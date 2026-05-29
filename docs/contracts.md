@@ -1,0 +1,226 @@
+# Contracts — Repository Interfaces
+
+Đây là **"hợp đồng"** giữa các thành viên. SA định nghĩa, Dev Infra implement, Dev Use Case gọi.
+Không ai được thay đổi file này mà không có approval của SA.
+
+---
+
+## VectorRepository
+
+Dùng cho: Qdrant vector search (Dev 3 — RAG Engineer implement)
+
+```python
+# app/domain/repositories/vector_repository.py
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import List
+
+@dataclass
+class SearchResult:
+    chunk_id: str
+    document_id: str
+    document_name: str
+    page_number: int
+    content: str
+    score: float
+
+class VectorRepository(ABC):
+
+    @abstractmethod
+    async def upsert(self, chunk_id: str, vector: List[float], payload: dict) -> None:
+        """Lưu vector + metadata vào vector DB."""
+
+    @abstractmethod
+    async def search(self, vector: List[float], top_k: int = 5) -> List[SearchResult]:
+        """Tìm top_k chunks gần nhất theo cosine similarity."""
+
+    @abstractmethod
+    async def delete_by_document(self, document_id: str) -> None:
+        """Xóa toàn bộ vectors của một document."""
+```
+
+---
+
+## DocumentRepository
+
+Dùng cho: PostgreSQL document metadata (Dev 2 — Backend/DB implement)
+
+```python
+# app/domain/repositories/document_repository.py
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import List, Optional
+from datetime import datetime
+from enum import Enum
+
+class DocumentStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+@dataclass
+class Document:
+    id: str
+    name: str
+    file_type: str          # pdf, docx, txt, xlsx, csv
+    s3_key: str
+    status: DocumentStatus
+    uploaded_by: str        # user_id
+    created_at: datetime
+    chunk_count: int = 0
+    error_message: Optional[str] = None
+
+class DocumentRepository(ABC):
+
+    @abstractmethod
+    async def create(self, document: Document) -> Document:
+        """Tạo document record mới."""
+
+    @abstractmethod
+    async def get_by_id(self, document_id: str) -> Optional[Document]:
+        """Lấy document theo ID."""
+
+    @abstractmethod
+    async def list_all(self, limit: int = 50, offset: int = 0) -> List[Document]:
+        """Liệt kê tất cả documents."""
+
+    @abstractmethod
+    async def update_status(self, document_id: str, status: DocumentStatus, error: Optional[str] = None) -> None:
+        """Cập nhật trạng thái ingestion."""
+
+    @abstractmethod
+    async def delete(self, document_id: str) -> None:
+        """Soft delete document."""
+```
+
+---
+
+## ConversationRepository
+
+Dùng cho: Lịch sử hội thoại (Dev 2 — Backend/DB implement)
+
+```python
+# app/domain/repositories/conversation_repository.py
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import List
+from datetime import datetime
+
+@dataclass
+class Message:
+    role: str           # "user" hoặc "assistant"
+    content: str
+    created_at: datetime
+
+@dataclass
+class Conversation:
+    id: str
+    user_id: str
+    messages: List[Message]
+
+class ConversationRepository(ABC):
+
+    @abstractmethod
+    async def get_recent_messages(self, user_id: str, limit: int = 3) -> List[Message]:
+        """Lấy N tin nhắn gần nhất của user (dùng cho LLM context)."""
+
+    @abstractmethod
+    async def save_message(self, user_id: str, role: str, content: str) -> None:
+        """Lưu 1 tin nhắn vào lịch sử."""
+
+    @abstractmethod
+    async def clear_history(self, user_id: str) -> None:
+        """Xóa toàn bộ lịch sử của user."""
+```
+
+---
+
+## UserRepository
+
+Dùng cho: Auth + user management (Dev 2 — Backend Dev implement)
+
+```python
+# app/domain/repositories/user_repository.py
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Optional
+from enum import Enum
+
+class UserRole(str, Enum):
+    ADMIN = "admin"
+    USER = "user"
+
+@dataclass
+class User:
+    id: str
+    email: str
+    hashed_password: str
+    role: UserRole
+    is_active: bool = True
+
+class UserRepository(ABC):
+
+    @abstractmethod
+    async def get_by_email(self, email: str) -> Optional[User]:
+        """Tìm user theo email (dùng cho login)."""
+
+    @abstractmethod
+    async def get_by_id(self, user_id: str) -> Optional[User]:
+        """Tìm user theo ID (dùng cho JWT verify)."""
+
+    @abstractmethod
+    async def create(self, user: User) -> User:
+        """Tạo user mới."""
+```
+
+---
+
+## API Schemas (Pydantic)
+
+Đây là contract giữa **Frontend Dev** và **Backend Dev**.
+
+```python
+# interfaces/api/schemas/query.py
+from pydantic import BaseModel
+from typing import List
+
+class Source(BaseModel):
+    document_name: str
+    page_number: int
+    score: float
+
+class QueryRequest(BaseModel):
+    question: str
+    user_id: str
+
+class QueryResponse(BaseModel):
+    answer: str             # streamed cuối cùng
+    sources: List[Source]
+    session_id: str
+
+# interfaces/api/schemas/document.py
+class UploadResponse(BaseModel):
+    document_id: str
+    status: str             # "processing"
+    message: str
+
+# interfaces/api/schemas/auth.py
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+```
+
+---
+
+## Quy trình thay đổi contract
+
+1. Mở issue trên GitHub tag SA
+2. SA review + approve
+3. SA cập nhật file này
+4. Các Dev liên quan update implementation của mình
+5. Merge — không được tự ý thay đổi interfaces
