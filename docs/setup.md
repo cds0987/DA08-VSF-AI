@@ -56,9 +56,8 @@ OPENAI_API_KEY=sk-...
 # Gemini
 GEMINI_API_KEY=...
 
-# Qdrant Cloud
-QDRANT_URL=https://xxx.qdrant.io
-QDRANT_API_KEY=...
+# Qdrant (self-hosted — chạy qua Docker Compose, không cần API key)
+QDRANT_URL=http://qdrant:6333
 QDRANT_COLLECTION=rag_chatbot
 
 # PostgreSQL
@@ -75,10 +74,10 @@ JWT_SECRET_KEY=your-secret-key-change-in-production
 JWT_ALGORITHM=HS256
 JWT_EXPIRE_MINUTES=60
 
-# Langfuse (observability)
+# Langfuse (observability — self-hosted, chạy qua Docker Compose)
 LANGFUSE_PUBLIC_KEY=...
 LANGFUSE_SECRET_KEY=...
-LANGFUSE_HOST=https://cloud.langfuse.com
+LANGFUSE_HOST=http://langfuse:3000
 ```
 
 ---

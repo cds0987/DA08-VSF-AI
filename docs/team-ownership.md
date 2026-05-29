@@ -6,9 +6,9 @@
 |------|----------------|---------------|---------------|
 | **SA** | Architecture, domain design, contracts, code review | `app/domain/` | — (viết trước) |
 | **Frontend Dev** | Web UI chat, admin dashboard, streaming display | `frontend/` (Next.js) | API Schemas từ SA |
-| **Backend Dev** | FastAPI setup, Auth JWT, API routing, DB setup | `app/interfaces/api/`, `app/infrastructure/db/`, `app/application/use_cases/auth/` | Domain entities từ SA |
-| **RAG Engineer** | Toàn bộ RAG pipeline: ingestion (parse → chunk → embed → store) + query retrieval (embed → search → rank → filter) | `app/application/use_cases/ingestion/`, `app/application/use_cases/query/retrieval.py`, `app/infrastructure/vector/`, `app/infrastructure/external/gemini_client.py` | VectorRepository, DocumentRepository interface |
-| **AI/Agent Engineer** | LLM orchestration, prompt building, streaming response, conversation memory. Phase 2+: LangGraph Agent, Redis, tools | `app/application/use_cases/query/orchestration.py`, `app/infrastructure/external/openai_client.py`, `app/infrastructure/memory/` | ConversationRepository interface, SearchResult từ RAG Engineer |
+| **Backend Dev** | User Service: FastAPI setup, Auth JWT, user management, DB setup | `user-service/app/interfaces/api/`, `user-service/app/infrastructure/db/`, `user-service/app/application/use_cases/auth/` | Domain entities từ SA |
+| **RAG Engineer** | Toàn bộ RAG pipeline: ingestion (parse → chunk → embed → store) + query retrieval (embed → search → rank → filter) | `rag-service/app/application/use_cases/ingestion/`, `rag-service/app/application/use_cases/query/retrieval.py`, `rag-service/app/infrastructure/vector/`, `rag-service/app/infrastructure/external/gemini_client.py` | VectorRepository, DocumentRepository interface |
+| **AI/Agent Engineer** | Chat Service toàn bộ: LLM orchestration, prompt building, streaming response, conversation memory, API routing. Phase 2+: LangGraph Agent, Redis, tools | `chat-service/app/` | ConversationRepository interface, SearchResult từ RAG Engineer |
 | **DevOps** | Docker, AWS ECS, CI/CD, Langfuse setup, monitoring | `infra/`, `docker-compose.yml`, `.github/workflows/` | Không phụ thuộc code logic |
 
 ---
@@ -80,9 +80,11 @@ from app.domain.entities.document import Document  # ✅
 ### 3. Thay đổi contract → báo SA
 Bất kỳ thay đổi nào trong `app/domain/` phải được SA approve trước.
 
-### 4. `openai_client.py` — AI/Agent Engineer owns
-RAG Engineer dùng `openai_client.py` để tạo embedding, nhưng không sửa file này.
-Muốn thêm method → mở issue tag AI/Agent Engineer.
+### 4. `openai_client.py` — mỗi service có file riêng, độc lập
+- `chat-service/.../openai_client.py`: AI/Agent Engineer owns — Chat Completion + streaming.
+- `rag-service/.../openai_client.py`: RAG Engineer owns — Embedding only.
+
+2 file hoàn toàn độc lập, không dùng chung. RAG Engineer không cần tag AI/Agent Engineer khi thêm embedding method.
 
 ---
 
@@ -115,8 +117,8 @@ feature branches:
 | Touch point | Người liên quan | Cách xử lý |
 |-------------|----------------|------------|
 | Domain entities | SA + tất cả | SA freeze trước khi team code |
-| API schemas | Backend Dev + Frontend Dev | SA định nghĩa schema, 2 bên code song song |
+| API schemas | Backend Dev (User Service) + AI/Agent Engineer (Chat Service) + Frontend Dev | SA định nghĩa schema trong contracts.md, các bên code song song |
 | `SearchResult` dataclass | SA define, RAG Engineer dùng, AI Engineer nhận | SA define trong `domain/`, không ai được tự sửa |
-| DB models | Backend Dev + RAG + AI Engineer | Backend Dev owns `infrastructure/db/`, người khác chỉ gọi qua repository interface |
+| DB models | Backend Dev + RAG + AI Engineer | Mỗi service owns `infrastructure/db/` của mình: Backend Dev → `user-service/`, AI/Agent Engineer → `chat-service/`, RAG Engineer → `rag-service/`. Không cross-service. |
 | `openai_client.py` | AI/Agent Engineer owns, RAG Engineer dùng | AI Engineer owns, RAG Engineer mở issue nếu cần thêm method |
 | `requirements.txt` | Tất cả | Thêm package → mở PR, không tự pip install rồi push |

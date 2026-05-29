@@ -54,10 +54,12 @@ from datetime import datetime
 from enum import Enum
 
 class DocumentStatus(str, Enum):
-    PENDING = "pending"
+    PENDING = "pending"         # End User upload, chờ Admin approve
+    QUEUED = "queued"           # Admin upload trực tiếp, hoặc đã được approve
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+    REJECTED = "rejected"       # Admin reject
 
 @dataclass
 class Document:
@@ -70,6 +72,9 @@ class Document:
     created_at: datetime
     chunk_count: int = 0
     error_message: Optional[str] = None
+    classification: str = "internal"                              # public | internal | secret | top_secret
+    allowed_departments: List[str] = field(default_factory=list) # cho Secret: list tên phòng ban
+    allowed_user_ids: List[str] = field(default_factory=list)    # cho Top Secret: thường = [uploaded_by]
 
 class DocumentRepository(ABC):
 
@@ -158,6 +163,7 @@ class User:
     hashed_password: str
     role: UserRole
     is_active: bool = True
+    department: str = ""   # phòng ban — dùng để check Secret-level access (Phase 2)
 
 class UserRepository(ABC):
 
@@ -178,10 +184,10 @@ class UserRepository(ABC):
 
 ## API Schemas (Pydantic)
 
-Đây là contract giữa **Frontend Dev** và **Backend Dev**.
+Đây là contract giữa **Frontend Dev** và **Backend Dev (User Service) / AI/Agent Engineer (Chat Service)**.
 
 ```python
-# interfaces/api/schemas/query.py
+# chat-service/interfaces/api/schemas/query.py
 from pydantic import BaseModel
 from typing import List
 
@@ -199,13 +205,13 @@ class QueryResponse(BaseModel):
     sources: List[Source]
     session_id: str
 
-# interfaces/api/schemas/document.py
+# chat-service/interfaces/api/schemas/document.py
 class UploadResponse(BaseModel):
     document_id: str
-    status: str             # "processing"
+    status: str             # "queued" (Admin upload) | "pending" (End User upload)
     message: str
 
-# interfaces/api/schemas/auth.py
+# user-service/interfaces/api/schemas/auth.py
 class LoginRequest(BaseModel):
     email: str
     password: str

@@ -31,53 +31,108 @@ infrastructure  →  application  →  domain
 
 ## Folder Structure
 
+Mỗi service là 1 folder riêng, dùng Clean Architecture độc lập bên trong.
+
 ```
-app/
-├── domain/
-│   ├── entities/
-│   │   ├── document.py         # Document, Chunk
-│   │   ├── conversation.py     # Conversation, Message
-│   │   └── user.py             # User
-│   └── repositories/
-│       ├── vector_repository.py       # Abstract VectorRepository
-│       ├── document_repository.py     # Abstract DocumentRepository
-│       ├── conversation_repository.py # Abstract ConversationRepository
-│       └── user_repository.py         # Abstract UserRepository
+user-service/                   ← Container 1: Auth, User management
+├── app/
+│   ├── domain/
+│   │   ├── entities/
+│   │   │   └── user.py             # User
+│   │   └── repositories/
+│   │       └── user_repository.py         # Abstract UserRepository
+│   │
+│   ├── application/
+│   │   └── use_cases/
+│   │       └── auth/
+│   │           ├── login_use_case.py
+│   │           └── verify_token_use_case.py
+│   │
+│   ├── infrastructure/
+│   │   └── db/
+│   │       ├── models.py
+│   │       └── postgres_user_repository.py
+│   │
+│   └── interfaces/
+│       └── api/
+│           ├── main.py
+│           ├── dependencies.py
+│           ├── routers/
+│           │   └── auth.py
+│           └── schemas/
+│               └── auth.py
 │
-├── application/
-│   └── use_cases/
-│       ├── auth/
-│       │   ├── login_use_case.py
-│       │   └── verify_token_use_case.py
-│       ├── query/
-│       │   └── query_document_use_case.py
-│       └── ingestion/
-│           └── ingest_document_use_case.py
+chat-service/                   ← Container 2: LLM Orchestration, Conversation
+├── app/
+│   ├── domain/
+│   │   ├── entities/
+│   │   │   └── conversation.py     # Conversation, Message
+│   │   └── repositories/
+│   │       └── conversation_repository.py # Abstract ConversationRepository
+│   │
+│   ├── application/
+│   │   └── use_cases/
+│   │       └── query/
+│   │           └── orchestration.py       # Build prompt, call OpenAI, stream
+│   │
+│   ├── infrastructure/
+│   │   ├── db/
+│   │   │   ├── models.py
+│   │   │   └── postgres_conversation_repo.py
+│   │   ├── external/
+│   │   │   ├── openai_client.py    # Chat Completion wrapper
+│   │   │   └── rag_service_client.py  # HTTP client gọi RAG Service
+│   │   └── memory/                # Phase 2: Redis short-term memory
+│   │
+│   └── interfaces/
+│       └── api/
+│           ├── main.py
+│           ├── dependencies.py
+│           ├── routers/
+│           │   ├── query.py
+│           │   └── documents.py
+│           └── schemas/
+│               ├── query.py        # QueryRequest, QueryResponse
+│               └── document.py
 │
-├── infrastructure/
-│   ├── db/
-│   │   ├── models.py                        # SQLAlchemy ORM models
-│   │   ├── postgres_document_repository.py  # Implements DocumentRepository
-│   │   ├── postgres_conversation_repo.py    # Implements ConversationRepository
-│   │   └── postgres_user_repository.py      # Implements UserRepository
-│   ├── vector/
-│   │   └── qdrant_vector_repository.py      # Implements VectorRepository
-│   └── external/
-│       ├── openai_client.py    # Embedding + Chat Completion wrapper
-│       └── gemini_client.py    # Vision OCR wrapper
-│
-└── interfaces/
-    └── api/
-        ├── main.py             # FastAPI app init
-        ├── dependencies.py     # Dependency injection
-        ├── routers/
-        │   ├── auth.py
-        │   ├── query.py
-        │   └── documents.py
-        └── schemas/
-            ├── query.py        # QueryRequest, QueryResponse
-            ├── document.py     # UploadResponse, DocumentList
-            └── auth.py         # LoginRequest, TokenResponse
+rag-service/                    ← Container 3: OCR, Ingestion, Retrieval
+├── app/
+│   ├── domain/
+│   │   ├── entities/
+│   │   │   └── document.py         # Document, Chunk
+│   │   └── repositories/
+│   │       ├── vector_repository.py       # Abstract VectorRepository
+│   │       └── document_repository.py     # Abstract DocumentRepository
+│   │
+│   ├── application/
+│   │   └── use_cases/
+│   │       ├── ingestion/
+│   │       │   └── ingest_document_use_case.py
+│   │       └── query/
+│   │           └── retrieval.py    # Embed → Qdrant search → rank → filter
+│   │
+│   ├── infrastructure/
+│   │   ├── db/
+│   │   │   ├── models.py
+│   │   │   └── postgres_document_repository.py
+│   │   ├── vector/
+│   │   │   └── qdrant_vector_repository.py
+│   │   └── external/
+│   │       ├── openai_client.py    # Embedding only
+│   │       ├── gemini_client.py    # Vision OCR
+│   │       └── langfuse_client.py  # Trace ingestion + retrieval
+│   │
+│   └── interfaces/
+│       └── api/
+│           ├── main.py
+│           ├── routers/
+│           │   ├── ingest.py       # POST /ingest
+│           │   └── search.py       # POST /search
+│           └── schemas/
+│               ├── ingest.py
+│               └── search.py       # SearchResult response
+
+frontend/                       ← Vercel deployment (Next.js)
 ```
 
 ---
@@ -124,16 +179,29 @@ class QdrantVectorRepository(VectorRepository):  # implement interface từ doma
 
 FastAPI router nhận use case qua `Depends()` — use case nhận repository qua constructor.
 
-```python
-# interfaces/api/dependencies.py
-def get_query_use_case() -> QueryDocumentUseCase:
-    vector_repo = QdrantVectorRepository()       # infrastructure
-    conversation_repo = PostgresConversationRepo()
-    return QueryDocumentUseCase(vector_repo, conversation_repo)
+> **Lưu ý Microservices:** Chat Service không gọi Qdrant trực tiếp — nó gọi RAG Service qua HTTP. `RagServiceClient` là Infrastructure adapter đóng gói HTTP call đó. User Service không gọi RAG Service — chỉ xử lý auth/user data.
 
-# interfaces/api/routers/query.py
+```python
+# user-service/app/interfaces/api/dependencies.py
+def get_login_use_case() -> LoginUseCase:
+    user_repo = PostgresUserRepository()
+    return LoginUseCase(user_repo)
+
+# chat-service/app/interfaces/api/dependencies.py
+def get_orchestration_use_case() -> OrchestrationUseCase:
+    rag_client = RagServiceClient(base_url=settings.RAG_SERVICE_URL)  # HTTP client
+    conversation_repo = PostgresConversationRepo()
+    openai_client = OpenAIClient()
+    return OrchestrationUseCase(rag_client, conversation_repo, openai_client)
+
+# rag-service/app/interfaces/api/dependencies.py
+def get_retrieval_use_case() -> RetrievalUseCase:
+    vector_repo = QdrantVectorRepository()       # infrastructure trong RAG Service
+    return RetrievalUseCase(vector_repo)
+
+# chat-service/app/interfaces/api/routers/query.py
 @router.post("/query")
-async def query(request: QueryRequest, use_case = Depends(get_query_use_case)):
+async def query(request: QueryRequest, use_case = Depends(get_orchestration_use_case)):
     return await use_case.execute(request.question, request.user_id)
 ```
 
