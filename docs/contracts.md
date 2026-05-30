@@ -65,7 +65,7 @@ class DocumentStatus(str, Enum):
 class Document:
     id: str
     name: str
-    file_type: str          # pdf, docx, txt, xlsx, csv
+    file_type: str          # pdf, docx, txt, xlsx, csv, pptx, md
     s3_key: str
     status: DocumentStatus
     uploaded_by: str        # user_id
@@ -119,6 +119,11 @@ class Message:
     created_at: datetime
 
 @dataclass
+class ConversationContext:
+    summary: Optional[str]          # LLM-generated summary của các turns cũ (None nếu chưa đủ để compress)
+    recent_messages: List[Message]  # 5 turns gần nhất giữ nguyên verbatim
+
+@dataclass
 class Conversation:
     id: str
     user_id: str
@@ -127,16 +132,20 @@ class Conversation:
 class ConversationRepository(ABC):
 
     @abstractmethod
-    async def get_recent_messages(self, user_id: str, limit: int = 3) -> List[Message]:
-        """Lấy N tin nhắn gần nhất của user (dùng cho LLM context)."""
+    async def get_context(self, user_id: str, recent_k: int = 5) -> ConversationContext:
+        """Lấy context cho LLM: summary của history cũ + recent_k turns gần nhất verbatim."""
 
     @abstractmethod
     async def save_message(self, user_id: str, role: str, content: str) -> None:
         """Lưu 1 tin nhắn vào lịch sử."""
 
     @abstractmethod
+    async def update_summary(self, user_id: str, summary: str) -> None:
+        """Cập nhật summary sau khi LLM compress các turns cũ."""
+
+    @abstractmethod
     async def clear_history(self, user_id: str) -> None:
-        """Xóa toàn bộ lịch sử của user."""
+        """Xóa toàn bộ lịch sử và summary của user."""
 ```
 
 ---
@@ -160,10 +169,11 @@ class UserRole(str, Enum):
 class User:
     id: str
     email: str
-    hashed_password: str
     role: UserRole
     is_active: bool = True
-    department: str = ""   # phòng ban — dùng để check Secret-level access (Phase 2)
+    department: str = ""            # phòng ban — dùng để check Secret-level access (Phase 2)
+    hashed_password: Optional[str] = None   # None nếu đăng nhập qua Microsoft SSO
+    auth_provider: str = "local"    # "local" | "microsoft"
 
 class UserRepository(ABC):
 
@@ -195,6 +205,7 @@ class Source(BaseModel):
     document_name: str
     page_number: int
     score: float
+    chunk_text: str          # đoạn văn bản gốc được retrieve — dùng để highlight trên viewer
 
 class QueryRequest(BaseModel):
     question: str
@@ -220,6 +231,22 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
 ```
+
+---
+
+## API Endpoint Spec
+
+> Đã tách ra file riêng để dễ tham khảo: **[docs/api-spec.md](api-spec.md)**
+>
+> Bao gồm: tất cả endpoint của User Service, Chat Service, RAG Service (internal) — path, method, request/response format đầy đủ.
+
+---
+
+## DB Schema
+
+> Đã tách ra file riêng để dễ tham khảo: **[docs/data-schema.md](data-schema.md)**
+>
+> Bao gồm: SQL DDL cho 4 schemas (`user_svc`, `chat_svc`, `rag_svc`, `hr_mock`) + Qdrant payload format.
 
 ---
 

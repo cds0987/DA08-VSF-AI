@@ -6,19 +6,18 @@
 | Phiên bản docs | 1.0 – MVP (Phase 1) |
 | Tác giả (SA) | [Tên SA] |
 | Ngày tạo | 2026-05-28 |
-| Phase hiện tại | Phase 1 – MVP Build (2 tuần) |
+| Phase hiện tại | Phase 1 – MVP + Cloud Deploy (3 tuần) |
 | Trạng thái | Draft – Living Document |
 
-> _Đây là SA docs MVP (Phase 1). Hệ thống sẽ được evaluate sau 2 tuần build, sau đó cập nhật docs và phát triển tiếp. Docs này là living document — sẽ thay đổi theo từng phase._
+> _Đây là SA docs Phase 1. Hệ thống sẽ được evaluate cuối tuần 3 (Phase 1.5), sau đó cập nhật docs và phát triển tiếp. Docs này là living document — sẽ thay đổi theo từng phase._
 
 **Lộ trình phát triển:**
 
 | **Phase** | **Thời gian** | **Mục tiêu** | **Trạng thái** |
 |-----------|--------------|-------------|---------------|
-| Phase 1 – MVP | Tuần 1–2 | Core RAG pipeline, OCR, auth đơn giản, Langfuse tracing | 🔨 Đang làm |
-| Phase 2 – Evaluation | Tuần 3 | Chạy RAGAS, đánh giá OCR quality, tune chunking/threshold, đo latency | ⏳ Chờ |
-| Phase 3 – Deploy | Tuần 4 | Deploy lên AWS cloud đầy đủ, smoke test, production-ready | ⏳ Chờ |
-| Phase 4 – Optimize | Sau tuần 4 | Semantic cache, monitoring nâng cao, Multi-Agent nếu cần, SSO thật | 📋 Planned |
+| Phase 1 – MVP + Cloud Deploy | Tuần 1–3 | Core RAG pipeline, OCR, auth (email/password + Microsoft SSO), guardrails, Redis, full AWS deploy | 🔨 Đang làm |
+| Phase 1.5 – Evaluation Checkpoint | Cuối tuần 3 | Chạy RAGAS, đo latency, quyết định tiếp tục Phase 2 hay tune thêm | ⏳ Chờ |
+| Phase 2 – Cải tiến & Tích hợp | Tuần 4–5 | Admin Dashboard nâng cao, Knowledge Gap Detection, Microsoft Teams Bot, Semantic Cache | ⏳ Chờ |
 
 ---
 
@@ -213,13 +212,17 @@ graph LR
     DET -->|PDF text| MU["PyMuPDF"]
     DET -->|DOCX / TXT| DC["python-docx"]
     DET -->|Excel / CSV| PD["pandas"]
+    DET -->|PPTX| PP["python-pptx"]
+    DET -->|Markdown| MD["str split"]
 
     GEM --> NORM["Normalize Vietnamese"]
     MU --> NORM
     DC --> NORM
     PD --> NORM
+    PP --> NORM
+    MD --> NORM
 
-    NORM --> CHUNK["Semantic Chunking 512 tokens"]
+    NORM --> CHUNK["Semantic Chunking 1024 tokens"]
     CHUNK --> EMBED["OpenAI text-embedding-3-small"]
     EMBED -->|Store vectors| QD[("Qdrant (self-hosted on AWS)")]
     EMBED -->|Store metadata| PGM[("PostgreSQL")]
@@ -234,26 +237,28 @@ graph LR
     USER["End User"] -->|Question| UI["Web UI Next.js"]
     UI -->|POST /query SSE| API["Chat Service /query"]
 
-    API --> TRACE["Langfuse Start Trace"]
-    API --> JWT{"JWT Auth"}
-    JWT -->|Invalid| ERR["401 Unauthorized"]
-    JWT -->|Valid| EMB["OpenAI Embed Question"]
+    API --> JWT{"JWT + Redis Blacklist\n+ Rate Limit 20/min"}
+    JWT -->|Invalid / Rate exceeded| ERR["401 / 429"]
+    JWT -->|Valid| GUARD_IN["Input Guardrail\nllm-guard\nPrompt Injection + Off-topic"]
 
-    EMB --> SRCH["Qdrant Search Top-K=5"]
+    GUARD_IN -->|Blocked| CANNED["Canned Response"]
+    GUARD_IN -->|Pass| TRACE["Langfuse Start Trace"]
+
+    TRACE --> EMB["OpenAI Embed Question"]
+    EMB --> SRCH["Qdrant Search Top-K=5\n+ Classification Filter"]
     SRCH --> FILT{"Score >= 0.7?"}
 
     FILT -->|No| FB["Fallback - No info found"]
-    FILT -->|Yes| HIST["Fetch History PG 3 turns"]
+    FILT -->|Yes| HIST["Fetch Context\nSummary Buffer\n5 turns verbatim"]
 
     HIST --> PROMPT["Build Prompt"]
-    PROMPT --> LLM["GPT-4o mini Streaming"]
+    PROMPT --> LLM["GPT-4o mini\nBuffer Full Response"]
+    LLM --> GUARD_OUT["Output Guardrail\nllm-guard PII Redaction"]
 
-    LLM -->|SSE stream| UI
-    LLM --> CITE["Citation doc + page"]
-    CITE --> UI
-
+    GUARD_OUT -->|SSE stream| UI
     FB --> UI
-    TRACE -->|Log metrics| LFC["Langfuse (self-hosted on AWS)"]
+    CANNED --> UI
+    GUARD_OUT --> LOG["Langfuse Log\n+ PostgreSQL Save"]
 ```
 
 ### Danh sách các thành phần (Module)
@@ -268,7 +273,7 @@ graph LR
 | 4 | Ingestion Module | Parse tài liệu (PDF/DOCX/TXT/Excel/CSV), normalize tiếng Việt, semantic chunking, embed, lưu Qdrant + PostgreSQL. | ✅ MVP |
 | 5 | Query Module | Embed câu hỏi, tìm Qdrant, filter score, build prompt, gọi LLM, stream response. | ✅ MVP |
 | 6 | Auth Module | Simple JWT authentication. 2 role: Admin và End User. | ✅ MVP |
-| 7 | Conversation Module | Lưu/đọc lịch sử hội thoại từ PostgreSQL. Multi-turn context (3 turns gần nhất). | ✅ MVP |
+| 7 | Conversation Module | Lưu/đọc lịch sử hội thoại từ PostgreSQL. Summary Buffer: LLM tóm tắt các turns cũ thành summary, giữ 5 turns gần nhất verbatim — hiểu đủ ngữ cảnh mà không tốn nhiều token. | ✅ MVP |
 | 8 | Embedding Service | Wrapper gọi OpenAI text-embedding-3-small. Dùng cho cả ingestion và query. | ✅ MVP |
 | 9 | LLM Service | Wrapper gọi OpenAI GPT-4o mini. Hỗ trợ streaming response. | ✅ MVP |
 | 10 | Langfuse Integration | Trace 2 luồng riêng biệt — (1) Ingestion trace: parse time, chunk count, embed time, error rate. (2) Query trace: latency từng bước, token cost, retrieved chunks + scores, feedback. RAGAS evaluation chạy offline Phase 2 trên Query trace data. | ✅ MVP |
@@ -306,7 +311,7 @@ graph LR
 ## 2.2 Session Configuration
 
 > Mục này mô tả cấu hình session cho từng chức năng hoặc toàn hệ thống, tùy theo mức độ nhạy cảm.
-> - MVP sử dụng Simple JWT (không có IAM tập trung). Phase 3 sẽ tích hợp SSO/IAM nội bộ.
+> - Phase 1 hỗ trợ cả Simple JWT (email/password) và Microsoft Account SSO (Azure AD qua msal). Phase 3 có thể bổ sung MFA bắt buộc cho Admin hoặc Conditional Access nâng cao.
 > - Nếu cần chỉ rõ các chức năng đặc biệt cần session ngắn/dài khác nhau: đặt tại bảng dưới đây.
 
 **Kịch bản 1: Sử dụng cấu hình mặc định**
@@ -330,7 +335,7 @@ graph LR
 
 | **STT** | **Nhóm chức năng** | **Mô tả** | **Phase** |
 |--------|------------------|----------|---------|
-| 1 | Document Management | End User upload tài liệu (PDF, DOCX, TXT, Excel, CSV, tối đa 50MB), chọn classification (Public / Internal / Secret / Top Secret). Status = Pending — chưa index. Admin review queue và Approve/Reject (kèm lý do). Sau khi Approve: Queued → Processing → Indexed / Failed. Admin upload trực tiếp không cần duyệt. Hỗ trợ xóa và re-index. | ✅ MVP |
+| 1 | Document Management | End User upload tài liệu (PDF, DOCX, TXT, Excel, CSV, PPTX, Markdown, tối đa 50MB), chọn classification (Public / Internal / Secret / Top Secret). Status = Pending — chưa index. Admin review queue và Approve/Reject (kèm lý do). Sau khi Approve: Queued → Processing → Indexed / Failed. Admin upload trực tiếp không cần duyệt. Hỗ trợ xóa và re-index. | ✅ MVP |
 | 2 | OCR – PDF scan | Tự động phát hiện PDF scan (không có text layer). Gọi Gemini Vision API để extract text. PDF text-based dùng PyMuPDF. Output là text thuần để đưa vào pipeline. | ✅ MVP |
 | 3 | Structured Data (Excel/CSV) | Excel: đọc từng sheet, convert rows sang text có header. CSV: parse với pandas, convert sang text. | ✅ MVP |
 | 4 | Tiếng Việt Handling | Normalize Unicode NFC sau khi extract text. Fix encoding lỗi. Hỗ trợ tài liệu tiếng Việt và tiếng Anh lẫn lộn trong cùng file. | ✅ MVP |
@@ -338,15 +343,26 @@ graph LR
 | 5b | Personal HR Q&A (Function Calling) | Trả lời câu hỏi cá nhân HR: ngày nghỉ còn lại, số ngày đã nghỉ, trạng thái đơn nghỉ phép, thông tin khấu trừ lương. Single Agent dùng HR tool: Function Calling query PostgreSQL HR tables. Luôn filter `WHERE user_id = current_user` — không thể xem data người khác. Phase 1: mock data. | ✅ MVP |
 | 6 | Citation / Source Reference | Mỗi câu trả lời kèm nguồn tài liệu (tên file, trang/section). Người dùng click xem trích dẫn gốc. | ✅ MVP |
 | 7 | Fallback – Không có thông tin | Nếu retrieval score < 0.7 → trả về "Không tìm thấy thông tin trong tài liệu nội bộ". Không gọi LLM – tiết kiệm cost, tránh hallucination. | ✅ MVP |
-| 8 | Conversation History – Multi-turn | Lưu lịch sử hội thoại theo từng user. Câu hỏi sau hiểu được ngữ cảnh 3 turns gần nhất. | ✅ MVP |
-| 9 | Authentication – Simple JWT | Login bằng email + password. JWT token TTL 8 giờ. 2 role: Admin và End User. | ✅ MVP |
+| 8 | Conversation History – Multi-turn | Lưu lịch sử hội thoại theo từng user. Summary Buffer: LLM tóm tắt các turns cũ, giữ 5 turns gần nhất verbatim. Câu hỏi sau luôn hiểu đủ ngữ cảnh mà không tốn nhiều token. | ✅ MVP |
+| 9 | Authentication | Login bằng email/password hoặc Microsoft Account (SSO via Azure AD). JWT token TTL 8 giờ, blacklist trong Redis khi logout. 2 role: Admin và End User. | ✅ MVP |
 | 10 | Admin Dashboard | Xem danh sách tài liệu đã index (trạng thái, ngày upload, số chunk). Xem và xử lý Pending documents queue (Approve / Reject kèm lý do). Xem ingestion status real-time. Upload và xóa tài liệu. Xem usage metrics cơ bản. | ✅ MVP |
 | 11 | Feedback Loop | Người dùng đánh giá câu trả lời (thumbs up/down). Lưu vào PostgreSQL và sync lên Langfuse để phân tích chất lượng. | ✅ MVP |
 | 12 | Langfuse Observability | Trace toàn bộ LLM pipeline. Dashboard latency, token cost, RAGAS scores, feedback. IT/DevOps dùng để monitor và debug. | ✅ MVP |
 | 13 | Semantic Cache | Cache câu hỏi tương tự (cosine similarity > 0.95). TTL 1 giờ. Tiết kiệm ~60% API cost. | 🔄 Phase 2 |
-| 14 | Document Classification & Access Control | **Phase 1 (MVP):** Uploader chọn classification khi upload — Public (ai có account), Internal (nhân viên chính thức), Secret (nhóm/phòng ban chỉ định), Top Secret (chỉ uploader). Field lưu vào metadata, chưa enforce filter. **Phase 2:** Qdrant payload filter — mỗi chunk mang classification + allowed_departments. Query pipeline filter trước khi retrieve, đảm bảo không rò rỉ chunk bị hạn chế. | ✅🔄 Phase 1+2 |
-| 15 | SSO Integration | Tích hợp SSO với IAM nội bộ thật của công ty. Thay thế Simple JWT. | 📋 Phase 3 |
+| 14 | Document Classification & Access Control | **Phase 1 (MVP):** Uploader chọn classification khi upload. Qdrant filter enforce cơ bản: Top Secret → chỉ uploader xem được; Internal → nhân viên active; Public → tất cả account. **Phase 2:** Secret level với allowed_departments filter — mỗi chunk mang danh sách phòng ban được phép, query pipeline filter theo department của user. | ✅🔄 Phase 1+2 |
+| 15 | SSO – Microsoft Account | Đăng nhập bằng Microsoft Account (Azure AD via msal). Cùng hệ sinh thái với Microsoft Teams Bot Phase 2. Phase 3 có thể bổ sung MFA bắt buộc và Conditional Access policy cho Admin. | ✅ Phase 1 |
 | 16 | Multi-Agent Architecture | Upgrade từ Single Agent lên Multi-Agent nếu có nhu cầu xử lý câu hỏi phức tạp đa nguồn. | 📋 Phase 4 |
+
+### Feature 14 — Định nghĩa 4 cấp phân loại tài liệu
+
+> Áp dụng cho Feature 14: Document Classification & Access Control. Uploader chọn khi upload. Phase 1 lưu field; Phase 2 enforce filter.
+
+| **Cấp bậc** | **Người được xem** | **Ví dụ áp dụng** |
+|------------|------------------|-----------------|
+| 🔴 Top Secret | Chỉ 1 người cụ thể — thường là người upload tài liệu đó | Hợp đồng cá nhân, tài liệu đàm phán nhạy cảm |
+| 🟠 Secret | Một nhóm nhỏ được chỉ định (theo phòng ban hoặc role) | Báo cáo tài chính nội bộ, kế hoạch sản phẩm mới |
+| 🟡 Internal | Toàn bộ nhân viên chính thức của công ty | Quy trình nội bộ, chính sách HR, tài liệu kỹ thuật |
+| 🟢 Public | Ai có account trên hệ thống (kể cả đối tác, contractor bên ngoài) | Tài liệu onboarding, hướng dẫn chung |
 
 ---
 
@@ -360,7 +376,7 @@ graph LR
 
 ```mermaid
 flowchart TB
-    NEXTJS[Next.js - Vercel CDN Global]
+    NEXTJS[Next.js - AWS EC2 Docker Compose]
 
     subgraph AWS[AWS ap-southeast-1 Singapore]
         USVC[User Service - FastAPI]
@@ -405,8 +421,8 @@ flowchart TB
 | 5 | RDS PostgreSQL | User Service / Chat Service / RAG Service | AWS RDS PostgreSQL 15 | TCP/SSL | User Service: user data. Chat Service: conversation history. RAG Service: document metadata, audit log. SSL required. |
 | 6 | AWS S3 SDK | RAG Service / Ingestion Module | AWS S3 (Private Bucket) | HTTPS / S3 SDK | PUT file gốc khi ingest. GET để xử lý. IAM Role-based access. |
 | 7 | Langfuse SDK | Chat Service + RAG Service | Langfuse (self-hosted on AWS) | HTTP nội bộ (VPC) | Chat Service: LLM trace. RAG Service: ingestion + retrieval trace. Trace data không ra ngoài AWS. |
-| 8 | Frontend → Chat Service | Next.js (Vercel) | Chat Service (EC2) | HTTPS + SSE | REST API cho query/upload. Server-Sent Events cho streaming response. |
-| 9 | Frontend → User Service | Next.js (Vercel) | User Service (EC2) | HTTPS | REST API cho login, user management. |
+| 8 | Frontend → Chat Service | Next.js (AWS EC2) | Chat Service (EC2) | HTTPS + SSE | REST API cho query/upload. Server-Sent Events cho streaming response. Cùng EC2 — Nginx route /api/chat → chat-service:8001. |
+| 9 | Frontend → User Service | Next.js (AWS EC2) | User Service (EC2) | HTTPS | REST API cho login, user management. Cùng EC2 — Nginx route /api/user → user-service:8000. |
 | 10 | Chat Service → RAG Service | Chat Service | RAG Service | HTTP REST / Sync | Forward upload request tới `/ingest`. Search request tới `/search`. Giao tiếp nội bộ trong Docker network. |
 
 ---
@@ -447,13 +463,13 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Ingestion Pipel
 | **Bước** | **Actor** | **Hành động** | **Dữ liệu** |
 |---------|---------|-------------|-----------|
 | 0 | Langfuse | Khởi tạo ingestion trace. | trace_id, doc_id, file_name, timestamp |
-| 1 | Admin / End User | Upload tài liệu. Admin dùng Admin Dashboard; End User dùng giao diện chat (Upload Document). Kèm chọn classification (public/internal/secret/top_secret). | File (PDF/DOCX/TXT/Excel/CSV, max 50MB) + classification |
+| 1 | Admin / End User | Upload tài liệu. Admin dùng Admin Dashboard; End User dùng giao diện chat (Upload Document). Kèm chọn classification (public/internal/secret/top_secret). | File (PDF/DOCX/TXT/Excel/CSV/PPTX/MD, max 50MB) + classification |
 | 2 | FastAPI | Validate file type + size. Xác thực JWT (Admin hoặc End User). | Authenticated request + file |
 | 3 | FastAPI | Upload file gốc lên AWS S3. | S3 key: `{doc_id}/{filename}` |
 | 4 | FastAPI | Tạo record document trong PostgreSQL. Admin → status: `queued` (tiếp tục Step 5). End User → status: `pending` (dừng, chờ approve). Trả về 202 Accepted. | `{ doc_id, status: 'queued' \| 'pending' }` |
 | 4b | Admin | Xem pending queue trên Admin Dashboard. **Approve** → status: `queued` → tiếp tục Step 5. **Reject** → status: `rejected`, ghi lý do, thông báo uploader. | `{ doc_id, action: 'approve'\|'reject', reason? }` |
 | 5 | BackgroundTask | Đọc file từ S3. Cập nhật status → 'processing'. | File binary từ S3 |
-| 6 | OCR Module | PDF text-based → PyMuPDF. PDF scan → Gemini Vision OCR. DOCX → python-docx. Excel → openpyxl, convert rows sang text có header. CSV → pandas. | Raw text + metadata |
+| 6 | OCR Module | PDF text-based → PyMuPDF. PDF scan → Gemini Vision OCR. DOCX → python-docx. Excel → openpyxl, convert rows sang text có header. CSV → pandas. PPTX → python-pptx, extract text từng shape. Markdown → parse trực tiếp (str split). | Raw text + metadata |
 | 7 | Ingestion Module | Normalize tiếng Việt: Unicode NFC, fix encoding, collapse whitespace. | Cleaned text |
 | 8 | Ingestion Module | Semantic chunking theo heading/paragraph. Max 1024 token/chunk, overlap 128 token. | List of `{ chunk_text, chunk_metadata }` |
 | 9 | Embedding Service | Gọi OpenAI text-embedding-3-small, batch embed các chunks. | Chunk text → vector [1536 dims] |
@@ -470,17 +486,20 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 | **Bước** | **Actor** | **Hành động** | **Dữ liệu** |
 |---------|---------|-------------|-----------|
 | 1 | User | Nhập câu hỏi qua giao diện chat (max 500 ký tự). | Query text |
-| 2 | FastAPI | Xác thực JWT. Kiểm tra rate limit (60 req/phút/user). | Authenticated request |
-| 3 | Langfuse | Khởi tạo trace mới cho request này. | trace_id, user_id, timestamp |
-| 4 | Query Module | Normalize tiếng Việt cho query. Embed bằng text-embedding-3-small. | Query vector [1536 dims] |
-| 5 | Qdrant (self-hosted on AWS) | Semantic search Top-K=5 chunks gần nhất theo cosine similarity. | List of `{ chunk_text, source, page, score }` |
-| 6 | Query Module | Kiểm tra score threshold: max score < 0.7 → trả fallback, không gọi LLM. | "Không tìm thấy thông tin trong tài liệu nội bộ" |
-| 7 | PostgreSQL | Lấy 3 conversation turns gần nhất của user này. | Conversation history |
-| 8 | Query Module | Build prompt: System prompt + Conversation history + Context chunks + Question. | Full prompt (~2000–3000 tokens) |
-| 9 | LLM Service | Gọi GPT-4o mini streaming. Forward từng token về frontend. | Streaming tokens |
-| 10 | Langfuse | Log: latency từng bước, input/output tokens, retrieved chunks, scores, response. | Trace data (PII masked) |
-| 11 | PostgreSQL | Lưu conversation turn: user_id, question, answer, sources, latency, timestamp. | Conversation record |
-| 12 | Next.js | Hiển thị streaming response + citation + nút feedback cho user. | Rendered UI |
+| 2 | FastAPI | Xác thực JWT (kiểm tra blacklist Redis). Kiểm tra rate limit Redis (20 req/phút/user). | Authenticated request |
+| 3 | **Input Guardrail** (llm-guard) | Scan input: (1) Prompt injection detection, (2) Off-topic classifier — nếu fail → trả canned response ngay, không gọi LLM. | Pass / Block + lý do |
+| 4 | Langfuse | Khởi tạo trace mới cho request này. | trace_id, user_id, timestamp |
+| 5 | Query Module | Normalize tiếng Việt cho query. Embed bằng text-embedding-3-small. | Query vector [1536 dims] |
+| 6 | Qdrant (self-hosted on AWS) | Semantic search Top-K=5 chunks gần nhất theo cosine similarity. | List of `{ chunk_text, source, page, score }` |
+| 7 | Query Module | Kiểm tra score threshold: max score < 0.7 → trả fallback, không gọi LLM. | "Không tìm thấy thông tin trong tài liệu nội bộ" |
+| 8 | PostgreSQL | Lấy conversation context: summary các turns cũ + 5 turns gần nhất verbatim (Summary Buffer). | Conversation context |
+| 9 | Query Module | Build prompt: System prompt + Conversation context + Context chunks + Question. | Full prompt (~2000–4000 tokens) |
+| 10 | LLM Service | Gọi GPT-4o mini streaming. Buffer full response trước khi qua Output Guardrail. | Full response text |
+| 11 | **Output Guardrail** (llm-guard) | Scan output: PII detection — redact nếu phát hiện thông tin cá nhân người khác. | Cleaned response |
+| 12 | FastAPI | Forward response đã clean về frontend qua SSE streaming. | Streaming tokens |
+| 13 | Langfuse | Log: latency từng bước, input/output tokens, retrieved chunks, scores, guardrail events. | Trace data (PII masked) |
+| 14 | PostgreSQL | Lưu conversation turn: user_id, question, answer, sources, latency, timestamp. | Conversation record |
+| 15 | Next.js | Hiển thị streaming response + citation + nút feedback cho user. | Rendered UI |
 
 > **RAGAS Evaluation (Phase 2 — Offline, không real-time):**
 > Phase 1 chỉ collect trace data (latency, token, retrieved chunks, scores). RAGAS chạy offline trong Phase 2 bằng cách:
@@ -500,10 +519,10 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 **[Diagram: Deployment Architecture]**
 
 **Hình vẽ kiến trúc triển khai cần có:**
-- Loại hạ tầng: **Cloud (AWS ap-southeast-1 Singapore)** + Vercel CDN.
+- Loại hạ tầng: **Cloud (AWS ap-southeast-1 Singapore)** — toàn bộ stack trên AWS, không dùng dịch vụ bên ngoài.
 - Network Topology: EC2 trong Public Subnet với Security Group chặt. RDS trong Private Subnet, chỉ EC2 truy cập được.
-- Entry từ Internet: HTTPS → Nginx (EC2) → FastAPI. Vercel phục vụ Next.js frontend.
-- Các server / container: 1 EC2 t3.medium chạy Docker Compose với 5 containers: nginx + User Service + Chat Service + RAG Service + Qdrant + Langfuse.
+- Entry từ Internet: HTTPS → Nginx (EC2) → route theo path: `/` → Next.js frontend, `/api/*` → backend services.
+- Các server / container: 1 EC2 t3.medium chạy Docker Compose với 6 containers: nginx + next-frontend + User Service + Chat Service + RAG Service + Qdrant + Langfuse.
 - Mapping service/module → node: User Service (port 8000) + Chat Service (port 8001) + RAG Service (port 8002) trên EC2. RDS/S3 là managed cloud services. Phase 3 tách sang ECS Fargate 3 Task riêng.
 - Database: RDS PostgreSQL Single-AZ (MVP), S3 với versioning.
 - Quản lý truy cập: SSH vào EC2 chỉ từ IP cố định (port 22). AWS Secrets Manager inject API Keys runtime.
@@ -512,8 +531,9 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 
 | **Thành phần** | **Service** | **Ghi chú** |
 |--------------|-----------|-----------|
-| Web UI (Next.js) | Vercel | Deploy tách biệt backend. CDN tự động. Free tier đủ cho MVP. |
+| Web UI (Next.js) | AWS EC2 (Docker Compose) | Container trong cùng EC2, Nginx route `/` → next-frontend:3000. Toàn bộ traffic nằm trong AWS — không có CORS. |
 | Backend (FastAPI) | AWS EC2 t3.medium (4GB RAM) | Docker Compose. 3 backend services: User Service (port 8000), Chat Service (port 8001), RAG Service (port 8002). Public IP với Security Group: chỉ mở 80/443/22. |
+| Cache / Rate Limit | Redis 7 (Docker Compose) | JWT blacklist (logout thật sự) + per-user rate limiting. |
 | Vector DB | Qdrant (self-hosted on AWS) | Docker container trên EC2. Dữ liệu nằm trong VPC — không ra ngoài. |
 | Database | AWS RDS PostgreSQL 15 (db.t3.micro) | Managed. Automated backup 7 ngày. Single-AZ cho MVP. |
 | File Storage | AWS S3 (Private Bucket) | Lưu tài liệu gốc. Versioning bật. SSE-S3 encryption. |
@@ -565,7 +585,7 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 
 | **Hạng mục** | **Công nghệ** | **Lý do chọn** |
 |-------------|-------------|--------------|
-| Frontend | Next.js 14 + TypeScript + TailwindCSS | Production-ready, streaming response tốt qua SSE, deploy Vercel dễ. |
+| Frontend | Next.js 14 + TypeScript + TailwindCSS | Production-ready, streaming response tốt qua SSE, container hóa dễ với Docker. |
 | Backend | Python 3.11 – FastAPI | Async native, hệ sinh thái AI/ML tốt nhất, phát triển nhanh. |
 | Architecture | Microservices (3 backend services) | User Service + Chat Service + RAG Service. Giao tiếp qua HTTP REST. JWT verify locally bằng shared secret — không cần gọi User Service mỗi request. Mỗi service dùng Clean Architecture nội bộ. |
 | LLM Orchestration | LlamaIndex | RAG-focused, ít boilerplate hơn LangChain, dễ học. |
@@ -575,12 +595,16 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 | PDF Parser | PyMuPDF (fitz) | Tốt nhất cho PDF tiếng Việt text-based, nhanh, accurate. |
 | DOCX Parser | python-docx | Standard library cho DOCX. |
 | Excel/CSV Parser | openpyxl + pandas | openpyxl đọc .xlsx; pandas convert rows sang text có header. |
+| PPTX Parser | python-pptx | Đọc slides, extract text từng shape. |
+| Markdown Parser | built-in (str split) | Markdown là plain text — parse trực tiếp, không cần thư viện. |
 | Vietnamese NLP | unicodedata (NFC normalize) | Chuẩn hóa dấu tiếng Việt, không cần thêm thư viện nặng. |
 | Vector Database | Qdrant (self-hosted on AWS) | Self-hosted trong VPC, dữ liệu không ra ngoài, metadata filtering. |
 | Metadata Database | PostgreSQL 15 (AWS RDS) | ACID, reliable, conversation history, audit log. |
 | File Storage | AWS S3 | Durable, rẻ, tích hợp tốt với EC2 qua IAM Role. |
 | Observability | Langfuse (self-hosted on AWS) (free tier) | Trace LLM pipeline, RAGAS scores, latency, cost. Dashboard cho IT/DevOps. |
-| Authentication & Authorization | Simple JWT (python-jose) | Email + password, 2 role hardcode. Upgrade SSO sau Phase 3. |
+| Authentication & Authorization | JWT (python-jose) + Microsoft SSO (msal) + Redis blacklist | Email/password hoặc Azure AD SSO. JWT blacklist trong Redis cho logout thật sự. |
+| Guardrails | llm-guard | Input: prompt injection detection + off-topic classifier. Output: PII redaction. Chạy local, không gọi API ngoài. |
+| Cache & Rate Limit | Redis 7 | JWT blacklist (logout) + per-user rate limiting (20 req/phút). |
 | CI/CD | GitHub Actions | Free, tích hợp tốt với GitHub, đủ cho MVP. |
 | DevSecOps Tools | Gitleaks + Trivy | Secret scan + container vulnerability scan. |
 | Secret Management | AWS Secrets Manager | API keys, DB password. Inject vào runtime, không lưu trong code. |
@@ -600,7 +624,7 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 **Phạm vi:** Các lớp phòng thủ vòng ngoài và quản lý hạ tầng vật lý/ảo hóa.
 
 - **Network Security:** Security Groups EC2 chỉ mở port 80/443 (Nginx) và 22 (SSH từ IP cố định). RDS Security Group chỉ accept từ EC2 Security Group.
-- **Hạn chế Automated Attacks & Bot:** Rate Limiting 60 request/phút/user tại FastAPI middleware. Phase 3 bổ sung WAF + Bot Detection tại AWS ALB.
+- **Hạn chế Automated Attacks & Bot:** Rate Limiting 20 request/phút/user cho `/query` endpoint (LLM call) tại FastAPI middleware. Phase 3 bổ sung WAF + Bot Detection tại AWS ALB.
 - **Kiểm soát lưu lượng request:** Max 500 ký tự cho query. Max 50MB cho file upload. Validate file type (PDF/DOCX/TXT/Excel/CSV).
 - **Quản lý bí mật (Secrets Management):** OpenAI Key, Gemini Key, Langfuse Key, DB password lưu trong AWS Secrets Manager. Không lưu secret trong mã nguồn hay .env file. Rotation tự động định kỳ.
 
@@ -670,7 +694,7 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 > _Bổ sung chi tiết logic bảo mật đặc thù cho hệ thống:_
 > - **Prompt Injection Prevention:** Sanitize và escape user input. System prompt hardcode server-side, không lấy từ user input.
 > - **Hallucination Control:** Retrieval score < 0.7 → trả fallback, không gọi LLM. LLM chỉ được dùng thông tin từ context chunks đã retrieve.
-> - **CORS:** Chỉ whitelist domain Next.js (Vercel) tại FastAPI.
+> - **CORS:** Không cần whitelist riêng — frontend và backend cùng domain, Nginx xử lý routing nội bộ.
 > - **SQL Injection:** SQLAlchemy ORM với parameterized queries. Không dùng raw SQL string.
 
 ### 7.1.4 Governance & Compliance
@@ -758,7 +782,7 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 | Fallback Rate | % câu hỏi bị từ chối do retrieval score < threshold. Target 10–20%. |
 | Semantic Cache | Cache dựa trên cosine similarity của câu hỏi. Phase 2. |
 | BackgroundTasks | Cơ chế xử lý bất đồng bộ của FastAPI. Ingestion chạy nền sau khi API trả về 202 Accepted. |
-| Microservices | Kiến trúc backend chia thành nhiều service độc lập, mỗi service deploy riêng, giao tiếp qua API. Project này dùng 2 backend services: API Service + RAG Service. |
+| Microservices | Kiến trúc backend chia thành nhiều service độc lập, mỗi service deploy riêng, giao tiếp qua API. Project này dùng 3 backend services: User Service + Chat Service + RAG Service. |
 | SSE | Server-Sent Events – cơ chế streaming response từ FastAPI về Next.js. |
 | JWT | JSON Web Token – chuẩn xác thực stateless. Token chứa user_id và role. |
 | DSR | Data Subject Request – yêu cầu của chủ thể dữ liệu về quyền truy xuất/xóa dữ liệu cá nhân. |

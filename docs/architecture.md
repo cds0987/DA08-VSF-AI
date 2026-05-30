@@ -132,7 +132,7 @@ rag-service/                    ← Container 3: OCR, Ingestion, Retrieval
 │               ├── ingest.py
 │               └── search.py       # SearchResult response
 
-frontend/                       ← Vercel deployment (Next.js)
+frontend/                       ← AWS EC2 deployment (Next.js container, Docker Compose)
 ```
 
 ---
