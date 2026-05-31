@@ -9,7 +9,6 @@ Hệ thống chatbot nội bộ giúp ~4,000 nhân viên truy vấn tài liệu 
 ```bash
 # 1. Clone
 git clone <repo-url>
-cd rag-chatbot
 
 # 2. Copy env files và điền API keys
 cp src/user-service/.env.example  src/user-service/.env
