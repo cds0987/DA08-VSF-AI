@@ -5,49 +5,109 @@ Không ai được thay đổi file này mà không có approval của SA.
 
 ---
 
-## VectorRepository
-
-Dùng cho: Qdrant vector search (Dev 3 — RAG Engineer implement)
+## user-service — Domain
 
 ```python
-# app/domain/repositories/vector_repository.py
-from abc import ABC, abstractmethod
+# src/user-service/app/domain/entities/user.py
 from dataclasses import dataclass
-from typing import List
+from typing import Optional
+from enum import Enum
+
+class UserRole(str, Enum):
+    ADMIN = "admin"
+    USER = "user"
 
 @dataclass
-class SearchResult:
-    chunk_id: str
-    document_id: str
-    document_name: str
-    page_number: int
-    content: str
-    score: float
+class User:
+    id: str
+    email: str
+    role: UserRole
+    is_active: bool = True
+    department: str = ""                        # dùng để check Secret-level access
+    hashed_password: Optional[str] = None       # None nếu đăng nhập qua Microsoft SSO
+    auth_provider: str = "local"                # "local" | "microsoft"
+```
 
-class VectorRepository(ABC):
+```python
+# src/user-service/app/domain/repositories/user_repository.py
+from abc import ABC, abstractmethod
+from typing import Optional
+from app.domain.entities.user import User
+
+class UserRepository(ABC):
 
     @abstractmethod
-    async def upsert(self, chunk_id: str, vector: List[float], payload: dict) -> None:
-        """Lưu vector + metadata vào vector DB."""
+    async def get_by_email(self, email: str) -> Optional[User]:
+        """Tìm user theo email (dùng cho login)."""
 
     @abstractmethod
-    async def search(self, vector: List[float], top_k: int = 5) -> List[SearchResult]:
-        """Tìm top_k chunks gần nhất theo cosine similarity."""
+    async def get_by_id(self, user_id: str) -> Optional[User]:
+        """Tìm user theo ID (dùng cho JWT verify)."""
 
     @abstractmethod
-    async def delete_by_document(self, document_id: str) -> None:
-        """Xóa toàn bộ vectors của một document."""
+    async def create(self, user: User) -> User:
+        """Tạo user mới."""
 ```
 
 ---
 
-## DocumentRepository
-
-Dùng cho: PostgreSQL document metadata (Dev 2 — Backend/DB implement)
+## chat-service — Domain
 
 ```python
-# app/domain/repositories/document_repository.py
+# chat-service/app/domain/entities/conversation.py
+from dataclasses import dataclass, field
+from typing import List, Optional
+from datetime import datetime
+
+@dataclass
+class Message:
+    role: str           # "user" | "assistant"
+    content: str
+    created_at: datetime
+
+@dataclass
+class ConversationContext:
+    summary: Optional[str]          # LLM-generated summary của các turns cũ (None nếu chưa đủ để compress)
+    recent_messages: List[Message]  # 5 turns gần nhất giữ nguyên verbatim
+
+@dataclass
+class Conversation:
+    id: str
+    user_id: str
+    messages: List[Message] = field(default_factory=list)
+```
+
+```python
+# chat-service/app/domain/repositories/conversation_repository.py
 from abc import ABC, abstractmethod
+from typing import Optional
+from app.domain.entities.conversation import ConversationContext
+
+class ConversationRepository(ABC):
+
+    @abstractmethod
+    async def get_context(self, user_id: str, recent_k: int = 5) -> ConversationContext:
+        """Lấy context cho LLM: summary của history cũ + recent_k turns gần nhất verbatim."""
+
+    @abstractmethod
+    async def save_message(self, user_id: str, role: str, content: str) -> None:
+        """Lưu 1 tin nhắn vào lịch sử."""
+
+    @abstractmethod
+    async def update_summary(self, user_id: str, summary: str) -> None:
+        """Cập nhật summary sau khi LLM compress các turns cũ."""
+
+    @abstractmethod
+    async def clear_history(self, user_id: str) -> None:
+        """Xóa toàn bộ lịch sử và summary của user."""
+```
+
+---
+
+## rag-service — Domain
+
+```python
+# rag-service/app/domain/entities/document.py
 from dataclasses import dataclass, field
 from typing import List, Optional
 from datetime import datetime
@@ -65,16 +125,33 @@ class DocumentStatus(str, Enum):
 class Document:
     id: str
     name: str
-    file_type: str          # pdf, docx, txt, xlsx, csv, pptx, md
+    file_type: str              # pdf, docx, txt, xlsx, csv, pptx, md
     s3_key: str
     status: DocumentStatus
-    uploaded_by: str        # user_id
+    uploaded_by: str            # user_id
     created_at: datetime
     chunk_count: int = 0
     error_message: Optional[str] = None
-    classification: str = "internal"                              # public | internal | secret | top_secret
-    allowed_departments: List[str] = field(default_factory=list) # cho Secret: list tên phòng ban
-    allowed_user_ids: List[str] = field(default_factory=list)    # cho Top Secret: thường = [uploaded_by]
+    classification: str = "internal"                                # public | internal | secret | top_secret
+    allowed_departments: List[str] = field(default_factory=list)   # bắt buộc nếu secret
+    allowed_user_ids: List[str] = field(default_factory=list)      # bắt buộc nếu top_secret
+
+@dataclass
+class Chunk:
+    id: str
+    document_id: str
+    parent_id: str              # parent chunk chứa context đầy đủ hơn
+    child_text: str             # 128–256 tokens — dùng để embed
+    parent_text: str            # 512–1024 tokens — đưa vào LLM prompt
+    page_number: int
+    section_title: str = ""
+```
+
+```python
+# rag-service/app/domain/repositories/document_repository.py
+from abc import ABC, abstractmethod
+from typing import List, Optional
+from app.domain.entities.document import Document, DocumentStatus
 
 class DocumentRepository(ABC):
 
@@ -99,105 +176,84 @@ class DocumentRepository(ABC):
         """Soft delete document."""
 ```
 
----
+```python
+# rag-service/app/domain/repositories/embedding_service.py
+from abc import ABC, abstractmethod
+from typing import List
 
-## ConversationRepository
+class EmbeddingService(ABC):
 
-Dùng cho: Lịch sử hội thoại (Dev 2 — Backend/DB implement)
+    @abstractmethod
+    async def embed(self, text: str) -> List[float]:
+        """Embed 1 đoạn text → vector 1024 dims (BGE-M3)."""
+
+    @abstractmethod
+    async def embed_batch(self, texts: List[str]) -> List[List[float]]:
+        """Embed nhiều text cùng lúc — dùng khi ingestion chunking."""
+```
 
 ```python
-# app/domain/repositories/conversation_repository.py
+# rag-service/app/domain/repositories/vector_repository.py
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List
-from datetime import datetime
 
 @dataclass
-class Message:
-    role: str           # "user" hoặc "assistant"
-    content: str
-    created_at: datetime
-
-@dataclass
-class ConversationContext:
-    summary: Optional[str]          # LLM-generated summary của các turns cũ (None nếu chưa đủ để compress)
-    recent_messages: List[Message]  # 5 turns gần nhất giữ nguyên verbatim
-
-@dataclass
-class Conversation:
-    id: str
+class UserContext:
     user_id: str
-    messages: List[Message]
-
-class ConversationRepository(ABC):
-
-    @abstractmethod
-    async def get_context(self, user_id: str, recent_k: int = 5) -> ConversationContext:
-        """Lấy context cho LLM: summary của history cũ + recent_k turns gần nhất verbatim."""
-
-    @abstractmethod
-    async def save_message(self, user_id: str, role: str, content: str) -> None:
-        """Lưu 1 tin nhắn vào lịch sử."""
-
-    @abstractmethod
-    async def update_summary(self, user_id: str, summary: str) -> None:
-        """Cập nhật summary sau khi LLM compress các turns cũ."""
-
-    @abstractmethod
-    async def clear_history(self, user_id: str) -> None:
-        """Xóa toàn bộ lịch sử và summary của user."""
-```
-
----
-
-## UserRepository
-
-Dùng cho: Auth + user management (Dev 2 — Backend Dev implement)
-
-```python
-# app/domain/repositories/user_repository.py
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Optional
-from enum import Enum
-
-class UserRole(str, Enum):
-    ADMIN = "admin"
-    USER = "user"
+    user_role: str          # "admin" | "user"
+    user_department: str    # dùng để filter secret docs trong Qdrant
 
 @dataclass
-class User:
-    id: str
-    email: str
-    role: UserRole
-    is_active: bool = True
-    department: str = ""            # phòng ban — dùng để check Secret-level access (Phase 2)
-    hashed_password: Optional[str] = None   # None nếu đăng nhập qua Microsoft SSO
-    auth_provider: str = "local"    # "local" | "microsoft"
+class SearchResult:
+    chunk_id: str
+    parent_id: str
+    document_id: str
+    document_name: str
+    file_type: str
+    page_number: int
+    section_title: str
+    child_text: str
+    parent_text: str        # đưa vào LLM prompt
+    score: float            # hybrid search score (RRF)
+    rerank_score: float     # score sau BGE-Reranker-v2-m3, None nếu chưa rerank
 
-class UserRepository(ABC):
-
-    @abstractmethod
-    async def get_by_email(self, email: str) -> Optional[User]:
-        """Tìm user theo email (dùng cho login)."""
-
-    @abstractmethod
-    async def get_by_id(self, user_id: str) -> Optional[User]:
-        """Tìm user theo ID (dùng cho JWT verify)."""
+class VectorRepository(ABC):
 
     @abstractmethod
-    async def create(self, user: User) -> User:
-        """Tạo user mới."""
+    async def upsert(self, chunk_id: str, vector: List[float], payload: dict) -> None:
+        """Lưu vector + metadata vào Qdrant."""
+
+    @abstractmethod
+    async def hybrid_search(
+        self,
+        vector: List[float],
+        query_text: str,
+        user_context: UserContext,
+        top_k: int = 20
+    ) -> List[SearchResult]:
+        """Hybrid search (vector + BM25 RRF) với classification filter theo user_context.
+        top_k=20 là candidates trước rerank — RAG Engineer rerank xuống Top-3 sau đó.
+        Filter logic:
+          public      → không filter
+          internal    → user.is_active
+          secret      → allowed_departments contains user_context.user_department
+          top_secret  → allowed_user_ids contains user_context.user_id
+        """
+
+    @abstractmethod
+    async def delete_by_document(self, document_id: str) -> None:
+        """Xóa toàn bộ vectors của một document."""
 ```
 
 ---
 
 ## API Schemas (Pydantic)
 
-Đây là contract giữa **Frontend Dev** và **Backend Dev (User Service) / AI/Agent Engineer (Chat Service)**.
+Contract giữa **Frontend Dev** và **Backend Dev / AI/Agent Engineer**.
 
 ```python
-# chat-service/interfaces/api/schemas/query.py
+# chat-service/app/interfaces/api/schemas/query.py
 from pydantic import BaseModel
 from typing import List
 
@@ -205,24 +261,24 @@ class Source(BaseModel):
     document_name: str
     page_number: int
     score: float
-    chunk_text: str          # đoạn văn bản gốc được retrieve — dùng để highlight trên viewer
+    chunk_text: str         # đoạn văn bản gốc được retrieve — dùng để highlight trên viewer
 
 class QueryRequest(BaseModel):
     question: str
     user_id: str
 
 class QueryResponse(BaseModel):
-    answer: str             # streamed cuối cùng
+    answer: str
     sources: List[Source]
     session_id: str
 
-# chat-service/interfaces/api/schemas/document.py
+# chat-service/app/interfaces/api/schemas/document.py
 class UploadResponse(BaseModel):
     document_id: str
     status: str             # "queued" (Admin upload) | "pending" (End User upload)
     message: str
 
-# user-service/interfaces/api/schemas/auth.py
+# src/user-service/app/interfaces/api/schemas/auth.py
 class LoginRequest(BaseModel):
     email: str
     password: str
@@ -236,17 +292,13 @@ class TokenResponse(BaseModel):
 
 ## API Endpoint Spec
 
-> Đã tách ra file riêng để dễ tham khảo: **[docs/api-spec.md](api-spec.md)**
->
-> Bao gồm: tất cả endpoint của User Service, Chat Service, RAG Service (internal) — path, method, request/response format đầy đủ.
+> Đã tách ra file riêng: **[docs/api-spec.md](api-spec.md)**
 
 ---
 
 ## DB Schema
 
-> Đã tách ra file riêng để dễ tham khảo: **[docs/data-schema.md](data-schema.md)**
->
-> Bao gồm: SQL DDL cho 4 schemas (`user_svc`, `chat_svc`, `rag_svc`, `hr_mock`) + Qdrant payload format.
+> Đã tách ra file riêng: **[docs/data-schema.md](data-schema.md)**
 
 ---
 

@@ -3,7 +3,7 @@
 Mỗi service có file `.env` riêng. Copy từ `.env.example` rồi điền giá trị thực.
 
 ```bash
-cp user-service/.env.example  user-service/.env
+cp src/user-service/.env.example  src/user-service/.env
 cp chat-service/.env.example  chat-service/.env
 cp rag-service/.env.example   rag-service/.env
 ```
@@ -12,7 +12,7 @@ cp rag-service/.env.example   rag-service/.env
 
 ---
 
-## User Service — `user-service/.env.example`
+## User Service — `src/user-service/.env.example`
 
 ```env
 # Database
@@ -56,8 +56,11 @@ JWT_ALGORITHM=HS256
 # Redis
 REDIS_URL=redis://localhost:6379/0
 
-# OpenAI
-OPENAI_API_KEY=sk-...
+# Azure OpenAI — LLM (Chat Completion + Streaming)
+AZURE_OPENAI_KEY=...
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
+AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini
+AZURE_OPENAI_API_VERSION=2024-02-01
 
 # Service URLs (internal)
 RAG_SERVICE_URL=http://localhost:8002
@@ -71,7 +74,9 @@ LANGFUSE_HOST=http://localhost:3000
 | Biến | Mô tả | Lấy ở đâu |
 |------|-------|-----------|
 | `JWT_SECRET_KEY` | Phải khớp với User Service | Dùng cùng key đã generate |
-| `OPENAI_API_KEY` | Key gọi LLM + Embedding | platform.openai.com → API Keys |
+| `AZURE_OPENAI_KEY` | Key gọi Azure OpenAI LLM | Azure Portal → resource → Keys and Endpoint |
+| `AZURE_OPENAI_ENDPOINT` | Endpoint của Azure OpenAI resource | Azure Portal → resource → Keys and Endpoint |
+| `AZURE_OPENAI_DEPLOYMENT` | Tên deployment model trên Azure | Azure OpenAI Studio → Deployments |
 | `RAG_SERVICE_URL` | URL nội bộ tới RAG Service | `http://localhost:8002` (local) hoặc tên container trong Docker Compose |
 | `LANGFUSE_*` | LLM observability | langfuse.com → Project Settings |
 
@@ -87,11 +92,24 @@ DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/rag_chatbot
 JWT_SECRET_KEY=your-secret-key-change-in-production
 JWT_ALGORITHM=HS256
 
-# OpenAI (Embedding only)
-OPENAI_API_KEY=sk-...
+# Azure OpenAI — dùng cho Query Rewriting (sinh 3 biến thể câu hỏi trước khi search, tăng recall)
+# Phase 1 MVP chưa dùng — chuẩn bị sẵn cho Phase 2
+AZURE_OPENAI_KEY=...
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
+AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini
+AZURE_OPENAI_API_VERSION=2024-02-01
 
-# Gemini (OCR)
-GEMINI_API_KEY=...
+# Azure Document Intelligence — OCR cho PDF scan
+AZURE_DOC_INTEL_KEY=...
+AZURE_DOC_INTEL_ENDPOINT=https://your-resource.cognitiveservices.azure.com
+
+# BGE-M3 Embedding Service (self-hosted)
+BGE_M3_URL=http://localhost:8003
+BGE_M3_MODEL=BAAI/bge-m3
+
+# BGE Reranker (self-hosted)
+BGE_RERANKER_URL=http://localhost:8004
+BGE_RERANKER_MODEL=BAAI/bge-reranker-v2-m3
 
 # Qdrant
 QDRANT_URL=http://localhost:6333
@@ -112,8 +130,12 @@ LANGFUSE_HOST=http://localhost:3000
 | Biến | Mô tả | Lấy ở đâu |
 |------|-------|-----------|
 | `JWT_SECRET_KEY` | Phải khớp với User Service | Dùng cùng key đã generate |
-| `OPENAI_API_KEY` | Gọi Embedding API | platform.openai.com → API Keys |
-| `GEMINI_API_KEY` | OCR cho file scan/image | aistudio.google.com → Get API Key |
+| `AZURE_OPENAI_KEY` | Key gọi Azure OpenAI — dùng cho Query Rewriting (Phase 2), **không** dùng cho embedding | Azure Portal → resource → Keys and Endpoint |
+| `AZURE_OPENAI_ENDPOINT` | Endpoint của Azure OpenAI resource | Azure Portal → resource → Keys and Endpoint |
+| `AZURE_DOC_INTEL_KEY` | Key gọi Azure Document Intelligence OCR | Azure Portal → resource → Keys and Endpoint |
+| `AZURE_DOC_INTEL_ENDPOINT` | Endpoint Azure Document Intelligence | Azure Portal → resource → Keys and Endpoint |
+| `BGE_M3_URL` | URL tới BGE-M3 Embedding service (self-hosted) | EC2 nội bộ hoặc `http://localhost:8003` local |
+| `BGE_RERANKER_URL` | URL tới BGE-Reranker service (self-hosted) | EC2 nội bộ hoặc `http://localhost:8004` local |
 | `QDRANT_URL` | Vector DB endpoint | `http://localhost:6333` (local Docker) |
 | `QDRANT_COLLECTION` | Tên collection Qdrant | Giữ nguyên `rag_chatbot` |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Credentials upload file lên S3 | AWS Console → IAM → Users → Security credentials |

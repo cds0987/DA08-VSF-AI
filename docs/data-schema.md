@@ -151,18 +151,24 @@ Collection name: `rag_chatbot`
 ```json
 {
   "chunk_id": "uuid",
+  "chunk_type": "child",
+  "parent_id": "uuid",
+  "parent_text": "string",
+  "child_text": "string",
   "document_id": "uuid",
   "document_name": "string",
+  "file_type": "pdf | docx | txt | xlsx | csv | pptx | md",
   "page_number": 1,
-  "content": "string",
+  "section_title": "string",
   "classification": "public | internal | secret | top_secret",
   "allowed_departments": ["HR", "Finance"],
   "allowed_user_ids": ["uuid"],
-  "uploaded_by": "uuid"
+  "uploaded_by": "uuid",
+  "ocr_confidence": 0.95
 }
 ```
 
-> Vector dimension: 1536 (OpenAI `text-embedding-3-small`). Chunk size: 1024 tokens, overlap: 128 tokens.
+> Vector dimension: 1024 (BGE-M3). Chỉ embed `child_text`. `parent_text` lưu trong payload để đưa vào LLM context. `ocr_confidence` chỉ có với PDF scan, dùng để flag low-quality chunks. Chunk size: Child 128–256 token, Parent 512–1024 token, overlap 20–30 token.
 
 ---
 

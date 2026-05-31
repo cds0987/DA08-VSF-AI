@@ -52,7 +52,7 @@ Response 200 (SSE):
   data: {"token": "chính sách..."}
   data: {"done": true, "sources": [{"document_name": "string", "page_number": 1, "score": 0.85}], "session_id": "uuid"}
 
-Response 429:  { "detail": "Rate limit exceeded. Max 60 requests/minute." }
+Response 429:  { "detail": "Rate limit exceeded. Max 20 requests/minute." }
 ```
 
 ### `POST /documents/upload`
@@ -63,7 +63,7 @@ Admin → `queued`. End User → `pending`.
 Request:
   Content-Type: multipart/form-data
   Fields:
-    file: <binary> (max 50MB, pdf/docx/txt/xlsx/csv)
+    file: <binary> (max 50MB, pdf/docx/txt/xlsx/csv/pptx/md)
     classification: "public" | "internal" | "secret" | "top_secret"
     allowed_departments?: ["HR", "Finance"]   # bắt buộc nếu secret
     allowed_user_ids?: ["uuid"]               # bắt buộc nếu top_secret
@@ -154,11 +154,13 @@ Response 202: { "message": "Ingestion started", "document_id": "uuid" }
 ### `POST /search`
 
 ```
-Request: { "query": "string", "top_k": 5, "user_id": "uuid", "user_role": "string", "user_department": "string" }
+Request: { "query": "string", "top_k": 20, "user_id": "uuid", "user_role": "string", "user_department": "string" }
 Response 200:
   { "results": [{ "chunk_id": "uuid", "document_id": "uuid", "document_name": "string",
-                  "page_number": 1, "content": "string", "score": 0.85 }] }
+                  "page_number": 1, "content": "string", "score": 0.85, "rerank_score": 0.92 }] }
 ```
+
+> top_k=20 là số candidates trước rerank. BGE-Reranker-v2-m3 rerank → trả về Top-3 parent chunks cho LLM prompt.
 
 ---
 

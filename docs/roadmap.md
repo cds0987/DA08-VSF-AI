@@ -42,7 +42,7 @@ _Upload & Ingestion_
 - [ ] Upload file (PDF, DOCX, TXT, XLSX, CSV, PPTX, MD — tối đa 50MB)
 - [ ] End User upload → status `pending`, chờ Admin approve
 - [ ] Admin approve → tự động index; reject → ghi lý do, user thấy được
-- [ ] PDF scan → OCR bằng Gemini Vision, trích xuất được text tiếng Việt
+- [ ] PDF scan → OCR bằng Azure Document Intelligence, trích xuất được text tiếng Việt
 - [ ] Excel/XLSX → convert từng row thành text có header đúng
 - [ ] Upload có chọn classification (Public / Internal / Secret / Top Secret), field lưu vào DB
 - [ ] User nhận notification khi tài liệu được approve hoặc reject (in-app notification hoặc email)

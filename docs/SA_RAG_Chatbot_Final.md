@@ -164,13 +164,17 @@ graph TB
         LFI["Langfuse Integration"]
     end
 
-    subgraph EXTERNAL["External Services and Storage"]
+    subgraph AWS_STORAGE["AWS — Storage & Self-hosted"]
         QDRANT[("Qdrant (self-hosted on AWS)")]
         PG[("PostgreSQL")]
         S3[("AWS S3")]
-        OAI["OpenAI API"]
-        GEM["Gemini Vision API"]
+        BGE["BGE-M3 Embedding Service (self-hosted EC2)"]
         LF["Langfuse (self-hosted on AWS)"]
+    end
+
+    subgraph AZURE["Azure Cloud"]
+        AOAI["Azure OpenAI GPT-4o Mini"]
+        ADI["Azure Document Intelligence"]
     end
 
     EU --> UI
@@ -178,17 +182,18 @@ graph TB
     UI --> AUTH
     UI --> ORCH
     ORCH --> CONV
-    ORCH --> OAI
+    ORCH --> AOAI
     ORCH -- "HTTP REST" --> QUERY
     ORCH -- "HTTP REST" --> INGEST
     QUERY --> QDRANT
+    QUERY --> BGE
     QUERY --> LFI
     INGEST --> OCR
-    INGEST --> OAI
+    INGEST --> BGE
     INGEST --> QDRANT
     INGEST --> PG
     INGEST --> S3
-    OCR --> GEM
+    OCR --> ADI
     CONV --> PG
     AUTH --> PG
     LFI --> LF
@@ -208,22 +213,22 @@ graph LR
     API -->|Trigger| BG["BackgroundTask"]
 
     BG --> DET{"File Type Detection"}
-    DET -->|PDF scan| GEM["Gemini Vision API"]
+    DET -->|PDF scan| ADI["Azure Document Intelligence"]
     DET -->|PDF text| MU["PyMuPDF"]
     DET -->|DOCX / TXT| DC["python-docx"]
     DET -->|Excel / CSV| PD["pandas"]
     DET -->|PPTX| PP["python-pptx"]
     DET -->|Markdown| MD["str split"]
 
-    GEM --> NORM["Normalize Vietnamese"]
+    ADI --> NORM["Normalize Vietnamese"]
     MU --> NORM
     DC --> NORM
     PD --> NORM
     PP --> NORM
     MD --> NORM
 
-    NORM --> CHUNK["Semantic Chunking 1024 tokens"]
-    CHUNK --> EMBED["OpenAI text-embedding-3-small"]
+    NORM --> CHUNK["Parent-Child Chunking (Child 128-256t, Parent 512-1024t)"]
+    CHUNK --> EMBED["BGE-M3 Embedding Service (self-hosted)"]
     EMBED -->|Store vectors| QD[("Qdrant (self-hosted on AWS)")]
     EMBED -->|Store metadata| PGM[("PostgreSQL")]
 ```
@@ -244,15 +249,16 @@ graph LR
     GUARD_IN -->|Blocked| CANNED["Canned Response"]
     GUARD_IN -->|Pass| TRACE["Langfuse Start Trace"]
 
-    TRACE --> EMB["OpenAI Embed Question"]
-    EMB --> SRCH["Qdrant Search Top-K=5\n+ Classification Filter"]
-    SRCH --> FILT{"Score >= 0.7?"}
+    TRACE --> EMB["BGE-M3 Embed Question (self-hosted)"]
+    EMB --> SRCH["Qdrant Hybrid Search\nTop-K=20 + Classification Filter"]
+    SRCH --> FILT{"Max Score >= 0.7?"}
 
     FILT -->|No| FB["Fallback - No info found"]
-    FILT -->|Yes| HIST["Fetch Context\nSummary Buffer\n5 turns verbatim"]
+    FILT -->|Yes| RERANK["BGE-Reranker-v2-m3\nTop-20 → Top-3"]
+    RERANK --> HIST["Fetch Context\nSummary Buffer\n5 turns verbatim"]
 
     HIST --> PROMPT["Build Prompt"]
-    PROMPT --> LLM["GPT-4o mini\nBuffer Full Response"]
+    PROMPT --> LLM["Azure OpenAI GPT-4o Mini\nBuffer Full Response"]
     LLM --> GUARD_OUT["Output Guardrail\nllm-guard PII Redaction"]
 
     GUARD_OUT -->|SSE stream| UI
@@ -269,19 +275,19 @@ graph LR
 | 2 | User Service (FastAPI) | Microservice 1: Auth/JWT, user management, login. Issue JWT token khi login. Chia sẻ `JWT_SECRET_KEY` với Chat Service và RAG Service để verify locally — không cần gọi lại User Service mỗi request. | ✅ MVP |
 | 2b | Chat Service (FastAPI) | Microservice 2: LLM orchestration, conversation history, streaming response. Verify JWT locally bằng shared secret. Giao tiếp với RAG Service qua HTTP REST. | ✅ MVP |
 | 2c | RAG Service (FastAPI) | Microservice 3: OCR, Ingestion pipeline (parse→chunk→embed→store), Query retrieval (embed→search→rank). Expose `/ingest` và `/search` endpoints. Verify JWT locally. | ✅ MVP |
-| 3 | OCR Module | Detect PDF scan → gọi Gemini Vision API. PDF text-based → PyMuPDF. | ✅ MVP |
-| 4 | Ingestion Module | Parse tài liệu (PDF/DOCX/TXT/Excel/CSV), normalize tiếng Việt, semantic chunking, embed, lưu Qdrant + PostgreSQL. | ✅ MVP |
+| 3 | OCR Module | Detect PDF scan → Azure Document Intelligence (OCR). PDF text-based → PyMuPDF (local). | ✅ MVP |
+| 4 | Ingestion Module | Parse tài liệu (PDF/DOCX/TXT/Excel/CSV), normalize tiếng Việt, Parent-Child Chunking, embed, lưu Qdrant + PostgreSQL. | ✅ MVP |
 | 5 | Query Module | Embed câu hỏi, tìm Qdrant, filter score, build prompt, gọi LLM, stream response. | ✅ MVP |
 | 6 | Auth Module | Simple JWT authentication. 2 role: Admin và End User. | ✅ MVP |
 | 7 | Conversation Module | Lưu/đọc lịch sử hội thoại từ PostgreSQL. Summary Buffer: LLM tóm tắt các turns cũ thành summary, giữ 5 turns gần nhất verbatim — hiểu đủ ngữ cảnh mà không tốn nhiều token. | ✅ MVP |
-| 8 | Embedding Service | Wrapper gọi OpenAI text-embedding-3-small. Dùng cho cả ingestion và query. | ✅ MVP |
-| 9 | LLM Service | Wrapper gọi OpenAI GPT-4o mini. Hỗ trợ streaming response. | ✅ MVP |
+| 8 | Embedding Service | BGE-M3 Embedding Service (self-hosted trên AWS EC2). 1024 dims. Dùng cho cả ingestion và query. | ✅ MVP |
+| 9 | LLM Service | Azure OpenAI GPT-4o Mini. Hỗ trợ streaming response. Data trong Azure tenant. | ✅ MVP |
 | 10 | Langfuse Integration | Trace 2 luồng riêng biệt — (1) Ingestion trace: parse time, chunk count, embed time, error rate. (2) Query trace: latency từng bước, token cost, retrieved chunks + scores, feedback. RAGAS evaluation chạy offline Phase 2 trên Query trace data. | ✅ MVP |
 | 11 | Vector DB (Qdrant (self-hosted on AWS)) | Lưu và tìm kiếm vector embedding. Metadata filtering theo document. | ✅ MVP |
 | 12 | Metadata DB (RDS PostgreSQL) | Lưu document metadata, conversation history, user info, audit log. | ✅ MVP |
 | 13 | Document Storage (S3) | Lưu file gốc sau khi upload. Ingestion module đọc từ đây để xử lý. | ✅ MVP |
 | 13b | HR Data Module | Mock HR tables trong PostgreSQL: `hr_leave_balance` (ngày nghỉ còn lại), `hr_leave_requests` (trạng thái đơn), `hr_payroll_summary` (thông tin lương). Dùng cho Personal HR Q&A feature. | ✅ MVP |
-| 14 | Semantic Cache (Redis) | Cache câu hỏi tương tự (cosine similarity > 0.95). Tiết kiệm ~60% OpenAI API cost. | 🔄 Phase 2 |
+| 14 | Semantic Cache (Redis) | Cache câu hỏi tương tự (cosine similarity > 0.95). Tiết kiệm ~60% Azure OpenAI API cost. | 🔄 Phase 2 |
 | 15 | SQS Queue | Async ingestion queue có DLQ. Thay thế BackgroundTasks khi scale. | 🔄 Phase 2 |
 
 ### Thông tin dữ liệu – Phân loại bảo mật
@@ -336,7 +342,7 @@ graph LR
 | **STT** | **Nhóm chức năng** | **Mô tả** | **Phase** |
 |--------|------------------|----------|---------|
 | 1 | Document Management | End User upload tài liệu (PDF, DOCX, TXT, Excel, CSV, PPTX, Markdown, tối đa 50MB), chọn classification (Public / Internal / Secret / Top Secret). Status = Pending — chưa index. Admin review queue và Approve/Reject (kèm lý do). Sau khi Approve: Queued → Processing → Indexed / Failed. Admin upload trực tiếp không cần duyệt. Hỗ trợ xóa và re-index. | ✅ MVP |
-| 2 | OCR – PDF scan | Tự động phát hiện PDF scan (không có text layer). Gọi Gemini Vision API để extract text. PDF text-based dùng PyMuPDF. Output là text thuần để đưa vào pipeline. | ✅ MVP |
+| 2 | OCR – PDF scan | Tự động phát hiện PDF scan (không có text layer). Gọi Azure Document Intelligence để extract text + layout. PDF text-based dùng PyMuPDF (local). Output là text thuần để đưa vào pipeline. | ✅ MVP |
 | 3 | Structured Data (Excel/CSV) | Excel: đọc từng sheet, convert rows sang text có header. CSV: parse với pandas, convert sang text. | ✅ MVP |
 | 4 | Tiếng Việt Handling | Normalize Unicode NFC sau khi extract text. Fix encoding lỗi. Hỗ trợ tài liệu tiếng Việt và tiếng Anh lẫn lộn trong cùng file. | ✅ MVP |
 | 5 | Q&A Chatbot – Policy/Document | Nhân viên nhập câu hỏi tiếng Việt / Anh về quy trình, chính sách, tài liệu kỹ thuật. Single Agent dùng RAG tool: embed câu hỏi → Qdrant search → LLM build answer. Response streaming – chữ xuất hiện dần. | ✅ MVP |
@@ -350,6 +356,16 @@ graph LR
 | 12 | Langfuse Observability | Trace toàn bộ LLM pipeline. Dashboard latency, token cost, RAGAS scores, feedback. IT/DevOps dùng để monitor và debug. | ✅ MVP |
 | 13 | Semantic Cache | Cache câu hỏi tương tự (cosine similarity > 0.95). TTL 1 giờ. Tiết kiệm ~60% API cost. | 🔄 Phase 2 |
 | 14 | Document Classification & Access Control | **Phase 1 (MVP):** Uploader chọn classification khi upload. Qdrant filter enforce cơ bản: Top Secret → chỉ uploader xem được; Internal → nhân viên active; Public → tất cả account. **Phase 2:** Secret level với allowed_departments filter — mỗi chunk mang danh sách phòng ban được phép, query pipeline filter theo department của user. | ✅🔄 Phase 1+2 |
+
+> **Định nghĩa 4 cấp phân loại tài liệu:**
+>
+> | Cấp bậc | Người được xem | Ví dụ áp dụng |
+> |---------|---------------|--------------|
+> | 🔴 Top Secret | Chỉ 1 người cụ thể — thường là người upload tài liệu đó | Hợp đồng cá nhân, tài liệu đàm phán nhạy cảm |
+> | 🟠 Secret | Một nhóm nhỏ được chỉ định (theo phòng ban hoặc role) | Báo cáo tài chính nội bộ, kế hoạch sản phẩm mới |
+> | 🟡 Internal | Toàn bộ nhân viên chính thức của công ty | Quy trình nội bộ, chính sách HR, tài liệu kỹ thuật |
+> | 🟢 Public | Ai có account trên hệ thống (kể cả đối tác, contractor bên ngoài) | Tài liệu onboarding, hướng dẫn chung |
+
 | 15 | SSO – Microsoft Account | Đăng nhập bằng Microsoft Account (Azure AD via msal). Cùng hệ sinh thái với Microsoft Teams Bot Phase 2. Phase 3 có thể bổ sung MFA bắt buộc và Conditional Access policy cho Admin. | ✅ Phase 1 |
 | 16 | Multi-Agent Architecture | Upgrade từ Single Agent lên Multi-Agent nếu có nhu cầu xử lý câu hỏi phức tạp đa nguồn. | 📋 Phase 4 |
 
@@ -386,11 +402,12 @@ flowchart TB
         S3[(S3 Storage)]
         QDRANT["Qdrant (self-hosted on AWS)"]
         LF["Langfuse (self-hosted on AWS)"]
+        BGE["BGE-M3 Embedding Service (self-hosted EC2)"]
     end
 
-    subgraph EXT[Public Internet - External APIs]
-        OPENAI[OpenAI API - US]
-        GEMINI[Gemini Vision API - Google Cloud]
+    subgraph AZURE[Azure Cloud]
+        AOAI[Azure OpenAI GPT-4o Mini]
+        ADI[Azure Document Intelligence]
     end
 
     NEXTJS -- "9. HTTPS / Sync" --> USVC
@@ -399,9 +416,9 @@ flowchart TB
     USVC -- "5. TCP SSL / Sync" --> PG
     CHAT -- "5. TCP SSL / Sync" --> PG
     RAG -- "5. TCP SSL / Sync" --> PG
-    CHAT -- "2. HTTPS / Sync" --> OPENAI
-    RAG -- "1. HTTPS / Sync" --> OPENAI
-    RAG -- "3. HTTPS / Sync" --> GEMINI
+    CHAT -- "2. HTTPS / Sync" --> AOAI
+    RAG -- "1. HTTP VPC / Sync" --> BGE
+    RAG -- "3. HTTPS / Sync" --> ADI
     RAG -- "4. HTTPS REST / Sync" --> QDRANT
     RAG -- "6. S3 SDK / Sync" --> S3
     CHAT -- "7. HTTPS / Async" --> LF
@@ -414,10 +431,11 @@ flowchart TB
 
 | **STT** | **Endpoint** | **From** | **To** | **Method** | **Data** |
 |--------|-------------|---------|-------|-----------|---------|
-| 1 | OpenAI Embeddings API | RAG Service / Ingestion Module | OpenAI text-embedding-3-small | HTTPS/TLS – Sync | Chunk text → vector [1536 dims]. Retry 3 lần khi timeout. API Key qua Secrets Manager. |
-| 2 | OpenAI Chat Completion API | Chat Service / LLM Orchestration | OpenAI GPT-4o mini | HTTPS/TLS – Sync, Streaming | Full prompt → streaming tokens. API Key qua Secrets Manager. |
-| 3 | Gemini Vision API | RAG Service / OCR Module | Google Gemini Vision API | HTTPS/TLS – Sync | PDF scan image → extracted text. Gọi khi phát hiện PDF scan. |
-| 4 | Qdrant REST API | RAG Service / Query + Ingestion Module | Qdrant (self-hosted on AWS) | HTTPS / REST | Upsert vectors khi ingest. Cosine search Top-K=5 khi query. API Key auth. |
+| 1 | BGE-M3 Embedding Service | RAG Service / Ingestion + Query Module | BGE-M3 (self-hosted trên AWS EC2) | HTTP nội bộ (VPC) – Sync | Child chunk text → vector [1024 dims]. Không gọi external API. Retry 3 lần khi timeout. |
+| 2 | Azure OpenAI Chat Completion API | Chat Service / LLM Orchestration | Azure OpenAI GPT-4o Mini | HTTPS/TLS – Sync, Streaming | Full prompt → streaming tokens. Data ở trong Azure tenant. API Key qua Secrets Manager. |
+| 3 | Azure Document Intelligence API | RAG Service / OCR Module | Azure Document Intelligence | HTTPS/TLS – Sync | PDF scan image → extracted text + layout. Chỉ gọi khi phát hiện PDF scan. |
+| 3b | PyMuPDF | RAG Service / OCR Module | Local processing (không gọi API) | In-process | PDF có text layer → extract text trực tiếp. Nhanh, miễn phí. |
+| 4 | Qdrant REST API | RAG Service / Query + Ingestion Module | Qdrant (self-hosted on AWS) | HTTPS / REST | Upsert vectors khi ingest. Hybrid search Top-K=20 (vector + BM25 via RRF) khi query. API Key auth. |
 | 5 | RDS PostgreSQL | User Service / Chat Service / RAG Service | AWS RDS PostgreSQL 15 | TCP/SSL | User Service: user data. Chat Service: conversation history. RAG Service: document metadata, audit log. SSL required. |
 | 6 | AWS S3 SDK | RAG Service / Ingestion Module | AWS S3 (Private Bucket) | HTTPS / S3 SDK | PUT file gốc khi ingest. GET để xử lý. IAM Role-based access. |
 | 7 | Langfuse SDK | Chat Service + RAG Service | Langfuse (self-hosted on AWS) | HTTP nội bộ (VPC) | Chat Service: LLM trace. RAG Service: ingestion + retrieval trace. Trace data không ra ngoài AWS. |
@@ -469,11 +487,11 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Ingestion Pipel
 | 4 | FastAPI | Tạo record document trong PostgreSQL. Admin → status: `queued` (tiếp tục Step 5). End User → status: `pending` (dừng, chờ approve). Trả về 202 Accepted. | `{ doc_id, status: 'queued' \| 'pending' }` |
 | 4b | Admin | Xem pending queue trên Admin Dashboard. **Approve** → status: `queued` → tiếp tục Step 5. **Reject** → status: `rejected`, ghi lý do, thông báo uploader. | `{ doc_id, action: 'approve'\|'reject', reason? }` |
 | 5 | BackgroundTask | Đọc file từ S3. Cập nhật status → 'processing'. | File binary từ S3 |
-| 6 | OCR Module | PDF text-based → PyMuPDF. PDF scan → Gemini Vision OCR. DOCX → python-docx. Excel → openpyxl, convert rows sang text có header. CSV → pandas. PPTX → python-pptx, extract text từng shape. Markdown → parse trực tiếp (str split). | Raw text + metadata |
+| 6 | OCR Module | Auto-detect PDF type: có text layer → PyMuPDF (local). Không có text layer → Azure Document Intelligence OCR. DOCX → python-docx. Excel → openpyxl, convert rows sang text có header. CSV → pandas. PPTX → python-pptx, extract text từng shape. Markdown → parse theo heading. | Raw text + metadata |
 | 7 | Ingestion Module | Normalize tiếng Việt: Unicode NFC, fix encoding, collapse whitespace. | Cleaned text |
-| 8 | Ingestion Module | Semantic chunking theo heading/paragraph. Max 1024 token/chunk, overlap 128 token. | List of `{ chunk_text, chunk_metadata }` |
-| 9 | Embedding Service | Gọi OpenAI text-embedding-3-small, batch embed các chunks. | Chunk text → vector [1536 dims] |
-| 10 | Qdrant (self-hosted on AWS) | Upsert vectors với payload: doc_id, chunk_id, text, source, page. | Vector + payload |
+| 8 | Ingestion Module | Parent-Child Chunking theo loại file: PDF/DOCX → heading-based; TXT → paragraph-based; XLSX → Header+RowGroup; CSV → Row-as-Document; PPTX → Slide-as-Parent+Text-as-Child; MD → Heading-based. Parent ~512–1024 token, Child ~128–256 token, overlap 20–30 token. Chỉ embed Child chunks. | List of `{ parent_text, child_text, chunk_metadata }` |
+| 9 | Embedding Service | Gọi BGE-M3 Embedding Service (self-hosted), batch embed child chunks. | Child text → vector [1024 dims] |
+| 10 | Qdrant (self-hosted on AWS) | Upsert vectors với payload: chunk_id, chunk_type, parent_id, parent_text, child_text, doc_id, file_type, section_title, page, classification, ocr_confidence. | Vector + payload |
 | 11 | PostgreSQL | Lưu document record: tên, S3 key, số chunk, status: 'indexed'. | Document record |
 | 12 | Langfuse | Log ingestion metrics: parse_time, chunk_count, embed_time, total_latency, status (success/failed). Error message nếu thất bại. | Ingestion trace data |
 
@@ -489,12 +507,14 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 | 2 | FastAPI | Xác thực JWT (kiểm tra blacklist Redis). Kiểm tra rate limit Redis (20 req/phút/user). | Authenticated request |
 | 3 | **Input Guardrail** (llm-guard) | Scan input: (1) Prompt injection detection, (2) Off-topic classifier — nếu fail → trả canned response ngay, không gọi LLM. | Pass / Block + lý do |
 | 4 | Langfuse | Khởi tạo trace mới cho request này. | trace_id, user_id, timestamp |
-| 5 | Query Module | Normalize tiếng Việt cho query. Embed bằng text-embedding-3-small. | Query vector [1536 dims] |
-| 6 | Qdrant (self-hosted on AWS) | Semantic search Top-K=5 chunks gần nhất theo cosine similarity. | List of `{ chunk_text, source, page, score }` |
+| 5 | Query Module | Normalize tiếng Việt cho query. Embed bằng BGE-M3 Embedding Service (self-hosted). | Query vector [1024 dims] |
+| 5b | Query Module | Query Rewriting: LLM sinh 3 variations của câu hỏi gốc → hybrid search cả 3 → kết hợp kết quả bằng Reciprocal Rank Fusion (RRF). Top-20 candidates. | 3 query variants + merged Top-20 results |
+| 6 | Qdrant (self-hosted on AWS) | Hybrid search: vector search + BM25 keyword search, kết hợp bằng RRF. Top-K=20 candidates. | List of `{ child_text, parent_text, source, page, score }` |
 | 7 | Query Module | Kiểm tra score threshold: max score < 0.7 → trả fallback, không gọi LLM. | "Không tìm thấy thông tin trong tài liệu nội bộ" |
+| 7b | BGE-Reranker-v2-m3 (self-hosted) | Rerank Top-20 candidates theo độ liên quan với query gốc. Trả về Top-3 parent chunks để đưa vào LLM prompt. | Top-3 parent_text chunks (rerank_score) |
 | 8 | PostgreSQL | Lấy conversation context: summary các turns cũ + 5 turns gần nhất verbatim (Summary Buffer). | Conversation context |
-| 9 | Query Module | Build prompt: System prompt + Conversation context + Context chunks + Question. | Full prompt (~2000–4000 tokens) |
-| 10 | LLM Service | Gọi GPT-4o mini streaming. Buffer full response trước khi qua Output Guardrail. | Full response text |
+| 9 | Query Module | Build prompt: System prompt + Conversation context + Top-3 parent_text chunks + Question. | Full prompt (~2000–4000 tokens) |
+| 10 | LLM Service | Gọi Azure OpenAI GPT-4o Mini streaming. Buffer full response trước khi qua Output Guardrail. | Full response text |
 | 11 | **Output Guardrail** (llm-guard) | Scan output: PII detection — redact nếu phát hiện thông tin cá nhân người khác. | Cleaned response |
 | 12 | FastAPI | Forward response đã clean về frontend qua SSE streaming. | Streaming tokens |
 | 13 | Langfuse | Log: latency từng bước, input/output tokens, retrieved chunks, scores, guardrail events. | Trace data (PII masked) |
@@ -538,7 +558,7 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 | Database | AWS RDS PostgreSQL 15 (db.t3.micro) | Managed. Automated backup 7 ngày. Single-AZ cho MVP. |
 | File Storage | AWS S3 (Private Bucket) | Lưu tài liệu gốc. Versioning bật. SSE-S3 encryption. |
 | Tracing | Langfuse (self-hosted on AWS) | Docker container trên EC2. Dashboard latency, RAGAS, cost. Trace data nằm trong VPC. |
-| Secret Management | AWS Secrets Manager | OpenAI Key, Gemini Key, DB password, Langfuse Key. Inject vào EC2 lúc runtime. |
+| Secret Management | AWS Secrets Manager | Azure OpenAI Key, Azure Document Intelligence Key, BGE-M3/Reranker URL, DB password, Langfuse Key. Inject vào EC2 lúc runtime. |
 | SSL/TLS | Let's Encrypt (Nginx reverse proxy) | HTTPS cho FastAPI endpoint. HTTP redirect sang HTTPS. |
 
 **Diễn giải giải pháp High Availability:**
@@ -589,10 +609,10 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 | Backend | Python 3.11 – FastAPI | Async native, hệ sinh thái AI/ML tốt nhất, phát triển nhanh. |
 | Architecture | Microservices (3 backend services) | User Service + Chat Service + RAG Service. Giao tiếp qua HTTP REST. JWT verify locally bằng shared secret — không cần gọi User Service mỗi request. Mỗi service dùng Clean Architecture nội bộ. |
 | LLM Orchestration | LlamaIndex | RAG-focused, ít boilerplate hơn LangChain, dễ học. |
-| Embedding Model | OpenAI text-embedding-3-small | Tiếng Việt tốt, rẻ (~$0.02/1M tokens), 1536 dims. |
-| LLM | OpenAI GPT-4o mini | Cân bằng chi phí/chất lượng. Streaming support. |
-| OCR | Gemini Vision API | Không cần quản lý model local, tốt tiếng Việt, gọi API đơn giản. |
-| PDF Parser | PyMuPDF (fitz) | Tốt nhất cho PDF tiếng Việt text-based, nhanh, accurate. |
+| Embedding Model | BGE-M3 (self-hosted trên AWS EC2) | Không gọi API ngoài, 1024 dims, đa ngôn ngữ tốt, zero latency khi scale nội bộ. |
+| LLM | Azure OpenAI GPT-4o Mini | Data trong Azure tenant, không đi qua OpenAI public API. Đảm bảo compliance cho doanh nghiệp. |
+| OCR PDF scan | Azure Document Intelligence | Bảo mật (trong Azure tenant), chất lượng cao cho tiếng Việt, hỗ trợ bảng + layout phức tạp. |
+| OCR PDF văn bản | PyMuPDF (local) | Nhanh, miễn phí, không cần OCR khi PDF đã có text layer. |
 | DOCX Parser | python-docx | Standard library cho DOCX. |
 | Excel/CSV Parser | openpyxl + pandas | openpyxl đọc .xlsx; pandas convert rows sang text có header. |
 | PPTX Parser | python-pptx | Đọc slides, extract text từng shape. |
@@ -626,7 +646,7 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 - **Network Security:** Security Groups EC2 chỉ mở port 80/443 (Nginx) và 22 (SSH từ IP cố định). RDS Security Group chỉ accept từ EC2 Security Group.
 - **Hạn chế Automated Attacks & Bot:** Rate Limiting 20 request/phút/user cho `/query` endpoint (LLM call) tại FastAPI middleware. Phase 3 bổ sung WAF + Bot Detection tại AWS ALB.
 - **Kiểm soát lưu lượng request:** Max 500 ký tự cho query. Max 50MB cho file upload. Validate file type (PDF/DOCX/TXT/Excel/CSV).
-- **Quản lý bí mật (Secrets Management):** OpenAI Key, Gemini Key, Langfuse Key, DB password lưu trong AWS Secrets Manager. Không lưu secret trong mã nguồn hay .env file. Rotation tự động định kỳ.
+- **Quản lý bí mật (Secrets Management):** Azure OpenAI Key, Azure Document Intelligence Key, BGE-M3/Reranker URL, Langfuse Key, DB password lưu trong AWS Secrets Manager. Không lưu secret trong mã nguồn hay .env file. Rotation tự động định kỳ.
 
 > _Bổ sung chi tiết cấu hình cho hệ thống:_
 > - S3 Bucket Policy: chỉ EC2 IAM Role có quyền PUT/GET. Block Public Access bật.
@@ -725,15 +745,15 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 | Nhóm chủ thể dữ liệu | Nhân viên nội bộ VinSmartFuture (~4,000 người), Quản trị viên (~20 người) |
 | Pháp nhân kiểm soát dữ liệu | VinSmartFuture – Việt Nam |
 | Số lượng chủ thể dữ liệu | Nhân viên: ~4,000 người \| Quản trị viên: ~20 người |
-| Nơi lưu trữ dữ liệu | AWS Singapore (ap-southeast-1): RDS, S3, EC2 (Qdrant + Langfuse self-hosted). Toàn bộ dữ liệu nội bộ và trace data nằm trong AWS VPC. Chỉ OpenAI và Gemini ra ngoài (nội dung query/OCR). |
+| Nơi lưu trữ dữ liệu | AWS Singapore (ap-southeast-1): RDS, S3, EC2 (Qdrant + Langfuse + BGE-M3 self-hosted). Toàn bộ dữ liệu nội bộ và trace data nằm trong AWS VPC. Azure OpenAI (LLM call) và Azure Document Intelligence (PDF scan OCR) ra ngoài AWS nhưng trong Azure tenant — không transfer cross-border ra ngoài Azure. |
 | Dung lượng dữ liệu lưu trữ | Conversation History: ~5–10 GB/năm. User metadata: < 1 GB. |
 | Người tiếp nhận DSR | [Tên] – IT Department – xử lý yêu cầu xóa/truy xuất dữ liệu trong 72 giờ. |
 | Thời gian lưu trữ | Conversation History: 1 năm TTL. Email: đến khi xóa tài khoản. Audit Log: 2 năm. |
 | Cơ chế xóa | Soft delete → Hard delete sau 30 ngày. Hỗ trợ xóa theo DSR trong 72 giờ. |
 
 **Lưu ý xử lý dữ liệu qua Third-party:**
-- **OpenAI:** Câu hỏi user gửi đến OpenAI API. Cần review và ký OpenAI Data Processing Agreement.
-- **Gemini:** Nội dung PDF scan gửi đến Google Gemini API. Cần review Google Cloud DPA tương tự.
+- **Azure OpenAI:** LLM prompt (câu hỏi + context chunks) gửi đến Azure OpenAI trong cùng Azure tenant. Data Processing Agreement theo Microsoft Azure DPA. Data không rời khỏi Azure region được chọn.
+- **Azure Document Intelligence:** Nội dung PDF scan gửi đến Azure Document Intelligence trong Azure tenant. Cùng Microsoft Azure DPA. Chỉ gọi khi phát hiện PDF scan — PDF text layer dùng PyMuPDF local, không gọi API ngoài.
 - **Langfuse:** Self-hosted trên AWS EC2 — trace data không ra ngoài VPC. Vẫn cần mask PII trong trace content (question/answer text).
 
 **Biểu đồ luồng dữ liệu cá nhân:**
@@ -774,7 +794,7 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 | Context Precision | RAGAS metric: % chunks retrieved thật sự liên quan đến câu hỏi. |
 | Context Recall | RAGAS metric: % thông tin cần thiết có trong retrieved chunks. |
 | Langfuse | Open-source LLM observability platform. Trace LLM pipeline, đo latency, token cost, RAGAS scores. |
-| OCR | Optical Character Recognition – nhận diện ký tự từ ảnh hoặc PDF scan. MVP dùng Gemini Vision API. |
+| OCR | Optical Character Recognition – nhận diện ký tự từ ảnh hoặc PDF scan. MVP dùng Azure Document Intelligence (PDF scan) + PyMuPDF (PDF có text layer). |
 | CER | Character Error Rate – % ký tự bị nhận sai khi OCR. Target < 5%. |
 | WER | Word Error Rate – % từ bị nhận sai khi OCR. Target < 10%. |
 | Semantic Chunking | Cắt tài liệu theo cấu trúc ngữ nghĩa (heading, paragraph) thay vì cắt cố định theo số token. |

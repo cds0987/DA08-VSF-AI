@@ -54,7 +54,7 @@ pip install -r requirements.txt
 Mỗi service có file `.env` riêng. Copy từ `.env.example` trong từng folder:
 
 ```bash
-cp user-service/.env.example  user-service/.env
+cp src/user-service/.env.example  src/user-service/.env
 cp chat-service/.env.example  chat-service/.env
 cp rag-service/.env.example   rag-service/.env
 ```
