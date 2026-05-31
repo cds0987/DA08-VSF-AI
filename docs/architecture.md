@@ -62,7 +62,7 @@ src/user-service/                   ← Container 1: Auth, User management
 │           └── schemas/
 │               └── auth.py
 │
-chat-service/                   ← Container 2: LLM Orchestration, Conversation
+src/chat-service/                   ← Container 2: LLM Orchestration, Conversation
 ├── app/
 │   ├── domain/
 │   │   ├── entities/
@@ -95,7 +95,7 @@ chat-service/                   ← Container 2: LLM Orchestration, Conversation
 │               ├── query.py        # QueryRequest, QueryResponse
 │               └── document.py
 │
-rag-service/                    ← Container 3: OCR, Ingestion, Retrieval
+src/rag-service/                    ← Container 3: OCR, Ingestion, Retrieval
 ├── app/
 │   ├── domain/
 │   │   ├── entities/
@@ -134,7 +134,7 @@ rag-service/                    ← Container 3: OCR, Ingestion, Retrieval
 │               ├── ingest.py
 │               └── search.py       # SearchResult response
 
-frontend/                       ← AWS EC2 deployment (Next.js container, Docker Compose)
+src/frontend/                       ← AWS EC2 deployment (Next.js container, Docker Compose)
 ```
 
 ---
@@ -189,14 +189,14 @@ def get_login_use_case() -> LoginUseCase:
     user_repo = PostgresUserRepository()
     return LoginUseCase(user_repo)
 
-# chat-service/app/interfaces/api/dependencies.py
+# src/chat-service/app/interfaces/api/dependencies.py
 def get_orchestration_use_case() -> OrchestrationUseCase:
     rag_client = RagServiceClient(base_url=settings.RAG_SERVICE_URL)  # HTTP client
     conversation_repo = PostgresConversationRepo()
     openai_client = OpenAIClient()
     return OrchestrationUseCase(rag_client, conversation_repo, openai_client)
 
-# rag-service/app/interfaces/api/dependencies.py
+# src/rag-service/app/interfaces/api/dependencies.py
 def get_retrieval_use_case() -> RetrievalUseCase:
     vector_repo = QdrantVectorRepository()       # implement VectorRepository
     embedding_svc = BgeM3EmbeddingService()      # implement EmbeddingService
@@ -208,7 +208,7 @@ def get_ingest_use_case() -> IngestDocumentUseCase:
     embedding_svc = BgeM3EmbeddingService()      # dùng chung interface, cùng 1 instance
     return IngestDocumentUseCase(document_repo, vector_repo, embedding_svc)
 
-# chat-service/app/interfaces/api/routers/query.py
+# src/chat-service/app/interfaces/api/routers/query.py
 @router.post("/query")
 async def query(request: QueryRequest, use_case = Depends(get_orchestration_use_case)):
     return await use_case.execute(request.question, request.user_id)

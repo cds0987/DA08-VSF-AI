@@ -26,7 +26,7 @@ Project có **3 backend services** độc lập. Mỗi service có `requirements
 
 ```bash
 # User Service (Backend Dev)
-cd user-service
+cd src/user-service
 python -m venv venv
 venv\Scripts\activate          # Windows
 # source venv/bin/activate     # Mac/Linux
@@ -55,8 +55,8 @@ Mỗi service có file `.env` riêng. Copy từ `.env.example` trong từng fold
 
 ```bash
 cp src/user-service/.env.example  src/user-service/.env
-cp chat-service/.env.example  chat-service/.env
-cp rag-service/.env.example   rag-service/.env
+cp src/chat-service/.env.example  src/chat-service/.env
+cp src/rag-service/.env.example   src/rag-service/.env
 ```
 
 Xem đầy đủ nội dung từng file và hướng dẫn lấy API keys tại **[docs/env-setup.md](env-setup.md)**.
@@ -103,17 +103,17 @@ Mỗi service chạy trên port riêng. Mở 3 terminal:
 
 ```bash
 # Terminal 1 — User Service (port 8000)
-cd user-service
+cd src/user-service
 venv\Scripts\activate
 uvicorn app.interfaces.api.main:app --reload --port 8000
 
 # Terminal 2 — Chat Service (port 8001)
-cd chat-service
+cd src/chat-service
 venv\Scripts\activate
 uvicorn app.interfaces.api.main:app --reload --port 8001
 
 # Terminal 3 — RAG Service (port 8002)
-cd rag-service
+cd src/rag-service
 venv\Scripts\activate
 uvicorn app.interfaces.api.main:app --reload --port 8002
 ```
@@ -128,7 +128,7 @@ API docs tự động:
 ## 6. Frontend setup
 
 ```bash
-cd frontend
+cd src/frontend
 
 npm install
 
@@ -148,19 +148,19 @@ Frontend tại: http://localhost:3000
 
 ```bash
 # User Service
-cd user-service
+cd src/user-service
 pytest tests/ -v
 
 # Chat Service
-cd chat-service
+cd src/chat-service
 pytest tests/ -v
 
 # RAG Service
-cd rag-service
+cd src/rag-service
 pytest tests/ -v
 
 # Với coverage (ví dụ RAG Service)
-cd rag-service
+cd src/rag-service
 pytest --cov=app tests/
 ```
 
@@ -209,5 +209,5 @@ Services sau khi `docker compose up`:
 | `Invalid signature` (JWT) | `JWT_SECRET_KEY` không khớp giữa services | Kiểm tra `.env` của 3 services phải dùng cùng key |
 | `Invalid API Key` | `.env` chưa điền đúng | Kiểm tra lại `.env` |
 | `ModuleNotFoundError` | Chưa activate venv đúng service | `cd <service-folder> && venv\Scripts\activate` |
-| `QDRANT_URL not set` | Thiếu env var | Kiểm tra `rag-service/.env` |
+| `QDRANT_URL not set` | Thiếu env var | Kiểm tra `src/rag-service/.env` |
 | `Connection refused 8002` (từ Chat Service) | RAG Service chưa chạy | Start RAG Service trước |

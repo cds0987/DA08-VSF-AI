@@ -54,7 +54,7 @@ class UserRepository(ABC):
 ## chat-service — Domain
 
 ```python
-# chat-service/app/domain/entities/conversation.py
+# src/chat-service/app/domain/entities/conversation.py
 from dataclasses import dataclass, field
 from typing import List, Optional
 from datetime import datetime
@@ -78,7 +78,7 @@ class Conversation:
 ```
 
 ```python
-# chat-service/app/domain/repositories/conversation_repository.py
+# src/chat-service/app/domain/repositories/conversation_repository.py
 from abc import ABC, abstractmethod
 from typing import Optional
 from app.domain.entities.conversation import ConversationContext
@@ -107,7 +107,7 @@ class ConversationRepository(ABC):
 ## rag-service — Domain
 
 ```python
-# rag-service/app/domain/entities/document.py
+# src/rag-service/app/domain/entities/document.py
 from dataclasses import dataclass, field
 from typing import List, Optional
 from datetime import datetime
@@ -148,7 +148,7 @@ class Chunk:
 ```
 
 ```python
-# rag-service/app/domain/repositories/document_repository.py
+# src/rag-service/app/domain/repositories/document_repository.py
 from abc import ABC, abstractmethod
 from typing import List, Optional
 from app.domain.entities.document import Document, DocumentStatus
@@ -177,7 +177,7 @@ class DocumentRepository(ABC):
 ```
 
 ```python
-# rag-service/app/domain/repositories/embedding_service.py
+# src/rag-service/app/domain/repositories/embedding_service.py
 from abc import ABC, abstractmethod
 from typing import List
 
@@ -193,7 +193,7 @@ class EmbeddingService(ABC):
 ```
 
 ```python
-# rag-service/app/domain/repositories/vector_repository.py
+# src/rag-service/app/domain/repositories/vector_repository.py
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List
@@ -253,7 +253,7 @@ class VectorRepository(ABC):
 Contract giữa **Frontend Dev** và **Backend Dev / AI/Agent Engineer**.
 
 ```python
-# chat-service/app/interfaces/api/schemas/query.py
+# src/chat-service/app/interfaces/api/schemas/query.py
 from pydantic import BaseModel
 from typing import List
 
@@ -272,7 +272,7 @@ class QueryResponse(BaseModel):
     sources: List[Source]
     session_id: str
 
-# chat-service/app/interfaces/api/schemas/document.py
+# src/chat-service/app/interfaces/api/schemas/document.py
 class UploadResponse(BaseModel):
     document_id: str
     status: str             # "queued" (Admin upload) | "pending" (End User upload)

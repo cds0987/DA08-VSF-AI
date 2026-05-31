@@ -5,10 +5,10 @@
 | Role | Phụ trách chính | Service / Folder | Bắt đầu sau |
 |------|----------------|-----------------|-------------|
 | **SA** | Domain design, contracts, API schemas, code review | `app/domain/` (cả 3 services) | Ngay — làm đầu tiên |
-| **Frontend Dev** | Web UI chat, admin dashboard, streaming | `frontend/` (Next.js) | Sau khi SA freeze schemas |
+| **Frontend Dev** | Web UI chat, admin dashboard, streaming | `src/frontend/` (Next.js) | Sau khi SA freeze schemas |
 | **Backend Dev** | User Service: auth, JWT, user management, DB | `src/user-service/app/` | Sau khi SA freeze domain |
-| **RAG Engineer** | Ingestion pipeline + Retrieval pipeline toàn bộ | `rag-service/app/` | Sau khi SA freeze domain |
-| **AI/Agent Engineer** | Chat Service: LLM orchestration, streaming, memory | `chat-service/app/` | Sau khi SA freeze domain |
+| **RAG Engineer** | Ingestion pipeline + Retrieval pipeline toàn bộ | `src/rag-service/app/` | Sau khi SA freeze domain |
+| **AI/Agent Engineer** | Chat Service: LLM orchestration, streaming, memory | `src/chat-service/app/` | Sau khi SA freeze domain |
 | **DevOps** | Docker, AWS, CI/CD, Nginx, monitoring | `infra/`, `docker-compose.yml` | Ngay — song song với SA |
 
 ---
@@ -32,7 +32,7 @@ src/user-service/app/domain/
 
 **Files SA tạo — chat-service:**
 ```
-chat-service/app/domain/
+src/chat-service/app/domain/
 ├── entities/
 │   └── conversation.py          ← Message, ConversationContext, Conversation dataclass
 └── repositories/
@@ -41,7 +41,7 @@ chat-service/app/domain/
 
 **Files SA tạo — rag-service:**
 ```
-rag-service/app/domain/
+src/rag-service/app/domain/
 ├── entities/
 │   └── document.py              ← Document, Chunk dataclass, DocumentStatus enum
 └── repositories/
@@ -52,7 +52,7 @@ rag-service/app/domain/
 
 **SA cũng define schemas (Pydantic) — nằm trong interfaces/api nhưng SA viết:**
 ```
-chat-service/app/interfaces/api/schemas/
+src/chat-service/app/interfaces/api/schemas/
 ├── query.py       ← QueryRequest, QueryResponse, Source
 └── document.py    ← UploadResponse
 
@@ -72,7 +72,7 @@ src/user-service/app/interfaces/api/schemas/
 
 **Files Frontend Dev tạo:**
 ```
-frontend/
+src/frontend/
 ├── app/                         ← Next.js App Router
 │   ├── (auth)/
 │   │   └── login/page.tsx       ← Form đăng nhập (email/password + Microsoft SSO button)
@@ -140,7 +140,7 @@ src/user-service/app/
 
 **Files RAG Engineer tạo:**
 ```
-rag-service/app/
+src/rag-service/app/
 ├── application/
 │   └── use_cases/
 │       ├── ingestion/
@@ -198,7 +198,7 @@ rag-service/app/
 
 **Files AI/Agent Engineer tạo:**
 ```
-chat-service/app/
+src/chat-service/app/
 ├── application/
 │   └── use_cases/
 │       └── query/
@@ -252,9 +252,9 @@ docker-compose.yml               ← 9 containers: nginx, next-frontend, user-se
                                     chat-service, rag-service, qdrant, redis, langfuse, postgres
 
 src/user-service/Dockerfile
-chat-service/Dockerfile
-rag-service/Dockerfile
-frontend/Dockerfile
+src/chat-service/Dockerfile
+src/rag-service/Dockerfile
+src/frontend/Dockerfile
 
 nginx/
 ├── nginx.conf                   ← Route /api/user/* → user-service:8000
@@ -346,8 +346,8 @@ from app.domain.entities.document import Document  # ✅
 Bất kỳ thay đổi nào trong `app/domain/` phải SA approve trước.
 
 ### 4. External client files — mỗi service có file riêng, độc lập
-- `chat-service/.../openai_client.py`: AI/Agent Engineer owns — Azure OpenAI Chat + streaming
-- `rag-service/.../bge_m3_client.py`: RAG Engineer owns — BGE-M3 Embedding client
+- `src/chat-service/.../openai_client.py`: AI/Agent Engineer owns — Azure OpenAI Chat + streaming
+- `src/rag-service/.../bge_m3_client.py`: RAG Engineer owns — BGE-M3 Embedding client
 - 2 file hoàn toàn độc lập, không import lẫn nhau.
 
 ---
