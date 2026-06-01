@@ -34,6 +34,17 @@ Response 200:  { "id": "uuid", "email": "string", "role": "user" | "admin", "dep
 Response 401:  { "detail": "Not authenticated" }
 ```
 
+### `POST /auth/refresh`
+
+```
+Request Body: { "refresh_token": "string" }
+
+Response 200:  { "access_token": "eyJ...", "refresh_token": "new_refresh_token", "token_type": "bearer" }
+Response 401:  { "detail": "Invalid or expired refresh token" }
+```
+
+> Refresh Token TTL 7 ngày, rotate-on-use — mỗi lần gọi endpoint này trả về refresh token mới, invalidate cái cũ. Lưu refresh token hash trong `user_svc.refresh_tokens` (không lưu raw token).
+
 ### `GET /health`
 
 ```

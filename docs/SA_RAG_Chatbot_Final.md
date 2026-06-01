@@ -15,9 +15,9 @@
 
 | **Phase** | **Thời gian** | **Mục tiêu** | **Trạng thái** |
 |-----------|--------------|-------------|---------------|
-| Phase 1 – MVP + Cloud Deploy | Tuần 1–3 | Core RAG pipeline, OCR, auth (email/password + Microsoft SSO), guardrails, Redis, full AWS deploy | 🔨 Đang làm |
+| Phase 1 – MVP + Cloud Deploy | Tuần 1–3 | Core RAG pipeline, OCR, auth (email/password + Microsoft SSO), guardrails, Redis, Semantic Cache, full AWS deploy | 🔨 Đang làm |
 | Phase 1.5 – Evaluation Checkpoint | Cuối tuần 3 | Chạy RAGAS (5 metrics), load test, quyết định tiếp tục Phase 2 hay tune thêm | ⏳ Chờ |
-| Phase 2 – Cải tiến & Tích hợp | Tuần 4–5 | Admin Dashboard nâng cao, Knowledge Gap Detection, Microsoft Teams Bot, Semantic Cache | ⏳ Chờ |
+| Phase 2 – Cải tiến & Tích hợp | Tuần 4–5 | Admin Dashboard nâng cao, Knowledge Gap Detection, Microsoft Teams Bot | ⏳ Chờ |
 
 ---
 
@@ -205,7 +205,7 @@ graph TB
     LFI --> LF
 ```
 
-> _Phase 2+: Semantic Cache (Redis) đặt giữa Query Module và Qdrant. SQS Queue thay thế BackgroundTasks cho Ingestion._
+> _Phase 1: Semantic Cache (Redis) đặt giữa Query Module và Qdrant. Phase 2 (Production Scale): SQS Queue thay thế BackgroundTasks cho Ingestion._
 
 ---
 
@@ -295,7 +295,7 @@ graph LR
 | 12 | Metadata DB (RDS PostgreSQL) | Lưu document metadata, conversation history, user info, audit log. | ✅ MVP |
 | 13 | Document Storage (S3) | Lưu file gốc sau khi upload. Ingestion module đọc từ đây để xử lý. | ✅ MVP |
 | 13b | HR Data Module | Mock HR tables trong PostgreSQL: `hr_leave_balance` (ngày nghỉ còn lại), `hr_leave_requests` (trạng thái đơn), `hr_payroll_summary` (thông tin lương). Dùng cho Personal HR Q&A feature. | ✅ MVP |
-| 14 | Semantic Cache (Redis) | Cache câu hỏi tương tự (cosine similarity > 0.95). Tiết kiệm ~60% Azure OpenAI API cost. | 🔄 Phase 2 |
+| 14 | Semantic Cache (Redis) | Cache câu hỏi tương tự (cosine similarity > 0.95). Tiết kiệm ~60% Azure OpenAI API cost. | ✅ MVP |
 | 15 | SQS Queue | Async ingestion queue có DLQ. Thay thế BackgroundTasks khi scale. | 🔄 Phase 2 |
 
 ### Thông tin dữ liệu – Phân loại bảo mật
@@ -325,7 +325,7 @@ graph LR
 ## 2.2 Session Configuration
 
 > Mục này mô tả cấu hình session cho từng chức năng hoặc toàn hệ thống, tùy theo mức độ nhạy cảm.
-> - Phase 1 hỗ trợ cả Simple JWT (email/password) và Microsoft Account SSO (Azure AD qua msal). Phase 3 có thể bổ sung MFA bắt buộc cho Admin hoặc Conditional Access nâng cao.
+> - Phase 1 hỗ trợ cả Simple JWT (email/password) và Microsoft Account SSO (Azure AD qua msal). **Phase 1: MFA bắt buộc cho Admin (TOTP).** Phase 2: Conditional Access nâng cao.
 > - Nếu cần chỉ rõ các chức năng đặc biệt cần session ngắn/dài khác nhau: đặt tại bảng dưới đây.
 
 **Kịch bản 1: Sử dụng cấu hình mặc định**
@@ -362,7 +362,7 @@ graph LR
 | 10 | Admin Dashboard | **MVP:** Xem danh sách tài liệu đã index (trạng thái, ngày upload, số chunk). Xem và xử lý Pending documents queue (Approve / Reject kèm lý do). Xem ingestion status real-time. Upload và xóa tài liệu. Xem usage metrics cơ bản. **Phase 2:** Tổng số câu hỏi theo ngày/tuần, tỉ lệ feedback tốt/xấu, top 10 câu hỏi được hỏi nhiều nhất, danh sách câu hỏi bot không trả lời được (retrieval score < 0.7 — dùng để phát hiện Knowledge Gap). | ✅🔄 MVP + Phase 2 |
 | 11 | Feedback Loop | Người dùng đánh giá câu trả lời (thumbs up/down). Lưu vào PostgreSQL và sync lên Langfuse để phân tích chất lượng. | ✅ MVP |
 | 12 | Langfuse Observability | Trace toàn bộ LLM pipeline. Dashboard latency, token cost, RAGAS scores, feedback. IT/DevOps dùng để monitor và debug. | ✅ MVP |
-| 13 | Semantic Cache | Cache câu hỏi tương tự (cosine similarity > 0.95). TTL 1 giờ. Tiết kiệm ~60% API cost. | 🔄 Phase 2 |
+| 13 | Semantic Cache | Cache câu hỏi tương tự (cosine similarity > 0.95). TTL 1 giờ. Tiết kiệm ~60% API cost. | ✅ MVP |
 | 14 | Document Classification & Access Control | Uploader chọn classification khi upload. **ACL pre-filter:** Chat Service decode JWT → query PostgreSQL `rag_svc.documents` → lấy `allowed_doc_ids` user được phép đọc → truyền vào RAG `/search` dưới dạng `document_ids` filter. RAG Service chỉ search trong các doc đó — unauthorized data không rời khỏi Qdrant. `document_ids=None` mặc định chỉ search public docs (fail-secure). Kết quả cache Redis TTL ~60s. | ✅ MVP |
 
 > **Định nghĩa 4 cấp phân loại tài liệu:**
@@ -374,7 +374,7 @@ graph LR
 > | 🟡 Internal | Toàn bộ nhân viên chính thức của công ty | Quy trình nội bộ, chính sách HR, tài liệu kỹ thuật |
 > | 🟢 Public | Ai có account trên hệ thống (kể cả đối tác, contractor bên ngoài) | Tài liệu onboarding, hướng dẫn chung |
 
-| 15 | SSO – Microsoft Account | Đăng nhập bằng Microsoft Account (Azure AD via msal). Cùng hệ sinh thái với Microsoft Teams Bot Phase 2. Phase 3 có thể bổ sung MFA bắt buộc và Conditional Access policy cho Admin. | ✅ Phase 1 |
+| 15 | SSO – Microsoft Account | Đăng nhập bằng Microsoft Account (Azure AD via msal). Cùng hệ sinh thái với Microsoft Teams Bot Phase 2. Phase 1: MFA bắt buộc cho Admin (TOTP). Phase 2: Conditional Access policy nâng cao. | ✅ Phase 1 |
 | 16 | Multi-Agent Architecture | Upgrade từ Single Agent lên Multi-Agent nếu có nhu cầu xử lý câu hỏi phức tạp đa nguồn. | 📋 Phase 4 |
 | 17 | Microsoft Teams Bot Integration | Nhân viên hỏi bot trực tiếp trong Teams (DM hoặc mention trong channel), không cần mở tab mới. Kỹ thuật: `botbuilder-python` (Microsoft Bot Framework) — cùng hệ sinh thái Azure AD đã dùng cho SSO. | 🔄 Phase 2 |
 
@@ -694,7 +694,7 @@ graph TB
 - Network Topology: EC2 trong Public Subnet với Security Group chặt. RDS trong Private Subnet, chỉ EC2 truy cập được.
 - Entry từ Internet: HTTPS → Nginx (EC2) → route theo path: `/` → Next.js frontend, `/api/*` → backend services.
 - Các server / container: 1 EC2 t3.medium chạy Docker Compose với 9 containers: nginx, next-frontend, User Service, Chat Service, RAG Service, Qdrant, Redis, Langfuse, PostgreSQL.
-- Mapping service/module → node: User Service (port 8000) + Chat Service (port 8001) + RAG Service (port 8002) trên EC2. RDS/S3 là managed cloud services. Phase 3 tách sang ECS Fargate 3 Task riêng.
+- Mapping service/module → node: User Service (port 8000) + Chat Service (port 8001) + RAG Service (port 8002) trên EC2. RDS/S3 là managed cloud services. Phase 2 (Production Scale) tách sang ECS Fargate 3 Task riêng.
 - Database: RDS PostgreSQL Single-AZ (MVP), S3 với versioning.
 - Quản lý truy cập: SSH vào EC2 chỉ từ IP cố định (port 22). AWS Secrets Manager inject API Keys runtime.
 
@@ -714,17 +714,17 @@ graph TB
 
 **Diễn giải giải pháp High Availability:**
 
-> _MVP dùng kiến trúc đơn giản: 1 EC2 chạy Docker Compose. Không có HA tự động ở MVP. Phase 3 nâng lên ECS Fargate (min 2 tasks, auto-scale), RDS Multi-AZ, AWS ALB + WAF._
+> _MVP dùng kiến trúc đơn giản: 1 EC2 chạy Docker Compose. Không có HA tự động ở MVP. Phase 2 (Production Scale) nâng lên ECS Fargate (min 2 tasks, auto-scale), RDS Multi-AZ, AWS ALB + WAF._
 
-| **Thành phần** | **MVP (Phase 1)** | **Production (Phase 3+)** |
+| **Thành phần** | **MVP (Phase 1)** | **Phase 2 (Production Scale)** |
 |--------------|-----------------|------------------------|
 | Backend | 1 EC2 t3.medium, Docker Compose (3 services) | ECS Fargate, min 2 tasks/service, auto-scale |
 | Database | RDS Single-AZ db.t3.micro | RDS Multi-AZ + Read Replica |
 | Vector DB | Qdrant (self-hosted on AWS) — 1 container Docker Compose | Qdrant cluster riêng trên ECS (nhiều replica, persistent volume) |
 | Ingestion | FastAPI BackgroundTasks | AWS SQS + Worker Service riêng |
-| Cache | Không có | Redis ElastiCache – Semantic Cache |
+| Cache | Redis (self-hosted EC2) – Semantic Cache | Redis ElastiCache (managed, auto-scaling) |
 | Load Balancer | Nginx trên EC2 | AWS ALB + WAF |
-| Tracing | Langfuse (self-hosted on AWS) — Docker Compose | Langfuse cluster riêng trên ECS (Phase 3) |
+| Tracing | Langfuse (self-hosted on AWS) — Docker Compose | Langfuse cluster riêng trên ECS (Phase 2 Production Scale) |
 | Monitoring | CloudWatch basic | CloudWatch + Grafana + PagerDuty |
 
 ### 6.1.1 Thành phần lưu trữ dữ liệu
@@ -743,14 +743,14 @@ graph TB
 | Source Control | GitHub | Branch: main (prod), develop, feature/* |
 | CI Pipeline | GitHub Actions | Trigger: PR → develop. Chạy unit test, lint, type check. |
 | Security Gate (DevSecOps) | Gitleaks (secret scan) + Trivy (container vuln scan) | Block merge nếu phát hiện secret trong code hoặc CVE critical. |
-| Testing | pytest (unit) → Integration test với test DB | Phase 3 bổ sung E2E + Performance test (Locust). |
+| Testing | pytest (unit) → Integration test với test DB | Phase 2 bổ sung E2E + Performance test (Locust). |
 | Artifact & Versioning | Docker Image – AWS ECR, tag = commit SHA | Immutable tag. Không overwrite tag đã publish. |
 | Config & Environment Parity | .env.example versioned, secrets qua Secrets Manager | Không lưu secret trong .env hay source code. |
 | Secret Management | AWS Secrets Manager → inject lúc runtime | Rotation tự động cho Database Credentials. Least-privilege IAM Role. |
-| Deployment Strategy | GitHub Actions → SSH vào EC2 → `docker compose pull && docker compose up -d` | Manual trigger cho MVP. Phase 3 dùng ECS rolling deploy. |
+| Deployment Strategy | GitHub Actions → SSH vào EC2 → `docker compose pull && docker compose up -d` | Manual trigger cho MVP. Phase 2 (Production Scale) dùng ECS rolling deploy. |
 | Rollback & DB | `docker compose up image:previous-sha` + Alembic rollback migration | Playbook rollback thực hiện < 5 phút. |
 | Observability & Post-deploy | CloudWatch Logs + Langfuse Dashboard | Smoke test 10 câu hỏi mẫu sau mỗi deploy. |
-| Governance & Audit | Manual approval trước khi deploy lên main/production | Phase 3 thêm audit trail tự động (who/when/what deployed). |
+| Governance & Audit | Manual approval trước khi deploy lên main/production | Phase 2 thêm audit trail tự động (who/when/what deployed). |
 
 ## 6.3 Tech Stack
 
@@ -796,7 +796,7 @@ graph TB
 **Phạm vi:** Các lớp phòng thủ vòng ngoài và quản lý hạ tầng vật lý/ảo hóa.
 
 - **Network Security:** Security Groups EC2 chỉ mở port 80/443 (Nginx) và 22 (SSH từ IP cố định). RDS Security Group chỉ accept từ EC2 Security Group.
-- **Hạn chế Automated Attacks & Bot:** Rate Limiting 20 request/phút/user cho `/query` endpoint (LLM call) tại FastAPI middleware. Phase 3 bổ sung WAF + Bot Detection tại AWS ALB.
+- **Hạn chế Automated Attacks & Bot:** Rate Limiting 20 request/phút/user cho `/query` endpoint (LLM call) tại FastAPI middleware. Phase 2 bổ sung WAF + Bot Detection tại AWS ALB.
 - **Kiểm soát lưu lượng request:** Max 500 ký tự cho query. Max 50MB cho file upload. Validate file type (PDF/DOCX/TXT/Excel/CSV).
 - **Quản lý bí mật (Secrets Management):** Azure OpenAI Key, Azure Document Intelligence Key, BGE-M3/Reranker URL, Langfuse Key, DB password lưu trong AWS Secrets Manager. Không lưu secret trong mã nguồn hay .env file. Rotation tự động định kỳ.
 
@@ -804,13 +804,14 @@ graph TB
 > - S3 Bucket Policy: chỉ EC2 IAM Role có quyền PUT/GET. Block Public Access bật.
 > - Qdrant (self-hosted on AWS): API Key authentication. HTTPS only.
 > - HTTPS Only: Nginx terminate SSL. HTTP redirect sang HTTPS. Let's Encrypt certificate.
+> - **SSL Certificate Auto-renewal:** Let's Encrypt cert hết hạn sau 90 ngày. Certbot cron trên EC2: `0 2 * * * certbot renew --quiet && nginx -s reload`. Chạy daily lúc 2 AM — certbot chỉ gia hạn khi cert còn < 30 ngày. Không cần manual renew.
 
 ### 7.1.2 Identity & Access Management
 
 **Phạm vi:** Quản lý vòng đời tài khoản, chính sách xác thực và phân quyền.
 
 **Authentication:**
-- **Nguyên tắc:** Simple JWT (MVP). Phase 3 upgrade lên OIDC/OAuth2 tích hợp SSO nội bộ.
+- **Nguyên tắc:** Simple JWT + Refresh Token (Phase 1). Phase 2 upgrade lên OIDC/OAuth2 tích hợp SSO nội bộ.
 - **Chính sách mật khẩu:** Password hash bằng bcrypt. Không lưu plaintext password. Yêu cầu mật khẩu tối thiểu 8 ký tự, có chữ hoa, số.
 
 **Authorization:**
@@ -819,7 +820,7 @@ graph TB
 
 - **NT 1:** Tất cả các điểm truy cập đều cần thực hiện xác thực JWT. Endpoint không có token hợp lệ → 401 Unauthorized.
 - **NT 2:** Mọi yêu cầu thay đổi dữ liệu (POST, PUT, DELETE) hoặc truy cập dữ liệu nhạy cảm (GET) đều phải được thực thi kiểm tra quyền hạn tại tầng FastAPI Backend. Các kiểm tra phía Client chỉ nhằm mục đích tối ưu trải nghiệm người dùng (ẩn/hiện nút bấm).
-- **NT 3:** MVP dùng 2 role hardcode (Admin, End User). Phase 3: SSO/MFA bắt buộc cho Admin. Phase 2: Document-level Access Control theo phòng ban.
+- **NT 3:** MVP dùng 2 role hardcode (Admin, End User). Phase 1: MFA bắt buộc cho Admin (TOTP). Phase 2: Document-level Access Control theo phòng ban + SSO nâng cao.
 
 **B. Ma trận phân quyền (RBAC Matrix)**
 
@@ -844,8 +845,19 @@ graph TB
 > Khóa account sau 5 lần sai mật khẩu liên tiếp, mở khóa tự động sau 15 phút hoặc Admin unlock thủ công. Log toàn bộ lần đăng nhập thất bại.
 
 **Rotation:**
-- **Đối với User:** JWT token hết hạn sau 8 giờ, yêu cầu login lại. Phase 3: định kỳ yêu cầu đổi mật khẩu qua SSO.
+- **Đối với User:** JWT token hết hạn sau 8 giờ, yêu cầu login lại. Phase 2: định kỳ yêu cầu đổi mật khẩu qua SSO.
 - **Đối với hệ thống (S2S):** AWS Secrets Manager tự động rotate API Keys/Secrets định kỳ để giảm thiểu rủi ro rò rỉ.
+
+**Refresh Token (Phase 1):**
+- Access Token TTL 8h. **Refresh Token TTL 7 ngày**, rotate-on-use (mỗi lần dùng cấp refresh token mới, invalidate cái cũ).
+- Lưu refresh token hash trong PostgreSQL (`user_svc.refresh_tokens`) — không lưu raw token.
+- Endpoint: `POST /auth/refresh` — nhận refresh token → trả access token mới + refresh token mới.
+- Thu hồi: logout → xóa refresh token record. Xóa tài khoản → cascade xóa tất cả refresh tokens.
+
+**MFA (Phase 1 — Admin only):**
+- Admin account bắt buộc xác thực 2 lớp qua TOTP (Google Authenticator / Microsoft Authenticator).
+- Setup: Admin lần đầu login sau enable MFA → quét QR code → nhập 6-digit TOTP code.
+- End User: MFA optional (Phase 2 mở rộng nếu có nhu cầu).
 
 ### 7.1.3 Application Security & Data Protection
 
@@ -866,7 +878,7 @@ graph TB
 > _Bổ sung chi tiết logic bảo mật đặc thù cho hệ thống:_
 > - **Prompt Injection Prevention:** Sanitize và escape user input. System prompt hardcode server-side, không lấy từ user input.
 > - **Hallucination Control:** Retrieval score < 0.7 → trả fallback, không gọi LLM. LLM chỉ được dùng thông tin từ context chunks đã retrieve.
-> - **CORS:** Không cần whitelist riêng — frontend và backend cùng domain, Nginx xử lý routing nội bộ.
+> - **CORS:** Frontend (Next.js :3000) và backend (FastAPI :8000/:8001/:8002) cùng EC2, traffic qua Nginx — không cross-origin. FastAPI CORS middleware: `allow_origins=["http://localhost:3000"]` local dev, production dùng domain nội bộ (vd: `https://chatbot.vinsmartfuture.vn`). Không dùng wildcard `*`.
 > - **SQL Injection:** SQLAlchemy ORM với parameterized queries. Không dùng raw SQL string.
 
 ### 7.1.4 Governance & Compliance
@@ -918,14 +930,16 @@ graph TB
 > - Langfuse (self-hosted on AWS) chỉ nhận trace data đã masked (không có PII thô).
 > - Thể hiện rõ nơi đặt máy chủ: AWS ap-southeast-1 (Singapore).
 
-## 7.3 Cost Controls (Azure OpenAI)
+## 7.3 Cost Controls
 
 | Control | Cách thực hiện |
 |---------|---------------|
 | `max_tokens` per request | Hard-cap 1500 tokens mỗi LLM call trong Chat Service — ngăn response quá dài tiêu tốn token |
-| Budget alert | Đặt alert trên Azure OpenAI dashboard khi đạt 80% ngân sách tháng |
+| Azure OpenAI budget alert | Đặt alert trên Azure OpenAI dashboard khi đạt 80% ngân sách tháng |
 | Daily token tracking | Log `prompt_tokens + completion_tokens` vào Langfuse mỗi request — dễ trace spike bất thường |
 | Loop protection | Timeout 30s cho LLM call; không retry nếu lỗi 429 (rate limit Azure) để tránh call loop |
+| AWS Budgets alert | Đặt AWS Budget theo tháng. Alert email khi đạt 80% — cover toàn bộ EC2 + RDS + S3 + data transfer + CloudWatch |
+| AWS Cost Explorer | Review hàng tuần: kiểm tra EC2 runtime, RDS storage, S3 cost, CloudWatch log ingestion |
 
 ## 7.4 Failure Modes & Graceful Degradation
 
@@ -947,6 +961,24 @@ graph TB
 > - **Retry có chi phí** (Azure OpenAI): không retry, log và fail ngay
 > - **Dependent service** (RAG Service, Qdrant): Circuit Breaker, fail-fast sau ngưỡng
 
+## 7.5 Monitoring & Alerting
+
+**CloudWatch Alarms (Phase 1):**
+
+| Alarm | Metric | Threshold | Action |
+|-------|--------|-----------|--------|
+| High 5xx rate | HTTP 5xx từ Nginx access log | > 5% requests trong 5 phút | Email notify IT/DevOps |
+| PostgreSQL connections | RDS DatabaseConnections | > 80% max_connections | Email notify dev team |
+| EC2 CPU high | CPUUtilization | > 85% sustained 10 phút | Email notify IT/DevOps |
+| EC2 disk usage | disk_used_percent | > 80% | Email notify IT/DevOps |
+| Circuit Breaker Open | Custom metric (log từ Chat Service) | Circuit state = Open | Email notify dev team |
+
+**Application Error Tracking (Phase 1 — Sentry):**
+- FastAPI exception handler → Sentry SDK (`sentry_sdk.init(dsn=...)`) — capture tất cả unhandled 500 errors với full stack trace.
+- Dùng Sentry free cloud tier (50k errors/tháng đủ cho MVP) — không cần self-host thêm container.
+- Sentry alert → Email tức thì khi có exception mới. IT/DevOps nhận alert không cần phải chủ động search CloudWatch.
+- PII consideration: Sentry chỉ nhận exception context (stack trace, request path) — không log nội dung câu hỏi hay response LLM.
+
 ---
 
 # 8. Backup & Recovery
@@ -956,12 +988,85 @@ graph TB
 | Dữ liệu cần backup | PostgreSQL RDS (conversation history, document metadata, audit log), Qdrant (self-hosted on AWS) (vector data), AWS S3 (file tài liệu gốc) |
 | Vị trí lưu backup | PostgreSQL: RDS automated backup (AWS managed, same region). S3: Versioning real-time. Qdrant: Snapshot hàng ngày. |
 | Tần suất backup định kỳ | PostgreSQL: Automated daily backup + PITR mỗi 5 phút. Qdrant: Snapshot hàng ngày lúc 03:00 AM. S3: Versioning real-time. |
-| Thời gian lưu backup | PostgreSQL: 7 ngày (MVP), 30 ngày (Phase 3). Qdrant snapshot: 7 ngày. S3: Versioning vĩnh viễn. |
-| Quy trình Recovery | 1. Xác định scope sự cố. 2. Dừng backend (docker compose stop). 3. Restore PostgreSQL từ RDS snapshot/PITR. 4. Restore Qdrant từ snapshot. 5. Verify data integrity (kiểm tra số document, số chunk). 6. Restart backend. 7. Smoke test 10 câu hỏi mẫu. |
+| Thời gian lưu backup | PostgreSQL: 7 ngày (Phase 1), 30 ngày (Phase 2). Qdrant snapshot: 7 ngày. S3: Versioning vĩnh viễn. |
+| Quy trình Recovery | Xem chi tiết tại **8.1 Recovery Runbook** bên dưới. |
 | RTO (Recovery Time Objective) | ≤ 4 giờ (Tier 3 – Business Operational) |
 | RPO (Recovery Point Objective) | ≤ 5 phút cho PostgreSQL (PITR). ≤ 24 giờ cho Qdrant. |
-| Cơ chế Disaster Recovery (DR) | MVP: RDS Single-AZ, failover thủ công (~1–2 giờ). Phase 3: RDS Multi-AZ với tự động failover < 2 phút. |
-| DR Test | DR drill 1 lần sau Phase 3 deploy. Kiểm tra khả năng restore đầy đủ trong RTO. |
+| Cơ chế Disaster Recovery (DR) | Phase 1: RDS Single-AZ, failover thủ công (~1–2 giờ). Phase 2 (Production Scale): RDS Multi-AZ với tự động failover < 2 phút. |
+| DR Test | Xem **8.2 DR Drill** bên dưới. |
+
+### 8.1 Recovery Runbook (EC2 — Docker Compose)
+
+**Bước 1 — Xác định scope sự cố**
+
+```bash
+# SSH vào EC2
+ssh -i key.pem ubuntu@<ec2-public-ip>
+
+# Kiểm tra container status
+docker compose ps
+
+# Xem log service lỗi (ví dụ chat-service)
+docker compose logs --tail=100 chat-service
+
+# Kiểm tra disk + memory
+df -h && free -h
+```
+
+**Bước 2 — Dừng backend an toàn**
+
+```bash
+docker compose stop    # không dùng 'down' — giữ nguyên volume data
+```
+
+**Bước 3 — Restore PostgreSQL (nếu cần)**
+
+```bash
+# Restore từ RDS snapshot: AWS Console → RDS → Snapshots → Restore to new instance
+# Hoặc PITR: Restore to point in time → chọn thời điểm trước sự cố
+
+# Sau khi restore xong: cập nhật DB host trong Secrets Manager
+# → Restart services sẽ tự pick up giá trị mới
+```
+
+**Bước 4 — Restore Qdrant (nếu cần)**
+
+```bash
+# Snapshot Qdrant được lưu tự động hàng ngày lúc 03:00 AM
+# Khôi phục từ snapshot gần nhất:
+docker compose stop qdrant
+# Copy snapshot vào volume (snapshot lưu tại /qdrant/storage/snapshots)
+docker compose start qdrant
+# Verify: curl http://localhost:6333/collections
+```
+
+**Bước 5 — Verify & Restart**
+
+```bash
+docker compose up -d
+
+# Smoke test health endpoints
+curl http://localhost:8000/health   # User Service
+curl http://localhost:8001/health   # Chat Service
+curl http://localhost:8002/health   # RAG Service
+
+# Chạy 10 câu hỏi mẫu để confirm end-to-end hoạt động
+```
+
+### 8.2 DR Drill
+
+DR drill chạy 1 lần sau khi hoàn thành Phase 1 deploy lên AWS. Mục tiêu: xác nhận RTO ≤ 4h từ đầu đến khi smoke test pass.
+
+| Bước | Hành động | Ghi nhận thời gian |
+|------|-----------|-------------------|
+| 1 | Simulate sự cố (stop docker compose) | T=0 |
+| 2 | SSH vào EC2, xác định scope | T+? phút |
+| 3 | Restore PostgreSQL (nếu có change) | T+? phút |
+| 4 | Restore Qdrant từ snapshot | T+? phút |
+| 5 | Restart services + health check | T+? phút |
+| 6 | Smoke test 10 câu hỏi mẫu pass | T+? phút ← RTO thực tế |
+
+Kết quả ghi vào DR Drill Report. Nếu RTO vượt 4h → tối ưu runbook hoặc nâng infra.
 
 ---
 
@@ -982,7 +1087,7 @@ graph TB
 | Semantic Chunking | Cắt tài liệu theo cấu trúc ngữ nghĩa (heading, paragraph) thay vì cắt cố định theo số token. |
 | Score Threshold | Ngưỡng similarity tối thiểu (0.7). Dưới ngưỡng → fallback, không gọi LLM. |
 | Fallback Rate | % câu hỏi bị từ chối do retrieval score < threshold. Target 10–20%. |
-| Semantic Cache | Cache dựa trên cosine similarity của câu hỏi. Phase 2. |
+| Semantic Cache | Cache dựa trên cosine similarity của câu hỏi. TTL 1 giờ. Redis key: `semantic_cache:{query_hash}`. |
 | BackgroundTasks | Cơ chế xử lý bất đồng bộ của FastAPI. Ingestion chạy nền sau khi API trả về 202 Accepted. |
 | Microservices | Kiến trúc backend chia thành nhiều service độc lập, mỗi service deploy riêng, giao tiếp qua API. Project này dùng 3 backend services: User Service + Chat Service + RAG Service. |
 | SSE | Server-Sent Events – cơ chế streaming response từ FastAPI về Next.js. |
