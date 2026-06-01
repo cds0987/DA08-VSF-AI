@@ -1,0 +1,66 @@
+%% =====================================================================
+%% V2 — EXECUTION MODES (D8): MVP → scale KHÔNG rewrite core
+%% Backend interface giữ NGUYÊN; chỉ đổi cái nằm sau interface theo mode.
+%% Chi tiết: ../technique/execution-fallback.md §4b,4c · NEW_REPO_DECISIONS D8
+%% =====================================================================
+%%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 40, "rankSpacing": 60}}}%%
+
+flowchart LR
+
+    ORCH["Orchestrator<br/>claim · write artifact · enqueue"]
+    ROUTER["Capability Router<br/>+ circuit breaker"]
+    IFACE{{"Backend interface<br/>parse() / embed()<br/>KHÔNG đổi khi scale"}}
+
+    ORCH --> ROUTER --> IFACE
+
+    %% ----------------------- MODE 1 ----------------------------
+    subgraph M1["mode = single-node (MVP / dev)"]
+        direction TB
+        L1["LocalBackend<br/>process pool · concurrency THẤP<br/>(chừa CPU cho API/queue/DB)"]
+    end
+
+    %% ----------------------- MODE 2 ----------------------------
+    subgraph M2["mode = hybrid (chuyển tiếp)"]
+        direction TB
+        LB2["LB / K8s Service"]
+        RP2["Remote Pool (đồng nhất)"]
+        LF2["Local fallback bounded = 1"]
+        LB2 --> RP2
+    end
+
+    %% ----------------------- MODE 3 ----------------------------
+    subgraph M3["mode = distributed (production)"]
+        direction TB
+        LB3["LB / K8s Service<br/>autoscale CPU / queue"]
+        RP3["Remote Parser Pool × N"]
+        REG["Capability Registry + scheduler<br/>CHỈ khi server heterogeneous capability"]
+        LB3 --> RP3
+        REG -.->|"route capability-aware"| RP3
+    end
+
+    IFACE -->|"single-node"| L1
+    IFACE -->|"hybrid"| LB2
+    IFACE -->|"distributed"| LB3
+
+    IFACE -. "circuit OPEN → bounded local (vector-compatible nếu embed)" .-> LF2
+    IFACE -. "circuit OPEN → PAUSE claim (KHÔNG đổ về main)" .-> ROUTER
+
+    %% ----------------------- INVARIANT NOTE --------------------
+    NOTE["BẤT BIẾN mọi mode<br/>correctness = atomic claim + id deterministic + idempotent<br/>heartbeat = chọn server rảnh (KHÔNG phải correctness)<br/>registry chỉ cần khi heterogeneous; đồng nhất → LB/pull là đủ"]
+
+    M1 -.-> NOTE
+    M2 -.-> NOTE
+    M3 -.-> NOTE
+
+    %% ----------------------------- STYLE -----------------------
+    classDef core fill:#fdf2ff,stroke:#a6a,stroke-width:1px;
+    classDef local fill:#fff0e6,stroke:#c83,stroke-width:1px;
+    classDef remote fill:#eefbea,stroke:#6a6,stroke-width:1px;
+    classDef infra fill:#f5f7ff,stroke:#667,stroke-width:1px;
+    classDef note fill:#f7f7f7,stroke:#888,stroke-width:1px,stroke-dasharray:3 3;
+
+    class ORCH,ROUTER,IFACE core;
+    class L1,LF2 local;
+    class RP2,RP3 remote;
+    class LB2,LB3,REG infra;
+    class NOTE note;

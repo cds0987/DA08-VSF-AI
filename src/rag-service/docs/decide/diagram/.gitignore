@@ -1,0 +1,5 @@
+# Build output (regenerable từ *.mermaid) — không commit
+_rendered/
+
+# Puppeteer config chứa đường dẫn tuyệt đối máy local
+.puppeteer.json
