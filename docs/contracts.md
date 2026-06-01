@@ -282,9 +282,10 @@ from typing import List
 
 class Source(BaseModel):
     document_name: str
-    page_number: int
+    caption: str
+    heading_path: List[str]
     score: float
-    chunk_text: str         # đoạn văn bản gốc được retrieve — dùng để highlight trên viewer
+    source_s3_uri: str
 
 class QueryRequest(BaseModel):
     question: str

@@ -155,6 +155,7 @@ graph TB
     subgraph CHAT_SVC["Chat Service - Container 2"]
         CONV["Conversation Module"]
         ORCH["LLM Orchestration"]
+        RERANK["BGE-Reranker-v2-m3"]
     end
 
     subgraph RAG_SVC["RAG Service - Container 3"]
@@ -168,6 +169,7 @@ graph TB
         QDRANT[("Qdrant (self-hosted on AWS)")]
         PG[("PostgreSQL")]
         S3[("AWS S3")]
+        REDIS[("Redis")]
         BGE["BGE-M3 Embedding Service (self-hosted EC2)"]
         LF["Langfuse (self-hosted on AWS)"]
     end
@@ -196,6 +198,10 @@ graph TB
     OCR --> ADI
     CONV --> PG
     AUTH --> PG
+    AUTH --> REDIS
+    ORCH -- "ACL pre-filter" --> PG
+    ORCH --> REDIS
+    ORCH --> RERANK
     LFI --> LF
 ```
 
@@ -284,7 +290,7 @@ graph LR
 | 7 | Conversation Module | Lưu/đọc lịch sử hội thoại từ PostgreSQL. Summary Buffer: LLM tóm tắt các turns cũ thành summary, giữ 5 turns gần nhất verbatim — hiểu đủ ngữ cảnh mà không tốn nhiều token. | ✅ MVP |
 | 8 | Embedding Service | BGE-M3 Embedding Service (self-hosted trên AWS EC2). 1024 dims. Dùng cho cả ingestion và query. | ✅ MVP |
 | 9 | LLM Service | Azure OpenAI GPT-4o Mini. Hỗ trợ streaming response. Data trong Azure tenant. | ✅ MVP |
-| 10 | Langfuse Integration | Trace 2 luồng riêng biệt — (1) Ingestion trace: parse time, chunk count, embed time, error rate. (2) Query trace: latency từng bước, token cost, retrieved chunks + scores, feedback. RAGAS evaluation chạy offline Phase 2 trên Query trace data. | ✅ MVP |
+| 10 | Langfuse Integration | Trace 2 luồng riêng biệt — (1) Ingestion trace: parse time, chunk count, embed time, error rate. (2) Query trace: latency từng bước, token cost, retrieved chunks + scores, feedback. RAGAS evaluation chạy offline Phase 1.5 (cuối tuần 3) trên Query trace data. | ✅ MVP |
 | 11 | Vector DB (Qdrant (self-hosted on AWS)) | Lưu và tìm kiếm vector embedding. Metadata filtering theo document. | ✅ MVP |
 | 12 | Metadata DB (RDS PostgreSQL) | Lưu document metadata, conversation history, user info, audit log. | ✅ MVP |
 | 13 | Document Storage (S3) | Lưu file gốc sau khi upload. Ingestion module đọc từ đây để xử lý. | ✅ MVP |
@@ -454,16 +460,51 @@ flowchart TB
 
 > Thông thường sử dụng sơ đồ L2.
 
-**[Diagram: Data Flow – High Level]**
+```mermaid
+flowchart LR
+    ADM["Admin"]
+    EU["End User"]
 
-**Cách vẽ:**
-- Thể hiện được luồng dữ liệu đi từ hệ thống nào đến hệ thống nào.
-- Chú thích dữ liệu trao đổi trên từng luồng dữ liệu.
+    subgraph BACKEND["EC2 — Docker Compose"]
+        CHAT["Chat Service :8001"]
+        RAG["RAG Service :8002"]
+        BGE["BGE-M3 Embedding"]
+    end
 
-Luồng chính:
+    S3[("S3\nfile gốc")]
+    PG[("PostgreSQL\nmetadata + history")]
+    QD[("Qdrant\nvectors")]
+    REDIS[("Redis\ncache + rate limit")]
+    LF["Langfuse\ntrace"]
 
-- **Ingestion:** Admin → FastAPI → S3 → BackgroundTask → [OCR/Parse/CSV] → Normalize → Chunk → Embed → Qdrant + PostgreSQL
-- **Query:** User → FastAPI → Langfuse trace → Embed → Qdrant Search → PostgreSQL (history) → LLM → Streaming Response → Langfuse log
+    subgraph AZURE["Azure Cloud"]
+        LLM["GPT-4o Mini"]
+        OCR["Document Intelligence\nOCR"]
+    end
+
+    ADM -->|"upload file"| CHAT
+    CHAT -->|"file binary"| S3
+    CHAT -->|"POST /ingest"| RAG
+    RAG -->|"read file"| S3
+    RAG -->|"PDF scan"| OCR
+    RAG -->|"section text (batch)"| BGE
+    BGE -->|"vectors [1024d]"| QD
+    RAG -->|"doc metadata, status=indexed"| PG
+
+    EU -->|"question"| CHAT
+    CHAT -->|"allowed_doc_ids (TTL ~60s)"| REDIS
+    CHAT -->|"ACL query"| PG
+    CHAT -->|"POST /search + document_ids"| RAG
+    RAG -->|"embed query"| BGE
+    RAG -->|"hybrid search + doc_ids filter"| QD
+    QD -->|"Top-20 sections"| RAG
+    RAG -->|"sections"| CHAT
+    CHAT -->|"conversation context"| PG
+    CHAT -->|"prompt + Top-3 sections"| LLM
+    LLM -->|"streaming tokens (SSE)"| EU
+    CHAT -->|"trace"| LF
+    RAG -->|"trace"| LF
+```
 
 ## 5.2 Data Flow quan trọng
 
@@ -591,7 +632,52 @@ Investigate nguyên nhân:
 
 ## 6.1 Deployment Diagram
 
-**[Diagram: Deployment Architecture]**
+```mermaid
+graph TB
+    INTERNET["Internet — Users + Admin"]
+
+    subgraph AWS["AWS ap-southeast-1 (Singapore)"]
+        subgraph PUBLIC["Public Subnet — Security Group: 80/443/22"]
+            subgraph EC2["EC2 t3.medium"]
+                NGINX["nginx :80/:443\nSSL termination + reverse proxy"]
+                subgraph COMPOSE["Docker Compose — 9 containers"]
+                    NEXT["next-frontend :3000"]
+                    USVC["user-service :8000"]
+                    CHAT["chat-service :8001"]
+                    RAG["rag-service :8002"]
+                    QD["qdrant"]
+                    REDIS["redis"]
+                    LF["langfuse"]
+                    PG["postgresql"]
+                end
+            end
+        end
+        S3[("S3 — Private Bucket\nversioning + SSE-S3")]
+        SM["Secrets Manager\nAPI Keys + DB password"]
+        CW["CloudWatch Logs"]
+    end
+
+    subgraph AZURE["Azure Cloud"]
+        AOAI["Azure OpenAI\nGPT-4o Mini"]
+        ADI["Azure Document\nIntelligence"]
+    end
+
+    INTERNET -->|"HTTPS"| NGINX
+    NGINX -->|"/"| NEXT
+    NGINX -->|"/api/user"| USVC
+    NGINX -->|"/api/chat"| CHAT
+    CHAT -->|"HTTP internal"| RAG
+    USVC -->|"TCP/SSL"| PG
+    CHAT -->|"TCP/SSL"| PG
+    RAG -->|"TCP/SSL"| PG
+    CHAT -->|"TCP/SSL"| REDIS
+    USVC -->|"TCP/SSL"| REDIS
+    RAG -->|"S3 SDK (IAM Role)"| S3
+    CHAT -->|"HTTPS"| AOAI
+    RAG -->|"HTTPS"| ADI
+    SM -.->|"inject at runtime"| EC2
+    EC2 -.->|"logs"| CW
+```
 
 **Hình vẽ kiến trúc triển khai cần có:**
 - Loại hạ tầng: **Cloud (AWS ap-southeast-1 Singapore)** — toàn bộ stack trên AWS, không dùng dịch vụ bên ngoài.

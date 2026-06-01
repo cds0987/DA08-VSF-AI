@@ -50,7 +50,7 @@ Request:
 Response 200 (SSE):
   data: {"token": "Theo "}
   data: {"token": "chính sách..."}
-  data: {"done": true, "sources": [{"document_name": "string", "page_number": 1, "score": 0.85}], "session_id": "uuid"}
+  data: {"done": true, "sources": [{"document_name": "string", "caption": "string", "heading_path": ["string"], "score": 0.85, "source_s3_uri": "s3://..."}], "session_id": "uuid"}
 
 Response 429:  { "detail": "Rate limit exceeded. Max 20 requests/minute." }
 ```
