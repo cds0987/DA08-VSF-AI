@@ -199,6 +199,11 @@ src/rag-service/app/
 3. Score threshold filter: loại candidates dưới ngưỡng 0.5
 4. Trả về `List[SearchResult]` — không rerank (Chat Service tự rerank)
 
+*Failure Handling (`langfuse_client.py`, `bge_m3_client.py`, `azure_doc_intel_client.py`):*
+- **Langfuse**: Fail silently — tất cả trace call bọc trong try/except, lỗi chỉ log console, không làm gián đoạn request
+- **BGE-M3 Embedding**: Nếu unreachable → ingestion fail, cập nhật status `failed` kèm error message, Admin retry thủ công
+- **Azure Document Intelligence**: Tương tự BGE-M3 — fail ingestion, không ảnh hưởng query flow
+
 **Không được đụng:** `app/domain/` (SA owns), bất kỳ file nào trong user-service hoặc chat-service.
 
 ---
@@ -223,8 +228,10 @@ src/chat-service/app/
 │   ├── cache/
 │   │   └── redis_access_cache.py             ← Cache allowed_doc_ids theo user_id, TTL ~60s
 │   ├── external/
-│   │   ├── openai_client.py                  ← Azure OpenAI Chat Completion + SSE streaming
-│   │   ├── rag_service_client.py             ← HTTP client gọi POST /search và POST /ingest của RAG Service, forward X-Request-ID
+│   │   ├── openai_client.py                  ← Azure OpenAI Chat Completion + SSE streaming. Timeout 30s, không retry.
+│   │   ├── rag_service_client.py             ← HTTP client gọi POST /search và POST /ingest, forward X-Request-ID.
+│   │   │                                        Bọc bằng Circuit Breaker (pybreaker, fail_max=5, reset_timeout=30s).
+│   │   │                                        Circuit Open → trả 503 ngay, không chờ timeout.
 │   │   └── bge_reranker_client.py            ← Implement RerankService — gọi BGE-Reranker-v2-m3 HTTP API
 │   └── memory/                               ← Phase 2: Redis short-term memory
 │
@@ -254,6 +261,11 @@ src/chat-service/app/
 
 *Document flow (`documents.py` router):*
 - Upload file → lưu S3 → tạo record DB (status=pending/queued) → gọi `rag_client.ingest()` nếu Admin
+
+*Failure Handling (`rag_service_client.py`, `openai_client.py`, `redis_access_cache.py`):*
+- **RAG Service**: Circuit Breaker (`pybreaker`, fail_max=5, reset_timeout=30s) trong `rag_service_client.py`
+- **Azure OpenAI**: Timeout 30s, không retry — trả 503 ngay, log token count vào Langfuse trước khi fail
+- **Redis**: Fail-open — nếu Redis unreachable, `redis_access_cache.py` fallback về query PostgreSQL trực tiếp (rate limit tắt, log warning CloudWatch)
 
 **Không được đụng:** `app/domain/` (SA owns), bất kỳ file nào trong user-service hoặc rag-service.
 
@@ -414,3 +426,5 @@ feature branches:
 | `docker-compose.yml` | DevOps owns | Thêm env var mới → báo DevOps |
 | `openai_client.py` (chat-service) | AI/Agent Engineer owns | RAG Engineer không dùng, không đụng |
 | `bge_m3_client.py` (rag-service) | RAG Engineer owns | AI/Agent Engineer không dùng, không đụng |
+| `rag_service_client.py` (chat-service) | AI/Agent Engineer owns | Circuit Breaker state (fail_max, reset_timeout) cần đồng bộ với CloudWatch alarm threshold |
+| `langfuse_client.py` (rag-service) | RAG Engineer owns | Bắt buộc fail silently — không throw exception ra ngoài, không ảnh hưởng request |

@@ -34,6 +34,13 @@ Response 200:  { "id": "uuid", "email": "string", "role": "user" | "admin", "dep
 Response 401:  { "detail": "Not authenticated" }
 ```
 
+### `GET /health`
+
+```
+Response 200:  { "status": "ok", "database": "ok" }
+Response 503:  { "status": "degraded", "degraded_reasons": ["database unreachable"] }
+```
+
 ---
 
 ## Chat Service — `/query`, `/documents`, `/conversations`, `/feedback`
@@ -135,6 +142,13 @@ Response 200:  { "message": "Conversation history cleared" }
 ```
 Request Body: { "session_id": "uuid", "score": 1 | -1 }   # 1 = thumbs up, -1 = thumbs down
 Response 200:  { "message": "Feedback recorded" }
+```
+
+### `GET /health`
+
+```
+Response 200:  { "status": "ok", "database": "ok", "rag_service": "ok", "reranker": "ok" }
+Response 503:  { "status": "degraded", "degraded_reasons": ["rag_service unreachable"] }
 ```
 
 ---

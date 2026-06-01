@@ -77,14 +77,21 @@ docker run -d \
   -p 5432:5432 \
   postgres:15
 
-# Qdrant
+# Qdrant — mount volume để persist data khi restart container
 docker run -d \
   --name rag-qdrant \
   -p 6333:6333 \
+  -v qdrant_data:/qdrant/storage \
   qdrant/qdrant
+
+# Redis — JWT blacklist + rate limiting
+docker run -d \
+  --name rag-redis \
+  -p 6379:6379 \
+  redis:7-alpine
 ```
 
-Sau khi PostgreSQL chạy, tạo schemas:
+Sau khi PostgreSQL chạy, tạo schemas và apply migrations:
 
 ```bash
 docker exec -it rag-postgres psql -U user -d rag_chatbot -c "
@@ -94,6 +101,16 @@ docker exec -it rag-postgres psql -U user -d rag_chatbot -c "
   CREATE SCHEMA IF NOT EXISTS hr_mock;
 "
 ```
+
+Tạo tables bằng Alembic (mỗi service có `alembic/` riêng):
+
+```bash
+cd src/user-service && alembic upgrade head
+cd ../chat-service  && alembic upgrade head
+cd ../rag-service   && alembic upgrade head
+```
+
+> Schema thay đổi → tạo migration mới (`alembic revision --autogenerate -m "..."`) thay vì sửa DDL trực tiếp.
 
 ---
 
@@ -206,6 +223,7 @@ Services sau khi `docker compose up`:
 |-----|-------------|-----|
 | `Connection refused 5432` | PostgreSQL chưa chạy | Chạy lại docker run postgres |
 | `Connection refused 6333` | Qdrant chưa chạy | Chạy lại docker run qdrant |
+| `Connection refused 6379` | Redis chưa chạy | Chạy lại docker run redis |
 | `Invalid signature` (JWT) | `JWT_SECRET_KEY` không khớp giữa services | Kiểm tra `.env` của 3 services phải dùng cùng key |
 | `Invalid API Key` | `.env` chưa điền đúng | Kiểm tra lại `.env` |
 | `ModuleNotFoundError` | Chưa activate venv đúng service | `cd <service-folder> && venv\Scripts\activate` |

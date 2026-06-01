@@ -541,6 +541,9 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Ingestion Pipel
 | 12 | Langfuse | Log ingestion metrics: parse_time, chunk_count, embed_time, total_latency, status (success/failed). Error message nếu thất bại. | Ingestion trace data |
 
 > _Nếu BackgroundTask thất bại → cập nhật status 'failed' → Admin thấy trên dashboard và retry thủ công. Phase 2 thay bằng SQS + DLQ._
+>
+> **⚠️ Risk — BackgroundTasks (Phase 1):** FastAPI `BackgroundTasks` chạy in-process. Nếu EC2 instance restart hoặc process crash giữa chừng, job ingestion bị mất hoàn toàn — không có retry tự động, không có dead-letter queue, không có visibility. Admin chỉ phát hiện qua status 'processing' bị stuck.
+> **Mitigation Phase 2:** Thay bằng AWS SQS + worker service riêng (Feature #15) để đảm bảo at-least-once delivery và có DLQ cho job thất bại.
 
 ### 5.2.2 Luồng Query Pipeline (Sync – Streaming + Langfuse Trace)
 
@@ -575,6 +578,13 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 > 4. Kết quả hiển thị trên Langfuse dashboard
 >
 > RAGAS chỉ áp dụng cho Query flow — không áp dụng cho Ingestion flow.
+
+> **RAG Service Failure — Circuit Breaker:** Chat Service wrap call đến `POST /search` bằng Circuit Breaker (`pybreaker`, fail_max=5, reset_timeout=30s).
+> - **Closed** (bình thường): gọi RAG bình thường
+> - **Open** (≥5 failure liên tiếp trong 60s): fail-fast, trả 503 ngay không chờ timeout
+> - **Half-Open** (sau 30s): cho 1 request thử — success → Closed, fail → Open lại
+>
+> Khi circuit Open: SSE `{ "error": true, "message": "Hệ thống tìm kiếm tài liệu tạm thời không khả dụng. Vui lòng thử lại sau ít phút." }`, HTTP 503. Log state change vào Langfuse + CloudWatch. `GET /health` trả `"rag_service": "circuit_open"`.
 
 ## 5.3 Evaluation Criteria — Phase 1.5 (Cuối tuần 3)
 
@@ -907,6 +917,35 @@ graph TB
 > - Luồng: User (VN) → FastAPI (AWS Singapore) → PostgreSQL RDS (AWS Singapore). Không có cross-border transfer dữ liệu PII chưa masked.
 > - Langfuse (self-hosted on AWS) chỉ nhận trace data đã masked (không có PII thô).
 > - Thể hiện rõ nơi đặt máy chủ: AWS ap-southeast-1 (Singapore).
+
+## 7.3 Cost Controls (Azure OpenAI)
+
+| Control | Cách thực hiện |
+|---------|---------------|
+| `max_tokens` per request | Hard-cap 1500 tokens mỗi LLM call trong Chat Service — ngăn response quá dài tiêu tốn token |
+| Budget alert | Đặt alert trên Azure OpenAI dashboard khi đạt 80% ngân sách tháng |
+| Daily token tracking | Log `prompt_tokens + completion_tokens` vào Langfuse mỗi request — dễ trace spike bất thường |
+| Loop protection | Timeout 30s cho LLM call; không retry nếu lỗi 429 (rate limit Azure) để tránh call loop |
+
+## 7.4 Failure Modes & Graceful Degradation
+
+| Dependency | Failure | Behavior | User nhận được |
+|------------|---------|----------|----------------|
+| **RAG Service** | Unreachable / crash | Circuit Breaker (fail_max=5, reset=30s). Circuit Open → fail-fast 503, không chờ timeout. Chat Service `/health` trả `"rag_service": "circuit_open"`. | "Hệ thống tìm kiếm tài liệu tạm thời không khả dụng. Vui lòng thử lại sau ít phút." |
+| **Azure OpenAI** | Timeout / 5xx | Timeout 30s, **không retry** (tránh loop cost). Trả 503 ngay. Log token count trước khi fail vào Langfuse. | "Hệ thống AI tạm thời không phản hồi. Vui lòng thử lại." |
+| **PostgreSQL** | Unreachable | Tất cả services trả 503. Không có fallback — DB là critical path cho auth, ACL, conversation history. CloudWatch alarm khi connection pool cạn. | 503 — toàn bộ tính năng không khả dụng |
+| **Redis** | Unreachable | **Fail-open**: service vẫn chạy. Rate limit bị tắt (chấp nhận được ngắn hạn). JWT blacklist mất tác dụng (logout token có thể dùng lại trong window còn lại). Log warning vào CloudWatch. | Không thông báo — service hoạt động bình thường nhưng degraded |
+| **Qdrant** | Unreachable | RAG Service tự bắt lỗi → trả 503 cho Chat Service → Chat Service circuit breaker xử lý tiếp. | Cùng message như RAG Service die |
+| **BGE-M3 Embedding** | Unreachable | Ingestion fail → document status `failed`, Admin thấy trên dashboard. Query không bị ảnh hưởng (vector đã index rồi). | Admin: "Ingestion thất bại — embedding service không khả dụng" |
+| **Langfuse** | Unreachable | **Fail silently** — trace call bọc trong try/except, lỗi chỉ log ra console. Không được làm gián đoạn request. | Không thông báo |
+| **Azure Document Intelligence** | Unreachable | Ingestion fail với `error_message: "OCR service unavailable"`. Status → `failed`. Admin retry thủ công. | Admin: "Ingestion thất bại — OCR không khả dụng" |
+
+> **Nguyên tắc:**
+> - **Critical path** (PostgreSQL, Azure OpenAI): fail → 503, thông báo user rõ ràng
+> - **Observability** (Langfuse): fail silently — không được kill request chính
+> - **Cache / Rate limit** (Redis): fail-open — service degraded nhưng vẫn hoạt động
+> - **Retry có chi phí** (Azure OpenAI): không retry, log và fail ngay
+> - **Dependent service** (RAG Service, Qdrant): Circuit Breaker, fail-fast sau ngưỡng
 
 ---
 

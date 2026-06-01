@@ -9,6 +9,18 @@ Mỗi service dùng PostgreSQL schema riêng trên cùng 1 RDS instance, tách b
 
 ---
 
+## Migration Strategy
+
+Schema được quản lý bằng **Alembic** — mỗi service có thư mục `alembic/` riêng.
+
+- Thêm column mới → tạo migration mới, không sửa DDL trực tiếp
+- `alembic upgrade head` — áp migration mới nhất
+- `alembic downgrade -1` — rollback 1 bước nếu cần
+
+> File DDL trong doc này là **tham chiếu** — source of truth là các file migration trong repo.
+
+---
+
 ## User Service — Schema `user_svc`
 
 ```sql
