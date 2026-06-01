@@ -77,7 +77,7 @@ Response 400:  { "detail": "File type not supported" | "File exceeds 50MB" }
 Admin thấy tất cả, End User chỉ thấy tài liệu mình upload.
 
 ```
-Query params: ?status=pending|queued|processing|completed|failed|rejected&limit=50&offset=0
+Query params: ?status=pending|queued|processing|indexed|failed|rejected&limit=50&offset=0
 
 Response 200:
   {
@@ -143,24 +143,96 @@ Response 200:  { "message": "Feedback recorded" }
 
 > Không expose ra ngoài. Chỉ Chat Service gọi qua Docker internal network.
 
+### `POST /search`
+
+Consumer endpoint chính. Chat Service gọi sau khi đã query `allowed_doc_ids` từ PostgreSQL.
+
+```
+Request:
+  Content-Type: application/json
+  X-Request-ID: <caller-generated-uuid>   (optional — dùng để trace xuyên service)
+  Body:
+    {
+      "query": "string (bắt buộc, max 2000 ký tự)",
+      "top_k": 20,                          (1–50, default 20)
+      "document_ids": ["doc_1", "doc_5"]    (optional — None = chỉ search public docs)
+    }
+
+Response 200:
+  {
+    "request_id": "uuid",
+    "results": [
+      {
+        "section_id": "doc_123_section_0007",
+        "document_id": "doc_123",
+        "document_name": "travel_policy.pdf",
+        "caption": "Quy định về mức hoàn tiền tối đa cho vé máy bay công tác",
+        "section_content": "## Hoàn tiền vé máy bay\n...\n",
+        "heading_path": ["Chính sách công tác", "Hoàn tiền vé máy bay"],
+        "score": 0.91,
+        "source_s3_uri": "s3://bucket/raw/hr/travel_policy.pdf",
+        "markdown_s3_uri": "s3://bucket/rag-derived/markdown/doc_123.md"
+      }
+    ]
+  }
+
+Response 422:  { "detail": "query is required" | "top_k must be between 1 and 50" }
+```
+
+> **ACL flow:** Chat Service query PostgreSQL `rag_svc.documents` → lấy `allowed_doc_ids` → truyền vào `document_ids`. Kết quả cache Redis TTL ~60s. `document_ids=None` mặc định chỉ search public docs (fail-secure).
+>
+> **Tracing:** `X-Request-ID` từ caller được echo lại trong response body (`request_id`) và header (`X-Request-ID`) để correlate log xuyên service.
+>
+> **Score threshold:** RAG filter kết quả dưới 0.5 trước khi trả. Số results thực tế có thể ít hơn `top_k`.
+>
+> **Reranking:** Chat Service tự rerank bằng `RerankService` (BGE-Reranker-v2-m3) sau khi nhận results.
+
 ### `POST /ingest`
+
+Trigger ingest một document cụ thể. Gọi sau khi Admin approve.
 
 ```
 Request: { "document_id": "uuid", "s3_key": "string", "file_type": "string",
            "classification": "string", "allowed_departments": [], "allowed_user_ids": [] }
 Response 202: { "message": "Ingestion started", "document_id": "uuid" }
+Response 409: { "detail": "Document is already being processed" }
 ```
 
-### `POST /search`
+### `POST /scan`
+
+Operational endpoint — trigger scan toàn bộ S3 bucket và enqueue ingest jobs cho các doc chưa được index.
 
 ```
-Request: { "query": "string", "top_k": 20, "user_id": "uuid", "user_role": "string", "user_department": "string" }
+Request: { "bucket": "optional-string", "prefix": "optional-string" }
+Response 200: { "status": "scan started", "queued": 2 }
+Response 409: { "detail": "scan already in progress" }
+```
+
+### `GET /status/{doc_id}`
+
+```
 Response 200:
-  { "results": [{ "chunk_id": "uuid", "document_id": "uuid", "document_name": "string",
-                  "page_number": 1, "content": "string", "score": 0.85, "rerank_score": 0.92 }] }
+  {
+    "doc_id": "doc_123",
+    "status": "pending" | "indexing" | "indexed" | "failed",
+    "file_path": "s3://...",
+    "section_count": 7,
+    "parser_version": "pipeline.parsers.v1",
+    "caption_model": "heuristic",
+    "embedding_model": "bge-m3",
+    "uploaded_at": "2026-05-31T10:15:00+00:00",
+    "processed_at": "2026-05-31T10:15:08+00:00"   (null nếu chưa xong)
+  }
+Response 404: { "detail": "Document not found" }
 ```
 
-> top_k=20 là số candidates trước rerank. BGE-Reranker-v2-m3 rerank → trả về Top-3 parent chunks cho LLM prompt.
+### `GET /health`
+
+```
+Response 200:  { "status": "ok", "vector_store": "ok", "metadata_store": "ok",
+                 "ai_provider": "ok", "scanner": "enabled", "dispatcher": {...}, "degraded_reasons": [] }
+Response 503:  { "status": "degraded", ..., "degraded_reasons": ["qdrant unreachable"] }
+```
 
 ---
 
@@ -170,8 +242,10 @@ Response 200:
 # chat-service/interfaces/api/schemas/query.py
 class Source(BaseModel):
     document_name: str
-    page_number: int
+    caption: str
+    heading_path: List[str]
     score: float
+    source_s3_uri: str
 
 class QueryRequest(BaseModel):
     question: str

@@ -102,6 +102,40 @@ class ConversationRepository(ABC):
         """Xóa toàn bộ lịch sử và summary của user."""
 ```
 
+```python
+# src/chat-service/app/domain/repositories/rerank_service.py
+from abc import ABC, abstractmethod
+from typing import List
+from app.domain.entities.search_result import SearchResult
+
+class RerankService(ABC):
+
+    @abstractmethod
+    async def rerank(self, query: str, sections: List[SearchResult], top_n: int = 3) -> List[SearchResult]:
+        """Rerank sections bằng BGE-Reranker-v2-m3, trả về top_n có score cao nhất."""
+```
+
+```python
+# src/chat-service/app/domain/repositories/document_access_repository.py
+from abc import ABC, abstractmethod
+from typing import List, Optional
+
+class DocumentAccessRepository(ABC):
+
+    @abstractmethod
+    async def get_allowed_doc_ids(self, user_id: str, role: str, department: str) -> Optional[List[str]]:
+        """Query PostgreSQL rag_svc.documents → trả list doc_id user được phép đọc.
+        None = user chỉ có quyền đọc public docs.
+        Logic:
+          admin       → None (search tất cả)
+          user/public → None (chỉ public)
+          internal    → list tất cả doc không phải secret/top_secret
+          secret      → doc có allowed_departments contains department
+          top_secret  → doc có allowed_user_ids contains user_id
+        Kết quả nên được cache Redis TTL ~60s.
+        """
+```
+
 ---
 
 ## rag-service — Domain
@@ -117,7 +151,7 @@ class DocumentStatus(str, Enum):
     PENDING = "pending"         # End User upload, chờ Admin approve
     QUEUED = "queued"           # Admin upload trực tiếp, hoặc đã được approve
     PROCESSING = "processing"
-    COMPLETED = "completed"
+    INDEXED = "indexed"         # Đã ingest và index vào Qdrant thành công
     FAILED = "failed"
     REJECTED = "rejected"       # Admin reject
 
@@ -130,21 +164,21 @@ class Document:
     status: DocumentStatus
     uploaded_by: str            # user_id
     created_at: datetime
-    chunk_count: int = 0
+    section_count: int = 0
     error_message: Optional[str] = None
     classification: str = "internal"                                # public | internal | secret | top_secret
     allowed_departments: List[str] = field(default_factory=list)   # bắt buộc nếu secret
     allowed_user_ids: List[str] = field(default_factory=list)      # bắt buộc nếu top_secret
 
 @dataclass
-class Chunk:
-    id: str
+class Section:
+    section_id: str             # format: {doc_id}_section_{index}
     document_id: str
-    parent_id: str              # parent chunk chứa context đầy đủ hơn
-    child_text: str             # 128–256 tokens — dùng để embed
-    parent_text: str            # 512–1024 tokens — đưa vào LLM prompt
-    page_number: int
-    section_title: str = ""
+    section_content: str        # processed Markdown — đưa thẳng vào LLM prompt
+    caption: str                # nhãn ngắn (AI-generated hoặc heuristic từ heading)
+    heading_path: List[str]     # breadcrumb: ["Chính sách công tác", "Hoàn tiền vé máy bay"]
+    source_s3_uri: str          # URI file gốc — dùng để cite nguồn
+    markdown_s3_uri: str        # URI full document Markdown — dùng khi cần context rộng hơn
 ```
 
 ```python
@@ -196,32 +230,24 @@ class EmbeddingService(ABC):
 # src/rag-service/app/domain/repositories/vector_repository.py
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List
-
-@dataclass
-class UserContext:
-    user_id: str
-    user_role: str          # "admin" | "user"
-    user_department: str    # dùng để filter secret docs trong Qdrant
+from typing import List, Optional
 
 @dataclass
 class SearchResult:
-    chunk_id: str
-    parent_id: str
+    section_id: str
     document_id: str
     document_name: str
-    file_type: str
-    page_number: int
-    section_title: str
-    child_text: str
-    parent_text: str        # đưa vào LLM prompt
-    score: float            # hybrid search score (RRF)
-    rerank_score: float     # score sau BGE-Reranker-v2-m3, None nếu chưa rerank
+    caption: str
+    section_content: str    # processed Markdown — đưa thẳng vào LLM prompt
+    heading_path: List[str] # breadcrumb từ root đến section
+    score: float            # similarity score sau vector search và threshold filter
+    source_s3_uri: str      # URI file gốc — dùng để cite nguồn
+    markdown_s3_uri: str    # URI full document Markdown
 
 class VectorRepository(ABC):
 
     @abstractmethod
-    async def upsert(self, chunk_id: str, vector: List[float], payload: dict) -> None:
+    async def upsert(self, section_id: str, vector: List[float], payload: dict) -> None:
         """Lưu vector + metadata vào Qdrant."""
 
     @abstractmethod
@@ -229,16 +255,13 @@ class VectorRepository(ABC):
         self,
         vector: List[float],
         query_text: str,
-        user_context: UserContext,
-        top_k: int = 20
+        top_k: int = 20,
+        document_ids: Optional[List[str]] = None,
     ) -> List[SearchResult]:
-        """Hybrid search (vector + BM25 RRF) với classification filter theo user_context.
-        top_k=20 là candidates trước rerank — RAG Engineer rerank xuống Top-3 sau đó.
-        Filter logic:
-          public      → không filter
-          internal    → user.is_active
-          secret      → allowed_departments contains user_context.user_department
-          top_secret  → allowed_user_ids contains user_context.user_id
+        """Hybrid search (vector + BM25 RRF).
+        document_ids: filter chỉ search trong các doc này.
+        None = chỉ search public docs (fail-secure default).
+        Chat Service tự query allowed_doc_ids từ PostgreSQL trước khi gọi.
         """
 
     @abstractmethod

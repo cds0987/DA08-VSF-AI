@@ -2,14 +2,14 @@
 
 ## Tổng quan phân công
 
-| Role | Phụ trách chính | Service / Folder | Bắt đầu sau |
-|------|----------------|-----------------|-------------|
-| **SA** | Domain design, contracts, API schemas, code review | `app/domain/` (cả 3 services) | Ngay — làm đầu tiên |
-| **Frontend Dev** | Web UI chat, admin dashboard, streaming | `src/frontend/` (Next.js) | Sau khi SA freeze schemas |
-| **Backend Dev** | User Service: auth, JWT, user management, DB | `src/user-service/app/` | Sau khi SA freeze domain |
-| **RAG Engineer** | Ingestion pipeline + Retrieval pipeline toàn bộ | `src/rag-service/app/` | Sau khi SA freeze domain |
-| **AI/Agent Engineer** | Chat Service: LLM orchestration, streaming, memory | `src/chat-service/app/` | Sau khi SA freeze domain |
-| **DevOps** | Docker, AWS, CI/CD, Nginx, monitoring | `infra/`, `docker-compose.yml` | Ngay — song song với SA |
+| Role | Người phụ trách | Phụ trách chính | Service / Folder | Bắt đầu sau |
+|------|----------------|----------------|-----------------|-------------|
+| **SA** | Lê Hữu Hưng | Domain design, contracts, API schemas, code review | `app/domain/` (cả 3 services) | Ngay — làm đầu tiên |
+| **Frontend Dev** | Đặng Hồ Hải | Web UI chat, admin dashboard, streaming | `src/frontend/` (Next.js) | Sau khi SA freeze schemas |
+| **Backend Dev** | Vũ Quang Dũng | User Service: auth, JWT, user management, DB | `src/user-service/app/` | Sau khi SA freeze domain |
+| **RAG Engineer** | Trần Thanh Nguyên | Ingestion pipeline + Retrieval pipeline toàn bộ | `src/rag-service/app/` | Sau khi SA freeze domain |
+| **AI/Agent Engineer** | Phạm Quốc Dũng | Chat Service: LLM orchestration, streaming, memory | `src/chat-service/app/` | Sau khi SA freeze domain |
+| **DevOps** | Trần Hữu Gia Huy | Docker, AWS, CI/CD, Nginx, monitoring | `infra/`, `docker-compose.yml` | Ngay — song song với SA |
 
 ---
 
@@ -17,7 +17,7 @@
 
 ---
 
-### SA (Solution Architect)
+### SA (Solution Architect) — Lê Hữu Hưng
 
 **Làm đầu tiên (Ngày 1–2). Team chờ SA freeze xong mới code.**
 
@@ -39,13 +39,21 @@ src/chat-service/app/domain/
     └── conversation_repository.py  ← ConversationRepository ABC (get_context, save_message, ...)
 ```
 
+**Files SA tạo — chat-service (thêm mới):**
+```
+src/chat-service/app/domain/
+└── repositories/
+    ├── rerank_service.py              ← RerankService ABC (rerank)
+    └── document_access_repository.py ← DocumentAccessRepository ABC (get_allowed_doc_ids)
+```
+
 **Files SA tạo — rag-service:**
 ```
 src/rag-service/app/domain/
 ├── entities/
-│   └── document.py              ← Document, Chunk dataclass, DocumentStatus enum
+│   └── document.py              ← Document, Section dataclass, DocumentStatus enum
 └── repositories/
-    ├── vector_repository.py     ← UserContext, SearchResult dataclass, VectorRepository ABC
+    ├── vector_repository.py     ← SearchResult dataclass, VectorRepository ABC (document_ids filter)
     ├── document_repository.py   ← DocumentRepository ABC
     └── embedding_service.py     ← EmbeddingService ABC (embed, embed_batch)
 ```
@@ -66,7 +74,7 @@ src/user-service/app/interfaces/api/schemas/
 
 ---
 
-### Frontend Dev
+### Frontend Dev — Đặng Hồ Hải
 
 **Bắt đầu Ngày 3. Mock API bằng schemas SA đã viết — không chờ backend xong.**
 
@@ -99,7 +107,7 @@ src/frontend/
 
 ---
 
-### Backend Dev
+### Backend Dev — Vũ Quang Dũng
 
 **Phụ trách User Service toàn bộ. Bắt đầu Ngày 3.**
 
@@ -134,7 +142,7 @@ src/user-service/app/
 
 ---
 
-### RAG Engineer
+### RAG Engineer — Trần Thanh Nguyên
 
 **Phụ trách rag-service toàn bộ. Bắt đầu Ngày 3. Workload nặng nhất Phase 1.**
 
@@ -144,19 +152,18 @@ src/rag-service/app/
 ├── application/
 │   └── use_cases/
 │       ├── ingestion/
-│       │   └── ingest_document_use_case.py   ← Nhận document_id → parse → chunk → embed → upsert Qdrant
+│       │   └── ingest_document_use_case.py   ← Nhận document_id → parse → section → caption → embed → upsert Qdrant
 │       └── query/
-│           └── retrieval.py                  ← Nhận query + UserContext → embed → hybrid search → rerank → filter → SearchResult[]
+│           └── retrieval.py                  ← Nhận query + document_ids → embed → hybrid search → filter score → SearchResult[]
 │
 ├── infrastructure/
 │   ├── db/
 │   │   ├── models.py                         ← SQLAlchemy model cho bảng documents, audit_logs
 │   │   └── postgres_document_repository.py   ← Implement DocumentRepository
 │   ├── vector/
-│   │   └── qdrant_vector_repository.py       ← Implement VectorRepository (hybrid_search, upsert, delete)
+│   │   └── qdrant_vector_repository.py       ← Implement VectorRepository (hybrid_search với document_ids filter, upsert, delete)
 │   └── external/
 │       ├── bge_m3_client.py                  ← Implement EmbeddingService — gọi BGE-M3 HTTP API
-│       ├── bge_reranker_client.py            ← Gọi BGE-Reranker HTTP API, trả về rerank scores
 │       ├── azure_doc_intel_client.py         ← Gọi Azure Document Intelligence — OCR PDF scan
 │       └── langfuse_client.py                ← Ghi trace ingestion + retrieval vào Langfuse
 │
@@ -165,8 +172,11 @@ src/rag-service/app/
         ├── main.py
         ├── dependencies.py                   ← get_retrieval_use_case(), get_ingest_use_case()
         └── routers/
-            ├── ingest.py                     ← POST /ingest (nhận từ Chat Service)
-            └── search.py                     ← POST /search (nhận từ Chat Service)
+            ├── ingest.py                     ← POST /ingest (nhận từ Chat Service sau khi Admin approve)
+            ├── scan.py                       ← POST /scan (operational — trigger scan S3 bucket)
+            ├── status.py                     ← GET /status/{doc_id}
+            ├── health.py                     ← GET /health
+            └── search.py                     ← POST /search (nhận từ Chat Service, có document_ids filter)
 ```
 
 **Key logic cần implement:**
@@ -175,24 +185,25 @@ src/rag-service/app/
 1. Tải file từ S3 → detect loại: PDF scan / PDF text / DOCX / TXT / XLSX / ...
 2. OCR (nếu PDF scan): gọi `azure_doc_intel_client.py`
 3. Parse text: PyMuPDF (PDF text layer), python-docx (DOCX), openpyxl (XLSX)
-4. Parent-Child Chunking: Child 128–256 token, Parent 512–1024 token, overlap 20–30 token
-5. Embed từng child chunk: gọi `bge_m3_client.embed_batch()`
-6. Upsert Qdrant: `vector_repo.upsert()` với payload gồm `classification`, `allowed_departments`, `allowed_user_ids`
-7. Update `document_repo.update_status()` → COMPLETED
+4. Section-based Chunking theo heading hierarchy — mỗi section là một đơn vị độc lập
+5. Generate caption: thử LLM → fallback về heuristic từ heading đầu của section
+6. Embed từng section: gọi `bge_m3_client.embed_batch()`
+7. Upsert Qdrant: `vector_repo.upsert()` với payload gồm `section_id`, `document_id`, `caption`, `heading_path`, `source_s3_uri`, `markdown_s3_uri`, `classification`
+8. Update `document_repo.update_status()` → INDEXED
 
 *Retrieval pipeline (`retrieval.py`):*
 1. Embed query: gọi `embedding_svc.embed(query_text)`
-2. Hybrid search: `vector_repo.hybrid_search(vector, query_text, user_context, top_k=20)`
-   - Qdrant filter tự động theo `user_context.user_department` / `user_context.user_id`
-3. Rerank Top-20 → Top-3: gọi `bge_reranker_client.rerank(query, chunks)`
-4. Score threshold: nếu `max(rerank_score) < 0.7` → trả về rỗng (bot sẽ nói "không tìm thấy")
-5. Trả về `List[SearchResult]`
+2. Hybrid search: `vector_repo.hybrid_search(vector, query_text, top_k=20, document_ids=document_ids)`
+   - `document_ids` được Chat Service truyền vào — RAG Service không biết ACL logic
+   - `None` → chỉ search public docs (fail-secure)
+3. Score threshold filter: loại candidates dưới ngưỡng 0.5
+4. Trả về `List[SearchResult]` — không rerank (Chat Service tự rerank)
 
 **Không được đụng:** `app/domain/` (SA owns), bất kỳ file nào trong user-service hoặc chat-service.
 
 ---
 
-### AI/Agent Engineer
+### AI/Agent Engineer — Phạm Quốc Dũng
 
 **Phụ trách chat-service toàn bộ. Bắt đầu Ngày 3. Phase 1 nhẹ, Phase 2 nặng.**
 
@@ -202,15 +213,19 @@ src/chat-service/app/
 ├── application/
 │   └── use_cases/
 │       └── query/
-│           └── orchestration.py              ← Nhận câu hỏi → lấy context → gọi RAG → build prompt → stream Azure OpenAI
+│           └── orchestration.py              ← Nhận câu hỏi → pre-filter ACL → gọi RAG → rerank → build prompt → stream Azure OpenAI
 │
 ├── infrastructure/
 │   ├── db/
 │   │   ├── models.py                         ← SQLAlchemy model cho conversations, messages
-│   │   └── postgres_conversation_repo.py     ← Implement ConversationRepository
+│   │   ├── postgres_conversation_repo.py     ← Implement ConversationRepository
+│   │   └── postgres_document_access_repo.py  ← Implement DocumentAccessRepository (query rag_svc.documents)
+│   ├── cache/
+│   │   └── redis_access_cache.py             ← Cache allowed_doc_ids theo user_id, TTL ~60s
 │   ├── external/
 │   │   ├── openai_client.py                  ← Azure OpenAI Chat Completion + SSE streaming
-│   │   └── rag_service_client.py             ← HTTP client gọi POST /search và POST /ingest của RAG Service
+│   │   ├── rag_service_client.py             ← HTTP client gọi POST /search và POST /ingest của RAG Service, forward X-Request-ID
+│   │   └── bge_reranker_client.py            ← Implement RerankService — gọi BGE-Reranker-v2-m3 HTTP API
 │   └── memory/                               ← Phase 2: Redis short-term memory
 │
 └── interfaces/
@@ -228,12 +243,14 @@ src/chat-service/app/
 
 *Orchestration (`orchestration.py`):*
 1. Lấy conversation context: `conv_repo.get_context(user_id, recent_k=5)` → summary + 5 turns gần nhất
-2. Gọi RAG: `rag_client.search(query, user_context)` → `List[SearchResult]`
-3. Nếu kết quả rỗng (score thấp) → stream câu trả lời "Không tìm thấy thông tin liên quan"
-4. Build prompt: system prompt + summary + recent messages + parent_text của Top-3 chunks + câu hỏi user
-5. Gọi Azure OpenAI streaming: yield từng token → SSE event `data: {"token": "..."}`
-6. Lưu message: `conv_repo.save_message(user_id, "user", question)` + `save_message(user_id, "assistant", full_answer)`
-7. Summary buffer: nếu conversation > 10 turns → gọi LLM compress → `conv_repo.update_summary()`
+2. **ACL pre-filter:** `doc_access_repo.get_allowed_doc_ids(user_id, role, department)` → `allowed_doc_ids` (cache Redis TTL ~60s)
+3. Gọi RAG: `rag_client.search(query, top_k=20, document_ids=allowed_doc_ids)` → `List[SearchResult]`
+4. Nếu kết quả rỗng (score thấp) → stream câu trả lời "Không tìm thấy thông tin liên quan"
+5. **Rerank:** `rerank_svc.rerank(query, results, top_n=3)` → Top-3 sections
+6. Build prompt: system prompt + summary + recent messages + `section_content` của Top-3 sections + câu hỏi user
+7. Gọi Azure OpenAI streaming: yield từng token → SSE event `data: {"token": "..."}`
+8. Lưu message: `conv_repo.save_message(user_id, "user", question)` + `save_message(user_id, "assistant", full_answer)`
+9. Summary buffer: nếu conversation > 10 turns → gọi LLM compress → `conv_repo.update_summary()`
 
 *Document flow (`documents.py` router):*
 - Upload file → lưu S3 → tạo record DB (status=pending/queued) → gọi `rag_client.ingest()` nếu Admin
@@ -242,7 +259,7 @@ src/chat-service/app/
 
 ---
 
-### DevOps
+### DevOps — Trần Hữu Gia Huy
 
 **Bắt đầu ngay Ngày 1, song song với SA.**
 
@@ -302,16 +319,23 @@ Câu hỏi user
      ↓
 [AI/Agent Engineer]   orchestration.py: lấy conversation context từ DB
      ↓
-[AI/Agent Engineer]   rag_service_client.py: gọi POST /search
-     ↓  HTTP
-[RAG Engineer]        retrieval.py: embed → hybrid search → rerank → filter
+[AI/Agent Engineer]   doc_access_repo: query PostgreSQL → allowed_doc_ids (cache Redis ~60s)
      ↓
-[AI/Agent Engineer]   nhận List[SearchResult] → build prompt → gọi Azure OpenAI → stream về FE
+[AI/Agent Engineer]   rag_service_client.py: gọi POST /search { query, top_k, document_ids }
+     ↓  HTTP
+[RAG Engineer]        retrieval.py: embed → hybrid search (document_ids filter) → filter score threshold
+     ↓
+[AI/Agent Engineer]   nhận List[SearchResult] (Top-20)
+     ↓
+[AI/Agent Engineer]   bge_reranker_client.py: rerank Top-20 → Top-3
+     ↓
+[AI/Agent Engineer]   build prompt (section_content) → gọi Azure OpenAI → stream về FE
 ```
 
 **Ranh giới dữ liệu:**
-- RAG Engineer trả về `List[SearchResult]` (chunk content + score + metadata)
-- AI/Agent Engineer nhận list đó, không biết Qdrant hay BGE-M3 là gì
+- RAG Engineer trả về `List[SearchResult]` (section_content + score + metadata) — không rerank
+- AI/Agent Engineer: (1) quyết định document_ids nào được search, (2) rerank kết quả, (3) build prompt
+- RAG Engineer không biết ACL logic, không biết user là ai — chỉ nhận `document_ids` như một filter thông thường
 
 ---
 
@@ -322,8 +346,8 @@ Câu hỏi user
 | SA | Nặng tuần 1 → nhẹ dần (review PR) | Review, không code |
 | Frontend Dev | Trung bình — UI chat + admin cơ bản | Trung bình — dashboard analytics |
 | Backend Dev | Trung bình — auth + user CRUD | Nhẹ — ít thay đổi |
-| RAG Engineer | **Nặng nhất** — toàn bộ ingestion + retrieval | Tune chất lượng, query rewriting |
-| AI/Agent Engineer | Nhẹ — prompt + stream + lưu history | **Nặng** — LangGraph Agent, Redis, Teams Bot |
+| RAG Engineer | **Nặng** — ingestion (section chunking, caption) + retrieval (hybrid search, document_ids filter) | Tune chất lượng, query rewriting |
+| AI/Agent Engineer | Trung bình — ACL pre-filter + rerank + prompt + stream + history | **Nặng** — LangGraph Agent, Redis, Teams Bot |
 | DevOps | Trung bình — Docker + AWS setup | Nhẹ — maintain |
 
 ---
@@ -361,10 +385,12 @@ develop       ← integration branch, mọi người merge vào đây
 feature branches:
   feat/[ten-nguoi]/[feature]
   Ví dụ:
-  feat/minh/rag-ingestion
+  feat/nguyen/rag-ingestion
   feat/hung/auth-jwt
-  feat/linh/llm-orchestration
-  feat/nam/docker-setup
+  feat/dung-pq/llm-orchestration
+  feat/huy/docker-setup
+  feat/hai/chat-ui
+  feat/dung-vq/user-service
 ```
 
 ### PR Checklist
@@ -380,8 +406,9 @@ feature branches:
 | Touch point | Người liên quan | Cách xử lý |
 |-------------|----------------|------------|
 | `app/domain/` (entities + repos) | SA owns, tất cả đọc | SA freeze trước khi team code — không ai tự sửa |
-| `SearchResult` dataclass | SA define, RAG Engineer implement, AI/Agent Engineer consume | Sửa → báo SA → SA update contracts.md → tất cả update |
-| `UserContext` dataclass | SA define, AI/Agent Engineer truyền vào, RAG Engineer nhận | Như trên |
+| `SearchResult` dataclass | SA define, RAG Engineer implement (trả về), AI/Agent Engineer consume (rerank + build prompt) | Sửa → báo SA → SA update contracts.md → tất cả update |
+| `DocumentAccessRepository` ABC | SA define, AI/Agent Engineer implement (`postgres_document_access_repo.py`) | Sửa → báo SA |
+| `RerankService` ABC | SA define, AI/Agent Engineer implement (`bge_reranker_client.py`) | Sửa → báo SA |
 | API schemas (Pydantic) | SA define, Backend Dev + AI/Agent Engineer implement, Frontend Dev consume | Sửa → báo SA |
 | `requirements.txt` | Tất cả | Thêm package → mở PR, không tự pip install rồi push |
 | `docker-compose.yml` | DevOps owns | Thêm env var mới → báo DevOps |
