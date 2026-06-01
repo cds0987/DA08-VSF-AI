@@ -1,11 +1,12 @@
 # API Specification — RAG Chatbot
 
-Danh sách đầy đủ endpoint của 3 services. Frontend Dev dùng file này để biết chính xác path, method, header, request/response format.
+Danh sách đầy đủ endpoint của các services. Frontend Dev dùng file này để biết chính xác path, method, header, request/response format.
 
 > **Base URL local:**
 > - User Service: `http://localhost:8000`
-> - Chat Service: `http://localhost:8001`
-> - RAG Service: `http://localhost:8002` _(internal — Frontend không gọi trực tiếp)_
+> - Ingest Service: `http://localhost:8001` _(Admin only)_
+> - Query Service: `http://localhost:8002`
+> - RAG Worker: không expose HTTP — giao tiếp qua NATS :4222 _(internal)_
 >
 > **Auth header** (trừ `/auth/login`): `Authorization: Bearer <jwt_token>`
 
@@ -54,7 +55,67 @@ Response 503:  { "status": "degraded", "degraded_reasons": ["database unreachabl
 
 ---
 
-## Chat Service — `/query`, `/documents`, `/conversations`, `/feedback`
+## Ingest Service — `/documents`
+
+> **Admin only** — tất cả endpoint yêu cầu role `admin`. End User không có quyền upload.
+> Upload xong → status `queued` ngay, Ingest Service publish NATS `doc.ingest` → RAG Worker tự xử lý.
+
+### `POST /documents/upload`
+
+```
+Request:
+  Content-Type: multipart/form-data
+  Authorization: Bearer <admin_token>
+  Fields:
+    file: <binary> (max 50MB, pdf/docx/txt/xlsx/csv/pptx/md)
+    classification: "public" | "internal" | "secret" | "top_secret"
+    allowed_departments?: ["HR", "Finance"]   # bắt buộc nếu secret
+    allowed_user_ids?: ["uuid"]               # bắt buộc nếu top_secret
+
+Response 202:  { "document_id": "uuid", "status": "queued", "message": "Ingestion started" }
+Response 400:  { "detail": "File type not supported" | "File exceeds 50MB" }
+Response 403:  { "detail": "Admin only" }
+```
+
+### `GET /documents`
+
+```
+Query params: ?status=queued|processing|indexed|failed&limit=50&offset=0
+
+Response 200:
+  {
+    "items": [
+      { "id": "uuid", "name": "string", "file_type": "string", "status": "string",
+        "classification": "string", "uploaded_by": "uuid", "chunk_count": 42, "created_at": "iso8601" }
+    ],
+    "total": 10
+  }
+```
+
+### `GET /documents/{document_id}`
+
+```
+Response 200:  { ...same as item above..., "error_message": null | "string" }
+Response 404:  { "detail": "Document not found" }
+```
+
+### `DELETE /documents/{document_id}`
+
+```
+Response 200:  { "message": "Document deleted" }
+Response 403:  { "detail": "Admin only" }
+```
+
+### `GET /health`
+
+```
+Response 200:  { "status": "ok", "database": "ok", "nats": "ok" }
+Response 503:  { "status": "degraded", "degraded_reasons": ["nats unreachable"] }
+```
+
+---
+
+## Query Service — `/query`, `/conversations`, `/feedback`
 
 ### `POST /query`
 
@@ -71,67 +132,6 @@ Response 200 (SSE):
   data: {"done": true, "sources": [{"document_name": "string", "caption": "string", "heading_path": ["string"], "score": 0.85, "source_s3_uri": "s3://..."}], "session_id": "uuid"}
 
 Response 429:  { "detail": "Rate limit exceeded. Max 20 requests/minute." }
-```
-
-### `POST /documents/upload`
-
-Admin → `queued`. End User → `pending`.
-
-```
-Request:
-  Content-Type: multipart/form-data
-  Fields:
-    file: <binary> (max 50MB, pdf/docx/txt/xlsx/csv/pptx/md)
-    classification: "public" | "internal" | "secret" | "top_secret"
-    allowed_departments?: ["HR", "Finance"]   # bắt buộc nếu secret
-    allowed_user_ids?: ["uuid"]               # bắt buộc nếu top_secret
-
-Response 202:  { "document_id": "uuid", "status": "queued" | "pending", "message": "string" }
-Response 400:  { "detail": "File type not supported" | "File exceeds 50MB" }
-```
-
-### `GET /documents`
-
-Admin thấy tất cả, End User chỉ thấy tài liệu mình upload.
-
-```
-Query params: ?status=pending|queued|processing|indexed|failed|rejected&limit=50&offset=0
-
-Response 200:
-  {
-    "items": [
-      { "id": "uuid", "name": "string", "file_type": "string", "status": "string",
-        "classification": "string", "uploaded_by": "uuid", "chunk_count": 42, "created_at": "iso8601" }
-    ],
-    "total": 10
-  }
-```
-
-### `GET /documents/{document_id}`
-
-```
-Response 200:  { ...same as item above..., "error_message": null | "string", "rejection_reason": null | "string" }
-Response 404:  { "detail": "Document not found" }
-```
-
-### `POST /documents/{document_id}/approve`  _(Admin only)_
-
-```
-Response 200:  { "document_id": "uuid", "status": "queued" }
-Response 403:  { "detail": "Admin only" }
-```
-
-### `POST /documents/{document_id}/reject`  _(Admin only)_
-
-```
-Request Body: { "reason": "string" }
-Response 200:  { "document_id": "uuid", "status": "rejected" }
-```
-
-### `DELETE /documents/{document_id}`  _(Admin only)_
-
-```
-Response 200:  { "message": "Document deleted" }
 ```
 
 ### `GET /conversations`
@@ -158,113 +158,28 @@ Response 200:  { "message": "Feedback recorded" }
 ### `GET /health`
 
 ```
-Response 200:  { "status": "ok", "database": "ok", "rag_service": "ok", "reranker": "ok" }
-Response 503:  { "status": "degraded", "degraded_reasons": ["rag_service unreachable"] }
+Response 200:  { "status": "ok", "database": "ok", "rag_worker": "ok", "reranker": "ok" }
+Response 503:  { "status": "degraded", "degraded_reasons": ["rag_worker unreachable"] }
 ```
 
 ---
 
-## RAG Service — Internal Only
+## RAG Worker — NATS Internal Only
 
-> Không expose ra ngoài. Chỉ Chat Service gọi qua Docker internal network.
+> Không expose HTTP. Chỉ giao tiếp qua NATS :4222.
 
-### `POST /search`
-
-Consumer endpoint chính. Chat Service gọi sau khi đã query `allowed_doc_ids` từ PostgreSQL.
-
-```
-Request:
-  Content-Type: application/json
-  X-Request-ID: <caller-generated-uuid>   (optional — dùng để trace xuyên service)
-  Body:
-    {
-      "query": "string (bắt buộc, max 2000 ký tự)",
-      "top_k": 20,                          (1–50, default 20)
-      "document_ids": ["doc_1", "doc_5"]    (optional — None = chỉ search public docs)
-    }
-
-Response 200:
-  {
-    "request_id": "uuid",
-    "results": [
-      {
-        "section_id": "doc_123_section_0007",
-        "document_id": "doc_123",
-        "document_name": "travel_policy.pdf",
-        "caption": "Quy định về mức hoàn tiền tối đa cho vé máy bay công tác",
-        "section_content": "## Hoàn tiền vé máy bay\n...\n",
-        "heading_path": ["Chính sách công tác", "Hoàn tiền vé máy bay"],
-        "score": 0.91,
-        "source_s3_uri": "s3://bucket/raw/hr/travel_policy.pdf",
-        "markdown_s3_uri": "s3://bucket/rag-derived/markdown/doc_123.md"
-      }
-    ]
-  }
-
-Response 422:  { "detail": "query is required" | "top_k must be between 1 and 50" }
-```
-
-> **ACL flow:** Chat Service query PostgreSQL `rag_svc.documents` → lấy `allowed_doc_ids` → truyền vào `document_ids`. Kết quả cache Redis TTL ~60s. `document_ids=None` mặc định chỉ search public docs (fail-secure).
->
-> **Tracing:** `X-Request-ID` từ caller được echo lại trong response body (`request_id`) và header (`X-Request-ID`) để correlate log xuyên service.
->
-> **Score threshold:** RAG filter kết quả dưới 0.5 trước khi trả. Số results thực tế có thể ít hơn `top_k`.
->
-> **Reranking:** Chat Service tự rerank bằng `RerankService` (BGE-Reranker-v2-m3) sau khi nhận results.
-
-### `POST /ingest`
-
-Trigger ingest một document cụ thể. Gọi sau khi Admin approve.
-
-```
-Request: { "document_id": "uuid", "s3_key": "string", "file_type": "string",
-           "classification": "string", "allowed_departments": [], "allowed_user_ids": [] }
-Response 202: { "message": "Ingestion started", "document_id": "uuid" }
-Response 409: { "detail": "Document is already being processed" }
-```
-
-### `POST /scan`
-
-Operational endpoint — trigger scan toàn bộ S3 bucket và enqueue ingest jobs cho các doc chưa được index.
-
-```
-Request: { "bucket": "optional-string", "prefix": "optional-string" }
-Response 200: { "status": "scan started", "queued": 2 }
-Response 409: { "detail": "scan already in progress" }
-```
-
-### `GET /status/{doc_id}`
-
-```
-Response 200:
-  {
-    "doc_id": "doc_123",
-    "status": "pending" | "indexing" | "indexed" | "failed",
-    "file_path": "s3://...",
-    "section_count": 7,
-    "parser_version": "pipeline.parsers.v1",
-    "caption_model": "heuristic",
-    "embedding_model": "bge-m3",
-    "uploaded_at": "2026-05-31T10:15:00+00:00",
-    "processed_at": "2026-05-31T10:15:08+00:00"   (null nếu chưa xong)
-  }
-Response 404: { "detail": "Document not found" }
-```
-
-### `GET /health`
-
-```
-Response 200:  { "status": "ok", "vector_store": "ok", "metadata_store": "ok",
-                 "ai_provider": "ok", "scanner": "enabled", "dispatcher": {...}, "degraded_reasons": [] }
-Response 503:  { "status": "degraded", ..., "degraded_reasons": ["qdrant unreachable"] }
-```
+| Subject | Type | Payload | Mô tả |
+|---------|------|---------|-------|
+| `doc.ingest` | Subscribe | `{ doc_id, s3_key, file_type, classification, allowed_departments, allowed_user_ids }` | Ingest Service publish khi Admin upload. RAG Worker nhận → chạy pipeline ingestion. |
+| `doc.status` | Publish | `{ doc_id, status: "indexed"\|"failed", chunk_count?, error? }` | RAG Worker publish sau khi ingestion xong. Ingest Service subscribe để cập nhật PostgreSQL. |
+| `rag.search` | Request-Reply | Request: `{ query_text, document_ids, top_k }` → Reply: `{ results: [...] }` | Query Service gửi request, RAG Worker xử lý và reply. Timeout 10s. |
 
 ---
 
 ## Pydantic Schemas (tham khảo thêm)
 
 ```python
-# chat-service/interfaces/api/schemas/query.py
+# query-service/interfaces/api/schemas/query.py
 class Source(BaseModel):
     document_name: str
     caption: str
@@ -281,10 +196,10 @@ class QueryResponse(BaseModel):
     sources: List[Source]
     session_id: str
 
-# chat-service/interfaces/api/schemas/document.py
+# ingest-service/interfaces/api/schemas/document.py
 class UploadResponse(BaseModel):
     document_id: str
-    status: str             # "queued" | "pending"
+    status: str             # always "queued" for Admin upload
     message: str
 
 # user-service/interfaces/api/schemas/auth.py

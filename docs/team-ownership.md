@@ -4,12 +4,12 @@
 
 | Role | Người phụ trách | Phụ trách chính | Service / Folder | Bắt đầu sau |
 |------|----------------|----------------|-----------------|-------------|
-| **SA** | Lê Hữu Hưng | Domain design, contracts, API schemas, code review | `app/domain/` (cả 3 services) | Ngay — làm đầu tiên |
+| **SA** | Lê Hữu Hưng | Domain design, contracts, API schemas, code review | `app/domain/` (cả 4 services) | Ngay — làm đầu tiên |
 | **Frontend Dev** | Đặng Hồ Hải | Web UI chat, admin dashboard, streaming | `src/frontend/` (Next.js) | Sau khi SA freeze schemas |
-| **Backend Dev** | Vũ Quang Dũng | User Service: auth, JWT, user management, DB | `src/user-service/app/` | Sau khi SA freeze domain |
-| **RAG Engineer** | Trần Thanh Nguyên | Ingestion pipeline + Retrieval pipeline toàn bộ | `src/rag-service/app/` | Sau khi SA freeze domain |
-| **AI/Agent Engineer** | Phạm Quốc Dũng | Chat Service: LLM orchestration, streaming, memory | `src/chat-service/app/` | Sau khi SA freeze domain |
-| **DevOps** | Trần Hữu Gia Huy | Docker, AWS, CI/CD, Nginx, monitoring | `infra/`, `docker-compose.yml` | Ngay — song song với SA |
+| **Backend Dev** | Vũ Quang Dũng | User Service + Ingest Service: auth, JWT, document management | `src/user-service/`, `src/ingest-service/` | Sau khi SA freeze domain |
+| **RAG Engineer** | Trần Thanh Nguyên | RAG Worker: ingestion pipeline + retrieval pipeline, NATS subscriber | `src/rag-worker/app/` | Sau khi SA freeze domain |
+| **AI/Agent Engineer** | Phạm Quốc Dũng | Query Service: LLM orchestration, streaming, memory, NATS client | `src/query-service/app/` | Sau khi SA freeze domain |
+| **DevOps** | Trần Hữu Gia Huy | Docker, AWS, CI/CD, Nginx, NATS setup, monitoring | `infra/`, `docker-compose.yml` | Ngay — song song với SA |
 
 ---
 

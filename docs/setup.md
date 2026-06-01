@@ -22,7 +22,7 @@ cd rag-chatbot
 
 ## 2. Backend setup
 
-Project có **3 backend services** độc lập. Mỗi service có `requirements.txt` riêng.
+Project có **4 backend services** độc lập. Mỗi service có `requirements.txt` riêng.
 
 ```bash
 # User Service (Backend Dev)
@@ -32,14 +32,20 @@ venv\Scripts\activate          # Windows
 # source venv/bin/activate     # Mac/Linux
 pip install -r requirements.txt
 
-# Chat Service (AI/Agent Engineer)
-cd ../chat-service
+# Ingest Service (Backend Dev)
+cd ../ingest-service
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
 
-# RAG Service (RAG Engineer)
-cd ../rag-service
+# Query Service (AI/Agent Engineer)
+cd ../query-service
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+
+# RAG Worker (RAG Engineer)
+cd ../rag-worker
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
@@ -54,14 +60,17 @@ pip install -r requirements.txt
 Mỗi service có file `.env` riêng. Copy từ `.env.example` trong từng folder:
 
 ```bash
-cp src/user-service/.env.example  src/user-service/.env
-cp src/chat-service/.env.example  src/chat-service/.env
-cp src/rag-service/.env.example   src/rag-service/.env
+cp src/user-service/.env.example    src/user-service/.env
+cp src/ingest-service/.env.example  src/ingest-service/.env
+cp src/query-service/.env.example   src/query-service/.env
+cp src/rag-worker/.env.example      src/rag-worker/.env
 ```
 
 Xem đầy đủ nội dung từng file và hướng dẫn lấy API keys tại **[docs/env-setup.md](env-setup.md)**.
 
-> **Quan trọng:** `JWT_SECRET_KEY` phải giống nhau ở cả 3 services. Generate bằng `openssl rand -hex 32` rồi điền vào cả 3 file `.env`.
+> **Quan trọng:** `JWT_SECRET_KEY` phải giống nhau ở cả 4 services. Generate bằng `openssl rand -hex 32` rồi điền vào cả 4 file `.env`.
+>
+> **NATS URL:** Tất cả services kết nối NATS qua `NATS_URL=nats://nats:4222` (Docker network) hoặc `nats://localhost:4222` (local dev).
 
 ---
 
@@ -96,7 +105,8 @@ Sau khi PostgreSQL chạy, tạo schemas và apply migrations:
 ```bash
 docker exec -it rag-postgres psql -U user -d rag_chatbot -c "
   CREATE SCHEMA IF NOT EXISTS user_svc;
-  CREATE SCHEMA IF NOT EXISTS chat_svc;
+  CREATE SCHEMA IF NOT EXISTS ingest_svc;
+  CREATE SCHEMA IF NOT EXISTS query_svc;
   CREATE SCHEMA IF NOT EXISTS rag_svc;
   CREATE SCHEMA IF NOT EXISTS hr_mock;
 "
@@ -105,40 +115,50 @@ docker exec -it rag-postgres psql -U user -d rag_chatbot -c "
 Tạo tables bằng Alembic (mỗi service có `alembic/` riêng):
 
 ```bash
-cd src/user-service && alembic upgrade head
-cd ../chat-service  && alembic upgrade head
-cd ../rag-service   && alembic upgrade head
+cd src/user-service    && alembic upgrade head
+cd ../ingest-service  && alembic upgrade head
+cd ../query-service   && alembic upgrade head
+cd ../rag-worker      && alembic upgrade head
 ```
 
 > Schema thay đổi → tạo migration mới (`alembic revision --autogenerate -m "..."`) thay vì sửa DDL trực tiếp.
 
 ---
 
-## 5. Chạy 3 services local
+## 5. Chạy services local
 
-Mỗi service chạy trên port riêng. Mở 3 terminal:
+Mỗi service chạy trên port riêng. Mở 5 terminal (hoặc dùng Docker Compose — Section 8):
 
 ```bash
+# Terminal 0 — NATS (cần chạy trước)
+docker run -d --name rag-nats -p 4222:4222 -p 8222:8222 nats:latest
+
 # Terminal 1 — User Service (port 8000)
 cd src/user-service
 venv\Scripts\activate
 uvicorn app.interfaces.api.main:app --reload --port 8000
 
-# Terminal 2 — Chat Service (port 8001)
-cd src/chat-service
+# Terminal 2 — Ingest Service (port 8001)
+cd src/ingest-service
 venv\Scripts\activate
 uvicorn app.interfaces.api.main:app --reload --port 8001
 
-# Terminal 3 — RAG Service (port 8002)
-cd src/rag-service
+# Terminal 3 — Query Service (port 8002)
+cd src/query-service
 venv\Scripts\activate
 uvicorn app.interfaces.api.main:app --reload --port 8002
+
+# Terminal 4 — RAG Worker (no port — NATS subscriber)
+cd src/rag-worker
+venv\Scripts\activate
+python app/main.py
 ```
 
 API docs tự động:
 - User Service: http://localhost:8000/docs
-- Chat Service: http://localhost:8001/docs
-- RAG Service: http://localhost:8002/docs
+- Ingest Service: http://localhost:8001/docs
+- Query Service: http://localhost:8002/docs
+- NATS Monitoring: http://localhost:8222
 
 ---
 
@@ -152,7 +172,8 @@ npm install
 cp .env.local.example .env.local
 # Điền:
 #   NEXT_PUBLIC_USER_SERVICE_URL=http://localhost:8000
-#   NEXT_PUBLIC_CHAT_SERVICE_URL=http://localhost:8001
+#   NEXT_PUBLIC_INGEST_SERVICE_URL=http://localhost:8001
+#   NEXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8002
 
 npm run dev
 ```
@@ -168,16 +189,20 @@ Frontend tại: http://localhost:3000
 cd src/user-service
 pytest tests/ -v
 
-# Chat Service
-cd src/chat-service
+# Ingest Service
+cd src/ingest-service
 pytest tests/ -v
 
-# RAG Service
-cd src/rag-service
+# Query Service
+cd src/query-service
 pytest tests/ -v
 
-# Với coverage (ví dụ RAG Service)
-cd src/rag-service
+# RAG Worker
+cd src/rag-worker
+pytest tests/ -v
+
+# Với coverage (ví dụ RAG Worker)
+cd src/rag-worker
 pytest --cov=app tests/
 ```
 
@@ -195,7 +220,7 @@ docker compose up --build
 docker compose up
 
 # Xem log của 1 service cụ thể
-docker compose logs -f chat-service
+docker compose logs -f query-service
 
 # Stop
 docker compose down
@@ -208,10 +233,12 @@ Services sau khi `docker compose up`:
 | nginx | 80 / 443 | Reverse proxy, entry point — route `/` → frontend, `/api/*` → backend |
 | next-frontend | 3000 | Next.js UI (production build) |
 | user-service | 8000 | Auth / User management |
-| chat-service | 8001 | LLM Orchestration / Conversation |
-| rag-service | 8002 | Ingestion / Retrieval |
+| ingest-service | 8001 | Document management (Admin only) |
+| query-service | 8002 | User chat / LLM Orchestration |
+| rag-worker | — | NATS Worker — ingestion + retrieval (no HTTP port) |
+| nats | 4222 / 8222 | Message broker (4222: client, 8222: monitoring UI) |
 | qdrant | 6333 | Vector database |
-| redis | 6379 | JWT blacklist + rate limiting |
+| redis | 6379 | JWT blacklist + rate limiting + semantic cache |
 | langfuse | 4000 | LLM observability dashboard (IT/DevOps only) |
 | postgres | 5432 | PostgreSQL (shared, tách schema) |
 
@@ -227,5 +254,5 @@ Services sau khi `docker compose up`:
 | `Invalid signature` (JWT) | `JWT_SECRET_KEY` không khớp giữa services | Kiểm tra `.env` của 3 services phải dùng cùng key |
 | `Invalid API Key` | `.env` chưa điền đúng | Kiểm tra lại `.env` |
 | `ModuleNotFoundError` | Chưa activate venv đúng service | `cd <service-folder> && venv\Scripts\activate` |
-| `QDRANT_URL not set` | Thiếu env var | Kiểm tra `src/rag-service/.env` |
+| `QDRANT_URL not set` | Thiếu env var | Kiểm tra `src/rag-worker/.env` |
 | `Connection refused 8002` (từ Chat Service) | RAG Service chưa chạy | Start RAG Service trước |

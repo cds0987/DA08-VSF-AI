@@ -152,7 +152,11 @@ graph TB
         AUTH["Auth Module"]
     end
 
-    subgraph CHAT_SVC["Chat Service - Container 2"]
+    subgraph INGEST_SVC["Ingest Service - Container 2"]
+        DOCMGMT["Document Management"]
+    end
+
+    subgraph QUERY_SVC["Query Service - Container 3"]
         CONV["Conversation Module"]
         ORCH["LLM Orchestration"]
         RERANK["BGE-Reranker-v2-m3"]
@@ -214,7 +218,7 @@ graph TB
 ```mermaid
 graph LR
     ADM["Admin"] -->|Upload file| UI["Web UI"]
-    UI -->|POST /documents/upload| API["Chat Service → RAG Service /ingest"]
+    UI -->|POST /documents/upload| API["Ingest Service → publish NATS doc.ingest → RAG Worker"]
     API -->|Save original file| S3[("S3 Storage")]
     API -->|Trigger| BG["BackgroundTask"]
 
@@ -247,7 +251,7 @@ graph LR
 ```mermaid
 graph LR
     USER["End User"] -->|Question| UI["Web UI Next.js"]
-    UI -->|POST /query SSE| API["Chat Service /query"]
+    UI -->|POST /query SSE| API["Query Service /query"]
 
     API --> JWT{"JWT + Redis Blacklist\n+ Rate Limit 20/min"}
     JWT -->|Invalid / Rate exceeded| ERR["401 / 429"]
@@ -262,7 +266,7 @@ graph LR
     SRCH --> FILT{"Max Score >= 0.7?"}
 
     FILT -->|No| FB["Fallback - No info found"]
-    FILT -->|Yes| RERANK["BGE-Reranker-v2-m3 (Chat Service)\nTop-20 → Top-3"]
+    FILT -->|Yes| RERANK["BGE-Reranker-v2-m3 (Query Service)\nTop-20 → Top-3"]
     RERANK --> HIST["Fetch Context\nSummary Buffer\n5 turns verbatim"]
 
     HIST --> PROMPT["Build Prompt"]
@@ -280,12 +284,14 @@ graph LR
 | **STT** | **Tên Module** | **Mục đích** | **Phase** |
 |--------|--------------|-------------|---------|
 | 1 | Web UI (Next.js) | Giao diện chat streaming cho nhân viên + Admin Dashboard upload tài liệu. | ✅ MVP |
-| 2 | User Service (FastAPI) | Microservice 1: Auth/JWT, user management, login. Issue JWT token khi login. Chia sẻ `JWT_SECRET_KEY` với Chat Service và RAG Service để verify locally — không cần gọi lại User Service mỗi request. | ✅ MVP |
-| 2b | Chat Service (FastAPI) | Microservice 2: LLM orchestration, conversation history, streaming response. Verify JWT locally bằng shared secret. Giao tiếp với RAG Service qua HTTP REST. | ✅ MVP |
-| 2c | RAG Service (FastAPI) | Microservice 3: OCR, Ingestion pipeline (parse→section→caption→embed→store), Query retrieval (embed→search với document_ids filter). Retrieval substrate — không làm ACL, không rerank. Expose `/ingest`, `/search`, `/scan`, `/status/{doc_id}`, `/health`. | ✅ MVP |
+| 2 | User Service (FastAPI) | Microservice 1: Auth/JWT, user management, login. Issue JWT token khi login. Chia sẻ `JWT_SECRET_KEY` với Ingest Service, Query Service và RAG Worker để verify locally — không cần gọi lại User Service mỗi request. | ✅ MVP |
+| 2b | Ingest Service (FastAPI) | Microservice 2: Admin document management — upload, approve, reject tài liệu. Lưu file lên S3, tạo record PostgreSQL. Sau khi Admin approve → publish NATS subject `doc.ingest`. Subscribe `doc.status` để cập nhật trạng thái ingestion từ RAG Worker. Chỉ Admin mới có quyền upload. | ✅ MVP |
+| 2c | RAG Worker (Python/NATS) | Worker thuần NATS — không expose HTTP. Subscribe `doc.ingest` → chạy pipeline ingestion (OCR→chunk→embed→store Qdrant). Handle request-reply `rag.search` từ Query Service (embed query → hybrid search → trả sections). | ✅ MVP |
+| 2d | Query Service (FastAPI) | Microservice 3: User chat — nhận câu hỏi, ACL check, publish NATS request `rag.search`, nhận sections, rerank, gọi LLM, stream SSE về frontend. Conversation history, feedback. Verify JWT locally. | ✅ MVP |
+| 2e | NATS Message Broker | Message broker trung tâm: (1) Async ingestion — Ingest Service publish `doc.ingest`, RAG Worker subscribe. (2) Request-reply retrieval — Query Service request `rag.search`, RAG Worker reply. Port 4222. | ✅ MVP |
 | 3 | OCR Module | Detect PDF scan → Azure Document Intelligence (OCR). PDF text-based → PyMuPDF (local). | ✅ MVP |
 | 4 | Ingestion Module | Parse tài liệu (PDF/DOCX/TXT/Excel/CSV), normalize tiếng Việt, Section-based Chunking theo heading hierarchy, generate caption, embed, lưu Qdrant + PostgreSQL. | ✅ MVP |
-| 5 | Query Module | Nhận query + allowed_doc_ids từ Chat Service, embed câu hỏi, hybrid search Qdrant với document_ids filter, filter score threshold. Không rerank — Chat Service tự rerank sau khi nhận kết quả. | ✅ MVP |
+| 5 | Query Module | Nhận query + allowed_doc_ids từ Query Service (qua NATS request-reply), embed câu hỏi, hybrid search Qdrant với document_ids filter, filter score threshold. Không rerank — Query Service tự rerank sau khi nhận kết quả. | ✅ MVP |
 | 6 | Auth Module | Simple JWT authentication. 2 role: Admin và End User. | ✅ MVP |
 | 7 | Conversation Module | Lưu/đọc lịch sử hội thoại từ PostgreSQL. Summary Buffer: LLM tóm tắt các turns cũ thành summary, giữ 5 turns gần nhất verbatim — hiểu đủ ngữ cảnh mà không tốn nhiều token. | ✅ MVP |
 | 8 | Embedding Service | BGE-M3 Embedding Service (self-hosted trên AWS EC2). 1024 dims. Dùng cho cả ingestion và query. | ✅ MVP |
@@ -363,7 +369,7 @@ graph LR
 | 11 | Feedback Loop | Người dùng đánh giá câu trả lời (thumbs up/down). Lưu vào PostgreSQL và sync lên Langfuse để phân tích chất lượng. | ✅ MVP |
 | 12 | Langfuse Observability | Trace toàn bộ LLM pipeline. Dashboard latency, token cost, RAGAS scores, feedback. IT/DevOps dùng để monitor và debug. | ✅ MVP |
 | 13 | Semantic Cache | Cache câu hỏi tương tự (cosine similarity > 0.95). TTL 1 giờ. Tiết kiệm ~60% API cost. | ✅ MVP |
-| 14 | Document Classification & Access Control | Uploader chọn classification khi upload. **ACL pre-filter:** Chat Service decode JWT → query PostgreSQL `rag_svc.documents` → lấy `allowed_doc_ids` user được phép đọc → truyền vào RAG `/search` dưới dạng `document_ids` filter. RAG Service chỉ search trong các doc đó — unauthorized data không rời khỏi Qdrant. `document_ids=None` mặc định chỉ search public docs (fail-secure). Kết quả cache Redis TTL ~60s. | ✅ MVP |
+| 14 | Document Classification & Access Control | Admin chọn classification khi upload. **ACL pre-filter:** Query Service decode JWT → query PostgreSQL `rag_svc.documents` → lấy `allowed_doc_ids` user được phép đọc → truyền vào NATS request `rag.search` dưới dạng `document_ids` filter. RAG Worker chỉ search trong các doc đó — unauthorized data không rời khỏi Qdrant. `document_ids=None` mặc định chỉ search public docs (fail-secure). Kết quả cache Redis TTL ~60s. | ✅ MVP |
 
 > **Định nghĩa 4 cấp phân loại tài liệu:**
 >
@@ -405,8 +411,9 @@ flowchart TB
 
     subgraph AWS[AWS ap-southeast-1 Singapore]
         USVC[User Service - FastAPI]
-        CHAT[Chat Service - FastAPI]
-        RAG[RAG Service - FastAPI]
+        INGEST[Ingest Service - FastAPI]
+        QUERY[Query Service - FastAPI]
+        RAG[RAG Worker - NATS]
         PG[(RDS PostgreSQL)]
         S3[(S3 Storage)]
         QDRANT["Qdrant (self-hosted on AWS)"]
@@ -441,16 +448,18 @@ flowchart TB
 | **STT** | **Endpoint** | **From** | **To** | **Method** | **Data** |
 |--------|-------------|---------|-------|-----------|---------|
 | 1 | BGE-M3 Embedding Service | RAG Service / Ingestion + Query Module | BGE-M3 (self-hosted trên AWS EC2) | HTTP nội bộ (VPC) – Sync | Child chunk text → vector [1024 dims]. Không gọi external API. Retry 3 lần khi timeout. |
-| 2 | Azure OpenAI Chat Completion API | Chat Service / LLM Orchestration | Azure OpenAI GPT-4o Mini | HTTPS/TLS – Sync, Streaming | Full prompt → streaming tokens. Data ở trong Azure tenant. API Key qua Secrets Manager. |
+| 2 | Azure OpenAI Chat Completion API | Query Service / LLM Orchestration | Azure OpenAI GPT-4o Mini | HTTPS/TLS – Sync, Streaming | Full prompt → streaming tokens. Data ở trong Azure tenant. API Key qua Secrets Manager. |
 | 3 | Azure Document Intelligence API | RAG Service / OCR Module | Azure Document Intelligence | HTTPS/TLS – Sync | PDF scan image → extracted text + layout. Chỉ gọi khi phát hiện PDF scan. |
 | 3b | PyMuPDF | RAG Service / OCR Module | Local processing (không gọi API) | In-process | PDF có text layer → extract text trực tiếp. Nhanh, miễn phí. |
 | 4 | Qdrant REST API | RAG Service / Query + Ingestion Module | Qdrant (self-hosted on AWS) | HTTPS / REST | Upsert vectors khi ingest (payload: section_id, document_id, classification, heading_path). Hybrid search Top-K=20 (vector + BM25 via RRF) với document_ids filter khi query. API Key auth. |
-| 5 | RDS PostgreSQL | User Service / Chat Service / RAG Service | AWS RDS PostgreSQL 15 | TCP/SSL | User Service: user data. Chat Service: conversation history. RAG Service: document metadata, audit log. SSL required. |
+| 5 | RDS PostgreSQL | User Service / Ingest Service / Query Service / RAG Worker | AWS RDS PostgreSQL 15 | TCP/SSL | User Service: user data. Ingest Service: document metadata. Query Service: conversation history. RAG Worker: audit log. SSL required. |
 | 6 | AWS S3 SDK | RAG Service / Ingestion Module | AWS S3 (Private Bucket) | HTTPS / S3 SDK | PUT file gốc khi ingest. GET để xử lý. IAM Role-based access. |
-| 7 | Langfuse SDK | Chat Service + RAG Service | Langfuse (self-hosted on AWS) | HTTP nội bộ (VPC) | Chat Service: LLM trace. RAG Service: ingestion + retrieval trace. Trace data không ra ngoài AWS. |
-| 8 | Frontend → Chat Service | Next.js (AWS EC2) | Chat Service (EC2) | HTTPS + SSE | REST API cho query/upload. Server-Sent Events cho streaming response. Cùng EC2 — Nginx route /api/chat → chat-service:8001. |
+| 7 | Langfuse SDK | Query Service + RAG Worker | Langfuse (self-hosted on AWS) | HTTP nội bộ (VPC) | Query Service: LLM trace. RAG Worker: ingestion + retrieval trace. Trace data không ra ngoài AWS. |
+| 8 | Frontend → Ingest Service | Next.js (AWS EC2) | Ingest Service (EC2) | HTTPS | REST API cho document management (Admin only). Nginx route /api/ingest → ingest-service:8001. |
+| 8b | Frontend → Query Service | Next.js (AWS EC2) | Query Service (EC2) | HTTPS + SSE | REST API cho chat/query. Server-Sent Events cho streaming response. Nginx route /api/query → query-service:8002. |
 | 9 | Frontend → User Service | Next.js (AWS EC2) | User Service (EC2) | HTTPS | REST API cho login, user management. Cùng EC2 — Nginx route /api/user → user-service:8000. |
-| 10 | Chat Service → RAG Service | Chat Service | RAG Service | HTTP REST / Sync | Ingest: `/ingest` sau khi Admin approve. Search: `/search` với `{ query, top_k, document_ids }` — Chat Service tự query allowed_doc_ids từ PostgreSQL trước khi gọi. Rerank kết quả nhận về bằng BGE-Reranker-v2-m3. Giao tiếp nội bộ trong Docker network, header `X-Request-ID` để trace. |
+| 10 | Query Service → RAG Worker (rag.search) | Query Service | RAG Worker | NATS request-reply | Query vector + document_ids → Top-20 sections. Query Service rerank nhận về bằng BGE-Reranker-v2-m3. |
+| 11 | Ingest Service → RAG Worker (doc.ingest) | Ingest Service | RAG Worker | NATS publish/subscribe | Admin approve → publish `{ doc_id, s3_key, file_type, classification }` → RAG Worker trigger ingestion pipeline. |
 
 ---
 
@@ -466,9 +475,11 @@ flowchart LR
     EU["End User"]
 
     subgraph BACKEND["EC2 — Docker Compose"]
-        CHAT["Chat Service :8001"]
-        RAG["RAG Service :8002"]
+        INGEST["Ingest Service :8001"]
+        QUERY["Query Service :8002"]
+        RAG["RAG Worker"]
         BGE["BGE-M3 Embedding"]
+        NATS[("NATS :4222")]
     end
 
     S3[("S3\nfile gốc")]
@@ -482,27 +493,26 @@ flowchart LR
         OCR["Document Intelligence\nOCR"]
     end
 
-    ADM -->|"upload file"| CHAT
-    CHAT -->|"file binary"| S3
-    CHAT -->|"POST /ingest"| RAG
+    ADM -->|"upload + approve"| INGEST
+    INGEST -->|"file binary"| S3
+    INGEST -->|"publish doc.ingest"| NATS
+    NATS -->|"subscribe → ingest"| RAG
     RAG -->|"read file"| S3
     RAG -->|"PDF scan"| OCR
     RAG -->|"section text (batch)"| BGE
     BGE -->|"vectors [1024d]"| QD
     RAG -->|"doc metadata, status=indexed"| PG
+    RAG -->|"publish doc.status"| NATS
 
-    EU -->|"question"| CHAT
-    CHAT -->|"allowed_doc_ids (TTL ~60s)"| REDIS
-    CHAT -->|"ACL query"| PG
-    CHAT -->|"POST /search + document_ids"| RAG
-    RAG -->|"embed query"| BGE
-    RAG -->|"hybrid search + doc_ids filter"| QD
-    QD -->|"Top-20 sections"| RAG
-    RAG -->|"sections"| CHAT
-    CHAT -->|"conversation context"| PG
-    CHAT -->|"prompt + Top-3 sections"| LLM
+    EU -->|"question"| QUERY
+    QUERY -->|"ACL query"| PG
+    QUERY -->|"allowed_doc_ids (TTL ~60s)"| REDIS
+    QUERY -->|"request rag.search"| NATS
+    NATS -->|"reply sections"| QUERY
+    QUERY -->|"conversation context"| PG
+    QUERY -->|"prompt + Top-3 sections"| LLM
     LLM -->|"streaming tokens (SSE)"| EU
-    CHAT -->|"trace"| LF
+    QUERY -->|"trace"| LF
     RAG -->|"trace"| LF
 ```
 
@@ -514,23 +524,21 @@ flowchart LR
 >
 > Trước mỗi data flow nên có tham chiếu tới mô hình L2 phù hợp. Tên các actor trong sequence diagram cần trùng với các thành phần trong sơ đồ tham chiếu.
 
-### 5.2.1 Luồng Ingestion Pipeline (Async – BackgroundTasks)
+### 5.2.1 Luồng Ingestion Pipeline (Async – NATS Worker)
 
 _[Tham chiếu: Application Architecture Diagram – Level 2 – Ingestion Pipeline]_
 
-> **Hai path upload:**
-> - **Admin upload** → status: `queued` → tiếp tục ngay Step 5 (indexing pipeline).
-> - **End User upload** → status: `pending` → dừng tại Step 4b, chờ Admin approve. Sau khi approve → status: `queued` → tiếp tục Step 5.
+> **Admin-only upload:** Chỉ Admin mới có quyền upload và quản lý tài liệu qua Ingest Service. End User chỉ dùng Query Service để hỏi.
 
 | **Bước** | **Actor** | **Hành động** | **Dữ liệu** |
 |---------|---------|-------------|-----------|
 | 0 | Langfuse | Khởi tạo ingestion trace. | trace_id, doc_id, file_name, timestamp |
-| 1 | Admin / End User | Upload tài liệu. Admin dùng Admin Dashboard; End User dùng giao diện chat (Upload Document). Kèm chọn classification (public/internal/secret/top_secret). | File (PDF/DOCX/TXT/Excel/CSV/PPTX/MD, max 50MB) + classification |
-| 2 | FastAPI | Validate file type + size. Xác thực JWT (Admin hoặc End User). | Authenticated request + file |
-| 3 | FastAPI | Upload file gốc lên AWS S3. | S3 key: `{doc_id}/{filename}` |
-| 4 | FastAPI | Tạo record document trong PostgreSQL. Admin → status: `queued` (tiếp tục Step 5). End User → status: `pending` (dừng, chờ approve). Trả về 202 Accepted. | `{ doc_id, status: 'queued' \| 'pending' }` |
-| 4b | Admin | Xem pending queue trên Admin Dashboard. **Approve** → status: `queued` → tiếp tục Step 5. **Reject** → status: `rejected`, ghi lý do, thông báo uploader. | `{ doc_id, action: 'approve'\|'reject', reason? }` |
-| 5 | BackgroundTask | Đọc file từ S3. Cập nhật status → 'processing'. | File binary từ S3 |
+| 1 | Admin | Upload tài liệu qua Admin Dashboard. Chọn classification (public/internal/secret/top_secret). | File (PDF/DOCX/TXT/Excel/CSV/PPTX/MD, max 50MB) + classification |
+| 2 | Ingest Service | Validate file type + size. Xác thực JWT (Admin only). | Authenticated request + file |
+| 3 | Ingest Service | Upload file gốc lên AWS S3. | S3 key: `{doc_id}/{filename}` |
+| 4 | Ingest Service | Tạo record document trong PostgreSQL, status: `queued`. Trả về 202 Accepted. | `{ doc_id, status: 'queued' }` |
+| 4b | Ingest Service | Publish NATS subject `doc.ingest` với payload `{ doc_id, s3_key, file_type, classification }`. | NATS message |
+| 5 | RAG Worker | Subscribe `doc.ingest` — nhận message, cập nhật status → `processing`, đọc file từ S3. | File binary từ S3 |
 | 6 | OCR Module | Auto-detect PDF type: có text layer → PyMuPDF (local). Không có text layer → Azure Document Intelligence OCR. DOCX → python-docx. Excel → openpyxl, convert rows sang text có header. CSV → pandas. PPTX → python-pptx, extract text từng shape. Markdown → parse theo heading. | Raw text + metadata |
 | 7 | Ingestion Module | Normalize tiếng Việt: Unicode NFC, fix encoding, collapse whitespace. | Cleaned text |
 | 8 | Ingestion Module | Section-based Chunking theo heading hierarchy: PDF/DOCX/MD → theo heading; TXT → theo paragraph; XLSX → Header+RowGroup; CSV → Row-as-Document; PPTX → Slide-as-Section. Mỗi section là một đơn vị độc lập — không chia parent/child. | List of `{ section_id, section_content (Markdown), heading_path }` |
@@ -539,11 +547,12 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Ingestion Pipel
 | 10 | Qdrant (self-hosted on AWS) | Upsert vectors với payload: section_id, document_id, document_name, caption, heading_path, source_s3_uri, markdown_s3_uri, classification, ocr_confidence. | Vector + payload |
 | 11 | PostgreSQL | Lưu document record: tên, S3 key, số section, status: `indexed`. | Document record |
 | 12 | Langfuse | Log ingestion metrics: parse_time, chunk_count, embed_time, total_latency, status (success/failed). Error message nếu thất bại. | Ingestion trace data |
+| 13 | RAG Worker | Publish NATS subject `doc.status` với `{ doc_id, status: 'indexed' \| 'failed', error? }`. | NATS message |
+| 14 | Ingest Service | Subscribe `doc.status` — nhận kết quả, cập nhật PostgreSQL record. Admin thấy trạng thái realtime trên dashboard. | Document status update |
 
-> _Nếu BackgroundTask thất bại → cập nhật status 'failed' → Admin thấy trên dashboard và retry thủ công. Phase 2 thay bằng SQS + DLQ._
+> _Nếu RAG Worker thất bại → publish `doc.status` với status `failed` → Ingest Service cập nhật DB → Admin thấy trên dashboard và retry thủ công._
 >
-> **⚠️ Risk — BackgroundTasks (Phase 1):** FastAPI `BackgroundTasks` chạy in-process. Nếu EC2 instance restart hoặc process crash giữa chừng, job ingestion bị mất hoàn toàn — không có retry tự động, không có dead-letter queue, không có visibility. Admin chỉ phát hiện qua status 'processing' bị stuck.
-> **Mitigation Phase 2:** Thay bằng AWS SQS + worker service riêng (Feature #15) để đảm bảo at-least-once delivery và có DLQ cho job thất bại.
+> **⚠️ Risk — NATS (Phase 1):** NATS mặc định không persist message (in-memory). Nếu RAG Worker crash trước khi xử lý xong, message bị mất. Mitigation: enable NATS JetStream (persistent messaging) hoặc Phase 2 thay bằng AWS SQS + DLQ.
 
 ### 5.2.2 Luồng Query Pipeline (Sync – Streaming + Langfuse Trace)
 
@@ -556,11 +565,11 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 | 3 | **Input Guardrail** (llm-guard) | Scan input: (1) Prompt injection detection, (2) Off-topic classifier — nếu fail → trả canned response ngay, không gọi LLM. | Pass / Block + lý do |
 | 4 | Langfuse | Khởi tạo trace mới cho request này. | trace_id, user_id, timestamp |
 | 5 | Query Module | Normalize tiếng Việt cho query. Embed bằng BGE-M3 Embedding Service (self-hosted). | Query vector [1024 dims] |
-| 4b | Chat Service | Query PostgreSQL `rag_svc.documents` → lấy `allowed_doc_ids` theo role/department của user. Cache kết quả trong Redis TTL ~60s. `None` nếu user chỉ có quyền public (fail-secure). | allowed_doc_ids list |
+| 4b | Query Service | Query PostgreSQL `rag_svc.documents` → lấy `allowed_doc_ids` theo role/department của user. Cache kết quả trong Redis TTL ~60s. `None` nếu user chỉ có quyền public (fail-secure). | allowed_doc_ids list |
 | 5b | Query Module | Query Rewriting: LLM sinh 3 variations của câu hỏi gốc → hybrid search cả 3 → kết hợp kết quả bằng Reciprocal Rank Fusion (RRF). Top-20 candidates. | 3 query variants + merged Top-20 results |
-| 6 | RAG Service / Qdrant | Hybrid search: vector search + BM25 keyword search, kết hợp bằng RRF. Filter chỉ trong `document_ids` được phép. Top-K=20 candidates vượt ngưỡng score 0.5. | List of `{ section_id, section_content, caption, heading_path, score, ... }` |
-| 7 | Chat Service | Kiểm tra score threshold: max score < 0.7 → trả fallback, không gọi LLM. | "Không tìm thấy thông tin trong tài liệu nội bộ" |
-| 7b | Chat Service / BGE-Reranker-v2-m3 | Rerank Top-20 sections theo độ liên quan với query gốc. Trả về Top-3 sections để đưa vào LLM prompt. | Top-3 section_content (Markdown) |
+| 6 | RAG Worker / Qdrant | Query Service publish NATS request `rag.search` với `{ query_vector, document_ids, top_k: 20 }`. RAG Worker hybrid search Qdrant (vector + BM25), filter `document_ids`, reply kết quả. Top-K=20 candidates vượt ngưỡng score 0.5. | List of `{ section_id, section_content, caption, heading_path, score, ... }` |
+| 7 | Query Service | Kiểm tra score threshold: max score < 0.7 → trả fallback, không gọi LLM. | "Không tìm thấy thông tin trong tài liệu nội bộ" |
+| 7b | Query Service / BGE-Reranker-v2-m3 | Rerank Top-20 sections theo độ liên quan với query gốc. Trả về Top-3 sections để đưa vào LLM prompt. | Top-3 section_content (Markdown) |
 | 8 | PostgreSQL | Lấy conversation context: summary các turns cũ + 5 turns gần nhất verbatim (Summary Buffer). | Conversation context |
 | 9 | Query Module | Build prompt: System prompt + Conversation context + Top-3 section_content (Markdown) + Question. | Full prompt (~2000–4000 tokens) |
 | 10 | LLM Service | Gọi Azure OpenAI GPT-4o Mini streaming. Buffer full response trước khi qua Output Guardrail. | Full response text |
@@ -579,12 +588,12 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 >
 > RAGAS chỉ áp dụng cho Query flow — không áp dụng cho Ingestion flow.
 
-> **RAG Service Failure — Circuit Breaker:** Chat Service wrap call đến `POST /search` bằng Circuit Breaker (`pybreaker`, fail_max=5, reset_timeout=30s).
-> - **Closed** (bình thường): gọi RAG bình thường
-> - **Open** (≥5 failure liên tiếp trong 60s): fail-fast, trả 503 ngay không chờ timeout
+> **RAG Worker Failure — Circuit Breaker:** Query Service wrap NATS request `rag.search` bằng Circuit Breaker (`pybreaker`, fail_max=5, reset_timeout=30s).
+> - **Closed** (bình thường): gọi RAG Worker qua NATS bình thường
+> - **Open** (≥5 timeout/failure liên tiếp trong 60s): fail-fast, trả 503 ngay không chờ NATS timeout
 > - **Half-Open** (sau 30s): cho 1 request thử — success → Closed, fail → Open lại
 >
-> Khi circuit Open: SSE `{ "error": true, "message": "Hệ thống tìm kiếm tài liệu tạm thời không khả dụng. Vui lòng thử lại sau ít phút." }`, HTTP 503. Log state change vào Langfuse + CloudWatch. `GET /health` trả `"rag_service": "circuit_open"`.
+> Khi circuit Open: SSE `{ "error": true, "message": "Hệ thống tìm kiếm tài liệu tạm thời không khả dụng. Vui lòng thử lại sau ít phút." }`, HTTP 503. Log state change vào Langfuse + CloudWatch. `GET /health` trả `"rag_worker": "circuit_open"`.
 
 ## 5.3 Evaluation Criteria — Phase 1.5 (Cuối tuần 3)
 
@@ -650,11 +659,13 @@ graph TB
         subgraph PUBLIC["Public Subnet — Security Group: 80/443/22"]
             subgraph EC2["EC2 t3.medium"]
                 NGINX["nginx :80/:443\nSSL termination + reverse proxy"]
-                subgraph COMPOSE["Docker Compose — 9 containers"]
+                subgraph COMPOSE["Docker Compose — 11 containers"]
                     NEXT["next-frontend :3000"]
                     USVC["user-service :8000"]
-                    CHAT["chat-service :8001"]
-                    RAG["rag-service :8002"]
+                    INGEST["ingest-service :8001"]
+                    QUERY["query-service :8002"]
+                    RAGW["rag-worker"]
+                    NATS["nats :4222"]
                     QD["qdrant"]
                     REDIS["redis"]
                     LF["langfuse"]
@@ -675,8 +686,11 @@ graph TB
     INTERNET -->|"HTTPS"| NGINX
     NGINX -->|"/"| NEXT
     NGINX -->|"/api/user"| USVC
-    NGINX -->|"/api/chat"| CHAT
-    CHAT -->|"HTTP internal"| RAG
+    NGINX -->|"/api/ingest"| INGEST
+    NGINX -->|"/api/query"| QUERY
+    INGEST -->|"NATS"| NATS
+    QUERY -->|"NATS"| NATS
+    NATS -->|"NATS"| RAGW
     USVC -->|"TCP/SSL"| PG
     CHAT -->|"TCP/SSL"| PG
     RAG -->|"TCP/SSL"| PG
@@ -693,8 +707,8 @@ graph TB
 - Loại hạ tầng: **Cloud (AWS ap-southeast-1 Singapore)** — toàn bộ stack trên AWS, không dùng dịch vụ bên ngoài.
 - Network Topology: EC2 trong Public Subnet với Security Group chặt. RDS trong Private Subnet, chỉ EC2 truy cập được.
 - Entry từ Internet: HTTPS → Nginx (EC2) → route theo path: `/` → Next.js frontend, `/api/*` → backend services.
-- Các server / container: 1 EC2 t3.medium chạy Docker Compose với 9 containers: nginx, next-frontend, User Service, Chat Service, RAG Service, Qdrant, Redis, Langfuse, PostgreSQL.
-- Mapping service/module → node: User Service (port 8000) + Chat Service (port 8001) + RAG Service (port 8002) trên EC2. RDS/S3 là managed cloud services. Phase 2 (Production Scale) tách sang ECS Fargate 3 Task riêng.
+- Các server / container: 1 EC2 t3.medium chạy Docker Compose với 11 containers: nginx, next-frontend, User Service, Ingest Service, Query Service, RAG Worker, NATS, Qdrant, Redis, Langfuse, PostgreSQL.
+- Mapping service/module → node: User Service (port 8000) + Ingest Service (port 8001) + Query Service (port 8002) + RAG Worker (no port) + NATS (port 4222) trên EC2. RDS/S3 là managed cloud services. Phase 2 (Production Scale) tách sang ECS Fargate riêng.
 - Database: RDS PostgreSQL Single-AZ (MVP), S3 với versioning.
 - Quản lý truy cập: SSH vào EC2 chỉ từ IP cố định (port 22). AWS Secrets Manager inject API Keys runtime.
 
@@ -703,7 +717,7 @@ graph TB
 | **Thành phần** | **Service** | **Ghi chú** |
 |--------------|-----------|-----------|
 | Web UI (Next.js) | AWS EC2 (Docker Compose) | Container trong cùng EC2, Nginx route `/` → next-frontend:3000. Toàn bộ traffic nằm trong AWS — không có CORS. |
-| Backend (FastAPI) | AWS EC2 t3.medium (4GB RAM) | Docker Compose. 3 backend services: User Service (port 8000), Chat Service (port 8001), RAG Service (port 8002). Public IP với Security Group: chỉ mở 80/443/22. |
+| Backend (FastAPI + NATS Worker) | AWS EC2 t3.medium (4GB RAM) | Docker Compose. 4 backend components: User Service (port 8000), Ingest Service (port 8001), Query Service (port 8002), RAG Worker (no HTTP port). NATS broker (port 4222, internal only). Public IP với Security Group: chỉ mở 80/443/22. |
 | Cache / Rate Limit | Redis 7 (Docker Compose) | JWT blacklist (logout thật sự) + per-user rate limiting. |
 | Vector DB | Qdrant (self-hosted on AWS) | Docker container trên EC2. Dữ liệu nằm trong VPC — không ra ngoài. |
 | Database | AWS RDS PostgreSQL 15 (db.t3.micro) | Managed. Automated backup 7 ngày. Single-AZ cho MVP. |
@@ -721,7 +735,7 @@ graph TB
 | Backend | 1 EC2 t3.medium, Docker Compose (3 services) | ECS Fargate, min 2 tasks/service, auto-scale |
 | Database | RDS Single-AZ db.t3.micro | RDS Multi-AZ + Read Replica |
 | Vector DB | Qdrant (self-hosted on AWS) — 1 container Docker Compose | Qdrant cluster riêng trên ECS (nhiều replica, persistent volume) |
-| Ingestion | FastAPI BackgroundTasks | AWS SQS + Worker Service riêng |
+| Ingestion | NATS Worker (self-hosted, in-memory) | AWS SQS + Worker Service riêng (persistent, DLQ) |
 | Cache | Redis (self-hosted EC2) – Semantic Cache | Redis ElastiCache (managed, auto-scaling) |
 | Load Balancer | Nginx trên EC2 | AWS ALB + WAF |
 | Tracing | Langfuse (self-hosted on AWS) — Docker Compose | Langfuse cluster riêng trên ECS (Phase 2 Production Scale) |
@@ -758,10 +772,10 @@ graph TB
 |-------------|-------------|--------------|
 | Frontend | Next.js 14 + TypeScript + TailwindCSS | Production-ready, streaming response tốt qua SSE, container hóa dễ với Docker. |
 | Backend | Python 3.11 – FastAPI | Async native, hệ sinh thái AI/ML tốt nhất, phát triển nhanh. |
-| Architecture | Microservices (3 backend services) | User Service + Chat Service + RAG Service. Giao tiếp qua HTTP REST. JWT verify locally bằng shared secret — không cần gọi User Service mỗi request. Mỗi service dùng Clean Architecture nội bộ. |
+| Architecture | Microservices + Event-driven (NATS) | User Service + Ingest Service + Query Service + RAG Worker. HTTP REST cho user-facing. NATS cho internal async (ingestion) và request-reply (retrieval). JWT verify locally bằng shared secret. Mỗi service dùng Clean Architecture nội bộ. |
 | LLM Orchestration | LlamaIndex | RAG-focused, ít boilerplate hơn LangChain, dễ học. |
 | Embedding Model | BGE-M3 (self-hosted trên AWS EC2) | Không gọi API ngoài, 1024 dims, đa ngôn ngữ tốt, zero latency khi scale nội bộ. Dùng trong RAG Service (ingestion + query). |
-| Reranking Model | BGE-Reranker-v2-m3 (self-hosted, trong Chat Service) | Cross-encoder rerank Top-20 sections → Top-3 trước khi đưa vào LLM prompt. Thuộc Chat Service — AI Engineer implement trong `RerankService`. |
+| Reranking Model | BGE-Reranker-v2-m3 (self-hosted, trong Query Service) | Cross-encoder rerank Top-20 sections → Top-3 trước khi đưa vào LLM prompt. Thuộc Query Service — AI Engineer implement trong `RerankService`. |
 | LLM | Azure OpenAI GPT-4o Mini | Data trong Azure tenant, không đi qua OpenAI public API. Đảm bảo compliance cho doanh nghiệp. |
 | OCR PDF scan | Azure Document Intelligence | Bảo mật (trong Azure tenant), chất lượng cao cho tiếng Việt, hỗ trợ bảng + layout phức tạp. |
 | OCR PDF văn bản | PyMuPDF (local) | Nhanh, miễn phí, không cần OCR khi PDF đã có text layer. |
@@ -934,7 +948,7 @@ graph TB
 
 | Control | Cách thực hiện |
 |---------|---------------|
-| `max_tokens` per request | Hard-cap 1500 tokens mỗi LLM call trong Chat Service — ngăn response quá dài tiêu tốn token |
+| `max_tokens` per request | Hard-cap 1500 tokens mỗi LLM call trong Query Service — ngăn response quá dài tiêu tốn token |
 | Azure OpenAI budget alert | Đặt alert trên Azure OpenAI dashboard khi đạt 80% ngân sách tháng |
 | Daily token tracking | Log `prompt_tokens + completion_tokens` vào Langfuse mỗi request — dễ trace spike bất thường |
 | Loop protection | Timeout 30s cho LLM call; không retry nếu lỗi 429 (rate limit Azure) để tránh call loop |
@@ -945,11 +959,11 @@ graph TB
 
 | Dependency | Failure | Behavior | User nhận được |
 |------------|---------|----------|----------------|
-| **RAG Service** | Unreachable / crash | Circuit Breaker (fail_max=5, reset=30s). Circuit Open → fail-fast 503, không chờ timeout. Chat Service `/health` trả `"rag_service": "circuit_open"`. | "Hệ thống tìm kiếm tài liệu tạm thời không khả dụng. Vui lòng thử lại sau ít phút." |
+| **RAG Worker** | Crash / NATS timeout | Circuit Breaker (fail_max=5, reset=30s). Circuit Open → fail-fast 503, không chờ NATS timeout. Query Service `/health` trả `"rag_worker": "circuit_open"`. | "Hệ thống tìm kiếm tài liệu tạm thời không khả dụng. Vui lòng thử lại sau ít phút." |
 | **Azure OpenAI** | Timeout / 5xx | Timeout 30s, **không retry** (tránh loop cost). Trả 503 ngay. Log token count trước khi fail vào Langfuse. | "Hệ thống AI tạm thời không phản hồi. Vui lòng thử lại." |
 | **PostgreSQL** | Unreachable | Tất cả services trả 503. Không có fallback — DB là critical path cho auth, ACL, conversation history. CloudWatch alarm khi connection pool cạn. | 503 — toàn bộ tính năng không khả dụng |
 | **Redis** | Unreachable | **Fail-open**: service vẫn chạy. Rate limit bị tắt (chấp nhận được ngắn hạn). JWT blacklist mất tác dụng (logout token có thể dùng lại trong window còn lại). Log warning vào CloudWatch. | Không thông báo — service hoạt động bình thường nhưng degraded |
-| **Qdrant** | Unreachable | RAG Service tự bắt lỗi → trả 503 cho Chat Service → Chat Service circuit breaker xử lý tiếp. | Cùng message như RAG Service die |
+| **Qdrant** | Unreachable | RAG Worker bắt lỗi → reply NATS với error → Query Service circuit breaker xử lý tiếp. | Cùng message như RAG Worker crash |
 | **BGE-M3 Embedding** | Unreachable | Ingestion fail → document status `failed`, Admin thấy trên dashboard. Query không bị ảnh hưởng (vector đã index rồi). | Admin: "Ingestion thất bại — embedding service không khả dụng" |
 | **Langfuse** | Unreachable | **Fail silently** — trace call bọc trong try/except, lỗi chỉ log ra console. Không được làm gián đoạn request. | Không thông báo |
 | **Azure Document Intelligence** | Unreachable | Ingestion fail với `error_message: "OCR service unavailable"`. Status → `failed`. Admin retry thủ công. | Admin: "Ingestion thất bại — OCR không khả dụng" |
@@ -971,7 +985,7 @@ graph TB
 | PostgreSQL connections | RDS DatabaseConnections | > 80% max_connections | Email notify dev team |
 | EC2 CPU high | CPUUtilization | > 85% sustained 10 phút | Email notify IT/DevOps |
 | EC2 disk usage | disk_used_percent | > 80% | Email notify IT/DevOps |
-| Circuit Breaker Open | Custom metric (log từ Chat Service) | Circuit state = Open | Email notify dev team |
+| Circuit Breaker Open | Custom metric (log từ Query Service) | Circuit state = Open | Email notify dev team |
 
 **Application Error Tracking (Phase 1 — Sentry):**
 - FastAPI exception handler → Sentry SDK (`sentry_sdk.init(dsn=...)`) — capture tất cả unhandled 500 errors với full stack trace.
@@ -1006,8 +1020,8 @@ ssh -i key.pem ubuntu@<ec2-public-ip>
 # Kiểm tra container status
 docker compose ps
 
-# Xem log service lỗi (ví dụ chat-service)
-docker compose logs --tail=100 chat-service
+# Xem log service lỗi (ví dụ query-service)
+docker compose logs --tail=100 query-service
 
 # Kiểm tra disk + memory
 df -h && free -h
@@ -1047,7 +1061,8 @@ docker compose up -d
 
 # Smoke test health endpoints
 curl http://localhost:8000/health   # User Service
-curl http://localhost:8001/health   # Chat Service
+curl http://localhost:8001/health   # Ingest Service
+curl http://localhost:8002/health   # Query Service
 curl http://localhost:8002/health   # RAG Service
 
 # Chạy 10 câu hỏi mẫu để confirm end-to-end hoạt động
@@ -1088,8 +1103,8 @@ Kết quả ghi vào DR Drill Report. Nếu RTO vượt 4h → tối ưu runbook
 | Score Threshold | Ngưỡng similarity tối thiểu (0.7). Dưới ngưỡng → fallback, không gọi LLM. |
 | Fallback Rate | % câu hỏi bị từ chối do retrieval score < threshold. Target 10–20%. |
 | Semantic Cache | Cache dựa trên cosine similarity của câu hỏi. TTL 1 giờ. Redis key: `semantic_cache:{query_hash}`. |
-| BackgroundTasks | Cơ chế xử lý bất đồng bộ của FastAPI. Ingestion chạy nền sau khi API trả về 202 Accepted. |
-| Microservices | Kiến trúc backend chia thành nhiều service độc lập, mỗi service deploy riêng, giao tiếp qua API. Project này dùng 3 backend services: User Service + Chat Service + RAG Service. |
+| NATS | Lightweight message broker (port 4222). Hỗ trợ publish/subscribe (async ingestion) và request-reply (sync retrieval). RAG Worker subscribe các subjects, không expose HTTP. |
+| Microservices | Kiến trúc backend chia thành nhiều service độc lập. Project này dùng 4 components: User Service + Ingest Service + Query Service + RAG Worker. Giao tiếp qua HTTP REST (user-facing) và NATS (internal async + request-reply). |
 | SSE | Server-Sent Events – cơ chế streaming response từ FastAPI về Next.js. |
 | JWT | JSON Web Token – chuẩn xác thực stateless. Token chứa user_id và role. |
 | DSR | Data Subject Request – yêu cầu của chủ thể dữ liệu về quyền truy xuất/xóa dữ liệu cá nhân. |
