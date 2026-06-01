@@ -17,6 +17,7 @@
 |-----------|--------------|-------------|---------------|
 | Phase 1 – MVP + Cloud Deploy | Tuần 1–3 | Core RAG pipeline, OCR, auth (email/password + Microsoft SSO), guardrails, Redis, full AWS deploy | 🔨 Đang làm |
 | Phase 1.5 – Evaluation Checkpoint | Cuối tuần 3 | Chạy RAGAS, đo latency, quyết định tiếp tục Phase 2 hay tune thêm | ⏳ Chờ |
+| Phase 1.5 – Evaluation Checkpoint | Cuối tuần 3 | Chạy RAGAS (5 metrics), load test, quyết định tiếp tục Phase 2 hay tune thêm | ⏳ Chờ |
 | Phase 2 – Cải tiến & Tích hợp | Tuần 4–5 | Admin Dashboard nâng cao, Knowledge Gap Detection, Microsoft Teams Bot, Semantic Cache | ⏳ Chờ |
 
 ---
@@ -351,7 +352,7 @@ graph LR
 | 7 | Fallback – Không có thông tin | Nếu retrieval score < 0.7 → trả về "Không tìm thấy thông tin trong tài liệu nội bộ". Không gọi LLM – tiết kiệm cost, tránh hallucination. | ✅ MVP |
 | 8 | Conversation History – Multi-turn | Lưu lịch sử hội thoại theo từng user. Summary Buffer: LLM tóm tắt các turns cũ, giữ 5 turns gần nhất verbatim. Câu hỏi sau luôn hiểu đủ ngữ cảnh mà không tốn nhiều token. | ✅ MVP |
 | 9 | Authentication | Login bằng email/password hoặc Microsoft Account (SSO via Azure AD). JWT token TTL 8 giờ, blacklist trong Redis khi logout. 2 role: Admin và End User. | ✅ MVP |
-| 10 | Admin Dashboard | Xem danh sách tài liệu đã index (trạng thái, ngày upload, số chunk). Xem và xử lý Pending documents queue (Approve / Reject kèm lý do). Xem ingestion status real-time. Upload và xóa tài liệu. Xem usage metrics cơ bản. | ✅ MVP |
+| 10 | Admin Dashboard | **MVP:** Xem danh sách tài liệu đã index (trạng thái, ngày upload, số chunk). Xem và xử lý Pending documents queue (Approve / Reject kèm lý do). Xem ingestion status real-time. Upload và xóa tài liệu. Xem usage metrics cơ bản. **Phase 2:** Tổng số câu hỏi theo ngày/tuần, tỉ lệ feedback tốt/xấu, top 10 câu hỏi được hỏi nhiều nhất, danh sách câu hỏi bot không trả lời được (retrieval score < 0.7 — dùng để phát hiện Knowledge Gap). | ✅🔄 MVP + Phase 2 |
 | 11 | Feedback Loop | Người dùng đánh giá câu trả lời (thumbs up/down). Lưu vào PostgreSQL và sync lên Langfuse để phân tích chất lượng. | ✅ MVP |
 | 12 | Langfuse Observability | Trace toàn bộ LLM pipeline. Dashboard latency, token cost, RAGAS scores, feedback. IT/DevOps dùng để monitor và debug. | ✅ MVP |
 | 13 | Semantic Cache | Cache câu hỏi tương tự (cosine similarity > 0.95). TTL 1 giờ. Tiết kiệm ~60% API cost. | 🔄 Phase 2 |
@@ -368,6 +369,7 @@ graph LR
 
 | 15 | SSO – Microsoft Account | Đăng nhập bằng Microsoft Account (Azure AD via msal). Cùng hệ sinh thái với Microsoft Teams Bot Phase 2. Phase 3 có thể bổ sung MFA bắt buộc và Conditional Access policy cho Admin. | ✅ Phase 1 |
 | 16 | Multi-Agent Architecture | Upgrade từ Single Agent lên Multi-Agent nếu có nhu cầu xử lý câu hỏi phức tạp đa nguồn. | 📋 Phase 4 |
+| 17 | Microsoft Teams Bot Integration | Nhân viên hỏi bot trực tiếp trong Teams (DM hoặc mention trong channel), không cần mở tab mới. Kỹ thuật: `botbuilder-python` (Microsoft Bot Framework) — cùng hệ sinh thái Azure AD đã dùng cho SSO. | 🔄 Phase 2 |
 
 ### Feature 14 — Định nghĩa 4 cấp phân loại tài liệu
 
@@ -521,14 +523,64 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 | 14 | PostgreSQL | Lưu conversation turn: user_id, question, answer, sources, latency, timestamp. | Conversation record |
 | 15 | Next.js | Hiển thị streaming response + citation + nút feedback cho user. | Rendered UI |
 
-> **RAGAS Evaluation (Phase 2 — Offline, không real-time):**
-> Phase 1 chỉ collect trace data (latency, token, retrieved chunks, scores). RAGAS chạy offline trong Phase 2 bằng cách:
+> **RAGAS Evaluation (Phase 1.5 — Offline, cuối tuần 3):**
+> Phase 1 chỉ collect trace data (latency, token, retrieved chunks, scores). RAGAS chạy offline trong Phase 1.5 (cuối tuần 3) bằng cách:
 > 1. Lấy sample queries từ Langfuse trace
-> 2. Chuẩn bị ground truth thủ công (~50–100 câu hỏi + đáp án đúng)
-> 3. Chạy RAGAS pipeline đo 4 metrics: Faithfulness, Answer Relevancy, Context Precision, Context Recall
+> 2. Chuẩn bị ground truth thủ công (~20–30 câu hỏi + đáp án đúng)
+> 3. Chạy RAGAS pipeline đo 5 metrics: Faithfulness, Answer Relevancy, Context Precision, Context Recall, Answer Correctness
 > 4. Kết quả hiển thị trên Langfuse dashboard
 >
 > RAGAS chỉ áp dụng cho Query flow — không áp dụng cho Ingestion flow.
+
+## 5.3 Evaluation Criteria — Phase 1.5 (Cuối tuần 3)
+
+> Đây là ngưỡng production tối thiểu. Nếu không đạt → investigate và tune trước khi tiếp tục Phase 2.
+
+### Nhóm 1 — RAG Quality (RAGAS framework)
+
+| Chỉ số | Ý nghĩa | Ngưỡng production |
+|--------|---------|------------------|
+| **Faithfulness** | Bot có bịa thông tin không có trong tài liệu không? | **≥ 0.90** |
+| **Answer Relevance** | Câu trả lời có đúng trọng tâm câu hỏi không? | **≥ 0.85** |
+| **Context Precision** | Chunks retrieve về có đúng không, hay lấy về nhiều đoạn rác? | **≥ 0.80** |
+| **Context Recall** | Bot có tìm đúng đoạn tài liệu liên quan không? | **≥ 0.80** |
+| **Answer Correctness** | Câu trả lời có đúng so với đáp án chuẩn (ground truth) không? | **≥ 0.80** |
+
+### Nhóm 2 — Performance
+
+| Chỉ số | Ý nghĩa | Ngưỡng production |
+|--------|---------|------------------|
+| **First token latency** | Thời gian đến khi streaming bắt đầu xuất hiện | **< 2 giây** |
+| **P95 response latency** | 95% câu hỏi trả lời xong trong bao lâu | **< 8 giây** |
+| **Concurrent users** | Bao nhiêu người dùng cùng lúc mà không giật lag | **≥ 50 users** |
+
+### Nhóm 3 — Safety & Reliability
+
+| Chỉ số | Ý nghĩa | Ngưỡng production |
+|--------|---------|------------------|
+| **Hallucination rate** | % câu trả lời có thông tin bịa không có trong nguồn | **< 5%** |
+| **Graceful rejection rate** | Khi không có tài liệu liên quan, bot có nói "không biết" không? | **≥ 95%** |
+| **Access control accuracy** | Bot có trả nhầm tài liệu restricted cho người không có quyền không? | **100%** |
+
+### Nhóm 4 — Business Metrics
+
+| Chỉ số | Ý nghĩa | Ngưỡng mục tiêu |
+|--------|---------|----------------|
+| **User satisfaction rate** | % câu hỏi được thumbs up | **≥ 70%** |
+| **Answerable rate** | % câu hỏi bot trả lời được (không phải "không tìm thấy") | **≥ 80%** |
+| **Weekly active users** | Số người dùng trong 1 tuần / tổng nhân viên | **≥ 30%** |
+
+**Kết quả evaluation quyết định bước tiếp theo:**
+
+```
+Nhóm 1–2 đạt ngưỡng? ──Yes──→ Tiếp tục Phase 2 bình thường
+      ↓ No
+Investigate nguyên nhân:
+  - Faithfulness thấp → prompt engineering, giảm hallucination
+  - Context score thấp → tune chunk size / overlap / top-k
+  - Latency cao → optimize embedding batch, caching
+  - Vẫn không cải thiện → thử Hybrid Search (dense + BM25 keyword)
+```
 
 ---
 
@@ -542,7 +594,7 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 - Loại hạ tầng: **Cloud (AWS ap-southeast-1 Singapore)** — toàn bộ stack trên AWS, không dùng dịch vụ bên ngoài.
 - Network Topology: EC2 trong Public Subnet với Security Group chặt. RDS trong Private Subnet, chỉ EC2 truy cập được.
 - Entry từ Internet: HTTPS → Nginx (EC2) → route theo path: `/` → Next.js frontend, `/api/*` → backend services.
-- Các server / container: 1 EC2 t3.medium chạy Docker Compose với 6 containers: nginx + next-frontend + User Service + Chat Service + RAG Service + Qdrant + Langfuse.
+- Các server / container: 1 EC2 t3.medium chạy Docker Compose với 9 containers: nginx, next-frontend, User Service, Chat Service, RAG Service, Qdrant, Redis, Langfuse, PostgreSQL.
 - Mapping service/module → node: User Service (port 8000) + Chat Service (port 8001) + RAG Service (port 8002) trên EC2. RDS/S3 là managed cloud services. Phase 3 tách sang ECS Fargate 3 Task riêng.
 - Database: RDS PostgreSQL Single-AZ (MVP), S3 với versioning.
 - Quản lý truy cập: SSH vào EC2 chỉ từ IP cố định (port 22). AWS Secrets Manager inject API Keys runtime.
@@ -793,6 +845,7 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 | Faithfulness | RAGAS metric: đo mức độ câu trả lời dựa trên context tìm được, không tự sáng tạo thêm thông tin. |
 | Context Precision | RAGAS metric: % chunks retrieved thật sự liên quan đến câu hỏi. |
 | Context Recall | RAGAS metric: % thông tin cần thiết có trong retrieved chunks. |
+| Answer Correctness | RAGAS metric: đo mức độ câu trả lời đúng so với đáp án chuẩn (ground truth). Target ≥ 0.80. |
 | Langfuse | Open-source LLM observability platform. Trace LLM pipeline, đo latency, token cost, RAGAS scores. |
 | OCR | Optical Character Recognition – nhận diện ký tự từ ảnh hoặc PDF scan. MVP dùng Azure Document Intelligence (PDF scan) + PyMuPDF (PDF có text layer). |
 | CER | Character Error Rate – % ký tự bị nhận sai khi OCR. Target < 5%. |
