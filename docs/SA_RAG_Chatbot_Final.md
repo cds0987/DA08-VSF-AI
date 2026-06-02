@@ -162,11 +162,15 @@ graph TB
         RERANK["BGE-Reranker-v2-m3"]
     end
 
-    subgraph RAG_SVC["RAG Service - Container 3"]
+    subgraph RAG_WRK["RAG Worker - Container 4 (NATS subscriber)"]
         QUERY["Query Retrieval"]
         INGEST["Ingestion Module"]
         OCR["OCR Module"]
         LFI["Langfuse Integration"]
+    end
+
+    subgraph NATS_BRK["NATS Broker - Container 5"]
+        NATS[("NATS :4222")]
     end
 
     subgraph AWS_STORAGE["AWS — Storage & Self-hosted"]
@@ -189,8 +193,10 @@ graph TB
     UI --> ORCH
     ORCH --> CONV
     ORCH --> AOAI
-    ORCH -- "HTTP REST" --> QUERY
-    ORCH -- "HTTP REST" --> INGEST
+    ORCH -- "NATS request-reply rag.search" --> NATS
+    NATS -- "subscribe rag.search" --> QUERY
+    DOCMGMT -- "NATS publish doc.ingest" --> NATS
+    NATS -- "subscribe doc.ingest" --> INGEST
     QUERY --> QDRANT
     QUERY --> BGE
     QUERY --> LFI
@@ -237,10 +243,11 @@ graph LR
     PP --> NORM
     MD --> NORM
 
-    NORM --> CHUNK["Section-based Chunking (theo heading hierarchy)"]
-    CHUNK --> CAP["Generate Caption (AI hoặc heuristic từ heading)"]
-    CAP --> EMBED["BGE-M3 Embedding Service (self-hosted)"]
-    EMBED -->|Store vectors| QD[("Qdrant (self-hosted on AWS)")]
+    NORM --> ART["Write Canonical Artifact\nMarkdown → S3 artifacts/{doc_id}.md"]
+    ART --> CHUNK["Section-based Chunking (theo heading hierarchy)"]
+    CHUNK --> CAP["Generate Caption per section\n(AI summary — khử vocab mismatch)\nfallback: heuristic từ heading"]
+    CAP --> EMBED["BGE-M3 Embed caption\n(KHÔNG embed raw content)\n→ vector [1024 dims]"]
+    EMBED -->|"vector = embedding(caption)\npayload = full content + lineage"| QD[("Qdrant (self-hosted on AWS)")]
     EMBED -->|Store metadata| PGM[("PostgreSQL")]
 ```
 
@@ -294,7 +301,7 @@ graph LR
 | 5 | Query Module | Nhận query + allowed_doc_ids từ Query Service (qua NATS request-reply), embed câu hỏi, hybrid search Qdrant với document_ids filter, filter score threshold. Không rerank — Query Service tự rerank sau khi nhận kết quả. | ✅ MVP |
 | 6 | Auth Module | Simple JWT authentication. 2 role: Admin và End User. | ✅ MVP |
 | 7 | Conversation Module | Lưu/đọc lịch sử hội thoại từ PostgreSQL. Summary Buffer: LLM tóm tắt các turns cũ thành summary, giữ 5 turns gần nhất verbatim — hiểu đủ ngữ cảnh mà không tốn nhiều token. | ✅ MVP |
-| 8 | Embedding Service | BGE-M3 Embedding Service (self-hosted trên AWS EC2). 1024 dims. Dùng cho cả ingestion và query. | ✅ MVP |
+| 8 | Embedding Service | BGE-M3 Embedding Service (self-hosted trên AWS EC2). 1024 dims. **Ingestion:** embed **caption** của section (không embed raw content) → vector phản ánh ý nghĩa nén. **Query:** embed câu hỏi bằng cùng model/dimension — lệch model = lệch không gian vector = recall vô nghĩa. | ✅ MVP |
 | 9 | LLM Service | Azure OpenAI GPT-4o Mini. Hỗ trợ streaming response. Data trong Azure tenant. | ✅ MVP |
 | 10 | Langfuse Integration | Trace 2 luồng riêng biệt — (1) Ingestion trace: parse time, chunk count, embed time, error rate. (2) Query trace: latency từng bước, token cost, retrieved chunks + scores, feedback. RAGAS evaluation chạy offline Phase 1.5 (cuối tuần 3) trên Query trace data. | ✅ MVP |
 | 11 | Vector DB (Qdrant (self-hosted on AWS)) | Lưu và tìm kiếm vector embedding. Metadata filtering theo document. | ✅ MVP |
@@ -447,13 +454,13 @@ flowchart TB
 
 | **STT** | **Endpoint** | **From** | **To** | **Method** | **Data** |
 |--------|-------------|---------|-------|-----------|---------|
-| 1 | BGE-M3 Embedding Service | RAG Service / Ingestion + Query Module | BGE-M3 (self-hosted trên AWS EC2) | HTTP nội bộ (VPC) – Sync | Child chunk text → vector [1024 dims]. Không gọi external API. Retry 3 lần khi timeout. |
+| 1 | BGE-M3 Embedding Service | RAG Worker / Ingestion + Query Module | BGE-M3 (self-hosted trên AWS EC2) | HTTP nội bộ (VPC) – Sync | Child chunk text → vector [1024 dims]. Không gọi external API. Retry 3 lần khi timeout. |
 | 2 | Azure OpenAI Chat Completion API | Query Service / LLM Orchestration | Azure OpenAI GPT-4o Mini | HTTPS/TLS – Sync, Streaming | Full prompt → streaming tokens. Data ở trong Azure tenant. API Key qua Secrets Manager. |
-| 3 | Azure Document Intelligence API | RAG Service / OCR Module | Azure Document Intelligence | HTTPS/TLS – Sync | PDF scan image → extracted text + layout. Chỉ gọi khi phát hiện PDF scan. |
-| 3b | PyMuPDF | RAG Service / OCR Module | Local processing (không gọi API) | In-process | PDF có text layer → extract text trực tiếp. Nhanh, miễn phí. |
-| 4 | Qdrant REST API | RAG Service / Query + Ingestion Module | Qdrant (self-hosted on AWS) | HTTPS / REST | Upsert vectors khi ingest (payload: section_id, document_id, classification, heading_path). Hybrid search Top-K=20 (vector + BM25 via RRF) với document_ids filter khi query. API Key auth. |
+| 3 | Azure Document Intelligence API | RAG Worker / OCR Module | Azure Document Intelligence | HTTPS/TLS – Sync | PDF scan image → extracted text + layout. Chỉ gọi khi phát hiện PDF scan. |
+| 3b | PyMuPDF | RAG Worker / OCR Module | Local processing (không gọi API) | In-process | PDF có text layer → extract text trực tiếp. Nhanh, miễn phí. |
+| 4 | Qdrant REST API | RAG Worker / Query + Ingestion Module | Qdrant (self-hosted on AWS) | HTTPS / REST | Upsert vectors khi ingest (payload: section_id, document_id, classification, heading_path). Hybrid search Top-K=20 (vector + BM25 via RRF) với document_ids filter khi query. API Key auth. |
 | 5 | RDS PostgreSQL | User Service / Ingest Service / Query Service / RAG Worker | AWS RDS PostgreSQL 15 | TCP/SSL | User Service: user data. Ingest Service: document metadata. Query Service: conversation history. RAG Worker: audit log. SSL required. |
-| 6 | AWS S3 SDK | RAG Service / Ingestion Module | AWS S3 (Private Bucket) | HTTPS / S3 SDK | PUT file gốc khi ingest. GET để xử lý. IAM Role-based access. |
+| 6 | AWS S3 SDK | RAG Worker / Ingestion Module | AWS S3 (Private Bucket) | HTTPS / S3 SDK | PUT file gốc khi ingest. GET để xử lý. IAM Role-based access. |
 | 7 | Langfuse SDK | Query Service + RAG Worker | Langfuse (self-hosted on AWS) | HTTP nội bộ (VPC) | Query Service: LLM trace. RAG Worker: ingestion + retrieval trace. Trace data không ra ngoài AWS. |
 | 8 | Frontend → Ingest Service | Next.js (AWS EC2) | Ingest Service (EC2) | HTTPS | REST API cho document management (Admin only). Nginx route /api/ingest → ingest-service:8001. |
 | 8b | Frontend → Query Service | Next.js (AWS EC2) | Query Service (EC2) | HTTPS + SSE | REST API cho chat/query. Server-Sent Events cho streaming response. Nginx route /api/query → query-service:8002. |
@@ -499,7 +506,7 @@ flowchart LR
     NATS -->|"subscribe → ingest"| RAG
     RAG -->|"read file"| S3
     RAG -->|"PDF scan"| OCR
-    RAG -->|"section text (batch)"| BGE
+    RAG -->|"caption (batch)"| BGE
     BGE -->|"vectors [1024d]"| QD
     RAG -->|"doc metadata, status=indexed"| PG
     RAG -->|"publish doc.status"| NATS
@@ -541,10 +548,11 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Ingestion Pipel
 | 5 | RAG Worker | Subscribe `doc.ingest` — nhận message, cập nhật status → `processing`, đọc file từ S3. | File binary từ S3 |
 | 6 | OCR Module | Auto-detect PDF type: có text layer → PyMuPDF (local). Không có text layer → Azure Document Intelligence OCR. DOCX → python-docx. Excel → openpyxl, convert rows sang text có header. CSV → pandas. PPTX → python-pptx, extract text từng shape. Markdown → parse theo heading. | Raw text + metadata |
 | 7 | Ingestion Module | Normalize tiếng Việt: Unicode NFC, fix encoding, collapse whitespace. | Cleaned text |
-| 8 | Ingestion Module | Section-based Chunking theo heading hierarchy: PDF/DOCX/MD → theo heading; TXT → theo paragraph; XLSX → Header+RowGroup; CSV → Row-as-Document; PPTX → Slide-as-Section. Mỗi section là một đơn vị độc lập — không chia parent/child. | List of `{ section_id, section_content (Markdown), heading_path }` |
-| 8b | Ingestion Module | Generate caption cho mỗi section: thử dùng LLM nếu có, fallback về heuristic từ heading đầu tiên của section. | section_id → caption |
-| 9 | Embedding Service | Gọi BGE-M3 Embedding Service (self-hosted), batch embed section_content. | Section text → vector [1024 dims] |
-| 10 | Qdrant (self-hosted on AWS) | Upsert vectors với payload: section_id, document_id, document_name, caption, heading_path, source_s3_uri, markdown_s3_uri, classification, ocr_confidence. | Vector + payload |
+| 7b | Ingestion Module | Ghi **canonical Markdown artifact** vào S3 prefix ổn định `artifacts/{document_id}.md`. Đây là source-of-truth sau parse — downstream (split/caption/embed) chỉ đọc artifact này, không đọc lại raw bytes. Cho phép replay embedding/splitting mà không OCR lại. | `artifact_s3_uri` |
+| 8 | Ingestion Module | Section-based Chunking theo heading hierarchy: PDF/DOCX/MD → theo heading; TXT → theo paragraph; XLSX → Header+RowGroup; CSV → Row-as-Document; PPTX → Slide-as-Section. Mỗi section là một đơn vị độc lập — không chia parent/child. `section_id` = deterministic `f(document_id, section_order)` — KHÔNG dùng content_hash làm id (OCR/LLM không byte-deterministic). | List of `{ section_id, content (Markdown full text), heading_path, content_hash }` |
+| 8b | Ingestion Module | Generate **caption** cho mỗi section: tóm tắt nén ý nghĩa để giải quyết vocabulary mismatch giữa câu hỏi tự nhiên và văn phong tài liệu. Thử dùng LLM trước, fallback về heuristic từ heading đầu tiên. Lưu kèm `caption_model`, `prompt_version`, `caption_hash` để biết khi nào cần re-embed. | `{ section_id, caption, caption_model, prompt_version }` |
+| 9 | Embedding Service | Gọi BGE-M3 Embedding Service (self-hosted), batch embed **caption** (KHÔNG embed raw content). Vector phản ánh ý nghĩa nén của section — search khớp ý định câu hỏi thay vì khớp từ ngữ tài liệu. | caption → vector [1024 dims] |
+| 10 | Qdrant (self-hosted on AWS) | Upsert vectors: `vector = embedding(caption)`. Payload chứa đủ để dựng response mà không cần query lại DB: `section_id`, `document_id`, `document_name`, `caption`, `content` (full section text), `heading_path`, `lineage.artifact_s3_uri`, `lineage.source_s3_uri`, `classification`, `ocr_confidence`. | `vector` + full payload (contract cứng — không bỏ field) |
 | 11 | PostgreSQL | Lưu document record: tên, S3 key, số section, status: `indexed`. | Document record |
 | 12 | Langfuse | Log ingestion metrics: parse_time, chunk_count, embed_time, total_latency, status (success/failed). Error message nếu thất bại. | Ingestion trace data |
 | 13 | RAG Worker | Publish NATS subject `doc.status` với `{ doc_id, status: 'indexed' \| 'failed', error? }`. | NATS message |
@@ -567,11 +575,11 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 | 5 | Query Module | Normalize tiếng Việt cho query. Embed bằng BGE-M3 Embedding Service (self-hosted). | Query vector [1024 dims] |
 | 4b | Query Service | Query PostgreSQL `rag_svc.documents` → lấy `allowed_doc_ids` theo role/department của user. Cache kết quả trong Redis TTL ~60s. `None` nếu user chỉ có quyền public (fail-secure). | allowed_doc_ids list |
 | 5b | Query Module | Query Rewriting: LLM sinh 3 variations của câu hỏi gốc → hybrid search cả 3 → kết hợp kết quả bằng Reciprocal Rank Fusion (RRF). Top-20 candidates. | 3 query variants + merged Top-20 results |
-| 6 | RAG Worker / Qdrant | Query Service publish NATS request `rag.search` với `{ query_vector, document_ids, top_k: 20 }`. RAG Worker hybrid search Qdrant (vector + BM25), filter `document_ids`, reply kết quả. Top-K=20 candidates vượt ngưỡng score 0.5. | List of `{ section_id, section_content, caption, heading_path, score, ... }` |
+| 6 | RAG Worker / Qdrant | Query Service publish NATS request `rag.search` với `{ query_vector, document_ids, top_k: 20 }`. RAG Worker hybrid search Qdrant (vector + BM25 via RRF), filter `document_ids`, reply kết quả. Top-K=20 candidates vượt ngưỡng score 0.5. **Lưu ý:** vector search khớp theo embedding(caption) — hybrid BM25 trên full content bù rủi ro caption bỏ sót chi tiết quan trọng. | List of `{ section_id, content (full text), caption, heading_path, lineage.source_s3_uri, score }` |
 | 7 | Query Service | Kiểm tra score threshold: max score < 0.7 → trả fallback, không gọi LLM. | "Không tìm thấy thông tin trong tài liệu nội bộ" |
-| 7b | Query Service / BGE-Reranker-v2-m3 | Rerank Top-20 sections theo độ liên quan với query gốc. Trả về Top-3 sections để đưa vào LLM prompt. | Top-3 section_content (Markdown) |
+| 7b | Query Service / BGE-Reranker-v2-m3 | Rerank Top-20 sections theo độ liên quan với query gốc bằng **full content** (cross-encoder). Trả về Top-3 sections để đưa vào LLM prompt. Rerank bù thêm rủi ro caption-only miss. | Top-3 `{ content (Markdown full text), lineage.source_s3_uri, heading_path }` |
 | 8 | PostgreSQL | Lấy conversation context: summary các turns cũ + 5 turns gần nhất verbatim (Summary Buffer). | Conversation context |
-| 9 | Query Module | Build prompt: System prompt + Conversation context + Top-3 section_content (Markdown) + Question. | Full prompt (~2000–4000 tokens) |
+| 9 | Query Module | Build prompt: System prompt + Conversation context + Top-3 section `content` (Markdown full text) + Question. Caption không đưa vào prompt — caption chỉ dùng cho vector search, LLM cần full content để grounding chính xác. | Full prompt (~2000–4000 tokens) |
 | 10 | LLM Service | Gọi Azure OpenAI GPT-4o Mini streaming. Buffer full response trước khi qua Output Guardrail. | Full response text |
 | 11 | **Output Guardrail** (llm-guard) | Scan output: PII detection — redact nếu phát hiện thông tin cá nhân người khác. | Cleaned response |
 | 12 | FastAPI | Forward response đã clean về frontend qua SSE streaming. | Streaming tokens |
@@ -774,7 +782,7 @@ graph TB
 | Backend | Python 3.11 – FastAPI | Async native, hệ sinh thái AI/ML tốt nhất, phát triển nhanh. |
 | Architecture | Microservices + Event-driven (NATS) | User Service + Ingest Service + Query Service + RAG Worker. HTTP REST cho user-facing. NATS cho internal async (ingestion) và request-reply (retrieval). JWT verify locally bằng shared secret. Mỗi service dùng Clean Architecture nội bộ. |
 | LLM Orchestration | LlamaIndex | RAG-focused, ít boilerplate hơn LangChain, dễ học. |
-| Embedding Model | BGE-M3 (self-hosted trên AWS EC2) | Không gọi API ngoài, 1024 dims, đa ngôn ngữ tốt, zero latency khi scale nội bộ. Dùng trong RAG Service (ingestion + query). |
+| Embedding Model | BGE-M3 (self-hosted trên AWS EC2) | Không gọi API ngoài, 1024 dims, đa ngôn ngữ tốt, zero latency khi scale nội bộ. Dùng trong RAG Worker (ingestion + query retrieval). |
 | Reranking Model | BGE-Reranker-v2-m3 (self-hosted, trong Query Service) | Cross-encoder rerank Top-20 sections → Top-3 trước khi đưa vào LLM prompt. Thuộc Query Service — AI Engineer implement trong `RerankService`. |
 | LLM | Azure OpenAI GPT-4o Mini | Data trong Azure tenant, không đi qua OpenAI public API. Đảm bảo compliance cho doanh nghiệp. |
 | OCR PDF scan | Azure Document Intelligence | Bảo mật (trong Azure tenant), chất lượng cao cho tiếng Việt, hỗ trợ bảng + layout phức tạp. |
@@ -973,7 +981,7 @@ graph TB
 > - **Observability** (Langfuse): fail silently — không được kill request chính
 > - **Cache / Rate limit** (Redis): fail-open — service degraded nhưng vẫn hoạt động
 > - **Retry có chi phí** (Azure OpenAI): không retry, log và fail ngay
-> - **Dependent service** (RAG Service, Qdrant): Circuit Breaker, fail-fast sau ngưỡng
+> - **Dependent service** (RAG Worker, Qdrant): Circuit Breaker, fail-fast sau ngưỡng
 
 ## 7.5 Monitoring & Alerting
 
@@ -1063,7 +1071,7 @@ docker compose up -d
 curl http://localhost:8000/health   # User Service
 curl http://localhost:8001/health   # Ingest Service
 curl http://localhost:8002/health   # Query Service
-curl http://localhost:8002/health   # RAG Service
+# RAG Worker không expose HTTP — monitor qua NATS health + Langfuse trace
 
 # Chạy 10 câu hỏi mẫu để confirm end-to-end hoạt động
 ```
