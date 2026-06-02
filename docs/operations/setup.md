@@ -66,7 +66,7 @@ cp src/query-service/.env.example   src/query-service/.env
 cp src/rag-worker/.env.example      src/rag-worker/.env
 ```
 
-Xem đầy đủ nội dung từng file và hướng dẫn lấy API keys tại **[docs/env-setup.md](env-setup.md)**.
+Xem đầy đủ nội dung từng file và hướng dẫn lấy API keys tại **[env-setup.md](env-setup.md)**.
 
 > **Quan trọng:** `JWT_SECRET_KEY` phải giống nhau ở cả 4 services. Generate bằng `openssl rand -hex 32` rồi điền vào cả 4 file `.env`.
 >

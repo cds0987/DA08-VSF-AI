@@ -1,8 +1,8 @@
 # Domain Model — RAG Internal Chatbot
 
 > Tài liệu **nền nghiệp vụ** (WHAT + WHY). Nó đứng **trước** các tài liệu kỹ thuật
-> ([architecture.md](architecture.md), [contracts.md](contracts.md),
-> [data-schema.md](data-schema.md), [team-ownership.md](team-ownership.md)) — vốn trả lời **HOW**.
+> ([clean-architecture.md](../2-architecture/clean-architecture.md), [contracts.md](../3-technical/contracts.md),
+> [data-schema.md](../3-technical/data-schema.md), [team-ownership.md](../delivery/team-ownership.md)) — vốn trả lời **HOW**.
 >
 > Quy tắc đọc: mọi quyết định kỹ thuật (HOW) phải truy ngược được về một **quy tắc nghiệp vụ (WHY)**,
 > và mọi quy tắc nghiệp vụ phải truy ngược được về một **định nghĩa domain (WHAT)**.
@@ -401,7 +401,7 @@ WHAT  → "câu trả lời đúng" tùy người hỏi (office + level)
 WHY   → rò rỉ sai phạm vi = rủi ro #1 → mọi thiết kế phải bảo vệ điều này
   │
 HOW   → Scope-before-content, fail-secure default, Clean Architecture
-        (xem architecture.md, contracts.md, data-schema.md)
+        (xem 2-architecture/clean-architecture.md, 3-technical/contracts.md, 3-technical/data-schema.md)
 ```
 
 - **HOW không có WHY** → dev không biết khi nào tuyệt đối không được vi phạm quy tắc.

@@ -316,13 +316,13 @@ class TokenResponse(BaseModel):
 
 ## API Endpoint Spec
 
-> Đã tách ra file riêng: **[docs/api-spec.md](api-spec.md)**
+> Đã tách ra file riêng: **[api-spec.md](api-spec.md)**
 
 ---
 
 ## DB Schema
 
-> Đã tách ra file riêng: **[docs/data-schema.md](data-schema.md)**
+> Đã tách ra file riêng: **[data-schema.md](data-schema.md)**
 
 ---
 

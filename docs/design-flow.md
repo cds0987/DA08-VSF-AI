@@ -4,8 +4,8 @@
 > truy ngược về một lý do nghiệp vụ*. Đọc file này trước khi đọc bất kỳ tài liệu thiết kế nào khác.
 >
 > ⚠️ **Lưu ý trạng thái:** Các tài liệu kỹ thuật hiện có trong `docs/`
-> ([architecture.md](architecture.md), [contracts.md](contracts.md), [data-schema.md](data-schema.md),
-> [api-spec.md](api-spec.md), và phần kỹ thuật của [SA_RAG_Chatbot_Final.md](SA_RAG_Chatbot_Final.md))
+> ([clean-architecture.md](2-architecture/clean-architecture.md), [contracts.md](3-technical/contracts.md), [data-schema.md](3-technical/data-schema.md),
+> [api-spec.md](3-technical/api-spec.md), và phần kỹ thuật của [solution-architecture.md](2-architecture/solution-architecture.md))
 > đang được coi là **bản nháp lỗi** — sẽ đối soát lại với chuỗi này sau. Chuỗi dưới đây được dựng
 > **từ nghiệp vụ xuống**, không bị ràng buộc bởi thiết kế kỹ thuật hiện tại.
 
@@ -27,9 +27,9 @@ ma trận, thay vì một tai nạn trong production.
 | Tầng | Trả lời câu hỏi | Artifact | Tiền tố ID | File |
 |---|---|---|---|---|
 | **0. Requirement** | Nghiệp vụ cần gì? Ràng buộc gì? | Sổ đăng ký yêu cầu | `REQ-xx` | file này, §4 |
-| **1. Phân tích** | Domain gì? Context nào? Rủi ro nào? | DDD strategic | `CTX-x`, `RISK-x` | [domain-model.md](domain-model.md) §1, 3, 6 |
-| **2. Domain Model** | "Đúng" là gì? Quy tắc & lý do? | Ngôn ngữ chung, quy tắc, building blocks | `IA-x`, `HR-x`, `FL-x`, `KI-x`, `CV-x`, `IT-x` | [domain-model.md](domain-model.md) §2, 4, 5 |
-| **3. Architecture Mapping** ⭐ | Quy tắc nào do component nào thực thi? | Ma trận truy vết | `ARCH-xx` | [architecture-mapping.md](architecture-mapping.md) |
+| **1. Phân tích** | Domain gì? Context nào? Rủi ro nào? | DDD strategic | `CTX-x`, `RISK-x` | [domain-model.md](1-domain/domain-model.md) §1, 3, 6 |
+| **2. Domain Model** | "Đúng" là gì? Quy tắc & lý do? | Ngôn ngữ chung, quy tắc, building blocks | `IA-x`, `HR-x`, `FL-x`, `KI-x`, `CV-x`, `IT-x` | [domain-model.md](1-domain/domain-model.md) §2, 4, 5 |
+| **3. Architecture Mapping** ⭐ | Quy tắc nào do component nào thực thi? | Ma trận truy vết | `ARCH-xx` | [architecture-mapping.md](2-architecture/architecture-mapping.md) |
 | **4. Chi tiết kỹ thuật** | Schema / API / interface cụ thể? | DDL, endpoints, contracts | `TECH-xx` | *(sẽ làm lại sau khi 0–3 ổn định)* |
 
 > Tầng 2 đã có ID sẵn trong domain-model (`IA-1`, `HR-1`...). Chuỗi này **tái dùng**, không phát minh ID mới.
@@ -66,7 +66,7 @@ học được gì thì **quay lên sửa tầng trên**. Tầng dưới là nơ
 ## 4. Sổ đăng ký Requirement (Tầng 0)
 
 > Trích từ bài toán nghiệp vụ gốc (không từ tài liệu kỹ thuật). Mỗi REQ có ID để các tầng dưới trỏ về.
-> Cột **Context** cho biết yêu cầu thuộc bounded context nào (xem [domain-model §3](domain-model.md)).
+> Cột **Context** cho biết yêu cầu thuộc bounded context nào (xem [domain-model §3](1-domain/domain-model.md)).
 
 | ID | Yêu cầu nghiệp vụ | Context | Rule liên quan (tầng 2) |
 |---|---|---|---|
@@ -96,13 +96,14 @@ học được gì thì **quay lên sửa tầng trên**. Tầng dưới là nơ
 ## 5. Thứ tự đọc tài liệu
 
 ```
-design-flow.md (file này)  ← bản đồ, đọc đầu tiên
+design-flow.md (file này)        ← bản đồ, đọc đầu tiên
         │
         ▼
-domain-model.md            ← WHAT + WHY (tầng 1–2)
+1-domain/domain-model.md         ← WHAT + WHY (tầng 1–2)
         │
         ▼
-architecture-mapping.md    ← cầu nối WHY → HOW (tầng 3)
+2-architecture/                  ← cầu nối WHY → HOW (tầng 3)
+  architecture-mapping.md
         │
         ▼
 [tài liệu kỹ thuật]         ← HOW chi tiết (tầng 4) — làm lại sau

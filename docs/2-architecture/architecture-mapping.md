@@ -7,7 +7,7 @@
 > Tài liệu này **chưa nói tới schema/code/framework**. Nó chỉ trả lời: *"Quy tắc X do component nào
 > thực thi, và component đó còn thiếu không?"*. Chi tiết kỹ thuật là việc của tầng 4 (làm sau).
 >
-> ⚠️ Dựng **thuần từ [domain-model.md](domain-model.md)** — không tham chiếu các tài liệu kỹ thuật
+> ⚠️ Dựng **thuần từ [domain-model.md](../1-domain/domain-model.md)** — không tham chiếu các tài liệu kỹ thuật
 > hiện có (đang coi là bản nháp lỗi).
 
 ---
@@ -96,7 +96,7 @@ Bộ khung sau khớp đúng domain, khi lấp lỗ trên thì **tái dùng đư
 
 ## 4. Lát cắt dọc đầu tiên (để kiểm chứng chuỗi)
 
-> Theo quy tắc xoắn ốc trong [design-flow.md §3.2](design-flow.md). Chạy hết một lát mỏng xuyên 5 tầng
+> Theo quy tắc xoắn ốc trong [design-flow.md §3.2](../design-flow.md). Chạy hết một lát mỏng xuyên 5 tầng
 > trước khi nhân rộng.
 
 **Use case: "Nhân viên Hà Nội cấp nhân viên hỏi số ngày phép còn lại"**
