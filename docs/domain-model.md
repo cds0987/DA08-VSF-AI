@@ -62,7 +62,7 @@ vẫn hỏi IT cách reset VPN. Đó mới là domain.
 
 ### 1.4. Tổ chức công ty (ngữ cảnh cố định)
 
-- **Quy mô:** ~6000 nhân viên.
+- **Quy mô:** ~4000 nhân viên.
 - **Văn phòng:** **Hà Nội**, **Hồ Chí Minh** *(chỉ 2 văn phòng)*.
 - **Phòng ban:** HR, IT, Finance, Legal, Operations.
 - **Chính sách:** có thể khác nhau theo **văn phòng** và **cấp bậc**.
@@ -174,6 +174,65 @@ một bộ quy tắc nghiệp vụ riêng**. Khi một từ đổi nghĩa → đ
 | Finance/Legal | Compliance team | Legal / Finance |
 | Knowledge Ingestion | Platform team | Confluence admins |
 | Conversation | Product team | UX (không cần domain expert) |
+
+### 3.5. Context Map — quan hệ tích hợp giữa các context
+
+> Bounded Context không sống cô lập. Context Map mô tả **ai phụ thuộc ai** và **mỗi quan hệ
+> được bảo vệ thế nào**. Hai thuật ngữ then chốt:
+> - **Upstream (U)** = bên *cung cấp*, áp đặt mô hình của mình lên bên kia.
+> - **Downstream (D)** = bên *phụ thuộc*, phải chịu mô hình của upstream.
+> - **ACL (Anti-Corruption Layer)** = lớp dịch thuật, ngăn mô hình bẩn của upstream "rò" vào
+>   và làm hỏng ngôn ngữ của downstream.
+
+```
+                    ┌──────────────────────────┐
+   (nguồn ngoài)    │  IDENTITY & ACCESS  (U)   │
+   HRIS / AD ──ACL──▶│  nguồn sự thật về:        │
+                    │  ai, office, OrgLevel,    │
+                    │  Employment Status        │
+                    └──────────┬───────────────┘
+                               │ U (cung cấp Access Profile + Scope)
+            ┌──────────────┬───┴────────┬───────────────┐
+            ▼ D            ▼ D          ▼ D              ▼ D
+      ┌──────────┐  ┌──────────┐  ┌────────────┐  ┌──────────┐
+      │   HR     │  │   IT     │  │ FINANCE/   │  │ GENERAL  │
+      │ KNOWLEDGE│  │ SUPPORT  │  │  LEGAL     │  │          │
+      └────┬─────┘  └────┬─────┘  └─────┬──────┘  └────┬─────┘
+           │ D           │ D            │ D            │ D
+           └─────────────┴──────┬───────┴─────────────┘
+                                ▼ U (cung cấp tài liệu "đủ điều kiện")
+                    ┌──────────────────────────┐
+                    │  KNOWLEDGE INGESTION (U)  │
+   Confluence ─ACL─▶│  Source of Truth, Owner,  │
+   Slack/Teams ─ACL▶│  hiệu lực, phân loại      │
+                    └──────────────────────────┘
+
+      ┌──────────────────────────────────────────────┐
+      │  CONVERSATION / DELIVERY  (D với tất cả)      │
+      │  điều phối hỏi-đáp + Handoff, mù về nghiệp vụ │
+      └──────────────────────────────────────────────┘
+```
+
+#### Bảng quan hệ (đọc kèm sơ đồ)
+
+| Quan hệ | Kiểu | **Vì sao đặt như vậy** |
+|---|---|---|
+| Identity → HR / IT / Finance / General | **U → D** (Customer–Supplier) | Identity là **nguồn sự thật duy nhất** về "ai + scope". Mọi context nghiệp vụ *phụ thuộc* nó, không tự định nghĩa lại office/level. Tập trung hoá để tránh rò rỉ phạm vi (rủi ro #1). |
+| Ingestion → HR / IT / Finance / General | **U → D** (Customer–Supplier) | Ingestion cung cấp *tài liệu đủ điều kiện* (có owner, còn hiệu lực, là Source of Truth). Context nghiệp vụ chỉ *diễn giải*, không lo nguồn. |
+| **HRIS/AD → Identity** | **ACL bắt buộc** | Hệ thống nhân sự ngoài có mô hình riêng (mã nhân viên, cơ cấu phòng ban lạ). ACL dịch sang ngôn ngữ Identity, **không để cấu trúc ngoài rò vào** Core Domain. |
+| **Confluence/Slack/Teams → Ingestion** | **ACL bắt buộc** | Mỗi nguồn có định dạng & khái niệm "tài liệu" khác nhau; Slack còn lẫn chính thức với phi chính thức. ACL chuẩn hoá + gắn nhãn Source of Truth trước khi vào trong. |
+| Conversation → mọi context nghiệp vụ | **D** (Conformist) | Conversation *cố tình tuân theo* mô hình của context nghiệp vụ, không áp mô hình ngược lại. Nó mù về nghiệp vụ — đây là chủ ý, không phải thiếu sót. |
+| HR ↔ IT ↔ Finance | **Separate Ways** (tách hẳn) | Không chia sẻ mô hình. "Policy" mỗi bên một nghĩa (xem bảng "từ nguy hiểm"). Cố hợp nhất = tạo bug nghiệp vụ. |
+
+#### Ba điểm rút ra (định hướng kiến trúc về sau)
+
+1. **Identity & Access là upstream của tất cả** → nó phải được thiết kế & freeze *trước*. Nếu nó
+   sai, mọi context dưới đều rò rỉ phạm vi. Đây là lý do nó là Core và được team mạnh nhất giữ.
+2. **Hai nơi BẮT BUỘC có ACL** là hai cửa nối với thế giới ngoài: *HRIS/AD → Identity* và
+   *Confluence/Slack/Teams → Ingestion*. Mọi "bẩn" của hệ thống ngoài phải dừng ở đây, không rò
+   vào Core.
+3. **Conversation là downstream thuần** (Conformist) → giữ nó "ngu" về nghiệp vụ là *đúng thiết kế*.
+   Mọi cám dỗ nhét logic nghiệp vụ vào tầng chat đều là rò rỉ ranh giới.
 
 ---
 
