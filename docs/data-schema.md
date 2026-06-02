@@ -9,6 +9,18 @@ Mỗi service dùng PostgreSQL schema riêng trên cùng 1 RDS instance, tách b
 
 ---
 
+## Migration Strategy
+
+Schema được quản lý bằng **Alembic** — mỗi service có thư mục `alembic/` riêng.
+
+- Thêm column mới → tạo migration mới, không sửa DDL trực tiếp
+- `alembic upgrade head` — áp migration mới nhất
+- `alembic downgrade -1` — rollback 1 bước nếu cần
+
+> File DDL trong doc này là **tham chiếu** — source of truth là các file migration trong repo.
+
+---
+
 ## User Service — Schema `user_svc`
 
 ```sql
@@ -27,6 +39,18 @@ CREATE TABLE user_svc.users (
 );
 
 CREATE INDEX idx_users_email ON user_svc.users(email);
+
+CREATE TABLE user_svc.refresh_tokens (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID NOT NULL REFERENCES user_svc.users(id) ON DELETE CASCADE,
+    token_hash  VARCHAR(255) NOT NULL,                      -- bcrypt hash của raw refresh token
+    expires_at  TIMESTAMP WITH TIME ZONE NOT NULL,          -- now() + 7 days
+    revoked_at  TIMESTAMP WITH TIME ZONE,                   -- set khi logout hoặc rotate
+    created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_refresh_tokens_user ON user_svc.refresh_tokens(user_id);
+CREATE INDEX idx_refresh_tokens_hash ON user_svc.refresh_tokens(token_hash);
 ```
 
 ---
@@ -178,6 +202,6 @@ Collection name: `rag_chatbot`
 |-----|-------|-----|---------|
 | `blacklist:{jti}` | `"1"` | Còn lại của token (tối đa 8h) | JWT revocation — logout thật sự |
 | `rate_limit:{user_id}:{minute}` | request count | 60 giây | Throttle per-user, ví dụ max 20 req/phút |
-| `semantic_cache:{query_hash}` | JSON response | 1 giờ | Cache RAG response cho câu hỏi tương tự _(Phase 2)_ |
+| `semantic_cache:{query_hash}` | JSON response | 1 giờ | Cache RAG response cho câu hỏi tương tự |
 
 > `jti` = JWT ID — field unique trong mỗi token, thêm vào payload khi phát hành.

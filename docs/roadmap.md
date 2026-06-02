@@ -28,6 +28,7 @@ Không chỉ là một chatbot — mà là **hệ thống quản lý tri thức 
 - Giao diện chat: hỏi câu hỏi → bot trả lời + trích dẫn nguồn tài liệu
 - Admin duyệt/từ chối tài liệu trước khi đưa vào knowledge base
 - Guardrails: chặn prompt injection, lọc off-topic, redact PII trong output
+- Semantic Cache: cache câu hỏi tương tự (Redis TTL 1h), tiết kiệm ~60% Azure OpenAI API cost
 - Deploy lên AWS: EC2 + Docker Compose, RDS, S3, HTTPS qua Nginx
 
 **Definition of Done:**
@@ -49,6 +50,7 @@ _Upload & Ingestion_
 - [ ] Classification được enforce khi query — Top Secret chỉ uploader xem được, Internal chỉ nhân viên active, Public cho tất cả account
 
 _Q&A Chatbot_
+- [ ] Semantic Cache hoạt động — câu hỏi tương tự (cosine similarity > 0.95) trả kết quả từ cache Redis, không gọi Azure OpenAI
 - [ ] Hỏi câu hỏi → bot trả lời streaming (chữ xuất hiện dần, không đợi toàn bộ)
 - [ ] Mỗi câu trả lời kèm nguồn: tên tài liệu + số trang + đoạn văn bản được trích dẫn
 - [ ] Click vào nguồn → mở document viewer, nhảy đến đúng trang, highlight đúng đoạn text đó
@@ -191,11 +193,11 @@ Các phase này không nằm trong scope hiện tại nhưng cho thấy sản ph
 
 | Phase | Tính năng | Giá trị |
 |-------|-----------|---------|
-| **Phase 4** | Onboarding flow tự động | Nhân viên mới được bot dẫn qua checklist thay vì hỏi từng người |
-| **Phase 4** | REST API public | Hệ thống khác của công ty tích hợp vào chatbot |
-| **Phase 5** | GraphRAG / Multi-agent routing | Nếu standard RAG không đủ tốt cho câu hỏi phức tạp → nâng lên knowledge graph hoặc agent chuyên biệt (HR / IT / Finance) |
-| **Phase 5** | Vietnamese embedding optimization | Cải thiện độ chính xác với tài liệu tiếng Việt |
-| **Phase 5** | Auto re-index khi tài liệu cập nhật | Knowledge base luôn up-to-date |
+| **Phase 3** | Onboarding flow tự động | Nhân viên mới được bot dẫn qua checklist thay vì hỏi từng người |
+| **Phase 3** | REST API public | Hệ thống khác của công ty tích hợp vào chatbot |
+| **Phase 4** | GraphRAG / Multi-agent routing | Nếu standard RAG không đủ tốt cho câu hỏi phức tạp → nâng lên knowledge graph hoặc agent chuyên biệt (HR / IT / Finance) |
+| **Phase 4** | Vietnamese embedding optimization | Cải thiện độ chính xác với tài liệu tiếng Việt |
+| **Phase 4** | Auto re-index khi tài liệu cập nhật | Knowledge base luôn up-to-date |
 
 ---
 
@@ -213,6 +215,6 @@ Các phase này không nằm trong scope hiện tại nhưng cho thấy sản ph
 
 | Rủi ro | Xử lý |
 |--------|-------|
-| Phase 1 trễ → không đủ thời gian cho Phase 2–3 | Phase 2–3 độc lập, có thể làm song song sau khi core chat chạy được |
+| Phase 1 trễ → không đủ thời gian cho Phase 2 | Phase 2 độc lập, có thể làm song song sau khi core chat chạy được |
 | Bot trả lời sai, team mất tin tưởng | Phase 2 làm ngay sau Phase 1, không để người dùng thấy bot bịa |
 | Teams Bot integration phức tạp hơn dự kiến | Microsoft Bot Framework có document tốt; đã có Azure AD setup từ SSO nên auth dễ hơn — ước tính 2–3 ngày |
