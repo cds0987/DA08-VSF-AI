@@ -36,6 +36,7 @@ design-flow.md ............. 🗺️  Bản đồ — đọc đầu tiên
 | Bạn muốn biết… | Đọc |
 |---|---|
 | Trật tự đọc & cách truy vết | [design-flow.md](design-flow.md) |
+| Điều cần xác minh với expert (chặn HOW) | [open-questions.md](open-questions.md) |
 | Bài toán nghiệp vụ, thị trường | [0-requirements/problem-and-market.md](0-requirements/problem-and-market.md) |
 | Domain, ngôn ngữ chung, quy tắc + lý do | [1-domain/domain-model.md](1-domain/domain-model.md) |
 | Quy tắc nào do component nào thực thi (lỗ hổng) | [2-architecture/architecture-mapping.md](2-architecture/architecture-mapping.md) |

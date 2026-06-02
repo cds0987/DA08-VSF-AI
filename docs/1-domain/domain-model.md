@@ -360,6 +360,58 @@ một bộ quy tắc nghiệp vụ riêng**. Khi một từ đổi nghĩa → đ
 
 ---
 
+## 7. Decision Policy — sống chung với điều chưa biết
+
+> Domain này sẽ **luôn** có chỗ chưa biết (chính sách chưa chốt, tài liệu mâu thuẫn, câu hỏi ngoài dự
+> kiến). Vì vậy một phần *bản chất nghiệp vụ* là: hệ thống phải **biết khi nào mình không biết** và lúc
+> đó cư xử an toàn — thay vì đoán. Đây là WHY, không phải HOW.
+
+### 7.1. Nguyên tắc nền
+
+> **Không biết nghiệp vụ ≠ không phục vụ được. Nó nghĩa là phần đó KHÔNG được tự quyết (automate) —
+> phải hạ cấp an toàn (degrade): trả lời hẹp hơn, hoặc hỏi lại, hoặc chuyển người thật.**
+
+Hệ quả: "trả lời được mọi câu" **không** phải mục tiêu. Mục tiêu là *trả lời đúng phạm vi mình chắc, và
+xử lý an toàn phần còn lại*. Một câu "tôi chưa đủ căn cứ" đúng lúc là **thành công**, không phải thất bại.
+
+### 7.2. Năm chế độ trả lời (Answer Decision)
+
+> Trước khi sinh câu trả lời, hệ thống phải *quyết định có nên trả lời không, và ở mức nào*. Đây là một
+> quyết định nghiệp vụ, không phải kỹ thuật.
+
+| Chế độ | Khi nào | Ví dụ |
+|---|---|---|
+| **1. Direct Answer** | Nguồn rõ, quyền rõ, rủi ro thấp | "Quy trình xin nghỉ phép ở đâu?" |
+| **2. Qualified Answer** | Trả lời được nhưng phải kèm điều kiện/giả định/trích nguồn/disclaimer | "Theo HR Policy 2026, chính sách chung là…" |
+| **3. Clarification** | Thiếu một biến quan trọng để trả lời đúng | "Bạn hỏi phép của office nào?" |
+| **4. Escalation** | Rủi ro cao, hoặc cần quyết định của người | "Tôi sắp bị kỷ luật, công ty có quyền sa thải không?" → HR/Legal |
+| **5. Safe Refusal** | Thiếu quyền, hoặc thuộc Restricted Topic | "Bạn A nghỉ mấy ngày?" → từ chối |
+
+> Ánh xạ về invariant: chế độ 4–5 chính là hiện thực của HR-4, FL-3, CV-2 (chủ đề nhạy cảm → người thật)
+> và HR-3 (không lộ data người khác). Chế độ 2 hiện thực FL-2/FL-4 (disclaimer + grounding).
+
+### 7.3. Risk gates — chốt chặn trước khi trả lời chắc chắn
+
+Hệ thống chỉ được trả lời ở **chế độ 1 (Direct)** khi qua hết các cổng nghiệp vụ sau; fail cổng nào → tụt
+xuống chế độ 2–5:
+
+1. Có **nguồn đã approve & còn hiệu lực** không? (KI-1, KI-3)
+2. Người hỏi có **quyền xem** không? (IA-2, IA-3)
+3. Có **policy mâu thuẫn** chưa giải được không? (HR-2)
+4. Có thuộc **Restricted Topic** không? (FL-3, HR-4)
+5. Có cần **dữ liệu cá nhân/hệ thống ngoài** chưa nối không? (HR-1)
+
+### 7.4. Unknown là dữ liệu hạng nhất
+
+Điều *ta không biết là mình chưa biết* (unknown unknown) không đoán hết được từ đầu — chỉ lộ ra qua vận
+hành. Vì vậy mọi lần hệ thống "không biết / từ chối / escalate / confidence thấp" **phải được ghi lại**
+để review và biến thành câu hỏi nghiệp vụ mới. Tự động hóa **mở rộng theo bằng chứng, không theo tham vọng**.
+
+> Chi tiết các unknown đang mở + hành vi mặc định an toàn cho từng cái: xem
+> [open-questions.md](../open-questions.md).
+
+---
+
 # PHẦN III — Điều CHƯA biết (phải hỏi domain expert)
 
 > Mục này tồn tại vì một tài liệu nghiệp vụ trung thực phải **thừa nhận điều mình chưa biết**,

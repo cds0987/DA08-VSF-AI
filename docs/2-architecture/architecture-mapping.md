@@ -31,6 +31,8 @@
 | **ARCH-10** | **Identity Adapter (ACL)** | Dịch dữ liệu nhân sự từ HRIS/AD sang `AccessProfile`, chặn mô hình ngoài rò vào lõi | (ranh giới Identity) | Identity |
 | **ARCH-11** | **Conversation Orchestrator** | Gắn danh tính vào hội thoại, định tuyến câu hỏi, không rò lịch sử chéo | `Conversation` | Conversation |
 | **ARCH-12** | **Audit Recorder** | Ghi truy vết câu trả lời quyền lợi/pháp lý: ai hỏi, trả gì, nguồn nào, **scope nào đã áp** | `AuditEntry` | Finance/Legal |
+| **ARCH-13** | **Answer Decision Layer** ⭐ | "Bộ phanh": *trước* khi sinh câu trả lời, qua risk gates rồi quyết định chế độ Direct / Qualified / Clarify / Escalate / Refuse. Là nơi hệ thống "biết khi nào mình không biết" | (điều phối invariant) | cắt ngang |
+| **ARCH-14** | **Unknown Logger** | Ghi mọi lần bot không biết / từ chối / escalate / confidence thấp → backlog để review & học | (feedback loop) | cắt ngang |
 
 ---
 
@@ -79,6 +81,13 @@
 | **Chiều THỜI GIAN (hiệu lực)** | HR-1, KI-3 | Trả lời theo tài liệu hết hạn = quyết định sai, lỗi im lặng |
 | **ESCALATION sang người thật** | HR-4, FL-3, CV-2 | Câu hỏi nhạy cảm gặp bot = rủi ro pháp lý/đạo đức cao nhất |
 | **POLICY RESOLVER** (chọn policy đúng) | HR-1, HR-2 | Trái tim Core Domain hiện chưa có component nào gánh |
+
+> ⚠️ **Lưu ý quan trọng — "lấp" không có nghĩa "phải biết hết rồi mới build".** Bốn lỗ hổng này chưa
+> chốt được nghiệp vụ, nhưng **vẫn build được ở chế độ hạ cấp an toàn** nhờ **ARCH-13 (Answer Decision
+> Layer)**: khi một chiều chưa biết → tụt xuống Qualified/Clarify/Escalate/Refuse thay vì đoán. Tức là
+> *không automate phần chưa biết, chứ không phải chặn cả hệ thống*. Hành vi mặc định an toàn cho từng
+> lỗ hổng: xem [open-questions.md §C](../open-questions.md). Điều **bắt buộc phải có ngay** vì thế là
+> **ARCH-13 + ARCH-14**, chứ không phải câu trả lời nghiệp vụ đầy đủ.
 
 ### 3.2. Lỗ hổng P1 — ngay sau P0
 
