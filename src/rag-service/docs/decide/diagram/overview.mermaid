@@ -1,0 +1,176 @@
+%% =====================================================================
+%% V2 — OVERVIEW (end-to-end ingest/index pipeline)
+%% Cross-cutting (config/health) đặt ngay trong stage nó tác động.
+%% Chi tiết từng stage: ingestion.mermaid / scaling.mermaid · technique/*.md
+%% Schema payload/response chuẩn: ../technique/search.md §6
+%% =====================================================================
+%%{init: {
+  "flowchart": {
+    "curve": "basis",
+    "nodeSpacing": 35,
+    "rankSpacing": 55
+  }
+}}%%
+
+flowchart LR
+
+    %% =========================================================
+    %% SOURCE + CHANGE DETECTOR
+    %% =========================================================
+    subgraph C0["Source"]
+        direction TB
+        S3[("Object Store / S3<br/>Raw Documents")]
+    end
+
+    subgraph C1["Change Detector"]
+        direction TB
+        EVT["Object Event Listener<br/>PRIMARY"]
+        SCAN["Reconciliation Scanner<br/>SAFETY NET"]
+    end
+
+    S3 --> EVT
+    S3 --> SCAN
+
+    %% =========================================================
+    %% FILE TASK INTAKE
+    %% =========================================================
+    subgraph C2["File Task Intake"]
+        direction TB
+        Q1[("Queue 1<br/>File Tasks<br/>Durable")]
+        CLAIM1{{"Atomic Claim<br/>claim_id"}}
+        CFG["Startup Config Validation<br/>fail-fast"]
+
+        Q1 --> CLAIM1
+        CFG -.-> CLAIM1
+    end
+
+    EVT -->|"new / update / delete"| Q1
+    SCAN -->|"repair missing / changed / deleted"| Q1
+
+    %% =========================================================
+    %% PARSE TIER
+    %% =========================================================
+    subgraph C3["Tier 1 — Parse / Split<br/>CPU-heavy"]
+        direction TB
+        PW1["Parser Worker 1<br/>Download · Convert/OCR · Parse · Split"]
+        PW2["Parser Worker 2"]
+        PWN["Parser Worker N"]
+    end
+
+    CLAIM1 --> PW1
+    CLAIM1 --> PW2
+    CLAIM1 --> PWN
+
+    %% =========================================================
+    %% CANONICAL + SECTION TASKS
+    %% =========================================================
+    subgraph C4["Canonical + Section Tasks"]
+        direction TB
+        ART[("Canonical Artifact Store<br/>Markdown")]
+        Q2[("Queue 2<br/>Section Tasks<br/>Durable")]
+        CLAIM2{{"Atomic Claim<br/>claim_id"}}
+
+        Q2 --> CLAIM2
+    end
+
+    PW1 --> ART
+    PW2 --> ART
+    PWN --> ART
+
+    PW1 -->|"section tasks"| Q2
+    PW2 -->|"section tasks"| Q2
+    PWN -->|"section tasks"| Q2
+
+    CFG -.-> CLAIM2
+
+    %% =========================================================
+    %% INDEX TIER
+    %% =========================================================
+    subgraph C5["Tier 2 — Index / Upsert<br/>I/O-bound"]
+        direction TB
+        IW1["Index Worker 1<br/>Build Caption · Request Vector · Upsert"]
+        IW2["Index Worker 2"]
+        IWN["Index Worker N"]
+    end
+
+    CLAIM2 --> IW1
+    CLAIM2 --> IW2
+    CLAIM2 --> IWN
+
+    %% =========================================================
+    %% EMBEDDING LAYER
+    %% =========================================================
+    subgraph C6["Shared Embedding Layer"]
+        direction TB
+        COAL["Embedding Coalescer<br/>Batch cross-worker requests"]
+        CACHE[("Embedding Cache<br/>content_hash")]
+        PROV["Embedding Provider<br/>rate-limit aware"]
+
+        COAL <-->|"hit / miss"| CACHE
+        COAL -->|"cache miss → batch embed"| PROV
+        PROV -->|"vectors"| COAL
+    end
+
+    IW1 -->|"caption"| COAL
+    IW2 -->|"caption"| COAL
+    IWN -->|"caption"| COAL
+
+    COAL -.->|"vector"| IW1
+    COAL -.->|"vector"| IW2
+    COAL -.->|"vector"| IWN
+
+    %% =========================================================
+    %% STORES + HEALTH
+    %% =========================================================
+    subgraph C7["Stores"]
+        direction TB
+        QDRANT[("Qdrant<br/>vector = embedding(caption)<br/>payload: caption · content (full) · heading_path · lineage.*")]
+        META[("Metadata DB<br/>documents · sections · job logs<br/>claim · status · version")]
+        HEALTH["Health / Readiness<br/>fail-closed"]
+    end
+
+    IW1 -->|"upsert vector + payload"| QDRANT
+    IW2 -->|"upsert vector + payload"| QDRANT
+    IWN -->|"upsert vector + payload"| QDRANT
+
+    IW1 -->|"status + job log"| META
+    IW2 -->|"status + job log"| META
+    IWN -->|"status + job log"| META
+
+    HEALTH -.-> QDRANT
+    HEALTH -.-> META
+    HEALTH -.-> COAL
+
+    %% =========================================================
+    %% FAILURE PATH
+    %% =========================================================
+    DLQ[("Dead Letter Queue<br/>classified failures")]
+
+    PW1 -.->|"failed"| DLQ
+    PW2 -.->|"failed"| DLQ
+    PWN -.->|"failed"| DLQ
+
+    IW1 -.->|"failed"| DLQ
+    IW2 -.->|"failed"| DLQ
+    IWN -.->|"failed"| DLQ
+
+    DLQ -.->|"failed status + job log"| META
+
+    %% =========================================================
+    %% STYLE
+    %% =========================================================
+    classDef store fill:#eef,stroke:#88a,stroke-width:1px;
+    classDef queue fill:#f5f7ff,stroke:#667,stroke-width:1px;
+    classDef gate fill:#fff7cc,stroke:#aa6,stroke-width:1px;
+    classDef worker fill:#ffffff,stroke:#999,stroke-width:1px;
+    classDef service fill:#eefbea,stroke:#6a6,stroke-width:1px;
+    classDef fail fill:#fee,stroke:#c66,stroke-width:1px,stroke-dasharray:4 3;
+    classDef ops fill:#f7f7f7,stroke:#888,stroke-width:1px,stroke-dasharray:3 3;
+
+    class S3,ART,QDRANT,META,CACHE store;
+    class Q1,Q2 queue;
+    class CLAIM1,CLAIM2 gate;
+    class PW1,PW2,PWN,IW1,IW2,IWN worker;
+    class EVT,SCAN,COAL,PROV service;
+    class DLQ fail;
+    class CFG,HEALTH ops;

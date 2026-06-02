@@ -1,0 +1,100 @@
+%% =====================================================================
+%% V2 — SCALING / DEPLOYMENT view (giữ dáng worker-pool + queue như hình gốc)
+%% Đã VÁ sơ đồ v1 để KHÔNG phạm docs/handoff/ + bổ sung review production.
+%% Ký hiệu: nhãn KHÔNG ★ = grounded trong handoff;
+%%          nhãn ★         = quyết định v2 NGOÀI/ĐỂ-NGỎ trong handoff →
+%%                           ghi PROPOSED vào NEW_REPO_DECISIONS.md trước khi chốt.
+%%   [FIX1] Canonical artifact  [FIX2] Section (không token-chunk)
+%%   [FIX3] Caption→embed       [FIX4] durable queue + atomic claim
+%%   [FIX5] coalescer dùng chung + cache  [FIX6] DLQ + job log
+%%   [REV]  provider/cache box · DLQ phân loại · coalescer bounds/drain/metrics
+%%          · stale-write guard
+%%   ★[TRG] Change detector: event PRIMARY + reconciliation scanner SAFETY
+%%          (giải Open Q "polling vs event" — handoff cảnh báo coupling, xem note)
+%% Logical: ingestion.mermaid · luồng đọc: search.mermaid · code: concise.md §3,§7
+%% =====================================================================
+
+flowchart LR
+
+    S3[("Object store / S3<br/>raw documents")]
+
+    %% ----------------- ★ CHANGE DETECTOR (hybrid) -----------------
+    EVT["★ Object event listener — PRIMARY<br/>S3-native / uploader / team khác (scanner neo S3)<br/>idempotent theo event_id · object_version/etag · content_hash"]
+    SCAN["Reconciliation scanner — SAFETY NET<br/>periodic list + compare Metadata DB<br/>repair missing/changed/deleted · reconcile orphan"]
+    S3 --> EVT
+    S3 --> SCAN
+
+    %% ----------------------- QUEUE 1 + CLAIM ----------------------
+    Q1[("Queue 1 — File tasks<br/>DURABLE (không in-memory)")]
+    CLAIM1{{"Atomic claim + claim id<br/>conditional-update · terminal-status guard"}}
+    EVT -->|"new/update/delete event"| Q1
+    SCAN -->|"missing/changed/deleted repair task"| Q1
+    Q1 --> CLAIM1
+
+    %% --------------------- TIER 1: PARSE POOL ---------------------
+    subgraph T1["Tier 1 — Parse / Split Workers (CPU-heavy, executor RIENG)"]
+        PW1["Parser Worker 1<br/>guard(size/path/allow-list)<br/>Download + Convert/OCR + Parse<br/>write artifact + Section split (nghia)"]
+        PW2["Parser Worker 2"]
+        PWN["Parser Worker N"]
+    end
+    CLAIM1 -->|"mark dang xu ly"| PW1 & PW2 & PWN
+
+    %% ------------------- CANONICAL ARTIFACT [FIX1] ----------------
+    ART[("Canonical artifact store<br/>Markdown, dia chi on dinh<br/>{prefix}/{document_id}")]
+    PW1 & PW2 & PWN --> ART
+
+    %% ----------------------- QUEUE 2 + CLAIM ----------------------
+    Q2[("Queue 2 — Section tasks  [FIX2]<br/>DURABLE · don vi NGHIA (KHONG token-chunk)<br/>section_id · heading_path · content_hash · order")]
+    CLAIM2{{"Atomic claim + claim id"}}
+    PW1 & PW2 & PWN -->|"section tasks"| Q2 --> CLAIM2
+
+    %% --------------------- TIER 2: ENCODE POOL --------------------
+    subgraph T2["Tier 2 — Embed / Upsert Workers (I/O-bound, limit RIENG)"]
+        EW1["Encode Worker 1<br/>Caption (y nghia nen)  [FIX3]<br/>embed CAPTION qua coalescer<br/>Upsert (write-order an toan)"]
+        EW2["Encode Worker 2"]
+        EWN["Encode Worker N"]
+    end
+    CLAIM2 --> EW1 & EW2 & EWN
+
+    %% --------- SHARED COALESCER + PROVIDER/CACHE [FIX5][REV] ------
+    COAL["Embedding-coalescer DUNG CHUNG<br/>bounded queue · max_batch / max_wait_ms / max_tokens<br/>graceful drain luc shutdown<br/>metrics: batch / wait / cache-hit / provider latency"]
+    CACHE[("Embedding cache · key = content_hash<br/>(in-memory mat qua restart —<br/>Open Q: cache ngoai khi multi-process)")]
+    PROV["Embedding provider<br/>per-model queue · rate-limit aware<br/>retry + backoff + jitter"]
+
+    EW1 & EW2 & EWN -->|"embed caption (cho vector)"| COAL
+    COAL <-->|"hit / miss"| CACHE
+    COAL -->|"cache miss -> batch"| PROV
+    PROV -->|"vectors"| COAL
+    COAL -.->|"tra vector ve worker"| EW1 & EW2 & EWN
+
+    %% --------------------------- STORES ---------------------------
+    QDRANT[("Vector store / Qdrant<br/>vector = embedding(caption)<br/>payload: unit_id · document_id · display_name · caption<br/>content (full) · heading_path · lineage.artifact_uri/source_uri<br/>(★ section lon: content_ref -> artifact)<br/>id deterministic · index encode dimension")]
+    META[("Metadata DB<br/>document/section · job log<br/>caption_model · prompt_version · ★*_version<br/>retention/prune + index thoi gian")]
+
+    EW1 & EW2 & EWN -->|"upsert vector + payload<br/>guard claim_id/attempt + ★version (chong stale write)"| QDRANT
+    EW1 & EW2 & EWN -->|"doc/section + claim + job log"| META
+
+    %% ----------------------- FAILURE [FIX6][REV] ------------------
+    DLQ[("Dead Letter Queue — phan loai<br/>stage(scan/parse/ocr/split/caption/embed/upsert)<br/>error_type(transient/permanent) · retry_count<br/>claim_id · document/section id<br/>permanent (vd PDF password) KHONG retry mai")]
+    PW1 & PW2 & PWN -.->|"failed"| DLQ
+    EW1 & EW2 & EWN -.->|"failed"| DLQ
+    DLQ -.->|"ghi job log + status failed (khong im lang)"| META
+
+    %% ------------------------- CROSS-CUTTING ----------------------
+    HEALTH["Health/readiness — fail-closed<br/>degraded => unhealthy + backend identity + ly do<br/>lo queue depth / running / dropped / scan / coalescer"]
+    CFG["Startup config validation (fail-fast)<br/>provider+baseURL+model · model+dimension+index"]
+    CFG -.-> CLAIM1
+    HEALTH -.-> QDRANT
+    HEALTH -.-> META
+    HEALTH -.-> COAL
+
+    %% ----------------------------- STYLE --------------------------
+    classDef store fill:#eef,stroke:#88a,stroke-width:1px;
+    classDef gate  fill:#ffe,stroke:#aa6,stroke-width:1px;
+    classDef fail  fill:#fee,stroke:#c66,stroke-width:1px,stroke-dasharray:4 3;
+    classDef xcut  fill:#efe,stroke:#6a6,stroke-width:1px;
+
+    class S3,Q1,ART,Q2,QDRANT,META,CACHE store;
+    class CLAIM1,CLAIM2,CFG gate;
+    class DLQ fail;
+    class HEALTH,COAL xcut;

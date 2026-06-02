@@ -1,0 +1,98 @@
+%% =====================================================================
+%% V2 — DATA INGESTION pipeline (luong GHI, logical stages)
+%% Grounded docs/handoff/ + review production. Tach tu design.mermaid.
+%% Ky hieu: KHONG ★ = grounded handoff; ★ = quyet dinh v2 ngoai/de-ngo handoff
+%%          (ghi PROPOSED vao NEW_REPO_DECISIONS.md truoc khi chot).
+%% Ban SUA so voi v1: section nghia · canonical artifact · embed CAPTION ·
+%%   durable queue + atomic claim · coalescer dung chung + cache content-hash ·
+%%   failure khong im lang. Deployment view: scaling.mermaid · doc: search.mermaid
+%% =====================================================================
+
+flowchart TD
+
+    %% --------------------------- SOURCE ---------------------------
+    subgraph SRC["Source"]
+        S3[("Object store / S3<br/>raw documents")]
+    end
+
+    %% --------------- ★ CHANGE DETECTOR (event + scanner) ----------
+    subgraph TRIG["Change detector — event PRIMARY + reconciliation SAFETY"]
+        EVT["★ Object event listener (primary)<br/>S3 EventBridge/SQS hoac uploader event<br/>idempotent: event_id · object_version/etag · content_hash"]
+        SCAN["Reconciliation scanner (safety net)<br/>periodic list + compare Metadata DB<br/>phan nhanh NEW / UPDATED / DELETED<br/>reconcile orphan · prune version cu"]
+    end
+
+    subgraph CTRL["Ingest control — durable"]
+        Q[("Durable job store<br/>pending-job persist (KHONG in-memory)")]
+        CLAIM{{"Atomic claim<br/>conditional-update + claim id<br/>updated_at doi khi acquire<br/>terminal-status guard theo claim id"}}
+    end
+
+    S3 --> EVT
+    S3 --> SCAN
+    EVT -->|"new/update/delete event"| Q
+    SCAN -->|"missing/changed/deleted repair"| Q
+    Q --> CLAIM
+
+    %% ---------------------- TIER 1: PARSE -------------------------
+    subgraph T1["Tier 1 — Parse (CPU-heavy, executor RIENG)"]
+        GUARD["I/O guard dung chung<br/>allow-list nguon · chan path traversal<br/>VALIDATE SIZE truoc khi doc body"]
+        PARSE["Parse / Convert / OCR<br/>tach loai re (text, sync) khoi loai dat (visual/OCR)<br/>tran chi phi + cache skip noi dung khong doi"]
+    end
+    CLAIM -->|"mark dang xu ly"| GUARD --> PARSE
+
+    ART[("Canonical artifact<br/>Markdown, dia chi on dinh<br/>{prefix}/{document_id}<br/>downstream chi doc artifact")]
+    PARSE --> ART
+
+    %% ---------------------- SECTION SPLIT -------------------------
+    SPLIT["Section split theo cau truc nghia (heading)<br/>= don vi NGHIA, KHONG token-chunk<br/>section_id · heading_path · order · content_hash<br/>length guard -> sub-split khi vuot nguong"]
+    ART --> SPLIT
+
+    %% ---------------------- TIER 2: ENCODE ------------------------
+    subgraph T2["Tier 2 — Encode / Upsert (I/O-bound, limit RIENG)"]
+        CAPTION["Caption moi section = y nghia nen<br/>khu vocabulary mismatch<br/>reliability dong nhat: retry+backoff+jitter<br/>luu caption_model · prompt_version · caption_hash"]
+        COAL["Embedding-coalescer DUNG CHUNG<br/>bounded queue · max_batch / max_wait_ms / max_tokens<br/>cache content-hash (skip re-embed) · graceful drain<br/>metrics: batch / wait / cache-hit / latency"]
+        EMB["Embed CAPTION (khong embed raw/full)"]
+        CAPTION --> COAL --> EMB
+    end
+    SPLIT -->|"sections"| CAPTION
+
+    %% ---------------------- WRITE / UPSERT ------------------------
+    WRITE{{"Thu tu ghi (atomic-safe replace)<br/>ghi-de du lieu chinh (id deterministic)<br/>-> prune phan thua -> mark hoan tat -> metadata -> job log<br/>guard claim_id/attempt + ★version (chong stale write)<br/>(KHONG delete-roi-recreate)"}}
+    EMB --> WRITE
+
+    subgraph STORES["Stores"]
+        QDRANT[("Vector store / Qdrant<br/>vector = embedding(caption)<br/>payload: unit_id · document_id · display_name · caption<br/>content (full) · heading_path · lineage.artifact_uri/source_uri<br/>(★ section lon: content_ref -> artifact)<br/>id deterministic · index encode dimension")]
+        META[("Metadata DB<br/>document/section + ★*_version · job log<br/>caption_model · prompt_version<br/>retention/prune + index thoi gian")]
+    end
+    WRITE -->|"upsert vector + payload"| QDRANT
+    WRITE -->|"document/section + claim + job log"| META
+
+    %% ---------------------- FAILURE PATH --------------------------
+    FAIL["Failure path (KHONG im lang)<br/>mark document failed + job log status failed<br/>phan loai stage · error_type(transient/permanent) · retry_count<br/>giai phong slot/future o finally"]
+    PARSE -.->|"failed"| FAIL
+    CAPTION -.->|"failed"| FAIL
+    EMB -.->|"failed"| FAIL
+    WRITE -.->|"failed"| FAIL
+    FAIL -.-> META
+
+    %% ----------------- CROSS-CUTTING (ingestion) ------------------
+    subgraph XCUT["Cross-cutting (bat buoc truoc production)"]
+        CFG["Startup config validation (fail-fast)<br/>provider+baseURL+model · model+dimension+index"]
+        HEALTH["Health/readiness (ingest) — fail-closed<br/>degraded => unhealthy + backend identity + ly do<br/>lo queue depth / running / dropped / scan / coalescer"]
+        DEPLOY["Deploy verify · pin SHA/digest (khong 'latest')<br/>verify image + health + migration sau rollout"]
+    end
+    CFG -.-> CLAIM
+    HEALTH -.-> QDRANT
+    HEALTH -.-> META
+    HEALTH -.-> COAL
+    DEPLOY -.-> STORES
+
+    %% ----------------------------- STYLE --------------------------
+    classDef store fill:#eef,stroke:#88a,stroke-width:1px;
+    classDef gate fill:#ffe,stroke:#aa6,stroke-width:1px;
+    classDef fail fill:#fee,stroke:#c66,stroke-width:1px,stroke-dasharray:4 3;
+    classDef xcut fill:#efe,stroke:#6a6,stroke-width:1px;
+
+    class S3,ART,QDRANT,META,Q store;
+    class CLAIM,WRITE,CFG gate;
+    class FAIL fail;
+    class HEALTH,DEPLOY,COAL xcut;

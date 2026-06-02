@@ -1,0 +1,53 @@
+%% =====================================================================
+%% V2 — SEARCH QUERY pipeline (luong DOC)
+%% Grounded docs/handoff/ + review production. Tach tu design.mermaid.
+%% Ky hieu: KHONG ★ = grounded handoff; ★ = quyet dinh v2 ngoai/de-ngo handoff
+%%          (ghi PROPOSED vao NEW_REPO_DECISIONS.md truoc khi chot).
+%% Invariant: khop Y DINH (semantic), embed query bang CUNG embedder voi ingest,
+%%   tra FULL content + ca hai lineage URI + score + correlation id,
+%%   response schema = CONTRACT (khong bo/doi field),
+%%   access control la viec cua CALLER tang tren (retrieval KHONG enforce).
+%% Deployment view: scaling.mermaid · luong ghi: ingestion.mermaid · code: concise.md
+%% =====================================================================
+
+flowchart TD
+
+    %% --------------------------- READ SOURCE ----------------------
+    subgraph STORES["Stores (read-only o luong search)"]
+        QDRANT[("Vector store / Qdrant<br/>vector = embedding(caption)<br/>payload: caption · content (full) · heading_path<br/>lineage.artifact_uri/source_uri<br/>(★ section lon: content_ref)")]
+        ARTR[("Canonical artifact store<br/>★ resolve content_ref -> full content")]
+    end
+
+    %% --------------------------- SEARCH ---------------------------
+    subgraph SEARCH["Search"]
+        QUERY["Query + correlation id"]
+        EMBQ["Embed query<br/>(CUNG embedder/coalescer voi ingest)"]
+        VSEARCH["Vector search semantic<br/>khop Y DINH, khong khop tu khoa<br/>nguong score / no-answer policy khi thieu context"]
+        RERANK["★ Hybrid + Rerank (Open Q — bu rui ro caption-only)<br/>BM25/full-text tren full content + rerank<br/>cho truy van can khop chinh xac thuat ngu/so"]
+        RESOLVE["★ Resolve content (chi khi payload la content_ref)<br/>fetch full content tu artifact<br/>BAT BUOC tra full content -> giu CONTRACT"]
+        RESULT["Result (schema = CONTRACT, khong bo/doi field)<br/>correlation_id · unit_id · document_id · display_name<br/>caption · content (full) · heading_path<br/>lineage.artifact_uri · lineage.source_uri · score"]
+        QUERY --> EMBQ --> VSEARCH --> RERANK --> RESOLVE --> RESULT
+    end
+
+    QDRANT --> VSEARCH
+    ARTR -.->|"content_ref"| RESOLVE
+
+    CALLER["Consumer layer<br/>(tang tren dung ket qua de grounding)"]
+    RESULT -.->|"access control / filtering<br/>la viec cua CALLER tang tren<br/>(retrieval de san field scope/tags, KHONG enforce)"| CALLER
+
+    %% ------------------- CROSS-CUTTING (search) -------------------
+    subgraph XCUT["Cross-cutting (bat buoc truoc production)"]
+        HEALTH["Health/readiness (search) — fail-closed<br/>neu vector backend loi => unhealthy + ly do<br/>lo ap luc embed cua search"]
+        EVAL["Eval gate · golden queries + expected source lineage<br/>recall/precision/no-answer + latency p50/p95<br/>phat hien hallucination / thieu grounding<br/>chan merge thay doi parser/caption/model/index/search/rerank"]
+    end
+    HEALTH -.-> QDRANT
+    EVAL -.-> RESULT
+
+    %% ----------------------------- STYLE --------------------------
+    classDef store fill:#eef,stroke:#88a,stroke-width:1px;
+    classDef xcut fill:#efe,stroke:#6a6,stroke-width:1px;
+    classDef prop fill:#fef6ff,stroke:#a6a,stroke-width:1px,stroke-dasharray:3 2;
+
+    class QDRANT,ARTR store;
+    class HEALTH,EVAL xcut;
+    class RERANK,RESOLVE prop;
