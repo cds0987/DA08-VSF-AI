@@ -40,13 +40,11 @@ _Auth_
 - [ ] Local account có thể reset mật khẩu qua email
 
 _Upload & Ingestion_
-- [ ] Upload file (PDF, DOCX, TXT, XLSX, CSV, PPTX, MD — tối đa 50MB)
-- [ ] End User upload → status `pending`, chờ Admin approve
-- [ ] Admin approve → tự động index; reject → ghi lý do, user thấy được
+- [ ] Admin upload file (PDF, DOCX, TXT, XLSX, CSV, PPTX, MD — tối đa 50MB)
+- [ ] Upload xong → status `queued` ngay, trigger ingestion pipeline tự động (không cần duyệt)
 - [ ] PDF scan → OCR bằng Azure Document Intelligence, trích xuất được text tiếng Việt
 - [ ] Excel/XLSX → convert từng row thành text có header đúng
 - [ ] Upload có chọn classification (Public / Internal / Secret / Top Secret), field lưu vào DB
-- [ ] User nhận notification khi tài liệu được approve hoặc reject (in-app notification hoặc email)
 - [ ] Classification được enforce khi query — Top Secret chỉ uploader xem được, Internal chỉ nhân viên active, Public cho tất cả account
 
 _Q&A Chatbot_
@@ -62,8 +60,7 @@ _HR Personal Q&A_
 - [ ] Không thể xem HR data của người khác (filter `user_id` đúng)
 
 _Admin Dashboard_
-- [ ] Xem danh sách tài liệu + trạng thái ingestion (pending / processing / indexed / failed)
-- [ ] Approve / Reject tài liệu từ pending queue
+- [ ] Xem danh sách tài liệu + trạng thái ingestion (queued / processing / indexed / failed)
 - [ ] Xem usage metrics cơ bản (số câu hỏi, feedback rate)
 - [ ] Deactivate / Reactivate tài khoản user (xử lý nhân viên nghỉ việc)
 
@@ -77,7 +74,7 @@ _Feedback & Observability_
 - [ ] Langfuse trace hoạt động: xem được latency, token cost, retrieved chunks
 
 _Cloud Deployment_
-- [ ] Toàn bộ stack chạy ổn định trên AWS EC2 bằng Docker Compose (9 containers: nginx, next-frontend, user-service, chat-service, rag-service, Qdrant, Redis, Langfuse, PostgreSQL)
+- [ ] Toàn bộ stack chạy ổn định trên AWS EC2 bằng Docker Compose (11 containers: nginx, next-frontend, user-service, document-service, query-service, rag-worker, nats, Qdrant, Redis, Langfuse, PostgreSQL)
 - [ ] RDS PostgreSQL thay thế local DB — data không mất khi restart
 - [ ] File upload lưu vào S3, không lưu local
 - [ ] Qdrant self-hosted trên AWS, có persistent volume

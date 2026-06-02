@@ -6,7 +6,7 @@
 |------|----------------|----------------|-----------------|-------------|
 | **SA** | Lê Hữu Hưng | Domain design, contracts, API schemas, code review | `app/domain/` (cả 4 services) | Ngay — làm đầu tiên |
 | **Frontend Dev** | Đặng Hồ Hải | Web UI chat, admin dashboard, streaming | `src/frontend/` (Next.js) | Sau khi SA freeze schemas |
-| **Backend Dev** | Vũ Quang Dũng | User Service + Ingest Service: auth, JWT, document management | `src/user-service/`, `src/ingest-service/` | Sau khi SA freeze domain |
+| **Backend Dev** | Vũ Quang Dũng | User Service + Document Service: auth, JWT, document management | `src/user-service/`, `src/document-service/` | Sau khi SA freeze domain |
 | **RAG Engineer** | Trần Thanh Nguyên | RAG Worker: ingestion pipeline + retrieval pipeline, NATS subscriber | `src/rag-worker/app/` | Sau khi SA freeze domain |
 | **AI/Agent Engineer** | Phạm Quốc Dũng | Query Service: LLM orchestration, streaming, memory, NATS client | `src/query-service/app/` | Sau khi SA freeze domain |
 | **DevOps** | Trần Hữu Gia Huy | Docker, AWS, CI/CD, Nginx, NATS setup, monitoring | `infra/`, `docker-compose.yml` | Ngay — song song với SA |
@@ -85,11 +85,10 @@ src/frontend/
 │   ├── (auth)/
 │   │   └── login/page.tsx       ← Form đăng nhập (email/password + Microsoft SSO button)
 │   ├── (main)/
-│   │   ├── chat/page.tsx        ← Giao diện chat chính, SSE streaming consumer
-│   │   ├── documents/page.tsx   ← Upload file + danh sách tài liệu của user
+│   │   ├── chat/page.tsx        ← Giao diện chat chính, SSE streaming consumer (End User only)
 │   │   └── admin/
-│   │       ├── documents/page.tsx  ← Pending queue: approve/reject
-│   │       └── users/page.tsx      ← Danh sách user, deactivate/reactivate
+│   │       ├── documents/page.tsx  ← Upload file + danh sách tài liệu + ingestion status (Admin only)
+│   │       └── users/page.tsx      ← Danh sách user, deactivate/reactivate (Admin only)
 ├── components/
 │   ├── ChatMessage.tsx          ← Render 1 tin nhắn (user / bot), source citations
 │   ├── SourceCard.tsx           ← Hiển thị nguồn tài liệu + highlight text
@@ -241,7 +240,7 @@ src/chat-service/app/
         ├── dependencies.py                   ← get_orchestration_use_case()
         └── routers/
             ├── query.py                      ← POST /query (streaming SSE)
-            ├── documents.py                  ← POST /documents/upload, GET /documents, approve/reject/delete
+            ├── documents.py                  ← POST /documents/upload, GET /documents, DELETE /documents/{id} (Admin only)
             ├── conversations.py              ← GET /conversations, DELETE /conversations
             └── feedback.py                   ← POST /feedback
 ```

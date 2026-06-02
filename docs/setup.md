@@ -32,8 +32,8 @@ venv\Scripts\activate          # Windows
 # source venv/bin/activate     # Mac/Linux
 pip install -r requirements.txt
 
-# Ingest Service (Backend Dev)
-cd ../ingest-service
+# Document Service (Backend Dev)
+cd ../document-service
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
@@ -61,7 +61,7 @@ Mỗi service có file `.env` riêng. Copy từ `.env.example` trong từng fold
 
 ```bash
 cp src/user-service/.env.example    src/user-service/.env
-cp src/ingest-service/.env.example  src/ingest-service/.env
+cp src/document-service/.env.example  src/document-service/.env
 cp src/query-service/.env.example   src/query-service/.env
 cp src/rag-worker/.env.example      src/rag-worker/.env
 ```
@@ -116,7 +116,7 @@ Tạo tables bằng Alembic (mỗi service có `alembic/` riêng):
 
 ```bash
 cd src/user-service    && alembic upgrade head
-cd ../ingest-service  && alembic upgrade head
+cd ../document-service  && alembic upgrade head
 cd ../query-service   && alembic upgrade head
 cd ../rag-worker      && alembic upgrade head
 ```
@@ -138,8 +138,8 @@ cd src/user-service
 venv\Scripts\activate
 uvicorn app.interfaces.api.main:app --reload --port 8000
 
-# Terminal 2 — Ingest Service (port 8001)
-cd src/ingest-service
+# Terminal 2 — Document Service (port 8001)
+cd src/document-service
 venv\Scripts\activate
 uvicorn app.interfaces.api.main:app --reload --port 8001
 
@@ -156,7 +156,7 @@ python app/main.py
 
 API docs tự động:
 - User Service: http://localhost:8000/docs
-- Ingest Service: http://localhost:8001/docs
+- Document Service: http://localhost:8001/docs
 - Query Service: http://localhost:8002/docs
 - NATS Monitoring: http://localhost:8222
 
@@ -172,7 +172,7 @@ npm install
 cp .env.local.example .env.local
 # Điền:
 #   NEXT_PUBLIC_USER_SERVICE_URL=http://localhost:8000
-#   NEXT_PUBLIC_INGEST_SERVICE_URL=http://localhost:8001
+#   NEXT_PUBLIC_DOCUMENT_SERVICE_URL=http://localhost:8001
 #   NEXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8002
 
 npm run dev
@@ -189,8 +189,8 @@ Frontend tại: http://localhost:3000
 cd src/user-service
 pytest tests/ -v
 
-# Ingest Service
-cd src/ingest-service
+# Document Service
+cd src/document-service
 pytest tests/ -v
 
 # Query Service
@@ -233,7 +233,7 @@ Services sau khi `docker compose up`:
 | nginx | 80 / 443 | Reverse proxy, entry point — route `/` → frontend, `/api/*` → backend |
 | next-frontend | 3000 | Next.js UI (production build) |
 | user-service | 8000 | Auth / User management |
-| ingest-service | 8001 | Document management (Admin only) |
+| document-service | 8001 | Document management (Admin only) |
 | query-service | 8002 | User chat / LLM Orchestration |
 | rag-worker | — | NATS Worker — ingestion + retrieval (no HTTP port) |
 | nats | 4222 / 8222 | Message broker (4222: client, 8222: monitoring UI) |
@@ -255,4 +255,4 @@ Services sau khi `docker compose up`:
 | `Invalid API Key` | `.env` chưa điền đúng | Kiểm tra lại `.env` |
 | `ModuleNotFoundError` | Chưa activate venv đúng service | `cd <service-folder> && venv\Scripts\activate` |
 | `QDRANT_URL not set` | Thiếu env var | Kiểm tra `src/rag-worker/.env` |
-| `Connection refused 8002` (từ Chat Service) | RAG Service chưa chạy | Start RAG Service trước |
+| `Connection refused 8001` (Document Service) | Document Service chưa chạy | Start Document Service trước |
