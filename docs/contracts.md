@@ -51,10 +51,10 @@ class UserRepository(ABC):
 
 ---
 
-## chat-service — Domain
+## query-service — Domain
 
 ```python
-# src/chat-service/app/domain/entities/conversation.py
+# src/query-service/app/domain/entities/conversation.py
 from dataclasses import dataclass, field
 from typing import List, Optional
 from datetime import datetime
@@ -78,7 +78,7 @@ class Conversation:
 ```
 
 ```python
-# src/chat-service/app/domain/repositories/conversation_repository.py
+# src/query-service/app/domain/repositories/conversation_repository.py
 from abc import ABC, abstractmethod
 from typing import Optional
 from app.domain.entities.conversation import ConversationContext
@@ -103,7 +103,7 @@ class ConversationRepository(ABC):
 ```
 
 ```python
-# src/chat-service/app/domain/repositories/rerank_service.py
+# src/query-service/app/domain/repositories/rerank_service.py
 from abc import ABC, abstractmethod
 from typing import List
 from app.domain.entities.search_result import SearchResult
@@ -116,7 +116,7 @@ class RerankService(ABC):
 ```
 
 ```python
-# src/chat-service/app/domain/repositories/document_access_repository.py
+# src/query-service/app/domain/repositories/document_access_repository.py
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
@@ -124,7 +124,7 @@ class DocumentAccessRepository(ABC):
 
     @abstractmethod
     async def get_allowed_doc_ids(self, user_id: str, role: str, department: str) -> Optional[List[str]]:
-        """Query PostgreSQL rag_svc.documents → trả list doc_id user được phép đọc.
+        """Query PostgreSQL doc_svc.documents → trả list doc_id user được phép đọc.
         None = user chỉ có quyền đọc public docs.
         Logic:
           admin       → None (search tất cả)
@@ -138,10 +138,10 @@ class DocumentAccessRepository(ABC):
 
 ---
 
-## rag-service — Domain
+## rag-worker — Domain
 
 ```python
-# src/rag-service/app/domain/entities/document.py
+# src/rag-worker/app/domain/entities/document.py
 from dataclasses import dataclass, field
 from typing import List, Optional
 from datetime import datetime
@@ -182,7 +182,7 @@ class Section:
 ```
 
 ```python
-# src/rag-service/app/domain/repositories/document_repository.py
+# src/rag-worker/app/domain/repositories/document_repository.py
 from abc import ABC, abstractmethod
 from typing import List, Optional
 from app.domain.entities.document import Document, DocumentStatus
@@ -211,7 +211,7 @@ class DocumentRepository(ABC):
 ```
 
 ```python
-# src/rag-service/app/domain/repositories/embedding_service.py
+# src/rag-worker/app/domain/repositories/embedding_service.py
 from abc import ABC, abstractmethod
 from typing import List
 
@@ -219,7 +219,7 @@ class EmbeddingService(ABC):
 
     @abstractmethod
     async def embed(self, text: str) -> List[float]:
-        """Embed 1 đoạn text → vector 1024 dims (BGE-M3)."""
+        """Embed 1 đoạn text → vector 1536 dims (text-embedding-3-small)."""
 
     @abstractmethod
     async def embed_batch(self, texts: List[str]) -> List[List[float]]:
@@ -227,7 +227,7 @@ class EmbeddingService(ABC):
 ```
 
 ```python
-# src/rag-service/app/domain/repositories/vector_repository.py
+# src/rag-worker/app/domain/repositories/vector_repository.py
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List, Optional
@@ -255,13 +255,13 @@ class VectorRepository(ABC):
         self,
         vector: List[float],
         query_text: str,
-        top_k: int = 20,
+        top_k: int = 5,
         document_ids: Optional[List[str]] = None,
     ) -> List[SearchResult]:
         """Hybrid search (vector + BM25 RRF).
         document_ids: filter chỉ search trong các doc này.
         None = chỉ search public docs (fail-secure default).
-        Chat Service tự query allowed_doc_ids từ PostgreSQL trước khi gọi.
+        Query Service tự query allowed_doc_ids từ PostgreSQL trước khi gọi.
         """
 
     @abstractmethod
@@ -276,7 +276,7 @@ class VectorRepository(ABC):
 Contract giữa **Frontend Dev** và **Backend Dev / AI/Agent Engineer**.
 
 ```python
-# src/chat-service/app/interfaces/api/schemas/query.py
+# src/query-service/app/interfaces/api/schemas/query.py
 from pydantic import BaseModel
 from typing import List
 
@@ -296,7 +296,7 @@ class QueryResponse(BaseModel):
     sources: List[Source]
     session_id: str
 
-# src/chat-service/app/interfaces/api/schemas/document.py
+# src/query-service/app/interfaces/api/schemas/document.py
 class UploadResponse(BaseModel):
     document_id: str
     status: str             # "queued" (Admin upload) | "pending" (End User upload)

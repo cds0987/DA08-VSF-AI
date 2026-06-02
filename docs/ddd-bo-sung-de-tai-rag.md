@@ -42,7 +42,7 @@ DDD yêu cầu team phải có ngôn ngữ chung, nhất quán từ code đến 
 | Thuật ngữ | Định nghĩa trong hệ thống này |
 |-----------|-------------------------------|
 | **Document** | Tài liệu nội bộ đã được Admin approve và index vào hệ thống. Chưa approve không phải Document, chỉ là Upload. |
-| **Chunk** | Đoạn văn bản con được cắt từ Document, kích thước 300–800 token, có overlap 50 token với chunk kề bên. |
+| **Chunk** | Đơn vị văn bản được cắt từ Document theo chiến lược Parent-Child (LlamaIndex HierarchicalNodeParser). Child node dùng để search; Parent node đưa vào LLM context. Config sizes TBD. |
 | **Embedding** | Vector số 1536 chiều đại diện cho nghĩa của một Chunk, được sinh bởi model `text-embedding-3-small`. |
 | **Query** | Câu hỏi của người dùng sau khi đã được normalize (lowercase, unicode NFC). |
 | **Retrieved Context** | Tập hợp top-K Chunk có similarity score cao nhất với Query, dùng làm context cho LLM. |
@@ -193,12 +193,12 @@ DDD nói: model ban đầu luôn nông cạn, phải refactor liên tục sau kh
 
 | Tham số | Giá trị ban đầu | Cần tune khi |
 |---------|----------------|--------------|
-| Chunk size | 500 token | RAGAS Context Recall < 0.75 |
-| Chunk overlap | 50 token | Câu trả lời bị đứt đoạn ngữ nghĩa |
+| Parent chunk size | TBD | RAGAS Context Recall < 0.75 |
+| Child chunk size | TBD | Câu trả lời bị đứt đoạn ngữ nghĩa |
 | Top-K retrieval | 5 chunks | Câu trả lời thiếu thông tin hoặc nhiễu |
 | Score threshold | 0.7 | Fallback rate > 30% hoặc hallucination xuất hiện |
-| Re-ranker | Không dùng (MVP) | Khi Top-K không đủ chất lượng |
-| Embedding model | text-embedding-3-small | Khi tiếng Việt accuracy kém |
+| Re-ranker | BGE-Reranker-v2-m3 (Top-5 → Top-3) | Nếu context quality vẫn thấp sau Top-5 |
+| Embedding model | text-embedding-3-small (1536 dims) | Khi tiếng Việt accuracy kém |
 
 **Quy trình tune:**
 1. Chạy bộ 40 câu Ground Truth sau mỗi thay đổi

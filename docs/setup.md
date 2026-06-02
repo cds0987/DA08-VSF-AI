@@ -76,15 +76,27 @@ Xem đầy đủ nội dung từng file và hướng dẫn lấy API keys tại 
 
 ## 4. Chạy PostgreSQL + Qdrant local (Docker)
 
+**Production:** PostgreSQL chạy trên AWS RDS — không có container. Xem chi tiết tại [docs/env-setup.md](env-setup.md).
+
+**Local dev:** Có thể dùng PostgreSQL Docker để test nhanh mà không cần RDS:
+
 ```bash
-# PostgreSQL
+# PostgreSQL local — tạo 4 databases riêng như production
 docker run -d \
   --name rag-postgres \
   -e POSTGRES_USER=user \
   -e POSTGRES_PASSWORD=password \
-  -e POSTGRES_DB=rag_chatbot \
+  -e POSTGRES_DB=postgres \
   -p 5432:5432 \
   postgres:15
+
+# Tạo 4 databases
+docker exec -it rag-postgres psql -U user -c "
+  CREATE DATABASE user_db;
+  CREATE DATABASE doc_db;
+  CREATE DATABASE query_db;
+  CREATE DATABASE langfuse_db;
+"
 
 # Qdrant — mount volume để persist data khi restart container
 docker run -d \
@@ -93,23 +105,11 @@ docker run -d \
   -v qdrant_data:/qdrant/storage \
   qdrant/qdrant
 
-# Redis — JWT blacklist + rate limiting
+# Redis — JWT blacklist + rate limiting + semantic cache
 docker run -d \
   --name rag-redis \
   -p 6379:6379 \
   redis:7-alpine
-```
-
-Sau khi PostgreSQL chạy, tạo schemas và apply migrations:
-
-```bash
-docker exec -it rag-postgres psql -U user -d rag_chatbot -c "
-  CREATE SCHEMA IF NOT EXISTS user_svc;
-  CREATE SCHEMA IF NOT EXISTS ingest_svc;
-  CREATE SCHEMA IF NOT EXISTS query_svc;
-  CREATE SCHEMA IF NOT EXISTS rag_svc;
-  CREATE SCHEMA IF NOT EXISTS hr_mock;
-"
 ```
 
 Tạo tables bằng Alembic (mỗi service có `alembic/` riêng):
@@ -117,8 +117,8 @@ Tạo tables bằng Alembic (mỗi service có `alembic/` riêng):
 ```bash
 cd src/user-service    && alembic upgrade head
 cd ../document-service  && alembic upgrade head
-cd ../query-service   && alembic upgrade head
-cd ../rag-worker      && alembic upgrade head
+cd ../query-service    && alembic upgrade head
+cd ../rag-worker       && alembic upgrade head
 ```
 
 > Schema thay đổi → tạo migration mới (`alembic revision --autogenerate -m "..."`) thay vì sửa DDL trực tiếp.
@@ -138,15 +138,15 @@ cd src/user-service
 venv\Scripts\activate
 uvicorn app.interfaces.api.main:app --reload --port 8000
 
-# Terminal 2 — Document Service (port 8001)
+# Terminal 2 — Document Service (port 8002)
 cd src/document-service
 venv\Scripts\activate
-uvicorn app.interfaces.api.main:app --reload --port 8001
+uvicorn app.interfaces.api.main:app --reload --port 8002
 
-# Terminal 3 — Query Service (port 8002)
+# Terminal 3 — Query Service (port 8001)
 cd src/query-service
 venv\Scripts\activate
-uvicorn app.interfaces.api.main:app --reload --port 8002
+uvicorn app.interfaces.api.main:app --reload --port 8001
 
 # Terminal 4 — RAG Worker (no port — NATS subscriber)
 cd src/rag-worker
@@ -156,8 +156,8 @@ python app/main.py
 
 API docs tự động:
 - User Service: http://localhost:8000/docs
-- Document Service: http://localhost:8001/docs
-- Query Service: http://localhost:8002/docs
+- Document Service: http://localhost:8002/docs
+- Query Service: http://localhost:8001/docs
 - NATS Monitoring: http://localhost:8222
 
 ---
@@ -172,8 +172,8 @@ npm install
 cp .env.local.example .env.local
 # Điền:
 #   NEXT_PUBLIC_USER_SERVICE_URL=http://localhost:8000
-#   NEXT_PUBLIC_DOCUMENT_SERVICE_URL=http://localhost:8001
-#   NEXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8002
+#   NEXT_PUBLIC_DOCUMENT_SERVICE_URL=http://localhost:8002
+#   NEXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8001
 
 npm run dev
 ```
@@ -233,14 +233,15 @@ Services sau khi `docker compose up`:
 | nginx | 80 / 443 | Reverse proxy, entry point — route `/` → frontend, `/api/*` → backend |
 | next-frontend | 3000 | Next.js UI (production build) |
 | user-service | 8000 | Auth / User management |
-| document-service | 8001 | Document management (Admin only) |
-| query-service | 8002 | User chat / LLM Orchestration |
-| rag-worker | — | NATS Worker — ingestion + retrieval (no HTTP port) |
-| nats | 4222 / 8222 | Message broker (4222: client, 8222: monitoring UI) |
+| document-service | 8002 | Document management (Admin only) |
+| query-service | 8001 | User chat / LLM Orchestration + Function Calling Agent |
+| rag-worker | — | NATS Worker — ingestion pipeline (no HTTP port) |
+| nats | 4222 / 8222 | Message broker — JetStream enabled (4222: client, 8222: monitoring UI) |
 | qdrant | 6333 | Vector database |
 | redis | 6379 | JWT blacklist + rate limiting + semantic cache |
-| langfuse | 4000 | LLM observability dashboard (IT/DevOps only) |
-| postgres | 5432 | PostgreSQL (shared, tách schema) |
+| langfuse | 3100 | LLM observability dashboard (IT/DevOps only) |
+
+> **PostgreSQL:** Không có container — dùng **AWS RDS db.t3.micro** với 4 databases riêng: `user_db`, `doc_db`, `query_db`, `langfuse_db`. Mỗi service kết nối đến database của mình qua cùng 1 RDS endpoint.
 
 ---
 
@@ -255,4 +256,5 @@ Services sau khi `docker compose up`:
 | `Invalid API Key` | `.env` chưa điền đúng | Kiểm tra lại `.env` |
 | `ModuleNotFoundError` | Chưa activate venv đúng service | `cd <service-folder> && venv\Scripts\activate` |
 | `QDRANT_URL not set` | Thiếu env var | Kiểm tra `src/rag-worker/.env` |
-| `Connection refused 8001` (Document Service) | Document Service chưa chạy | Start Document Service trước |
+| `Connection refused 8002` (Document Service) | Document Service chưa chạy | Start Document Service trước |
+| `Connection refused 8001` (Query Service) | Query Service chưa chạy | Start Query Service trước |

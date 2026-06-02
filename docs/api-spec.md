@@ -4,8 +4,8 @@ Danh sách đầy đủ endpoint của các services. Frontend Dev dùng file n�
 
 > **Base URL local:**
 > - User Service: `http://localhost:8000`
-> - Document Service: `http://localhost:8001` _(Admin only)_
-> - Query Service: `http://localhost:8002`
+> - Document Service: `http://localhost:8002` _(Admin only)_
+> - Query Service: `http://localhost:8001`
 > - RAG Worker: không expose HTTP — giao tiếp qua NATS :4222 _(internal)_
 >
 > **Auth header** (trừ `/auth/login`): `Authorization: Bearer <jwt_token>`

@@ -30,39 +30,33 @@ src/user-service/app/domain/
     └── user_repository.py       ← UserRepository ABC (get_by_email, get_by_id, create)
 ```
 
-**Files SA tạo — chat-service:**
+**Files SA tạo — query-service:**
 ```
-src/chat-service/app/domain/
+src/query-service/app/domain/
 ├── entities/
 │   └── conversation.py          ← Message, ConversationContext, Conversation dataclass
 └── repositories/
-    └── conversation_repository.py  ← ConversationRepository ABC (get_context, save_message, ...)
-```
-
-**Files SA tạo — chat-service (thêm mới):**
-```
-src/chat-service/app/domain/
-└── repositories/
-    ├── rerank_service.py              ← RerankService ABC (rerank)
+    ├── conversation_repository.py  ← ConversationRepository ABC (get_context, save_message, ...)
+    ├── rerank_service.py           ← RerankService ABC (rerank)
     └── document_access_repository.py ← DocumentAccessRepository ABC (get_allowed_doc_ids)
 ```
 
-**Files SA tạo — rag-service:**
+**Files SA tạo — rag-worker:**
 ```
-src/rag-service/app/domain/
+src/rag-worker/app/domain/
 ├── entities/
-│   └── document.py              ← Document, Section dataclass, DocumentStatus enum
+│   └── document.py              ← Document, Chunk dataclass, DocumentStatus enum
 └── repositories/
     ├── vector_repository.py     ← SearchResult dataclass, VectorRepository ABC (document_ids filter)
     ├── document_repository.py   ← DocumentRepository ABC
-    └── embedding_service.py     ← EmbeddingService ABC (embed, embed_batch)
+    └── embedding_service.py     ← EmbeddingService ABC (embed, embed_batch) — OpenAI interface
 ```
 
 **SA cũng define schemas (Pydantic) — nằm trong interfaces/api nhưng SA viết:**
 ```
-src/chat-service/app/interfaces/api/schemas/
+src/query-service/app/interfaces/api/schemas/
 ├── query.py       ← QueryRequest, QueryResponse, Source
-└── document.py    ← UploadResponse
+└── conversation.py ← ConversationHistory
 
 src/user-service/app/interfaces/api/schemas/
 └── auth.py        ← LoginRequest, TokenResponse
@@ -132,7 +126,7 @@ src/user-service/app/
             └── auth.py                    ← POST /auth/login, GET /auth/me
 ```
 
-**Không được đụng:** `app/domain/` (SA owns), bất kỳ file nào trong chat-service hoặc rag-service.
+**Không được đụng:** `app/domain/` (SA owns), bất kỳ file nào trong query-service hoặc rag-worker.
 
 **Key logic cần implement:**
 - `login_use_case.py`: bcrypt verify password → tạo JWT payload `{sub, role, department, jti}` → sign HS256
@@ -143,17 +137,17 @@ src/user-service/app/
 
 ### RAG Engineer — Trần Thanh Nguyên
 
-**Phụ trách rag-service toàn bộ. Bắt đầu Ngày 3. Workload nặng nhất Phase 1.**
+**Phụ trách rag-worker toàn bộ. Bắt đầu Ngày 3. Workload nặng nhất Phase 1.**
 
 **Files RAG Engineer tạo:**
 ```
-src/rag-service/app/
+src/rag-worker/app/
 ├── application/
 │   └── use_cases/
 │       ├── ingestion/
-│       │   └── ingest_document_use_case.py   ← Nhận document_id → parse → section → caption → embed → upsert Qdrant
+│       │   └── ingest_document_use_case.py   ← NATS subscribe doc.ingest → parse → chunk → embed → upsert Qdrant
 │       └── query/
-│           └── retrieval.py                  ← Nhận query + document_ids → embed → hybrid search → filter score → SearchResult[]
+│           └── retrieval.py                  ← Nhận query + document_ids → embed → hybrid search → Top-K=5 → SearchResult[]
 │
 ├── infrastructure/
 │   ├── db/
@@ -162,77 +156,67 @@ src/rag-service/app/
 │   ├── vector/
 │   │   └── qdrant_vector_repository.py       ← Implement VectorRepository (hybrid_search với document_ids filter, upsert, delete)
 │   └── external/
-│       ├── bge_m3_client.py                  ← Implement EmbeddingService — gọi BGE-M3 HTTP API
-│       ├── azure_doc_intel_client.py         ← Gọi Azure Document Intelligence — OCR PDF scan
-│       └── langfuse_client.py                ← Ghi trace ingestion + retrieval vào Langfuse
+│       ├── openai_embedding_client.py        ← Implement EmbeddingService — OpenAI text-embedding-3-small (1536 dims)
+│       ├── gemini_ocr_client.py              ← Gọi Gemini Vision API — OCR PDF scan tiếng Việt
+│       ├── bge_reranker_client.py            ← BGE-Reranker-v2-m3 (loaded inline trong container, Top-5→Top-3)
+│       └── langfuse_client.py               ← Ghi trace ingestion + retrieval vào Langfuse
 │
-└── interfaces/
-    └── api/
-        ├── main.py
-        ├── dependencies.py                   ← get_retrieval_use_case(), get_ingest_use_case()
-        └── routers/
-            ├── ingest.py                     ← POST /ingest (nhận từ Chat Service sau khi Admin approve)
-            ├── scan.py                       ← POST /scan (operational — trigger scan S3 bucket)
-            ├── status.py                     ← GET /status/{doc_id}
-            ├── health.py                     ← GET /health
-            └── search.py                     ← POST /search (nhận từ Chat Service, có document_ids filter)
+└── main.py                                   ← NATS subscriber — không có HTTP server
 ```
 
 **Key logic cần implement:**
 
 *Ingestion pipeline (`ingest_document_use_case.py`):*
-1. Tải file từ S3 → detect loại: PDF scan / PDF text / DOCX / TXT / XLSX / ...
-2. OCR (nếu PDF scan): gọi `azure_doc_intel_client.py`
-3. Parse text: PyMuPDF (PDF text layer), python-docx (DOCX), openpyxl (XLSX)
-4. Section-based Chunking theo heading hierarchy — mỗi section là một đơn vị độc lập
-5. Generate caption: thử LLM → fallback về heuristic từ heading đầu của section
-6. Embed từng section: gọi `bge_m3_client.embed_batch()`
-7. Upsert Qdrant: `vector_repo.upsert()` với payload gồm `section_id`, `document_id`, `caption`, `heading_path`, `source_s3_uri`, `markdown_s3_uri`, `classification`
-8. Update `document_repo.update_status()` → INDEXED
+1. Subscribe NATS `doc.ingest` (JetStream) → nhận `doc_id`, `s3_key`, `file_type`
+2. Tải file từ S3 → detect loại: PDF scan / PDF text / DOCX / TXT / XLSX / ...
+3. OCR (nếu PDF scan): gọi `gemini_ocr_client.py` — Gemini Vision API
+4. Parse text: PyMuPDF (PDF text layer), python-docx (DOCX), openpyxl (XLSX)
+5. Parent-Child Chunking: LlamaIndex HierarchicalNodeParser (config TBD)
+6. Embed child nodes: gọi `openai_embedding_client.embed_batch()` — 1536 dims
+7. Upsert Qdrant: `vector_repo.upsert()` với payload gồm `chunk_id`, `parent_text`, `child_text`, `document_id`, `classification`
+8. Publish NATS `doc.status` → Document Service cập nhật status → INDEXED
 
 *Retrieval pipeline (`retrieval.py`):*
-1. Embed query: gọi `embedding_svc.embed(query_text)`
-2. Hybrid search: `vector_repo.hybrid_search(vector, query_text, top_k=20, document_ids=document_ids)`
-   - `document_ids` được Chat Service truyền vào — RAG Service không biết ACL logic
+1. Embed query: gọi `embedding_svc.embed(query_text)` — text-embedding-3-small
+2. Hybrid search: `vector_repo.hybrid_search(vector, query_text, top_k=5, document_ids=document_ids)`
+   - `document_ids` được Query Service truyền vào — RAG Worker không biết ACL logic
    - `None` → chỉ search public docs (fail-secure)
 3. Score threshold filter: loại candidates dưới ngưỡng 0.5
-4. Trả về `List[SearchResult]` — không rerank (Chat Service tự rerank)
+4. Trả về `List[SearchResult]` qua NATS reply
 
-*Failure Handling (`langfuse_client.py`, `bge_m3_client.py`, `azure_doc_intel_client.py`):*
-- **Langfuse**: Fail silently — tất cả trace call bọc trong try/except, lỗi chỉ log console, không làm gián đoạn request
-- **BGE-M3 Embedding**: Nếu unreachable → ingestion fail, cập nhật status `failed` kèm error message, Admin retry thủ công
-- **Azure Document Intelligence**: Tương tự BGE-M3 — fail ingestion, không ảnh hưởng query flow
+*Failure Handling:*
+- **Langfuse**: Fail silently — tất cả trace call bọc trong try/except, lỗi chỉ log console
+- **OpenAI Embedding**: Nếu unreachable → ingestion fail, publish `doc.status` với status `failed`, Admin retry thủ công
+- **Gemini Vision API**: Tương tự — fail ingestion, không ảnh hưởng query flow
 
-**Không được đụng:** `app/domain/` (SA owns), bất kỳ file nào trong user-service hoặc chat-service.
+**Không được đụng:** `app/domain/` (SA owns), bất kỳ file nào trong user-service, document-service hoặc query-service.
 
 ---
 
 ### AI/Agent Engineer — Phạm Quốc Dũng
 
-**Phụ trách chat-service toàn bộ. Bắt đầu Ngày 3. Phase 1 nhẹ, Phase 2 nặng.**
+**Phụ trách query-service toàn bộ. Bắt đầu Ngày 3. Phase 1 nặng (LlamaIndex FunctionCallingAgent).**
 
 **Files AI/Agent Engineer tạo:**
 ```
-src/chat-service/app/
+src/query-service/app/
 ├── application/
 │   └── use_cases/
 │       └── query/
-│           └── orchestration.py              ← Nhận câu hỏi → pre-filter ACL → gọi RAG → rerank → build prompt → stream Azure OpenAI
+│           └── orchestration.py              ← FunctionCallingAgent → rag_search_tool / hr_query_tool → stream OpenAI GPT-4o mini
 │
 ├── infrastructure/
 │   ├── db/
 │   │   ├── models.py                         ← SQLAlchemy model cho conversations, messages
 │   │   ├── postgres_conversation_repo.py     ← Implement ConversationRepository
-│   │   └── postgres_document_access_repo.py  ← Implement DocumentAccessRepository (query rag_svc.documents)
+│   │   └── postgres_document_access_repo.py  ← Implement DocumentAccessRepository (query doc_db.documents)
 │   ├── cache/
 │   │   └── redis_access_cache.py             ← Cache allowed_doc_ids theo user_id, TTL ~60s
 │   ├── external/
-│   │   ├── openai_client.py                  ← Azure OpenAI Chat Completion + SSE streaming. Timeout 30s, không retry.
-│   │   ├── rag_service_client.py             ← HTTP client gọi POST /search và POST /ingest, forward X-Request-ID.
-│   │   │                                        Bọc bằng Circuit Breaker (pybreaker, fail_max=5, reset_timeout=30s).
-│   │   │                                        Circuit Open → trả 503 ngay, không chờ timeout.
-│   │   └── bge_reranker_client.py            ← Implement RerankService — gọi BGE-Reranker-v2-m3 HTTP API
-│   └── memory/                               ← Phase 2: Redis short-term memory
+│   │   ├── openai_client.py                  ← OpenAI GPT-4o mini — streaming + tool_call. Timeout 30s, không retry.
+│   │   └── nats_rag_client.py                ← NATS request-reply rag.search (timeout 10s).
+│   │                                            Circuit Breaker (pybreaker, fail_max=5, reset_timeout=30s).
+│   └── memory/                               ← Redis short-term memory
 │
 └── interfaces/
     └── api/
@@ -240,7 +224,6 @@ src/chat-service/app/
         ├── dependencies.py                   ← get_orchestration_use_case()
         └── routers/
             ├── query.py                      ← POST /query (streaming SSE)
-            ├── documents.py                  ← POST /documents/upload, GET /documents, DELETE /documents/{id} (Admin only)
             ├── conversations.py              ← GET /conversations, DELETE /conversations
             └── feedback.py                   ← POST /feedback
 ```
@@ -250,23 +233,21 @@ src/chat-service/app/
 *Orchestration (`orchestration.py`):*
 1. Lấy conversation context: `conv_repo.get_context(user_id, recent_k=5)` → summary + 5 turns gần nhất
 2. **ACL pre-filter:** `doc_access_repo.get_allowed_doc_ids(user_id, role, department)` → `allowed_doc_ids` (cache Redis TTL ~60s)
-3. Gọi RAG: `rag_client.search(query, top_k=20, document_ids=allowed_doc_ids)` → `List[SearchResult]`
-4. Nếu kết quả rỗng (score thấp) → stream câu trả lời "Không tìm thấy thông tin liên quan"
-5. **Rerank:** `rerank_svc.rerank(query, results, top_n=3)` → Top-3 sections
-6. Build prompt: system prompt + summary + recent messages + `section_content` của Top-3 sections + câu hỏi user
-7. Gọi Azure OpenAI streaming: yield từng token → SSE event `data: {"token": "..."}`
-8. Lưu message: `conv_repo.save_message(user_id, "user", question)` + `save_message(user_id, "assistant", full_answer)`
-9. Summary buffer: nếu conversation > 10 turns → gọi LLM compress → `conv_repo.update_summary()`
+3. **Semantic Cache check:** embed câu hỏi → cosine similarity > 0.95 → return cached response ngay
+4. **LlamaIndex FunctionCallingAgent** nhận câu hỏi → tự quyết định gọi tool:
+   - `rag_search_tool`: câu hỏi về tài liệu nội bộ → Query Rewriting (3 variations) → NATS `rag.search` → RRF merge → Top-5 candidates → rerank BGE-Reranker-v2-m3 Top-3
+   - `hr_query_tool`: câu hỏi HR cá nhân → query PostgreSQL `hr_*` tables với filter `WHERE user_id = current_user`
+5. Build prompt: system prompt + summary + recent messages + retrieved context
+6. Gọi OpenAI GPT-4o mini streaming: yield từng token → SSE event `data: {"token": "..."}`
+7. Lưu message: `conv_repo.save_message(user_id, "user", question)` + `save_message(user_id, "assistant", full_answer)`
+8. Summary buffer: nếu conversation > 10 turns → gọi LLM compress → `conv_repo.update_summary()`
 
-*Document flow (`documents.py` router):*
-- Upload file → lưu S3 → tạo record DB (status=pending/queued) → gọi `rag_client.ingest()` nếu Admin
+*Failure Handling:*
+- **NATS RAG search**: Circuit Breaker (`pybreaker`, fail_max=5, reset_timeout=30s) — Circuit Open → trả 503 ngay
+- **OpenAI**: Timeout 30s, không retry — trả 503 ngay, log token count vào Langfuse trước khi fail
+- **Redis**: Fail-open — nếu Redis unreachable, `redis_access_cache.py` fallback về query PostgreSQL trực tiếp
 
-*Failure Handling (`rag_service_client.py`, `openai_client.py`, `redis_access_cache.py`):*
-- **RAG Service**: Circuit Breaker (`pybreaker`, fail_max=5, reset_timeout=30s) trong `rag_service_client.py`
-- **Azure OpenAI**: Timeout 30s, không retry — trả 503 ngay, log token count vào Langfuse trước khi fail
-- **Redis**: Fail-open — nếu Redis unreachable, `redis_access_cache.py` fallback về query PostgreSQL trực tiếp (rate limit tắt, log warning CloudWatch)
-
-**Không được đụng:** `app/domain/` (SA owns), bất kỳ file nào trong user-service hoặc rag-service.
+**Không được đụng:** `app/domain/` (SA owns), bất kỳ file nào trong user-service, document-service hoặc rag-worker.
 
 ---
 
@@ -277,17 +258,21 @@ src/chat-service/app/
 **Files DevOps tạo:**
 ```
 docker-compose.yml               ← 9 containers: nginx, next-frontend, user-service,
-                                    chat-service, rag-service, qdrant, redis, langfuse, postgres
+                                    document-service, query-service, rag-worker,
+                                    nats (JetStream), qdrant, redis, langfuse :3100
+                                    (PostgreSQL = AWS RDS external, không có container)
 
 src/user-service/Dockerfile
-src/chat-service/Dockerfile
-src/rag-service/Dockerfile
+src/document-service/Dockerfile
+src/query-service/Dockerfile
+src/rag-worker/Dockerfile
 src/frontend/Dockerfile
 
 nginx/
-├── nginx.conf                   ← Route /api/user/* → user-service:8000
-│                                   Route /api/chat/* → chat-service:8001
-│                                   Route / → next-frontend:3000
+├── nginx.conf                   ← Route /api/user/*       → user-service:8000
+│                                   Route /api/documents/* → document-service:8002
+│                                   Route /api/query/*     → query-service:8001
+│                                   Route /                → next-frontend:3000
 └── ssl/                         ← Let's Encrypt cert (production)
 
 infra/
@@ -316,8 +301,8 @@ Ngày 1–2:
 Ngày 3+ (song song):
   Frontend  → mock API bằng schemas, build UI
   Backend Dev       → user-service: auth, DB, JWT
-  RAG Engineer      → ingestion pipeline + retrieval pipeline
-  AI/Agent Engineer → orchestration + streaming + conversation history
+  RAG Engineer      → rag-worker: ingestion pipeline (Parent-Child chunking, Gemini OCR) + retrieval
+  AI/Agent Engineer → query-service: FunctionCallingAgent + streaming + conversation history
   DevOps            → AWS EC2 setup + CI/CD hoàn chỉnh
 ```
 
@@ -332,21 +317,22 @@ Câu hỏi user
      ↓
 [AI/Agent Engineer]   doc_access_repo: query PostgreSQL → allowed_doc_ids (cache Redis ~60s)
      ↓
-[AI/Agent Engineer]   rag_service_client.py: gọi POST /search { query, top_k, document_ids }
-     ↓  HTTP
-[RAG Engineer]        retrieval.py: embed → hybrid search (document_ids filter) → filter score threshold
+[AI/Agent Engineer]   FunctionCallingAgent: LLM quyết định gọi tool nào
+     ├── rag_search_tool → nats_rag_client.py: NATS request-reply rag.search { query, top_k=5, document_ids }
+     │        ↓  NATS
+     │   [RAG Engineer] retrieval.py: embed → hybrid search → Top-5 → SearchResult[]
+     │        ↓
+     │   [AI/Agent Engineer] BGE-Reranker-v2-m3 (trong rag-worker): Top-5 → Top-3
+     │
+     └── hr_query_tool → query PostgreSQL hr_* tables WHERE user_id = current_user
      ↓
-[AI/Agent Engineer]   nhận List[SearchResult] (Top-20)
-     ↓
-[AI/Agent Engineer]   bge_reranker_client.py: rerank Top-20 → Top-3
-     ↓
-[AI/Agent Engineer]   build prompt (section_content) → gọi Azure OpenAI → stream về FE
+[AI/Agent Engineer]   build prompt → OpenAI GPT-4o mini streaming → SSE về FE
 ```
 
 **Ranh giới dữ liệu:**
-- RAG Engineer trả về `List[SearchResult]` (section_content + score + metadata) — không rerank
-- AI/Agent Engineer: (1) quyết định document_ids nào được search, (2) rerank kết quả, (3) build prompt
-- RAG Engineer không biết ACL logic, không biết user là ai — chỉ nhận `document_ids` như một filter thông thường
+- RAG Engineer: (1) embed query, (2) hybrid search Top-5, (3) rerank Top-3 — trả về `List[SearchResult]` qua NATS reply
+- AI/Agent Engineer: (1) quyết định document_ids nào được search, (2) build prompt, (3) stream về FE
+- RAG Engineer không biết ACL logic, không biết user là ai — chỉ nhận `document_ids` như filter thông thường
 
 ---
 
@@ -357,8 +343,8 @@ Câu hỏi user
 | SA | Nặng tuần 1 → nhẹ dần (review PR) | Review, không code |
 | Frontend Dev | Trung bình — UI chat + admin cơ bản | Trung bình — dashboard analytics |
 | Backend Dev | Trung bình — auth + user CRUD | Nhẹ — ít thay đổi |
-| RAG Engineer | **Nặng** — ingestion (section chunking, caption) + retrieval (hybrid search, document_ids filter) | Tune chất lượng, query rewriting |
-| AI/Agent Engineer | Trung bình — ACL pre-filter + rerank + prompt + stream + history | **Nặng** — LangGraph Agent, Redis, Teams Bot |
+| RAG Engineer | **Nặng** — ingestion (Parent-Child chunking, Gemini OCR) + retrieval (hybrid search Top-5, rerank Top-3) | Tune chất lượng, chunk config |
+| AI/Agent Engineer | **Nặng** — LlamaIndex FunctionCallingAgent + rerank + prompt + stream + history | Teams Bot, dashboard analytics |
 | DevOps | Trung bình — Docker + AWS setup | Nhẹ — maintain |
 
 ---
@@ -381,8 +367,8 @@ from app.domain.entities.document import Document  # ✅
 Bất kỳ thay đổi nào trong `app/domain/` phải SA approve trước.
 
 ### 4. External client files — mỗi service có file riêng, độc lập
-- `src/chat-service/.../openai_client.py`: AI/Agent Engineer owns — Azure OpenAI Chat + streaming
-- `src/rag-service/.../bge_m3_client.py`: RAG Engineer owns — BGE-M3 Embedding client
+- `src/query-service/.../openai_client.py`: AI/Agent Engineer owns — OpenAI GPT-4o mini streaming + tool_call
+- `src/rag-worker/.../openai_embedding_client.py`: RAG Engineer owns — OpenAI text-embedding-3-small (1536 dims)
 - 2 file hoàn toàn độc lập, không import lẫn nhau.
 
 ---
@@ -423,7 +409,7 @@ feature branches:
 | API schemas (Pydantic) | SA define, Backend Dev + AI/Agent Engineer implement, Frontend Dev consume | Sửa → báo SA |
 | `requirements.txt` | Tất cả | Thêm package → mở PR, không tự pip install rồi push |
 | `docker-compose.yml` | DevOps owns | Thêm env var mới → báo DevOps |
-| `openai_client.py` (chat-service) | AI/Agent Engineer owns | RAG Engineer không dùng, không đụng |
-| `bge_m3_client.py` (rag-service) | RAG Engineer owns | AI/Agent Engineer không dùng, không đụng |
-| `rag_service_client.py` (chat-service) | AI/Agent Engineer owns | Circuit Breaker state (fail_max, reset_timeout) cần đồng bộ với CloudWatch alarm threshold |
-| `langfuse_client.py` (rag-service) | RAG Engineer owns | Bắt buộc fail silently — không throw exception ra ngoài, không ảnh hưởng request |
+| `openai_client.py` (query-service) | AI/Agent Engineer owns | RAG Engineer không dùng, không đụng |
+| `openai_embedding_client.py` (rag-worker) | RAG Engineer owns | AI/Agent Engineer không dùng, không đụng |
+| `nats_rag_client.py` (query-service) | AI/Agent Engineer owns | Circuit Breaker state (fail_max, reset_timeout) cần đồng bộ với CloudWatch alarm threshold |
+| `langfuse_client.py` (rag-worker) | RAG Engineer owns | Bắt buộc fail silently — không throw exception ra ngoài, không ảnh hưởng request |

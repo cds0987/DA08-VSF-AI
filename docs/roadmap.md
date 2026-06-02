@@ -28,7 +28,7 @@ Không chỉ là một chatbot — mà là **hệ thống quản lý tri thức 
 - Giao diện chat: hỏi câu hỏi → bot trả lời + trích dẫn nguồn tài liệu
 - Admin duyệt/từ chối tài liệu trước khi đưa vào knowledge base
 - Guardrails: chặn prompt injection, lọc off-topic, redact PII trong output
-- Semantic Cache: cache câu hỏi tương tự (Redis TTL 1h), tiết kiệm ~60% Azure OpenAI API cost
+- Semantic Cache: cache câu hỏi tương tự (Redis TTL 1h), tiết kiệm ~60% OpenAI API cost
 - Deploy lên AWS: EC2 + Docker Compose, RDS, S3, HTTPS qua Nginx
 
 **Definition of Done:**
@@ -42,13 +42,13 @@ _Auth_
 _Upload & Ingestion_
 - [ ] Admin upload file (PDF, DOCX, TXT, XLSX, CSV, PPTX, MD — tối đa 50MB)
 - [ ] Upload xong → status `queued` ngay, trigger ingestion pipeline tự động (không cần duyệt)
-- [ ] PDF scan → OCR bằng Azure Document Intelligence, trích xuất được text tiếng Việt
+- [ ] PDF scan → OCR bằng Gemini Vision API, trích xuất được text tiếng Việt
 - [ ] Excel/XLSX → convert từng row thành text có header đúng
 - [ ] Upload có chọn classification (Public / Internal / Secret / Top Secret), field lưu vào DB
 - [ ] Classification được enforce khi query — Top Secret chỉ uploader xem được, Internal chỉ nhân viên active, Public cho tất cả account
 
 _Q&A Chatbot_
-- [ ] Semantic Cache hoạt động — câu hỏi tương tự (cosine similarity > 0.95) trả kết quả từ cache Redis, không gọi Azure OpenAI
+- [ ] Semantic Cache hoạt động — câu hỏi tương tự (cosine similarity > 0.95) trả kết quả từ cache Redis, không gọi OpenAI
 - [ ] Hỏi câu hỏi → bot trả lời streaming (chữ xuất hiện dần, không đợi toàn bộ)
 - [ ] Mỗi câu trả lời kèm nguồn: tên tài liệu + số trang + đoạn văn bản được trích dẫn
 - [ ] Click vào nguồn → mở document viewer, nhảy đến đúng trang, highlight đúng đoạn text đó
@@ -74,7 +74,7 @@ _Feedback & Observability_
 - [ ] Langfuse trace hoạt động: xem được latency, token cost, retrieved chunks
 
 _Cloud Deployment_
-- [ ] Toàn bộ stack chạy ổn định trên AWS EC2 bằng Docker Compose (11 containers: nginx, next-frontend, user-service, document-service, query-service, rag-worker, nats, Qdrant, Redis, Langfuse, PostgreSQL)
+- [ ] Toàn bộ stack chạy ổn định trên AWS EC2 bằng Docker Compose (9 containers: nginx, next-frontend, user-service, document-service, query-service, rag-worker, nats [JetStream], Qdrant, Redis, Langfuse :3100 — PostgreSQL = AWS RDS external)
 - [ ] RDS PostgreSQL thay thế local DB — data không mất khi restart
 - [ ] File upload lưu vào S3, không lưu local
 - [ ] Qdrant self-hosted trên AWS, có persistent volume

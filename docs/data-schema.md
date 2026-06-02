@@ -1,6 +1,6 @@
 # Data Schema — RAG Chatbot
 
-Mỗi service dùng PostgreSQL schema riêng trên cùng 1 RDS instance, tách bằng `CREATE SCHEMA`.
+Mỗi service kết nối đến **database riêng** trên cùng 1 AWS RDS db.t3.micro: `user_db`, `doc_db`, `query_db`, `langfuse_db`.
 
 > **Convention chung:**
 > - `id`: `UUID PRIMARY KEY DEFAULT gen_random_uuid()`
@@ -55,10 +55,10 @@ CREATE INDEX idx_refresh_tokens_hash ON user_svc.refresh_tokens(token_hash);
 
 ---
 
-## Chat Service — Schema `chat_svc`
+## Query Service — Database `query_db`
 
 ```sql
-CREATE TABLE chat_svc.conversations (
+CREATE TABLE query_svc.conversations (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     UUID NOT NULL,
     summary     TEXT,                                            -- LLM-generated summary của các turns cũ (Summary Buffer)
@@ -66,9 +66,9 @@ CREATE TABLE chat_svc.conversations (
     updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
-CREATE TABLE chat_svc.messages (
+CREATE TABLE query_svc.messages (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    conversation_id UUID NOT NULL REFERENCES chat_svc.conversations(id) ON DELETE CASCADE,
+    conversation_id UUID NOT NULL REFERENCES query_svc.conversations(id) ON DELETE CASCADE,
     user_id         UUID NOT NULL,
     role            VARCHAR(20) NOT NULL,        -- 'user' | 'assistant'
     content         TEXT NOT NULL,
@@ -78,15 +78,15 @@ CREATE TABLE chat_svc.messages (
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_messages_user_created ON chat_svc.messages(user_id, created_at DESC);
+CREATE INDEX idx_messages_user_created ON query_svc.messages(user_id, created_at DESC);
 ```
 
 ---
 
-## RAG Service — Schema `rag_svc`
+## Document Service / RAG Worker — Database `doc_db`
 
 ```sql
-CREATE TABLE rag_svc.documents (
+CREATE TABLE doc_svc.documents (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name                VARCHAR(500) NOT NULL,
     file_type           VARCHAR(20) NOT NULL,                        -- pdf | docx | txt | xlsx | csv | pptx | md
@@ -104,10 +104,10 @@ CREATE TABLE rag_svc.documents (
     deleted_at          TIMESTAMP WITH TIME ZONE
 );
 
-CREATE INDEX idx_documents_status ON rag_svc.documents(status) WHERE deleted_at IS NULL;
-CREATE INDEX idx_documents_uploader ON rag_svc.documents(uploaded_by) WHERE deleted_at IS NULL;
+CREATE INDEX idx_documents_status ON doc_svc.documents(status) WHERE deleted_at IS NULL;
+CREATE INDEX idx_documents_uploader ON doc_svc.documents(uploaded_by) WHERE deleted_at IS NULL;
 
-CREATE TABLE rag_svc.audit_logs (
+CREATE TABLE doc_svc.audit_logs (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     actor_id      UUID NOT NULL,
     actor_role    VARCHAR(50) NOT NULL,
@@ -119,12 +119,12 @@ CREATE TABLE rag_svc.audit_logs (
     created_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_audit_actor ON rag_svc.audit_logs(actor_id, created_at DESC);
+CREATE INDEX idx_audit_actor ON doc_svc.audit_logs(actor_id, created_at DESC);
 ```
 
 ---
 
-## HR Mock Data — Schema `hr_mock` (trong RAG Service DB)
+## HR Mock Data — Schema `hr_mock` (trong `doc_db` — RAG Worker)
 
 > Mock data cho Feature 5b (Personal HR Q&A). Filter bắt buộc `WHERE user_id = :current_user_id`.
 
@@ -192,7 +192,7 @@ Collection name: `rag_chatbot`
 }
 ```
 
-> Vector dimension: 1024 (BGE-M3). Chỉ embed `child_text`. `parent_text` lưu trong payload để đưa vào LLM context. `ocr_confidence` chỉ có với PDF scan, dùng để flag low-quality chunks. Chunk size: Child 128–256 token, Parent 512–1024 token, overlap 20–30 token.
+> Vector dimension: 1536 (text-embedding-3-small). Chỉ embed `child_text`. `parent_text` lưu trong payload để đưa vào LLM context. `ocr_confidence` chỉ có với PDF scan, dùng để flag low-quality chunks. Chunk size: Parent-Child (LlamaIndex HierarchicalNodeParser) — config TBD sau khi implement.
 
 ---
 
