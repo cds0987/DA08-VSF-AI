@@ -93,6 +93,9 @@ async def test_pluggable_provider() -> None:
         ) -> List[SearchResult]:
             return []
 
+        async def list_chunk_ids_by_document(self, document_id) -> List[str]:
+            return []
+
         async def delete_many(self, chunk_ids) -> None: ...
 
         async def delete_by_document(self, document_id) -> None: ...
