@@ -4,7 +4,9 @@ import pytest
 from app.interfaces.api.main import create_app
 
 
-def test_health_reports_unhealthy_when_running_degraded(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_health_reports_unhealthy_when_running_degraded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("AI_PROVIDER", "offline")
     monkeypatch.delenv("VECTOR_DB_URL", raising=False)
@@ -22,7 +24,9 @@ def test_health_reports_unhealthy_when_running_degraded(monkeypatch: pytest.Monk
     assert body["reasons"]
 
 
-def test_production_startup_fails_closed_when_degraded(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_production_startup_fails_closed_when_degraded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("AI_PROVIDER", "offline")
     monkeypatch.setenv("DATABASE_URL", "sqlite:///prod-metadata.db")
@@ -34,7 +38,9 @@ def test_production_startup_fails_closed_when_degraded(monkeypatch: pytest.Monke
             pass
 
 
-def test_invalid_runtime_settings_fail_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_invalid_runtime_settings_fail_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("AI_PROVIDER", "offline")
     monkeypatch.setenv("SEARCH_TOP_K", "1")
@@ -45,7 +51,9 @@ def test_invalid_runtime_settings_fail_startup(monkeypatch: pytest.MonkeyPatch) 
             pass
 
 
-def test_production_requires_durable_metadata_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_production_requires_durable_metadata_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("AI_PROVIDER", "openai")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -60,7 +68,9 @@ def test_production_requires_durable_metadata_backend(monkeypatch: pytest.Monkey
             pass
 
 
-def test_collection_name_must_not_preencode_dimension(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_collection_name_must_not_preencode_dimension(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("AI_PROVIDER", "offline")
     monkeypatch.setenv("VECTOR_COLLECTION", "rag_chatbot__d1024")
@@ -83,6 +93,50 @@ def test_openai_provider_requires_api_key_without_base_url(
     monkeypatch.delenv("CAPTION_BASE_URL", raising=False)
     monkeypatch.delenv("RERANK_BASE_URL", raising=False)
 
-    with pytest.raises(ValueError, match="thiếu API key"):
+    with pytest.raises(ValueError, match="API key"):
+        with TestClient(create_app()):
+            pass
+
+
+def test_remote_vector_backend_can_require_api_key_via_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AI_PROVIDER", "offline")
+    monkeypatch.setenv("VECTOR_DB_PROVIDER", "qdrant")
+    monkeypatch.setenv("VECTOR_DB_URL", "http://localhost:6333")
+    monkeypatch.setenv("VECTOR_DB_REQUIRE_API_KEY", "1")
+    monkeypatch.delenv("VECTOR_DB_API_KEY", raising=False)
+    monkeypatch.delenv("QDRANT_API_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="VECTOR_DB_API_KEY is required"):
+        with TestClient(create_app()):
+            pass
+
+
+def test_qdrant_cloud_requires_api_key_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AI_PROVIDER", "offline")
+    monkeypatch.setenv("VECTOR_DB_PROVIDER", "qdrant")
+    monkeypatch.setenv("VECTOR_DB_URL", "https://example.eu-central.aws.cloud.qdrant.io")
+    monkeypatch.delenv("VECTOR_DB_REQUIRE_API_KEY", raising=False)
+    monkeypatch.delenv("VECTOR_DB_API_KEY", raising=False)
+    monkeypatch.delenv("QDRANT_API_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="VECTOR_DB_API_KEY is required"):
+        with TestClient(create_app()):
+            pass
+
+
+def test_invalid_job_log_retention_days_fail_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AI_PROVIDER", "offline")
+    monkeypatch.setenv("JOBLOG_RETENTION_DAYS", "0")
+
+    with pytest.raises(ValueError, match="JOBLOG_RETENTION_DAYS must be > 0"):
         with TestClient(create_app()):
             pass

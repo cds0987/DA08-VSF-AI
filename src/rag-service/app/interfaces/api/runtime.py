@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import AsyncIterator
+from urllib.parse import urlparse
 
 from fastapi import FastAPI
 
@@ -43,6 +46,7 @@ class HealthReport:
 class RuntimeState:
     ingest_use_case: IngestDocumentUseCase | None
     retrieval_use_case: RetrievalUseCase | None
+    document_repository: DocumentRepository
     health: HealthReport
 
 
@@ -66,6 +70,7 @@ def validate_runtime_settings() -> None:
         raise ValueError("CHILD_OVERLAP_WORDS must be >= 0")
     if settings.child_overlap_words >= settings.child_max_words:
         raise ValueError("CHILD_OVERLAP_WORDS must be < CHILD_MAX_WORDS")
+    validate_job_log_retention_settings()
 
 
 def validate_vector_config(
@@ -85,6 +90,7 @@ def validate_vector_config(
         raise ValueError("Vector store dimension must be > 0")
     if vector_config.deployment == "remote" and not vector_config.url.strip():
         raise ValueError("VECTOR_DB_URL must not be empty for remote vector deployment")
+    validate_vector_backend_credentials(vector_config)
 
 
 def validate_ai_config(ai_settings: AISettings, settings: HaystackSettings) -> None:
@@ -99,6 +105,31 @@ def validate_ai_config(ai_settings: AISettings, settings: HaystackSettings) -> N
             raise ValueError(f"AI config for {capability_name} must include a model")
 
 
+def _is_truthy(raw: str) -> bool:
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _remote_vector_api_key_required(vector_config: VectorStoreConfig) -> bool:
+    explicit = os.getenv("VECTOR_DB_REQUIRE_API_KEY", "")
+    if explicit.strip():
+        return _is_truthy(explicit)
+    if vector_config.deployment != "remote":
+        return False
+    host = (urlparse(vector_config.url).hostname or "").lower()
+    if vector_config.provider.lower() == "qdrant" and "qdrant.io" in host:
+        return True
+    if vector_config.provider.lower() == "milvus" and "zillizcloud.com" in host:
+        return True
+    return False
+
+
+def validate_vector_backend_credentials(vector_config: VectorStoreConfig) -> None:
+    if _remote_vector_api_key_required(vector_config) and not vector_config.api_key.strip():
+        raise ValueError(
+            "VECTOR_DB_API_KEY is required for the configured remote vector backend"
+        )
+
+
 def metadata_backend_name(database_url: str) -> str:
     return "postgres" if database_url.strip() else "in_memory"
 
@@ -108,6 +139,65 @@ def validate_metadata_backend(app_env: str, database_url: str) -> None:
         raise ValueError(
             "DATABASE_URL must be configured in production; in-memory metadata is not durable"
         )
+
+
+@dataclass(frozen=True)
+class JobLogRetentionSettings:
+    retention_days: int = 30
+    prune_interval_seconds: int = 3600
+
+
+def load_job_log_retention_settings() -> JobLogRetentionSettings:
+    return JobLogRetentionSettings(
+        retention_days=int(os.getenv("JOBLOG_RETENTION_DAYS", "30")),
+        prune_interval_seconds=int(os.getenv("JOBLOG_PRUNE_INTERVAL_SECONDS", "3600")),
+    )
+
+
+def validate_job_log_retention_settings() -> None:
+    settings = load_job_log_retention_settings()
+    if settings.retention_days <= 0:
+        raise ValueError("JOBLOG_RETENTION_DAYS must be > 0")
+    if settings.prune_interval_seconds <= 0:
+        raise ValueError("JOBLOG_PRUNE_INTERVAL_SECONDS must be > 0")
+
+
+async def prune_job_logs_once(
+    document_repository: DocumentRepository,
+    settings: JobLogRetentionSettings,
+    logger: logging.Logger,
+) -> int:
+    cutoff = datetime.now(UTC) - timedelta(days=settings.retention_days)
+    pruned = await document_repository.prune_job_logs_older_than(cutoff)
+    log_event(
+        logger,
+        logging.INFO,
+        "job_log_prune_completed",
+        stage="retention",
+        retention_days=settings.retention_days,
+        pruned_count=pruned,
+        cutoff=cutoff.isoformat(),
+    )
+    return pruned
+
+
+async def run_job_log_pruner(
+    document_repository: DocumentRepository,
+    settings: JobLogRetentionSettings,
+    logger: logging.Logger,
+) -> None:
+    while True:
+        try:
+            await prune_job_logs_once(document_repository, settings, logger)
+        except Exception as exc:  # noqa: BLE001 - retention is background maintenance
+            log_event(
+                logger,
+                logging.WARNING,
+                "job_log_prune_failed",
+                stage="retention",
+                error=str(exc),
+            )
+        await asyncio.sleep(settings.prune_interval_seconds)
 
 
 def bootstrap_runtime() -> RuntimeState:
@@ -149,9 +239,9 @@ def bootstrap_runtime() -> RuntimeState:
 
     ingest_use_case = None
     retrieval_use_case = None
+    document_repository = build_document_repository()
     try:
         engine = build_engine(provider=provider, vector_config=vector_config)
-        document_repository = build_document_repository()
         ingest_use_case = IngestDocumentUseCase(engine, document_repository)
         retrieval_use_case = RetrievalUseCase(engine)
     except Exception as exc:
@@ -184,6 +274,7 @@ def bootstrap_runtime() -> RuntimeState:
     return RuntimeState(
         ingest_use_case=ingest_use_case,
         retrieval_use_case=retrieval_use_case,
+        document_repository=document_repository,
         health=health,
     )
 
@@ -200,7 +291,25 @@ def build_document_repository() -> DocumentRepository:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     runtime = bootstrap_runtime()
+    logger = logging.getLogger(__name__)
+    retention_settings = load_job_log_retention_settings()
+    prune_task = asyncio.create_task(
+        run_job_log_pruner(runtime.document_repository, retention_settings, logger)
+    )
     app.state.ingest_use_case = runtime.ingest_use_case
     app.state.retrieval_use_case = runtime.retrieval_use_case
     app.state.health = runtime.health
-    yield
+    app.state.job_log_prune_task = prune_task
+    try:
+        yield
+    finally:
+        prune_task.cancel()
+        try:
+            await prune_task
+        except asyncio.CancelledError:
+            log_event(
+                logger,
+                logging.INFO,
+                "job_log_prune_stopped",
+                stage="retention",
+            )

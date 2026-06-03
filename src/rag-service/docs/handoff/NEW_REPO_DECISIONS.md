@@ -45,3 +45,14 @@ This file records architecture decisions that the current repo has already ratif
 **Trade-off:** vector providers must support listing chunk ids by document.
 **When to revisit:** when metadata/job state is added and the full `mark -> overwrite -> prune -> complete` flow can be implemented.
 **New constraints:** document replacement must not use delete-then-recreate.
+
+### R5. Job logs have explicit retention and runtime pruning
+**Status:** RATIFIED 2026-06-04 (Codex + user direction)
+**Different from prototype:** job/audit logs are no longer "append forever"; retention is explicit and enforced by a background pruner.
+**Problem:** unbounded audit rows become dead storage and violate the Day-0 lifecycle requirement.
+**Options considered:**
+- A: keep logs forever - rejected because it recreates prototype growth/orphan risk.
+- B (chosen): keep `job_logs` with explicit retention config and prune them on a runtime schedule.
+**Trade-off:** runtime owns one more background maintenance task and retention must be tuned per environment.
+**When to revisit:** when lifecycle moves to an external scheduler or metadata backend provides native TTL.
+**New constraints:** every storage path must declare owner, retention, and cleanup; `job_logs` default retention is config-driven and must not block ingest.

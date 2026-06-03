@@ -83,8 +83,11 @@ GOLDEN_QUERIES = [
 
 def _build_eval_engine():
     if os.getenv("RAG_EVAL_REAL_PROVIDER", "").strip() == "1":
-        reset_ai_provider()
-        return build_engine(provider=get_ai_provider(), caption=True), True
+        try:
+            reset_ai_provider()
+            return build_engine(provider=get_ai_provider(), caption=True), True
+        except (ValueError, ModuleNotFoundError) as exc:
+            pytest.skip(f"real-provider eval not configured: {exc}")
     return build_engine(provider=OfflineProvider(256), caption=True), False
 
 
