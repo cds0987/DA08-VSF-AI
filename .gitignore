@@ -6,3 +6,8 @@ src/rag-service/haystack/
 __pycache__/
 *.py[cod]
 .venv/
+
+# Secrets — KHÔNG commit (.env chứa API key thật)
+.env
+*.env
+!.env.example
