@@ -5,8 +5,8 @@
 Bám docs:
 - embedding.md §1: embed là I/O-bound → async-native trả công (gather nhiều call
   provider đồng thời). search.md §8: search & ingest chia sẻ embedder.
-- inmemory.py: API Haystack là SYNC; wrapper bọc `asyncio.to_thread` để KHÔNG chặn
-  event loop (CPU/blocking store offload sang thread).
+- providers/*: client SYNC (vd chromadb/milvus) bọc `asyncio.to_thread` để KHÔNG
+  chặn event loop; client async-native (qdrant) thì async thuần.
 - embedding.md §2: idempotent response mapping — request ↔ vector đúng thứ tự.
 - LESSONS §4.9: mọi AI call retry+backoff+jitter đồng nhất (retry_async).
 
@@ -37,10 +37,33 @@ from haystack_interface.ai.base import AISettings, CapabilityConfig
 from haystack_interface.config import HaystackSettings
 from haystack_interface.engine import HaystackRagEngine
 from haystack_interface.text_utils import hash_embed, overlap_score
-from haystack_interface.vectorstore import InMemoryVectorRepository
+from haystack_interface.vectorstore import VectorStoreConfig
 
 DIM = 64
 USER = UserContext(user_id="u1", user_role="user", user_department="eng")
+ADMIN = UserContext(user_id="admin", user_role="admin", user_department="eng")
+
+
+def _has_qdrant() -> bool:
+    try:
+        import qdrant_client  # noqa: F401
+        return True
+    except ModuleNotFoundError:
+        return False
+
+
+def _vectors():
+    """Store chạm DB cho test async: qdrant in_process (embedded, không server)."""
+    from haystack_interface.vectorstore.providers.qdrant.inprocess import (
+        QdrantInProcessRepository,
+    )
+    return QdrantInProcessRepository(VectorStoreConfig(dimension=DIM))
+
+
+async def _count_chunks(repo) -> int:
+    """Đếm chunk backend-agnostic: admin search top_k lớn -> số chunk_id distinct."""
+    res = await repo.search(hash_embed(["count"], DIM)[0], "count", ADMIN, top_k=100000)
+    return len({r.chunk_id for r in res})
 
 
 # --- Fakes mô phỏng I/O-bound (await sleep) cho stage embed & rerank ---------- #
@@ -82,11 +105,14 @@ def _doc(i: int) -> IngestInput:
 # A. I/O-bound concurrency: gather nhiều search CHỒNG nhau (không tuần tự)      #
 # --------------------------------------------------------------------------- #
 async def test_io_concurrency_overlap() -> None:
+    if not _has_qdrant():
+        print("  A. I/O concurrency: SKIP (chua cai qdrant-client cho store in_process)")
+        return
     settings = HaystackSettings(embed_dimension=DIM)
     engine = HaystackRagEngine(
         settings=settings,
         embedder=SleepEmbedder(DIM, 0.1),
-        vectors=InMemoryVectorRepository(settings),
+        vectors=_vectors(),
         reranker=SleepReranker(0.1),
         captioner=None,
     )
@@ -110,7 +136,7 @@ async def test_io_concurrency_overlap() -> None:
 # B. Blocking store offload to_thread => KHÔNG chặn event loop                  #
 # --------------------------------------------------------------------------- #
 class _BlockingStore(VectorRepository):
-    """Mô phỏng đúng pattern inmemory.py: blocking work bọc trong to_thread."""
+    """Mô phỏng đúng pattern provider sync (chroma/milvus): blocking bọc to_thread."""
 
     async def upsert(self, chunk_id, vector, payload) -> None: ...
     async def delete_by_document(self, document_id) -> None: ...
@@ -153,14 +179,17 @@ async def test_blocking_offload_keeps_loop_alive() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# C. Concurrent ingest (gather) vào InMemory store: không mất write, đúng số    #
+# C. Concurrent ingest (gather) vào store: không mất write, đúng số             #
 # --------------------------------------------------------------------------- #
 async def test_concurrent_ingest_no_lost_writes() -> None:
+    if not _has_qdrant():
+        print("  C. concurrent ingest: SKIP (chua cai qdrant-client cho store in_process)")
+        return
     settings = HaystackSettings(embed_dimension=DIM)
     engine = HaystackRagEngine(
         settings=settings,
         embedder=ProviderEmbeddingService(OfflineProvider(DIM), dimension=DIM),
-        vectors=InMemoryVectorRepository(settings),
+        vectors=_vectors(),
         reranker=SleepReranker(0.0),
         captioner=None,
     )
@@ -169,14 +198,14 @@ async def test_concurrent_ingest_no_lost_writes() -> None:
     counts = await asyncio.gather(*[engine.ingest(_doc(i)) for i in range(N)])
     assert all(c >= 1 for c in counts), "mọi ingest concurrent phải tạo chunk"
 
-    total_docs = len(engine.vectors.store.filter_documents())
+    total_docs = await _count_chunks(engine.vectors)
     assert total_docs == sum(counts), (
         f"concurrent ingest mất/đụng write: store={total_docs} != ingested={sum(counts)}"
     )
 
     # Re-ingest đồng thời cùng tập -> idempotent, KHÔNG nhân đôi.
     await asyncio.gather(*[engine.ingest(_doc(i)) for i in range(N)])
-    assert len(engine.vectors.store.filter_documents()) == total_docs, "concurrent re-ingest phải idempotent"
+    assert await _count_chunks(engine.vectors) == total_docs, "concurrent re-ingest phải idempotent"
 
     res = await engine.search("word7", USER, rerank_threshold=0.0)
     assert any(r.document_id == "d7" for r in res), "search sau concurrent ingest phải tìm đúng doc"

@@ -8,7 +8,7 @@ Kiến trúc module (severable, mỗi module một nhiệm vụ — MOSA / hexag
     chunking/    section split (đơn vị nghĩa, không token-chunk)
     caption/     ý-nghĩa-nén section qua provider
     rerank/      Reranker (LLM qua gateway / lexical fallback)
-    vectorstore/ port VectorRepository (Haystack hybrid RRF; → Qdrant)
+    vectorstore/ port VectorRepository (provider-first: qdrant·chromadb·milvus)
     access/      classification filter (policy)
     engine.py    orchestrator (ingest + search), chỉ phụ thuộc port
     factory.py   composition root — wire backend theo env (offline | OpenAI)
@@ -43,7 +43,18 @@ from haystack_interface.ai import (
 
 # Port adapters + capability (cho composition tuỳ biến / test).
 from haystack_interface.embedding import ProviderEmbeddingService
-from haystack_interface.vectorstore import InMemoryVectorRepository
+from haystack_interface.vectorstore import (
+    VectorRecord,
+    VectorStoreConfig,
+    VectorStore,
+    VectorStoreProvider,
+    build_vector_store,
+    build_vector_repository,
+    register_backend,
+    register_provider,
+    available_backends,
+    available_providers,
+)
 from haystack_interface.caption import Captioner, ProviderCaptioner
 from haystack_interface.rerank import Reranker, LLMReranker, LexicalRerankerService
 
@@ -65,7 +76,16 @@ __all__ = [
     "OfflineProvider",
     # ports / capabilities
     "ProviderEmbeddingService",
-    "InMemoryVectorRepository",
+    "VectorRecord",
+    "VectorStore",
+    "VectorStoreProvider",
+    "VectorStoreConfig",
+    "build_vector_store",
+    "build_vector_repository",
+    "register_backend",
+    "register_provider",
+    "available_backends",
+    "available_providers",
     "Captioner",
     "ProviderCaptioner",
     "Reranker",

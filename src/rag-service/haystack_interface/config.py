@@ -1,11 +1,11 @@
-"""HaystackSettings — cấu hình KHÔNG-AI của pipeline (split · retrieval · store).
+"""HaystackSettings — cấu hình pipeline (split · retrieval). Ranh giới rõ:
 
-Cấu hình AI (model/endpoint/key cho embed/caption/rerank) thuộc về AI gateway
-(`haystack_interface.ai`), KHÔNG ở đây — giữ ranh giới: settings này lo Haystack
-pipeline + vector store; provider lo outbound AI.
+- Cấu hình AI (embed/caption/rerank) → AI gateway `haystack_interface.ai`.
+- Cấu hình STORAGE (backend DB, collection, url, dimension) → `VectorStoreConfig`
+  trong `haystack_interface.vectorstore` (config object quyết định database).
 
-`embed_dimension` validate khớp index — đổi dimension là MIGRATION, không config
-edit (embedding.md §4 / ingestion.md §8). Index id encode dimension.
+Settings này chỉ còn lo SPLIT + RETRIEVAL. `embed_dimension` ở đây là dimension
+embedder yêu cầu; factory ép VectorStoreConfig.dimension bằng nó (ingest==query==store).
 """
 
 from __future__ import annotations
@@ -32,13 +32,6 @@ class HaystackSettings:
     rerank_top_k: int = 3            # sau rerank (Top-3)
     rerank_threshold: float = 0.7    # BGE-Reranker / LLM threshold
 
-    # Vector store.
-    collection: str = "rag_chatbot"
-
-    def index_id(self) -> str:
-        """Index id encode dimension => đổi dimension là migration."""
-        return f"{self.collection}__d{self.embed_dimension}"
-
 
 def _int(name: str, default: int) -> int:
     raw = os.getenv(name)
@@ -60,5 +53,4 @@ def load_settings() -> HaystackSettings:
         top_k_candidates=_int("SEARCH_TOP_K", 20),
         rerank_top_k=_int("RERANK_TOP_K", 3),
         rerank_threshold=_float("RERANK_THRESHOLD", 0.7),
-        collection=os.getenv("QDRANT_COLLECTION", "rag_chatbot"),
     )

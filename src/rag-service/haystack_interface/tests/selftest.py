@@ -15,11 +15,24 @@ from app.domain.repositories.vector_repository import UserContext
 
 from haystack_interface import build_engine, IngestInput, OfflineProvider
 from haystack_interface.embedding import ProviderEmbeddingService
+from haystack_interface.text_utils import hash_embed
 
 DIM = 256
+ADMIN = UserContext(user_id="admin", user_role="admin", user_department="eng")
+
+
+async def _count_doc_chunks(engine, document_id: str) -> int:
+    """Đếm chunk của một document backend-agnostic: admin search top_k lớn."""
+    res = await engine.vectors.search(hash_embed(["count"], DIM)[0], "count", ADMIN, top_k=100000)
+    return sum(1 for r in res if r.document_id == document_id)
 
 
 async def run() -> None:
+    try:
+        import qdrant_client  # noqa: F401  (default provider qdrant in_process)
+    except ModuleNotFoundError:
+        print("SKIP - selftest can qdrant-client cho store mac dinh (pip install qdrant-client)")
+        return
     provider = OfflineProvider(DIM)
     # caption=False => baseline embed child trực tiếp (tất định, dễ assert).
     engine = build_engine(provider=provider, caption=False)
@@ -63,9 +76,9 @@ async def run() -> None:
     assert any(r.document_id == "d-sal" for r in allowed), "finance phải thấy secret của mình"
 
     # 5. Idempotent: re-ingest cùng doc KHÔNG nhân đôi (OVERWRITE + id deterministic).
-    before = len(engine.vectors.store.filter_documents())
+    before = await _count_doc_chunks(engine, "d-pw")
     await engine.ingest(pw)
-    after = len(engine.vectors.store.filter_documents())
+    after = await _count_doc_chunks(engine, "d-pw")
     assert before == after, f"re-ingest phải idempotent: {before} -> {after}"
 
     # 6. No-answer: threshold cao -> rỗng (không bịa).
