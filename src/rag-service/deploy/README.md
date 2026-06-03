@@ -2,6 +2,8 @@
 
 These files are the service-owned deploy artifacts for `rag-service`.
 
+> CI/CD pipeline + sự cố/bài học (vd dependency wheel cho Python 3.13): xem [`CI-CD.md`](./CI-CD.md).
+
 ## Included
 
 - `k8s/configmap.yaml`: non-secret runtime defaults.
