@@ -68,3 +68,21 @@ def test_collection_name_must_not_preencode_dimension(monkeypatch: pytest.Monkey
     with pytest.raises(ValueError, match="VECTOR_COLLECTION must not encode dimension"):
         with TestClient(create_app()):
             pass
+
+
+def test_openai_provider_requires_api_key_without_base_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AI_PROVIDER", "openai")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("EMBED_API_KEY", raising=False)
+    monkeypatch.delenv("CAPTION_API_KEY", raising=False)
+    monkeypatch.delenv("RERANK_API_KEY", raising=False)
+    monkeypatch.delenv("EMBED_BASE_URL", raising=False)
+    monkeypatch.delenv("CAPTION_BASE_URL", raising=False)
+    monkeypatch.delenv("RERANK_BASE_URL", raising=False)
+
+    with pytest.raises(ValueError, match="thiếu API key"):
+        with TestClient(create_app()):
+            pass

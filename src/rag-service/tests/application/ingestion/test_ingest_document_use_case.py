@@ -47,7 +47,7 @@ async def test_ingest_use_case_maps_request_into_engine_input() -> None:
     assert stored.status.value == "completed"
     assert stored.chunk_count == 3
     logs = await documents.list_job_logs("doc-1")
-    assert [entry.status for entry in logs] == ["processing", "completed"]
+    assert [entry.status for entry in logs] == ["completed", "processing"]
     assert all(entry.correlation_id == "ingest:doc-1" for entry in logs)
 
 
@@ -75,6 +75,11 @@ class FailingEngine(StubEngine):
         raise RuntimeError("embed failed")
 
 
+class LogFailingDocuments(InMemoryDocumentRepository):
+    async def append_job_log(self, entry):
+        raise RuntimeError("job log store down")
+
+
 @pytest.mark.asyncio
 async def test_ingest_use_case_logs_failed_runs() -> None:
     engine = FailingEngine()
@@ -93,5 +98,24 @@ async def test_ingest_use_case_logs_failed_runs() -> None:
     assert stored is not None
     assert stored.status.value == "failed"
     logs = await documents.list_job_logs("doc-fail")
-    assert [entry.status for entry in logs] == ["processing", "failed"]
-    assert logs[-1].error_type == "RuntimeError"
+    assert [entry.status for entry in logs] == ["failed", "processing"]
+    assert logs[0].error_type == "RuntimeError"
+
+
+@pytest.mark.asyncio
+async def test_ingest_use_case_does_not_fail_when_job_log_append_fails() -> None:
+    engine = StubEngine()
+    documents = LogFailingDocuments()
+    use_case = IngestDocumentUseCase(engine, documents)
+
+    chunk_count = await use_case.ingest(
+        document_id="doc-log-fail",
+        document_name="Guide",
+        file_type="md",
+        markdown="# Title\nBody",
+    )
+
+    assert chunk_count == 3
+    stored = await use_case.get_document("doc-log-fail")
+    assert stored is not None
+    assert stored.status.value == "completed"

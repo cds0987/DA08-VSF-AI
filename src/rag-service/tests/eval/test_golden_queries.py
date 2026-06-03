@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+import os
 from statistics import quantiles
 from time import perf_counter
 
 import pytest
 
 from haystack_interface import IngestInput, OfflineProvider, build_engine
+from haystack_interface.ai import get_ai_provider, reset_ai_provider
+
+"""Structural eval gate by default, real-provider eval when explicitly enabled.
+
+Offline mode proves retrieval plumbing: lineage fields, top-hit recall on a fixed corpus,
+correlation propagation, and no-answer threshold behavior. It does NOT claim production
+quality for caption/model/prompt changes because embeddings are synthetic.
+
+Set `RAG_EVAL_REAL_PROVIDER=1` to run the same golden cases against the configured AI
+provider. In that mode latency p95 becomes meaningful and is asserted via
+`RAG_EVAL_MAX_P95_MS` (default 5000).
+"""
 
 
 GOLDEN_CORPUS = [
@@ -68,9 +81,16 @@ GOLDEN_QUERIES = [
 ]
 
 
+def _build_eval_engine():
+    if os.getenv("RAG_EVAL_REAL_PROVIDER", "").strip() == "1":
+        reset_ai_provider()
+        return build_engine(provider=get_ai_provider(), caption=True), True
+    return build_engine(provider=OfflineProvider(256), caption=True), False
+
+
 @pytest.mark.asyncio
 async def test_golden_queries_preserve_lineage_and_recall() -> None:
-    engine = build_engine(provider=OfflineProvider(256), caption=True)
+    engine, real_provider = _build_eval_engine()
     for document in GOLDEN_CORPUS:
         await engine.ingest(document)
 
@@ -93,13 +113,17 @@ async def test_golden_queries_preserve_lineage_and_recall() -> None:
         assert top.correlation_id == f"eval:{case['document_id']}"
         assert top.content
 
-    p95_ms = quantiles(latencies_ms, n=20, method="inclusive")[-1]
-    assert p95_ms < 1000, f"search p95 too high for golden set: {p95_ms:.1f}ms"
+    if real_provider:
+        p95_ms = quantiles(latencies_ms, n=20, method="inclusive")[-1]
+        max_p95_ms = float(os.getenv("RAG_EVAL_MAX_P95_MS", "5000"))
+        assert p95_ms < max_p95_ms, (
+            f"search p95 too high for golden set: {p95_ms:.1f}ms >= {max_p95_ms:.1f}ms"
+        )
 
 
 @pytest.mark.asyncio
 async def test_golden_queries_no_answer_policy_for_ungrounded_question() -> None:
-    engine = build_engine(provider=OfflineProvider(256), caption=True)
+    engine, _ = _build_eval_engine()
     for document in GOLDEN_CORPUS:
         await engine.ingest(document)
 

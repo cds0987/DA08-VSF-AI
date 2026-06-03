@@ -70,7 +70,6 @@ def validate_runtime_settings() -> None:
 
 def validate_vector_config(
     vector_config: VectorStoreConfig,
-    settings: HaystackSettings,
 ) -> None:
     if not vector_config.collection.strip():
         raise ValueError("VECTOR_COLLECTION must not be empty")
@@ -84,10 +83,6 @@ def validate_vector_config(
         )
     if vector_config.dimension <= 0:
         raise ValueError("Vector store dimension must be > 0")
-    if vector_config.dimension != settings.embed_dimension:
-        raise ValueError(
-            "Vector store dimension must match EMBED_DIMENSION before engine wiring"
-        )
     if vector_config.deployment == "remote" and not vector_config.url.strip():
         raise ValueError("VECTOR_DB_URL must not be empty for remote vector deployment")
 
@@ -124,7 +119,7 @@ def bootstrap_runtime() -> RuntimeState:
     ai_settings = load_ai_settings()
     validate_ai_config(ai_settings, settings)
     vector_config = VectorStoreConfig.from_env(dimension=settings.embed_dimension)
-    validate_vector_config(vector_config, settings)
+    validate_vector_config(vector_config)
     database_url = os.getenv("DATABASE_URL", "").strip()
     validate_metadata_backend(app_env, database_url)
     metadata_backend = metadata_backend_name(database_url)

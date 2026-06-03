@@ -42,7 +42,7 @@ class DocumentRepository(ABC):
         limit: int = 100,
         offset: int = 0,
     ) -> List[JobLog]:
-        """Liệt kê job log theo document hoặc toàn cục."""
+        """Liệt kê job log theo document hoặc toàn cục, mới nhất trước."""
 
     @abstractmethod
     async def prune_job_logs_older_than(self, cutoff: datetime) -> int:

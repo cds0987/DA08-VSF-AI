@@ -59,7 +59,11 @@ class InMemoryDocumentRepository(DocumentRepository):
         limit: int = 100,
         offset: int = 0,
     ) -> List[JobLog]:
-        logs = self._job_logs
+        logs = sorted(
+            self._job_logs,
+            key=lambda entry: (entry.created_at, entry.document_id),
+            reverse=True,
+        )
         if document_id is not None:
             logs = [entry for entry in logs if entry.document_id == document_id]
         return logs[offset : offset + limit]
