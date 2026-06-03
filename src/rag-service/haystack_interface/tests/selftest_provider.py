@@ -22,8 +22,6 @@ import sys
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from app.domain.repositories.vector_repository import UserContext
-
 from haystack_interface import build_engine, IngestInput, OfflineProvider, OpenAIProvider
 from haystack_interface.ai.base import AISettings, CapabilityConfig
 from haystack_interface.caption import ProviderCaptioner
@@ -60,13 +58,11 @@ async def part_b_end_to_end() -> None:
 
     n = await engine.ingest(IngestInput(
         document_id="d-pw", document_name="Account", file_type="md",
-        classification="internal",
         markdown="# Reset mật khẩu\nVào Cài đặt > Bảo mật để đặt lại mật khẩu, link 15 phút.\n",
     ))
     assert n >= 1, "ingest (caption flow) phải tạo >=1 unit"
 
-    user = UserContext(user_id="u1", user_role="user", user_department="eng")
-    res = await engine.search("reset mật khẩu", user, rerank_threshold=0.0)
+    res = await engine.search("reset mật khẩu", rerank_threshold=0.0)
     assert res and res[0].document_id == "d-pw", "search qua LLM-reranker sai top-1"
     assert res[0].rerank_score > 0, "LLM-reranker phải gán rerank_score"
     print("  B. end-to-end embed→caption→hybrid→LLM-rerank (offline provider): OK")

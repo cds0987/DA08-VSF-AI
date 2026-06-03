@@ -13,7 +13,6 @@ from urllib.parse import urlparse
 
 from haystack_interface.vectorstore.providers.chromadb.base import (
     COLLECTION_METADATA,
-    OVERFETCH,
     ChromaBase,
 )
 
@@ -24,7 +23,7 @@ except ModuleNotFoundError as e:
         "Provider 'chromadb' can chromadb. Cai: pip install chromadb"
     ) from e
 
-from app.domain.repositories.vector_repository import SearchResult, UserContext
+from app.domain.repositories.vector_repository import SearchResult
 
 from haystack_interface.vectorstore.config import VectorStoreConfig
 from haystack_interface.vectorstore.store import VectorStore
@@ -79,16 +78,15 @@ class ChromaRemoteProvider(ChromaBase):
         self,
         vector: Sequence[float],
         query_text: str,
-        user_context: UserContext,
         top_k: int = 20,
     ) -> list[SearchResult]:
         collection = await self._ensure()
         res = await collection.query(
             query_embeddings=[list(vector)],
-            n_results=top_k * OVERFETCH,
+            n_results=top_k,
             include=["metadatas", "distances", "documents"],
         )
-        return self._assemble(res, user_context, top_k)
+        return self._assemble(res, top_k)
 
     async def delete_many(self, chunk_ids: Sequence[str]) -> None:
         ids = list(chunk_ids)

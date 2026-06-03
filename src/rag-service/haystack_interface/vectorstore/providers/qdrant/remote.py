@@ -13,7 +13,7 @@ from haystack_interface.vectorstore.providers.qdrant.base import QdrantBase, poi
 
 from qdrant_client import AsyncQdrantClient
 
-from app.domain.repositories.vector_repository import SearchResult, UserContext
+from app.domain.repositories.vector_repository import SearchResult
 
 from haystack_interface.vectorstore.config import VectorStoreConfig
 from haystack_interface.vectorstore.store import VectorStore
@@ -79,7 +79,6 @@ class QdrantRemoteProvider(QdrantBase):
         self,
         vector: Sequence[float],
         query_text: str,
-        user_context: UserContext,
         top_k: int = 20,
     ) -> list[SearchResult]:
         await self._ensure()
@@ -87,7 +86,6 @@ class QdrantRemoteProvider(QdrantBase):
             collection_name=self._collection,
             query=list(vector),
             limit=top_k,
-            query_filter=self._access_filter(user_context),
             with_payload=True,
         )
         return [self._to_result(point) for point in res.points]

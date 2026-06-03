@@ -25,11 +25,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 from app.domain.repositories.embedding_service import EmbeddingService
-from app.domain.repositories.vector_repository import (
-    SearchResult,
-    UserContext,
-    VectorRepository,
-)
+from app.domain.repositories.vector_repository import VectorRepository
 
 from haystack_interface import IngestInput, OfflineProvider, OpenAIProvider, ProviderEmbeddingService
 from haystack_interface.ai import retry_async
@@ -40,8 +36,6 @@ from haystack_interface.text_utils import hash_embed, overlap_score
 from haystack_interface.vectorstore import VectorStoreConfig
 
 DIM = 64
-USER = UserContext(user_id="u1", user_role="user", user_department="eng")
-ADMIN = UserContext(user_id="admin", user_role="admin", user_department="eng")
 
 
 def _has_qdrant() -> bool:
@@ -61,8 +55,8 @@ def _vectors():
 
 
 async def _count_chunks(repo) -> int:
-    """Đếm chunk backend-agnostic: admin search top_k lớn -> số chunk_id distinct."""
-    res = await repo.search(hash_embed(["count"], DIM)[0], "count", ADMIN, top_k=100000)
+    """Đếm chunk backend-agnostic: search top_k lớn -> số chunk_id distinct."""
+    res = await repo.search(hash_embed(["count"], DIM)[0], "count", top_k=100000)
     return len({r.chunk_id for r in res})
 
 
@@ -96,7 +90,6 @@ class SleepReranker:
 def _doc(i: int) -> IngestInput:
     return IngestInput(
         document_id=f"d{i}", document_name=f"Doc {i}", file_type="md",
-        classification="internal",
         markdown=f"# Section {i}\nNội dung tài liệu số {i} với từ khoá word{i} đặc trưng.\n",
     )
 
@@ -121,7 +114,7 @@ async def test_io_concurrency_overlap() -> None:
     N = 10
     t0 = time.perf_counter()
     results = await asyncio.gather(
-        *[engine.search("word1", USER, rerank_threshold=0.0) for _ in range(N)]
+        *[engine.search("word1", rerank_threshold=0.0) for _ in range(N)]
     )
     elapsed = time.perf_counter() - t0
 
@@ -141,7 +134,7 @@ class _BlockingStore(VectorRepository):
     async def upsert(self, chunk_id, vector, payload) -> None: ...
     async def delete_by_document(self, document_id) -> None: ...
 
-    async def hybrid_search(self, vector, query_text, user_context, top_k=20):
+    async def hybrid_search(self, vector, query_text, top_k=20):
         await asyncio.to_thread(time.sleep, 0.3)   # blocking CPU/I/O -> thread
         return []
 
@@ -159,13 +152,13 @@ async def test_blocking_offload_keeps_loop_alive() -> None:
     # CONCURRENT: store blocking chạy song song với ticker.
     t0 = time.perf_counter()
     _, ticks = await asyncio.gather(
-        store.hybrid_search([0.0] * DIM, "q", USER), ticker()
+        store.hybrid_search([0.0] * DIM, "q"), ticker()
     )
     t_concurrent = time.perf_counter() - t0
 
     # SERIAL baseline (cùng máy → tự hiệu chuẩn, miễn nhiễm granularity OS).
     t0 = time.perf_counter()
-    await store.hybrid_search([0.0] * DIM, "q", USER)
+    await store.hybrid_search([0.0] * DIM, "q")
     await ticker()
     t_serial = time.perf_counter() - t0
 
@@ -207,7 +200,7 @@ async def test_concurrent_ingest_no_lost_writes() -> None:
     await asyncio.gather(*[engine.ingest(_doc(i)) for i in range(N)])
     assert await _count_chunks(engine.vectors) == total_docs, "concurrent re-ingest phải idempotent"
 
-    res = await engine.search("word7", USER, rerank_threshold=0.0)
+    res = await engine.search("word7", rerank_threshold=0.0)
     assert any(r.document_id == "d7" for r in res), "search sau concurrent ingest phải tìm đúng doc"
     print(f"  C. concurrent ingest: {N} doc, {total_docs} chunk, không mất write + idempotent: OK")
 

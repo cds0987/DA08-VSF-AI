@@ -1,5 +1,5 @@
-from dataclasses import dataclass, field
-from typing import List, Optional
+from dataclasses import dataclass
+from typing import Optional
 from datetime import datetime
 from enum import Enum
 
@@ -24,9 +24,8 @@ class Document:
     created_at: datetime
     chunk_count: int = 0
     error_message: Optional[str] = None
-    classification: str = "internal"                                # public | internal | secret | top_secret
-    allowed_departments: List[str] = field(default_factory=list)   # bắt buộc nếu secret
-    allowed_user_ids: List[str] = field(default_factory=list)      # bắt buộc nếu top_secret
+    # Access control KHÔNG thuộc domain rag-service (search.md §6, LESSONS §1):
+    # retrieval trả raw unit + lineage, phân quyền là việc của caller tầng trên.
 
 
 @dataclass

@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Sequence
 
-from app.domain.repositories.vector_repository import SearchResult, UserContext
+from app.domain.repositories.vector_repository import SearchResult
 
 from haystack_interface.vectorstore.config import VectorStoreConfig
 from haystack_interface.vectorstore.types import VectorRecord
@@ -26,10 +26,12 @@ class VectorStoreProvider(ABC):
         self,
         vector: Sequence[float],
         query_text: str,
-        user_context: UserContext,
         top_k: int = 20,
     ) -> list[SearchResult]:
-        """Search thống nhất ra ngoài; bên trong backend có thể hybrid hay dense-only."""
+        """Search thống nhất ra ngoài; bên trong backend có thể hybrid hay dense-only.
+
+        KHÔNG enforce access control — trả raw unit + lineage (search.md §6).
+        """
 
     @abstractmethod
     async def delete_many(self, chunk_ids: Sequence[str]) -> None:

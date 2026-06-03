@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Mapping, Sequence
 
-from app.domain.repositories.vector_repository import SearchResult, UserContext, VectorRepository
+from app.domain.repositories.vector_repository import SearchResult, VectorRepository
 
 from haystack_interface.vectorstore.config import VectorStoreConfig
 from haystack_interface.vectorstore.provider import VectorStoreProvider
@@ -44,19 +44,17 @@ class VectorStore(VectorRepository):
         self,
         vector: Sequence[float],
         query_text: str,
-        user_context: UserContext,
         top_k: int = 20,
     ) -> list[SearchResult]:
-        return await self._provider.search(vector, query_text, user_context, top_k=top_k)
+        return await self._provider.search(vector, query_text, top_k=top_k)
 
     async def hybrid_search(
         self,
         vector: list[float],
         query_text: str,
-        user_context: UserContext,
         top_k: int = 20,
     ) -> list[SearchResult]:
-        return await self.search(vector, query_text, user_context, top_k=top_k)
+        return await self.search(vector, query_text, top_k=top_k)
 
     async def delete(self, chunk_id: str) -> None:
         await self.delete_many([chunk_id])

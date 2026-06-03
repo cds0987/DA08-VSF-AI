@@ -1,12 +1,10 @@
 from pydantic import BaseModel
-from typing import List, Optional
 
 
 class IngestRequest(BaseModel):
     document_id: str
-    classification: str = "internal"
-    allowed_departments: List[str] = []
-    allowed_user_ids: List[str] = []
+    # Không có field access control: rag-service không enforce phân quyền
+    # (search.md §6). Phân loại/scope nếu cần là metadata thụ động do caller quản.
 
 
 class IngestResponse(BaseModel):

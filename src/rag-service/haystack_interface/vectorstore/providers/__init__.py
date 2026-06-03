@@ -5,7 +5,7 @@ cho hai deployment, chọn theo `config.url`:
 
     providers/<db>/
         __init__.py   # build(config) — route theo url
-        base.py       # phần dùng chung (mapping, access filter/post-filter)
+        base.py       # phần dùng chung (mapping record↔point/row, ráp kết quả)
         remote.py     # CÓ url  → service riêng, client async-native (async thuần)
         inprocess.py  # KO url  → embedded chạy thẳng trong service, sync + to_thread
 

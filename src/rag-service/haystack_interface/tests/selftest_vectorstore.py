@@ -19,7 +19,7 @@ from typing import List
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from app.domain.repositories.vector_repository import SearchResult, UserContext
+from app.domain.repositories.vector_repository import SearchResult
 
 from haystack_interface import IngestInput, OfflineProvider, build_engine
 from haystack_interface.tests._contract import assert_vector_repository_contract
@@ -89,7 +89,7 @@ async def test_pluggable_provider() -> None:
         async def upsert_many(self, records) -> None: ...
 
         async def search(
-            self, vector, query_text, user_context, top_k=20
+            self, vector, query_text, top_k=20
         ) -> List[SearchResult]:
             return []
 
@@ -167,12 +167,10 @@ async def test_engine_uses_selected_provider() -> None:
             document_id="d1",
             document_name="Doc",
             file_type="md",
-            classification="internal",
             markdown="# T\nreset mật khẩu trong cài đặt.\n",
         )
     )
-    user = UserContext(user_id="u1", user_role="user", user_department="eng")
-    res = await engine.search("reset mật khẩu", user, rerank_threshold=0.0)
+    res = await engine.search("reset mật khẩu", rerank_threshold=0.0)
     assert res and res[0].document_id == "d1", "engine qua config object phai chay e2e"
     print("  7. build_engine dung provider qua config object + chay e2e: OK")
 
@@ -195,9 +193,6 @@ async def test_unified_interface_methods() -> None:
         "file_type": "md",
         "page_number": 1,
         "section_title": "T",
-        "classification": "internal",
-        "allowed_departments": [],
-        "allowed_user_ids": [],
     }
 
     await repo.insert("d2::p0::c0", vector, payload)
@@ -209,18 +204,17 @@ async def test_unified_interface_methods() -> None:
     assert dup_raised, "insert trung id phai fail"
 
     await repo.upsert_many([VectorRecord(chunk_id="d2::p0::c1", vector=vector, payload=payload)])
-    user = UserContext(user_id="u1", user_role="user", user_department="eng")
-    res = await repo.search(vector, "reset mật khẩu", user, top_k=10)
+    res = await repo.search(vector, "reset mật khẩu", top_k=10)
     assert any(r.document_id == "d2" for r in res), "search qua facade phai tim duoc doc"
 
     await repo.delete("d2::p0::c1")
-    after_delete = await repo.search(vector, "reset mật khẩu", user, top_k=10)
+    after_delete = await repo.search(vector, "reset mật khẩu", top_k=10)
     assert all(r.chunk_id != "d2::p0::c1" for r in after_delete), (
         "delete theo chunk_id phai go dung record"
     )
 
     await repo.delete_by_document("d2")
-    after_doc_delete = await repo.search(vector, "reset mật khẩu", user, top_k=10)
+    after_doc_delete = await repo.search(vector, "reset mật khẩu", top_k=10)
     assert all(r.document_id != "d2" for r in after_doc_delete), (
         "delete_by_document phai go het record"
     )
@@ -236,7 +230,7 @@ async def test_contract_qdrant_in_process() -> None:
     )
 
     await assert_vector_repository_contract(QdrantInProcessRepository, dim=DIM)
-    print("  9. contract test (qdrant in_process): dimension/idempotent/filter/delete: OK")
+    print("  9. contract test (qdrant in_process): dimension/idempotent/full-content/delete: OK")
 
 
 async def run() -> None:

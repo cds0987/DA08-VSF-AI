@@ -1,20 +1,28 @@
-from pydantic import BaseModel
 from typing import List
+
+from pydantic import BaseModel, Field
 
 
 class SearchRequest(BaseModel):
     question: str
-    user_id: str
-    user_role: str
-    user_department: str
+    correlation_id: str | None = None
+
+
+class SearchLineageResponse(BaseModel):
+    source_uri: str
+    artifact_uri: str
 
 
 class SearchResultResponse(BaseModel):
-    chunk_id: str
-    document_name: str
+    correlation_id: str
+    unit_id: str
+    document_id: str
+    display_name: str
+    caption: str
+    content: str
+    heading_path: List[str] = Field(default_factory=list)
+    lineage: SearchLineageResponse
     page_number: int
-    section_title: str
-    parent_text: str
     score: float
     rerank_score: float
 

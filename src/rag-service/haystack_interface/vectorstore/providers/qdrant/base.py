@@ -17,15 +17,8 @@ except ModuleNotFoundError as e:
         "Provider 'qdrant' can qdrant-client. Cai: pip install qdrant-client"
     ) from e
 
-from app.domain.repositories.vector_repository import SearchResult, UserContext
+from app.domain.repositories.vector_repository import SearchLineage, SearchResult
 
-from haystack_interface.access import (
-    DEPARTMENT_FIELD,
-    DEPT_SCOPED,
-    OPEN_CLASSIFICATIONS,
-    USER_FIELD,
-    USER_SCOPED,
-)
 from haystack_interface.vectorstore.config import VectorStoreConfig
 from haystack_interface.vectorstore.provider import VectorStoreProvider
 from haystack_interface.vectorstore.types import VectorRecord
@@ -56,43 +49,6 @@ class QdrantBase(VectorStoreProvider):
             payload={**record.payload, "chunk_id": record.chunk_id},
         )
 
-    @staticmethod
-    def _access_filter(ctx: UserContext) -> "models.Filter | None":
-        if ctx.user_role == "admin":
-            return None
-        return models.Filter(
-            should=[
-                models.FieldCondition(
-                    key="classification",
-                    match=models.MatchAny(any=list(OPEN_CLASSIFICATIONS)),
-                ),
-                models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="classification",
-                            match=models.MatchValue(value=DEPT_SCOPED),
-                        ),
-                        models.FieldCondition(
-                            key=DEPARTMENT_FIELD,
-                            match=models.MatchValue(value=ctx.user_department),
-                        ),
-                    ]
-                ),
-                models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="classification",
-                            match=models.MatchValue(value=USER_SCOPED),
-                        ),
-                        models.FieldCondition(
-                            key=USER_FIELD,
-                            match=models.MatchValue(value=ctx.user_id),
-                        ),
-                    ]
-                ),
-            ]
-        )
-
     def _vectors_config(self) -> "models.VectorParams":
         return models.VectorParams(size=self.config.dimension, distance=models.Distance.COSINE)
 
@@ -116,15 +72,19 @@ class QdrantBase(VectorStoreProvider):
     def _to_result(point) -> SearchResult:
         m = point.payload or {}
         return SearchResult(
-            chunk_id=m.get("chunk_id", str(point.id)),
+            unit_id=m.get("chunk_id", str(point.id)),
             parent_id=m.get("parent_id", ""),
             document_id=m.get("document_id", ""),
-            document_name=m.get("document_name", ""),
+            display_name=m.get("document_name", ""),
             file_type=m.get("file_type", ""),
             page_number=int(m.get("page_number", 0)),
-            section_title=m.get("section_title", ""),
-            child_text=m.get("child_text", ""),
-            parent_text=m.get("parent_text", ""),
+            caption=m.get("caption", m.get("child_text", "")),
+            content=m.get("parent_text", ""),
+            heading_path=list(m.get("heading_path", [])),
+            lineage=SearchLineage(
+                source_uri=m.get("source_uri", ""),
+                artifact_uri=m.get("artifact_uri", ""),
+            ),
             score=float(point.score) if point.score is not None else 0.0,
             rerank_score=float(m.get("rerank_score", 0.0)),
         )

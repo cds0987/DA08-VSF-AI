@@ -1,9 +1,9 @@
 """Phần dùng chung cho hai deployment của provider `milvus`.
 
 `remote.py` (AsyncMilvusClient, async thuần) và `inprocess.py` (MilvusClient + Milvus
-Lite, sync + to_thread) chia sẻ: map record→row, ráp kết quả search + POST-FILTER
-`can_access`. Toàn bộ payload nằm trong MỘT field động `payload` (JSON) nên không cần
-khai báo schema cứng; collection tạo bằng quick-setup (id + vector COSINE).
+Lite, sync + to_thread) chia sẻ: map record→row, ráp kết quả search. Toàn bộ payload
+nằm trong MỘT field động `payload` (JSON) nên không cần khai báo schema cứng; collection
+tạo bằng quick-setup (id + vector COSINE). KHÔNG enforce access (search.md §6).
 
 base KHÔNG import pymilvus — phần thuần dữ liệu; client do từng file deployment nạp.
 """
@@ -12,9 +12,8 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from app.domain.repositories.vector_repository import SearchResult, UserContext
+from app.domain.repositories.vector_repository import SearchLineage, SearchResult
 
-from haystack_interface.access import can_access
 from haystack_interface.vectorstore.config import VectorStoreConfig
 from haystack_interface.vectorstore.provider import VectorStoreProvider
 from haystack_interface.vectorstore.types import VectorRecord
@@ -22,7 +21,6 @@ from haystack_interface.vectorstore.types import VectorRecord
 PK = "id"
 VECTOR = "vector"
 PAYLOAD = "payload"
-OVERFETCH = 5
 
 
 class MilvusBase(VectorStoreProvider):
@@ -50,13 +48,11 @@ class MilvusBase(VectorStoreProvider):
         ids = sorted(row.get(PK) for row in (existing or []) if row.get(PK))
         return ids[0] if ids else None
 
-    def _assemble(self, hits, user_context: UserContext, top_k: int) -> list[SearchResult]:
+    def _assemble(self, hits, top_k: int) -> list[SearchResult]:
         out: list[SearchResult] = []
         for hit in hits or []:
             entity = hit.get("entity", hit) if isinstance(hit, dict) else {}
             payload = entity.get(PAYLOAD, {}) or {}
-            if not can_access(payload, user_context):
-                continue
             distance = hit.get("distance") if isinstance(hit, dict) else None
             out.append(self._to_result(payload, distance))
             if len(out) >= top_k:
@@ -68,15 +64,19 @@ class MilvusBase(VectorStoreProvider):
         # COSINE trong Milvus: score càng cao càng gần (đã là similarity).
         score = float(distance) if distance is not None else 0.0
         return SearchResult(
-            chunk_id=m.get("chunk_id", ""),
+            unit_id=m.get("chunk_id", ""),
             parent_id=m.get("parent_id", ""),
             document_id=m.get("document_id", ""),
-            document_name=m.get("document_name", ""),
+            display_name=m.get("document_name", ""),
             file_type=m.get("file_type", ""),
             page_number=int(m.get("page_number", 0)),
-            section_title=m.get("section_title", ""),
-            child_text=m.get("child_text", ""),
-            parent_text=m.get("parent_text", ""),
+            caption=m.get("caption", m.get("child_text", "")),
+            content=m.get("parent_text", ""),
+            heading_path=list(m.get("heading_path", [])),
+            lineage=SearchLineage(
+                source_uri=m.get("source_uri", ""),
+                artifact_uri=m.get("artifact_uri", ""),
+            ),
             score=score,
             rerank_score=float(m.get("rerank_score", 0.0)),
         )
@@ -100,7 +100,7 @@ class MilvusBase(VectorStoreProvider):
         return {
             "collection_name": self.collection_name,
             "data": [list(vector)],
-            "limit": top_k * OVERFETCH,
+            "limit": top_k,
             "output_fields": [PAYLOAD],
             "search_params": {"metric_type": "COSINE"},
         }

@@ -18,7 +18,6 @@ haystack_interface/
   vectorstore/ provider-first: VectorStoreConfig (provider, url) → registry chọn
                providers/<db>/ (qdrant · chromadb · milvus); mỗi db 2 file:
                remote.py (có url, async thuần) · inprocess.py (ko url, to_thread)
-  access/      classification filter (policy access control)
   config.py    HaystackSettings (split · retrieval — phần pipeline, KHÔNG-AI/KHÔNG-storage)
   engine.py    orchestrator (ingest + search) — chỉ phụ thuộc port
   factory.py   composition root — wire backend theo env (offline | OpenAI)
@@ -51,12 +50,11 @@ cd src/rag-service
 
 ```python
 from haystack_interface import build_engine, IngestInput
-from app.domain.repositories.vector_repository import UserContext
 
 engine = build_engine()                   # auto theo env (offline nếu không có key)
 await engine.ingest(IngestInput(document_id="d1", document_name="Doc",
                                 file_type="md", markdown="# Title\nNội dung..."))
-hits = await engine.search("câu hỏi", UserContext("u1", "user", "eng"))
+hits = await engine.search("câu hỏi")     # trả raw unit + lineage; access ở caller
 ```
 
 Mọi vùng khác cần AI (query-rewrite, eval, caption...) dùng chung gateway, **không
@@ -90,11 +88,11 @@ provider theo `config.provider`. **Deployment SUY RA TỪ `url`**: có url → `
 (embedded chạy thẳng trong tiến trình, client sync bọc **`to_thread`**). Mỗi provider
 là MỘT package, có HAI file implement cho hai deployment đó:
 
-| Provider | `remote.py` (có url, async thuần) | `inprocess.py` (ko url, to_thread) | Access |
-|---|---|---|---|
-| `qdrant` (mặc định) | `AsyncQdrantClient` server | `QdrantClient` `:memory:`/path | pre-filter payload |
-| `chromadb` | `AsyncHttpClient` server | `Ephemeral`/`Persistent` | post-filter `can_access` |
-| `milvus` | `AsyncMilvusClient` server | `MilvusClient` Milvus Lite (file) | payload JSON + post-filter |
+| Provider | `remote.py` (có url, async thuần) | `inprocess.py` (ko url, to_thread) |
+|---|---|---|
+| `qdrant` (mặc định) | `AsyncQdrantClient` server | `QdrantClient` `:memory:`/path |
+| `chromadb` | `AsyncHttpClient` server | `Ephemeral`/`Persistent` |
+| `milvus` | `AsyncMilvusClient` server | `MilvusClient` Milvus Lite (file) |
 
 > 🟡 Mới qdrant in_process chạy offline ngay; chromadb/milvus + mọi mode remote viết
 > theo API chuẩn nhưng **chưa verify qua DB/server thật**. Không còn provider
@@ -122,22 +120,19 @@ object/`VECTOR_DB_PROVIDER`, KHÔNG sửa engine/use-case (hexagonal). Provider 
 
 **Conformance — mọi provider phải pass contract chung.** `tests/_contract.py` ép
 các bất biến backend-agnostic (dimension guard · idempotent re-upsert · trả full
-content · classification filter cô lập secret · delete gỡ hết) qua *port*, không
-đụng nội bộ. Qdrant in_process (`:memory:`) chạy trong selftest khi có qdrant-client;
-chromadb/milvus chạy khi cài lib tương ứng. Bên thứ ba thêm DB mới → chạy chính
-contract này để chứng minh tuân thủ (MOSA §4).
+content · delete gỡ hết) qua *port*, không đụng nội bộ. Qdrant in_process (`:memory:`)
+chạy trong selftest khi có qdrant-client; chromadb/milvus chạy khi cài lib tương ứng.
+Bên thứ ba thêm DB mới → chạy chính contract này để chứng minh tuân thủ (MOSA §4).
 
 **Capability gap (đọc kỹ).** Contract ghim những gì PHẢI giống, KHÔNG ghim chất
 lượng ranking. Hiện cả ba provider chạy **dense-only** (hybrid sparse/BM25 còn TODO)
-→ rerank bước sau (trên parent_text) bù chất lượng. Access control: `qdrant`
-PRE-FILTER trên payload index; `chromadb`/`milvus` POST-FILTER `can_access` (Chroma
-không lưu list trong metadata; Milvus dùng payload JSON) — cùng một policy, khác cách
-biểu diễn. Nâng pre-filter cho chroma/milvus là tối ưu sau.
+→ rerank bước sau (trên parent_text) bù chất lượng.
 
-**Access policy single-source.** Quy tắc phân loại (public/internal/secret/
-top_secret) định nghĩa MỘT chỗ ở `access/classification.py` (hằng
-`OPEN_CLASSIFICATIONS`/`*_SCOPED`/`*_FIELD`). `can_access` (in-memory predicate) và
-Qdrant pre-filter cùng derive từ đó → không drift tham số policy.
+**KHÔNG enforce access control.** Retrieval layer trả raw unit + lineage; filtering
+theo org/role/classification là việc của **caller tầng trên** (search.md §6,
+handoff/LESSONS §1 discovery). `search()` không nhận `UserContext`. Nếu cần phân quyền,
+ingest có thể nhét scope/tags vào payload như **metadata thụ động** để caller tự lọc —
+nhưng rag-service KHÔNG tự lọc.
 
 ## AI gateway (`ai/`) — MỌI call AI đi qua đây
 
@@ -183,7 +178,7 @@ sửa nơi gọi** (execution-fallback.md §4b: backend abstraction từ ngày 1
 - **Index id encode dimension** — đổi dimension là *migration*; `upsert` reject
   vector sai dimension. (`ingestion.md` §8)
 - **Idempotent** — `chunk_id` deterministic + `DuplicatePolicy.OVERWRITE`. (`ingestion.md` §7)
-- **Classification filter** — public/internal/secret/top_secret theo `UserContext`.
+- **Không enforce access** — retrieval trả raw unit + lineage; phân quyền ở caller. (`search.md` §6)
 - **No-answer** — rerank threshold lọc kết quả yếu thay vì bịa. (`search.md` §3)
 - **Reliability đồng nhất** — mọi AI call qua gateway: retry+backoff+jitter. (LESSONS §4.9)
 
@@ -202,8 +197,6 @@ Vì engine/use-case chỉ phụ thuộc **port** trừu tượng, đổi backend
 
 - `OfflineProvider` embed **không phải semantic thật** — chỉ để pipeline chạy/eval
   cấu trúc; recall thật cần model embedding thật.
-- Access filter áp **post-retrieval** trên in-memory store (union rộng ×5 trước
-  filter để giảm cắt mất); production Qdrant nên **pre-filter** trên payload index.
 - Chưa gắn S3 / Azure OCR (parser adapter ngoài — `parser.md`); engine nhận sẵn
   Markdown canonical.
 - Interface `VectorRepository`/`EmbeddingService` hiện là **Python ABC nội bộ**, chưa

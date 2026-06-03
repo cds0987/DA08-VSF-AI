@@ -1,26 +1,13 @@
-"""HaystackRagEngine — orchestrate ingest + search end-to-end.
-
-Façade ghép port `EmbeddingService` + `VectorRepository` + chunking + reranker +
-(optional) captioner thành đúng hai pipeline use-case của rag-service:
-
-- ingest  ↔ application/use_cases/ingestion/... (split → caption/embed → upsert)
-- search  ↔ application/use_cases/query/retrieval.py (embed → hybrid → rerank Top-k)
-
-Engine KHÔNG biết SDK/provider/S3 — mọi AI đi qua port (embedder/captioner/reranker)
-đã được composition root (factory) wire. Đổi backend = đổi wiring, không sửa engine.
-"""
+"""HaystackRagEngine orchestrates ingest + search end-to-end."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Optional
+from uuid import uuid4
 
 from app.domain.repositories.embedding_service import EmbeddingService
-from app.domain.repositories.vector_repository import (
-    UserContext,
-    SearchResult,
-    VectorRepository,
-)
+from app.domain.repositories.vector_repository import SearchResult, VectorRepository
 
 from haystack_interface.caption import Captioner
 from haystack_interface.chunking import split_sections
@@ -32,11 +19,10 @@ from haystack_interface.rerank import Reranker
 class IngestInput:
     document_id: str
     document_name: str
-    file_type: str                       # pdf, docx, txt, md, ...
-    markdown: str                        # canonical artifact (đã parse, ingestion.md §4)
-    classification: str = "internal"     # public | internal | secret | top_secret
-    allowed_departments: Optional[List[str]] = None
-    allowed_user_ids: Optional[List[str]] = None
+    file_type: str
+    markdown: str
+    source_uri: Optional[str] = None
+    artifact_uri: Optional[str] = None
 
 
 class HaystackRagEngine:
@@ -52,15 +38,12 @@ class HaystackRagEngine:
         self.embedder = embedder
         self.vectors = vectors
         self.reranker = reranker
-        # captioner=None => baseline: embed thẳng child (eval D7).
-        # captioner set  => flow chuẩn: embed *caption* của section (ingestion.md §6).
         self.captioner = captioner
 
-    # ------------------------------------------------------------------ #
-    # INGEST (split → caption/embed → upsert)                            #
-    # ------------------------------------------------------------------ #
     async def ingest(self, doc: IngestInput) -> int:
         s = self.settings
+        source_uri = doc.source_uri or f"local://{doc.document_id}"
+        artifact_uri = doc.artifact_uri or f"{source_uri}#artifact"
         sections = split_sections(
             doc.markdown,
             parent_max_words=s.parent_max_words,
@@ -73,24 +56,23 @@ class HaystackRagEngine:
         payloads: List[dict] = []
         for pi, section in enumerate(sections):
             parent_id = f"{doc.document_id}::p{pi}"
+            heading_path = [section.section_title] if section.section_title else []
 
             if self.captioner is not None:
-                # Flow chuẩn: 1 unit/section, embed *caption*; BM25 trên full content.
                 caption = await self.captioner.caption(section.parent_text)
                 units = [(f"{parent_id}::c0", caption, caption, section.parent_text)]
             else:
-                # Baseline: embed thẳng child; BM25 cũng trên child.
                 units = [
                     (f"{parent_id}::c{ci}", child, child, child)
                     for ci, child in enumerate(section.children)
                 ]
 
-            for chunk_id, to_embed, child_text, bm25_text in units:
+            for chunk_id, to_embed, caption, bm25_text in units:
                 chunk_ids.append(chunk_id)
                 embed_texts.append(to_embed)
                 payloads.append(
                     {
-                        "child_text": child_text,
+                        "child_text": caption,
                         "bm25_text": bm25_text,
                         "parent_id": parent_id,
                         "parent_text": section.parent_text,
@@ -99,41 +81,38 @@ class HaystackRagEngine:
                         "file_type": doc.file_type,
                         "page_number": section.page_number,
                         "section_title": section.section_title,
-                        "classification": doc.classification,
-                        "allowed_departments": doc.allowed_departments or [],
-                        "allowed_user_ids": doc.allowed_user_ids or [],
+                        "heading_path": heading_path,
+                        "caption": caption,
+                        "source_uri": source_uri,
+                        "artifact_uri": artifact_uri,
                     }
                 )
 
         if not chunk_ids:
             return 0
 
-        # embed_batch -> vectors (cùng embedder cho ingest+query).
         vectors = await self.embedder.embed_batch(embed_texts)
-        # upsert vào vector store (payload mang parent_text + metadata).
         for chunk_id, vector, payload in zip(chunk_ids, vectors, payloads):
             await self.vectors.upsert(chunk_id, vector, payload)
         return len(chunk_ids)
 
-    # ------------------------------------------------------------------ #
-    # SEARCH (embed → hybrid → rerank Top-k)                             #
-    # ------------------------------------------------------------------ #
     async def search(
         self,
         query_text: str,
-        user_context: UserContext,
         top_k: Optional[int] = None,
         rerank_threshold: Optional[float] = None,
+        correlation_id: Optional[str] = None,
     ) -> List[SearchResult]:
         s = self.settings
         k = top_k if top_k is not None else s.rerank_top_k
         th = rerank_threshold if rerank_threshold is not None else s.rerank_threshold
+        request_correlation_id = correlation_id or str(uuid4())
 
-        # 1. embed query (CÙNG embedder với ingest)
         qvec = await self.embedder.embed(query_text)
-        # 2. hybrid_search (vector + BM25 RRF) -> candidates
         candidates = await self.vectors.hybrid_search(
-            qvec, query_text, user_context, top_k=s.top_k_candidates
+            qvec, query_text, top_k=s.top_k_candidates
         )
-        # 3. rerank (FULL content) + lọc threshold + trả Top-k
-        return await self.reranker.rerank(query_text, candidates, top_k=k, threshold=th)
+        results = await self.reranker.rerank(query_text, candidates, top_k=k, threshold=th)
+        for result in results:
+            result.correlation_id = request_correlation_id
+        return results

@@ -9,7 +9,6 @@ Kiến trúc module (severable, mỗi module một nhiệm vụ — MOSA / hexag
     caption/     ý-nghĩa-nén section qua provider
     rerank/      Reranker (LLM qua gateway / lexical fallback)
     vectorstore/ port VectorRepository (provider-first: qdrant·chromadb·milvus)
-    access/      classification filter (policy)
     engine.py    orchestrator (ingest + search), chỉ phụ thuộc port
     factory.py   composition root — wire backend theo env (offline | OpenAI)
 
@@ -18,12 +17,11 @@ provider/model/dimension (search.md §2). Đổi provider/backend = đổi wirin
 factory + ai/, KHÔNG sửa engine/use-case.
 
     from haystack_interface import build_engine, IngestInput
-    from app.domain.repositories.vector_repository import UserContext
 
     engine = build_engine()                  # auto theo env (offline nếu không có key)
     await engine.ingest(IngestInput(document_id="d1", document_name="Doc",
                                     file_type="md", markdown="# Title\nNội dung..."))
-    hits = await engine.search("câu hỏi", UserContext("u1", "user", "eng"))
+    hits = await engine.search("câu hỏi")    # trả raw unit + lineage; access ở caller
 """
 
 from haystack_interface.config import HaystackSettings, load_settings
