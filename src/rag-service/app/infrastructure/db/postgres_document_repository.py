@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
+from datetime import datetime
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, delete, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.domain.entities.document import Document, DocumentStatus
+from app.domain.entities.job_log import JobLog
 from app.domain.repositories.document_repository import DocumentRepository
-from app.infrastructure.db.models import Base, DocumentRecord
+from app.infrastructure.db.models import Base, DocumentRecord, JobLogRecord
 
 
 class PostgresDocumentRepository(DocumentRepository):
@@ -141,4 +143,69 @@ class PostgresDocumentRepository(DocumentRepository):
             created_at=record.created_at,
             chunk_count=record.chunk_count,
             error_message=record.error_message,
+        )
+
+    async def append_job_log(self, entry: JobLog) -> JobLog:
+        return await asyncio.to_thread(self._append_job_log_sync, entry)
+
+    def _append_job_log_sync(self, entry: JobLog) -> JobLog:
+        with self._session() as session:
+            record = JobLogRecord(
+                document_id=entry.document_id,
+                correlation_id=entry.correlation_id,
+                stage=entry.stage,
+                status=entry.status,
+                error_type=entry.error_type,
+                error_message=entry.error_message,
+                created_at=entry.created_at,
+            )
+            session.add(record)
+            session.flush()
+            return self._to_job_log(record)
+
+    async def list_job_logs(
+        self,
+        document_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[JobLog]:
+        return await asyncio.to_thread(self._list_job_logs_sync, document_id, limit, offset)
+
+    def _list_job_logs_sync(
+        self,
+        document_id: str | None,
+        limit: int,
+        offset: int,
+    ) -> list[JobLog]:
+        with self._session() as session:
+            stmt = (
+                select(JobLogRecord)
+                .order_by(JobLogRecord.created_at.desc(), JobLogRecord.id.desc())
+                .offset(offset)
+                .limit(limit)
+            )
+            if document_id is not None:
+                stmt = stmt.where(JobLogRecord.document_id == document_id)
+            records = session.execute(stmt).scalars().all()
+            return [self._to_job_log(record) for record in records]
+
+    async def prune_job_logs_older_than(self, cutoff: datetime) -> int:
+        return await asyncio.to_thread(self._prune_job_logs_older_than_sync, cutoff)
+
+    def _prune_job_logs_older_than_sync(self, cutoff: datetime) -> int:
+        with self._session() as session:
+            result = session.execute(
+                delete(JobLogRecord).where(JobLogRecord.created_at < cutoff)
+            )
+            return int(result.rowcount or 0)
+
+    def _to_job_log(self, record: JobLogRecord) -> JobLog:
+        return JobLog(
+            document_id=record.document_id,
+            correlation_id=record.correlation_id,
+            stage=record.stage,
+            status=record.status,
+            error_type=record.error_type,
+            error_message=record.error_message,
+            created_at=record.created_at,
         )

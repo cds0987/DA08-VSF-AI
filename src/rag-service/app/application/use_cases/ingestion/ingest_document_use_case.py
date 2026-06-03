@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, UTC
 
 from app.domain.entities.document import Document, DocumentStatus
+from app.domain.entities.job_log import JobLog
 from app.domain.repositories.document_repository import DocumentRepository
 from haystack_interface.engine import HaystackRagEngine, IngestInput
 
@@ -23,6 +24,7 @@ class IngestDocumentUseCase:
         artifact_uri: str | None = None,
         correlation_id: str | None = None,
     ) -> int:
+        request_correlation_id = correlation_id or f"ingest:{document_id}"
         document = Document(
             id=document_id,
             name=document_name,
@@ -33,6 +35,15 @@ class IngestDocumentUseCase:
             created_at=datetime.now(UTC),
         )
         await self._documents.create(document)
+        await self._documents.append_job_log(
+            JobLog(
+                document_id=document_id,
+                correlation_id=request_correlation_id,
+                stage="ingest",
+                status=DocumentStatus.PROCESSING.value,
+                created_at=datetime.now(UTC),
+            )
+        )
         try:
             chunk_count = await self._engine.ingest(
                 IngestInput(
@@ -42,7 +53,7 @@ class IngestDocumentUseCase:
                     markdown=markdown,
                     source_uri=source_uri,
                     artifact_uri=artifact_uri,
-                    correlation_id=correlation_id,
+                    correlation_id=request_correlation_id,
                 )
             )
         except Exception as exc:
@@ -51,9 +62,29 @@ class IngestDocumentUseCase:
                 DocumentStatus.FAILED,
                 error=str(exc),
             )
+            await self._documents.append_job_log(
+                JobLog(
+                    document_id=document_id,
+                    correlation_id=request_correlation_id,
+                    stage="ingest",
+                    status=DocumentStatus.FAILED.value,
+                    error_type=exc.__class__.__name__,
+                    error_message=str(exc),
+                    created_at=datetime.now(UTC),
+                )
+            )
             raise
         await self._documents.update_status(document_id, DocumentStatus.COMPLETED)
         await self._documents.update_chunk_count(document_id, chunk_count)
+        await self._documents.append_job_log(
+            JobLog(
+                document_id=document_id,
+                correlation_id=request_correlation_id,
+                stage="ingest",
+                status=DocumentStatus.COMPLETED.value,
+                created_at=datetime.now(UTC),
+            )
+        )
         return chunk_count
 
     async def delete(self, document_id: str) -> None:

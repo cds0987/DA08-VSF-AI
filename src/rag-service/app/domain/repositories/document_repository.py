@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import List, Optional
 from app.domain.entities.document import Document, DocumentStatus
+from app.domain.entities.job_log import JobLog
 
 
 class DocumentRepository(ABC):
@@ -28,3 +30,20 @@ class DocumentRepository(ABC):
     @abstractmethod
     async def delete(self, document_id: str) -> None:
         """Soft delete document."""
+
+    @abstractmethod
+    async def append_job_log(self, entry: JobLog) -> JobLog:
+        """Ghi audit log cho ingestion/search-related document workflow."""
+
+    @abstractmethod
+    async def list_job_logs(
+        self,
+        document_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[JobLog]:
+        """Liệt kê job log theo document hoặc toàn cục."""
+
+    @abstractmethod
+    async def prune_job_logs_older_than(self, cutoff: datetime) -> int:
+        """Xoá log cũ hơn mốc retention; trả số dòng đã prune."""

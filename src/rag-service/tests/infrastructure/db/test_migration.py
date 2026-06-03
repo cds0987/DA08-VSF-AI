@@ -28,8 +28,12 @@ def test_migration_upgrade_creates_documents_with_index(tmp_path, monkeypatch) -
 
     inspector = sa.inspect(sa.create_engine(url))
     assert "documents" in inspector.get_table_names()
+    assert "job_logs" in inspector.get_table_names()
     index_names = {index["name"] for index in inspector.get_indexes("documents")}
     assert "ix_documents_created_at" in index_names
+    job_log_index_names = {index["name"] for index in inspector.get_indexes("job_logs")}
+    assert "ix_job_logs_created_at" in job_log_index_names
+    assert "ix_job_logs_document_id" in job_log_index_names
 
     command.downgrade(cfg, "base")
     assert "documents" not in sa.inspect(sa.create_engine(url)).get_table_names()

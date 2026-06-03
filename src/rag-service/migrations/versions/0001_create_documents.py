@@ -32,8 +32,24 @@ def upgrade() -> None:
         sa.Column("error_message", sa.Text(), nullable=True),
     )
     op.create_index("ix_documents_created_at", "documents", ["created_at"])
+    op.create_table(
+        "job_logs",
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column("document_id", sa.String(length=255), nullable=False),
+        sa.Column("correlation_id", sa.String(length=255), nullable=True),
+        sa.Column("stage", sa.String(length=64), nullable=False),
+        sa.Column("status", sa.String(length=32), nullable=False),
+        sa.Column("error_type", sa.String(length=64), nullable=True),
+        sa.Column("error_message", sa.Text(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    )
+    op.create_index("ix_job_logs_created_at", "job_logs", ["created_at"])
+    op.create_index("ix_job_logs_document_id", "job_logs", ["document_id"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_job_logs_document_id", table_name="job_logs")
+    op.drop_index("ix_job_logs_created_at", table_name="job_logs")
+    op.drop_table("job_logs")
     op.drop_index("ix_documents_created_at", table_name="documents")
     op.drop_table("documents")

@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime
 from typing import List, Optional
 
 from app.domain.entities.document import Document, DocumentStatus
+from app.domain.entities.job_log import JobLog
 from app.domain.repositories.document_repository import DocumentRepository
 
 
 class InMemoryDocumentRepository(DocumentRepository):
     def __init__(self) -> None:
         self._documents: dict[str, Document] = {}
+        self._job_logs: list[JobLog] = []
 
     async def create(self, document: Document) -> Document:
         self._documents[document.id] = document
@@ -45,3 +48,23 @@ class InMemoryDocumentRepository(DocumentRepository):
 
     async def delete(self, document_id: str) -> None:
         self._documents.pop(document_id, None)
+
+    async def append_job_log(self, entry: JobLog) -> JobLog:
+        self._job_logs.append(entry)
+        return entry
+
+    async def list_job_logs(
+        self,
+        document_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[JobLog]:
+        logs = self._job_logs
+        if document_id is not None:
+            logs = [entry for entry in logs if entry.document_id == document_id]
+        return logs[offset : offset + limit]
+
+    async def prune_job_logs_older_than(self, cutoff: datetime) -> int:
+        before = len(self._job_logs)
+        self._job_logs = [entry for entry in self._job_logs if entry.created_at >= cutoff]
+        return before - len(self._job_logs)
