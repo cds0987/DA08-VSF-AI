@@ -9,9 +9,9 @@ from haystack_interface.ai import AIProvider, CAPTION, get_ai_provider
 from haystack_interface.logging_utils import log_event
 
 CAPTION_SYSTEM = (
-    "Ban nen y nghia cua mot doan tai lieu thanh 1-2 cau, tap trung vao chu de "
-    "va cac thuc the/thuat ngu chinh de phuc vu semantic search. "
-    "Chi tra ve cau tom tat, khong them loi dan."
+    "Bạn nén ý nghĩa của một đoạn tài liệu thành 1-2 câu, tập trung vào CHỦ ĐỀ "
+    "và CÁC THỰC THỂ/THUẬT NGỮ chính để phục vụ semantic search. "
+    "Chỉ trả về câu tóm tắt, không thêm lời dẫn."
 )
 
 

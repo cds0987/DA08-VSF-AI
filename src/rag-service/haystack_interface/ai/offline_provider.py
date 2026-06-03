@@ -17,7 +17,7 @@ import json
 import re
 from typing import List, Optional
 
-from haystack_interface.ai.base import AIProvider, CAPTION, RERANK
+from haystack_interface.ai.base import AIProvider, CAPTION, RERANK, RERANK_QUERY_MARKER
 from haystack_interface.text_utils import hash_embed, overlap_score
 
 DEFAULT_DIM = 1024
@@ -59,9 +59,10 @@ class OfflineProvider(AIProvider):
     def _fake_rerank(prompt: str) -> str:
         """Mô phỏng LLM-as-reranker: chấm overlap query↔passage, trả JSON.
 
-        Bám contract prompt của rerank.llm (dòng `CÂU HỎI:` + các dòng `[i] text`).
+        Bám contract prompt của rerank.llm: dòng query bắt đầu bằng
+        `RERANK_QUERY_MARKER` (hằng dùng chung) + các dòng `[i] text`.
         """
-        qm = re.search(r"CÂU HỎI:\s*(.*)", prompt)
+        qm = re.search(re.escape(RERANK_QUERY_MARKER) + r"\s*(.*)", prompt)
         query = qm.group(1).strip() if qm else ""
         scores = {
             int(m.group(1)): overlap_score(query, m.group(2))

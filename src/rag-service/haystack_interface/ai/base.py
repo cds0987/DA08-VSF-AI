@@ -29,6 +29,11 @@ EMBED = "embed"
 CAPTION = "caption"
 RERANK = "rerank"
 
+# Contract marker GIỮA RERANK_PROMPT (rerank.llm) và OfflineProvider._fake_rerank:
+# dòng query trong prompt bắt đầu bằng marker này. Tách hằng dùng chung để prompt
+# (nơi sinh) và parser offline (nơi đọc) KHÔNG drift — đổi marker là đổi một chỗ.
+RERANK_QUERY_MARKER = "CÂU HỎI:"
+
 
 # --------------------------------------------------------------------------- #
 # Settings — per-capability (base_url · api_key · model), khớp env notebook    #

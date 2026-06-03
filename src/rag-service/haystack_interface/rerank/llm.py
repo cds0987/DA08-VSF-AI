@@ -9,14 +9,16 @@ from typing import Dict, List
 
 from app.domain.repositories.vector_repository import SearchResult
 
-from haystack_interface.ai import AIProvider, RERANK, get_ai_provider
+from haystack_interface.ai import AIProvider, RERANK, RERANK_QUERY_MARKER, get_ai_provider
 from haystack_interface.logging_utils import log_event
 from haystack_interface.rerank.lexical import LexicalRerankerService
 
+# Dòng query dùng RERANK_QUERY_MARKER (hằng dùng chung với OfflineProvider._fake_rerank)
+# để prompt và parser offline KHÔNG drift. Passages giữ định dạng "[i] text".
 RERANK_PROMPT = (
-    "Cho mot CAU HOI va danh sach DOAN danh so. Cham muc lien quan moi doan voi "
-    'cau hoi theo thang 0.0-1.0. CHI tra JSON dang {{"0": 0.9, "1": 0.2}} khong giai thich.\n\n'
-    "CAU HOI: {query}\n\nCAC DOAN:\n{passages}"
+    "Cho một CÂU HỎI và danh sách ĐOẠN đánh số. Chấm mức liên quan mỗi đoạn với "
+    'câu hỏi theo thang 0.0–1.0. CHỈ trả JSON dạng {{"0": 0.9, "1": 0.2}} không giải thích.\n\n'
+    + RERANK_QUERY_MARKER + " {query}\n\nCÁC ĐOẠN:\n{passages}"
 )
 
 
