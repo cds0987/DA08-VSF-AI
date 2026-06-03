@@ -278,6 +278,7 @@ Response 503:  { "status": "degraded", "degraded_reasons": ["rag_worker unreacha
 ## RAG Worker — NATS Internal Only
 
 > Không expose HTTP. Chỉ giao tiếp qua NATS :4222.
+> **Subject contract do Backend Dev làm chủ** (đăng ký ở `infra/nats/subjects.md`); riêng payload `rag.search` do RAG Eng định nghĩa.
 
 | Subject | Type | Payload | Mô tả |
 |---------|------|---------|-------|

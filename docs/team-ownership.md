@@ -9,7 +9,7 @@
 | **Backend Dev** | Vũ Quang Dũng | User Service + Document Service: auth, JWT, document management + **chủ NATS subject contract & JetStream config** | `src/user-service/`, `src/document-service/`, `infra/nats/` | Sau khi SA freeze domain |
 | **RAG Engineer** | Trần Thanh Nguyên | RAG Worker (ingestion + retrieval, NATS) + **MCP Tool Service** (tool rag_search/hr_query + rerank) | `src/rag-worker/app/`, `src/mcp-service/app/` | Sau khi SA freeze domain |
 | **AI/Agent Engineer** | Phạm Quốc Dũng | Query Service: LLM orchestration, SSE streaming, notify, memory, MCP client | `src/query-service/app/` | Sau khi SA freeze domain |
-| **DevOps** | Trần Hữu Gia Huy | Docker, AWS, CI/CD, Nginx, NATS setup, monitoring | `infra/`, `docker-compose.yml` | Ngay — song song với SA |
+| **DevOps** | Trần Hữu Gia Huy | Docker, AWS, CI/CD, Nginx, **deploy/vận hành NATS container**, monitoring | `infra/`, `docker-compose.yml` | Ngay — song song với SA |
 
 ---
 
@@ -228,6 +228,22 @@ src/document-service/app/
 - **Event-driven ACL (database-per-service)**: mọi thay đổi quyền (upload / đổi classification / xóa) → publish `doc.access` lên NATS JetStream. Query Service tự giữ bản sao — **không ai đọc thẳng `doc_db` của service khác**.
 - **Document Service là chủ duy nhất bảng `documents`** (create + update status). Khớp [api-spec.md](api-spec.md) — `doc.status`: "Document Service subscribe để cập nhật PostgreSQL".
 
+#### NATS Subject Contract & Config (Backend Dev làm chủ)
+
+> Vì Document Service là "nhạc trưởng" của hầu hết subject, Backend Dev **làm chủ thiết kế messaging** —
+> giống cách SA làm chủ domain contract. DevOps chỉ deploy container theo cấu hình này.
+
+```
+infra/nats/
+├── subjects.md                  ← Đăng ký subject + payload (source of truth): doc.ingest, doc.status,
+│                                   doc.access, notify.doc_new  (rag.search payload do RAG Eng định nghĩa)
+└── jetstream.conf               ← Cấu hình stream/retention cho các subject persist (doc.*, notify.*)
+```
+- **Backend Dev** quyết: tên subject, payload, stream nào persist (JetStream). Đổi subject/payload → **báo Backend Dev** (tất cả service follow).
+- `rag.search` (request-reply giữa mcp-service ↔ rag-worker): payload do **RAG Eng** định nghĩa, nhưng vẫn đăng ký trong `subjects.md` để mọi người thấy.
+- DevOps gắn `jetstream.conf` vào container NATS trong `docker-compose.yml`.
+- **Chốt sớm (đầu Ngày 3)** — RAG Eng + AI Eng cần subject contract trước khi code NATS client của mình.
+
 **Không được đụng:** `app/domain/` (SA owns), bất kỳ file nào trong query-service hoặc rag-worker.
 
 ---
@@ -442,7 +458,7 @@ infra/
 
 **Key setup cần làm:**
 - **Langfuse server**: dựng + vận hành container `langfuse :3100` (DB backing, expose port, retention). Cấp **API key (public/secret) qua AWS Secrets Manager** cho rag-worker + query-service dùng chung 1 project. DevOps chỉ lo hạ tầng — **không** viết `langfuse_client.py` (chủ service tự nhúng client).
-- **NATS JetStream**: enable persist message cho `doc.ingest` / `doc.status`.
+- **NATS container**: deploy + vận hành broker (port 4222, JetStream enabled). **Subject + stream config do Backend Dev quyết** (DevOps chỉ chạy container theo cấu hình đó).
 - **CloudWatch alarm**: ngưỡng phải đồng bộ với Circuit Breaker (`fail_max`, `reset_timeout`) của `mcp_client.py` (query-service → mcp-service).
 
 **Không được đụng:** bất kỳ file Python `.py` logic nào.
@@ -501,7 +517,7 @@ Câu hỏi user
 |------|-----------------|----------|
 | SA | Nặng tuần 1 → nhẹ dần (review PR) | Review, không code |
 | Frontend Dev | **Nặng** — Nuxt 4 (chat SSE + admin) + Notification Center + Analytics Dashboard + Document Viewer + conversation history | Trung bình — mở rộng dashboard, realtime 2 chiều |
-| Backend Dev | **Nặng hơn trước** — user-service (auth + user CRUD) + document-service (upload, S3, NATS doc.ingest/doc.status, delete) | Nhẹ — ít thay đổi |
+| Backend Dev | **Nặng hơn trước** — user-service (auth + user CRUD) + document-service (upload, S3, NATS doc.ingest/doc.status, delete) + **chủ NATS subject contract** | Nhẹ — ít thay đổi |
 | RAG Engineer | **Rất nặng** — rag-worker (ingestion Parent-Child + Gemini OCR + retrieval Top-5) + mcp-service (tool rag_search/hr_query + rerank) | Tune chất lượng, chunk config |
 | AI/Agent Engineer | **Nặng** — query-service (FunctionCallingAgent + MCP client + SSE + notify + history) | Teams Bot (cũng là MCP client), dashboard analytics |
 | DevOps | Trung bình — Docker + AWS setup | Nhẹ — maintain |
@@ -571,6 +587,7 @@ feature branches:
 | API schemas (Pydantic) | SA define, Backend Dev + AI/Agent Engineer implement, Frontend Dev consume | Sửa → báo SA |
 | `requirements.txt` | Tất cả | Thêm package → mở PR, không tự pip install rồi push |
 | `docker-compose.yml` | DevOps owns | Thêm env var mới → báo DevOps |
+| NATS subject contract + JetStream config (`infra/nats/`) | **Backend Dev** owns (rag.search payload = RAG Eng) | Đổi tên subject / payload / stream → báo Backend Dev; DevOps deploy container theo config |
 | `openai_client.py` (query-service) | AI/Agent Engineer owns | RAG Engineer không dùng, không đụng |
 | `openai_embedding_client.py` (rag-worker) | RAG Engineer owns | AI/Agent Engineer không dùng, không đụng |
 | `mcp_client.py` (query-service) | AI/Agent Engineer owns | Circuit Breaker (fail_max, reset_timeout) cho call query-service → mcp-service; đồng bộ CloudWatch alarm |

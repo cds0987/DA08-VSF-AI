@@ -18,6 +18,8 @@ Không chỉ là một chatbot — mà là **hệ thống quản lý tri thức 
 
 ## 5 tuần — Lộ trình cụ thể
 
+> 📅 **Kế hoạch chi tiết từng tuần (ai làm gì theo Sprint):** [docs/sprints/](sprints/README.md) — roadmap này = *làm gì + DoD theo Phase*; folder sprints = *lịch thực thi từng tuần*.
+
 ### Phase 1 — Core MVP + Cloud Deploy _(Tuần 1–3)_
 
 > **Mục tiêu:** Chatbot hoàn chỉnh, chạy thật trên AWS, nhân viên truy cập được qua domain thực.
