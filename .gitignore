@@ -1,2 +1,8 @@
 .claude/
 proposal/
+src/rag-service/haystack/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/

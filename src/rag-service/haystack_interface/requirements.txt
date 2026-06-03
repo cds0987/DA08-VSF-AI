@@ -1,0 +1,9 @@
+# Core working RAG dựa trên Haystack. Bản in-memory/offline chỉ cần haystack-ai.
+haystack-ai==2.29.0
+
+# AI gateway gọi OpenAI SDK trực tiếp (haystack-ai đã kéo sẵn, khai báo tường minh).
+openai>=1.40
+
+# Production (bỏ comment khi gắn backend thật):
+# qdrant-haystack          # Qdrant document store + hybrid (RRF) cho VectorRepository
+# httpx                    # gọi BGE-M3 / BGE-Reranker self-hosted (đã có ở requirements gốc)
