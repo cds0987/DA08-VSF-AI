@@ -10,7 +10,7 @@ Không chỉ là một chatbot — mà là **hệ thống quản lý tri thức 
 
 ## Tại sao đề tài này khả thi
 
-- **Vibe coding**: 6 người, stack rõ ràng (FastAPI + Next.js + RAG), sprint nhanh
+- **Vibe coding**: 6 người, stack rõ ràng (FastAPI + Nuxt 4 + RAG), sprint nhanh
 - **Phase sau không phụ thuộc phase trước**: team có thể stop ở bất kỳ điểm nào và sản phẩm vẫn usable
 - **Có precedent**: các công ty như Notion, Confluence đều đang build tính năng này — chứng minh nhu cầu có thực
 
@@ -49,7 +49,7 @@ _Upload & Ingestion_
 
 _Q&A Chatbot_
 - [ ] Semantic Cache hoạt động — câu hỏi tương tự (cosine similarity > 0.95) trả kết quả từ cache Redis, không gọi OpenAI
-- [ ] Hỏi câu hỏi → bot trả lời streaming qua **WebSocket** (chữ xuất hiện dần, không đợi toàn bộ); client tự reconnect khi rớt
+- [ ] Hỏi câu hỏi → bot trả lời streaming qua **SSE** (`POST /query`, chữ xuất hiện dần, không đợi toàn bộ)
 - [ ] Mỗi câu trả lời kèm nguồn: tên tài liệu + số trang + đoạn văn bản được trích dẫn
 - [ ] Click vào nguồn → mở document viewer, nhảy đến đúng trang, highlight đúng đoạn text đó
 - [ ] Không có tài liệu liên quan → bot trả về "Không tìm thấy thông tin" — không bịa
@@ -59,15 +59,24 @@ _HR Personal Q&A_
 - [ ] Hỏi ngày nghỉ còn lại / trạng thái đơn nghỉ phép → bot trả lời đúng từ mock data
 - [ ] Không thể xem HR data của người khác (filter `user_id` đúng)
 
-_Admin Dashboard_
-- [ ] Xem danh sách tài liệu + trạng thái ingestion (queued / processing / indexed / failed)
-- [ ] Xem usage metrics cơ bản (số câu hỏi, feedback rate)
-- [ ] Deactivate / Reactivate tài khoản user (xử lý nhân viên nghỉ việc)
+_MCP Tool Service_
+- [ ] mcp-service chạy như MCP server riêng (port 8003), expose 2 tool: `rag_search`, `hr_query`
+- [ ] Query Service agent là MCP client — liệt kê + gọi tool qua MCP; inject `document_ids`/`user_id` (không để LLM tự điền)
+- [ ] `rag_search` self-contained: NATS rag.search → rerank BGE-Reranker → Top-3; `hr_query` đọc `mcp_db.hr_mock`
 
-_Realtime / Thông báo tài liệu mới (WebSocket)_
-- [ ] WebSocket mở sẵn ngay sau khi đăng nhập (app-level), dùng chung cho chat + thông báo
-- [ ] Tài liệu ingest xong (indexed) → Document Service phát `notify.doc_new` → Query Service đẩy thông báo "Có tài liệu mới: X" qua WebSocket tới **mọi user đang online có quyền xem** tài liệu đó (lọc theo classification/ACL — public/internal/secret/top_secret)
-- [ ] User thấy toast/badge thông báo ngay, không cần reload trang
+_Admin Dashboard + Analytics (FE)_
+- [ ] Xem danh sách tài liệu + trạng thái ingestion (queued / processing / indexed / failed)
+- [ ] Deactivate / Reactivate tài khoản user (xử lý nhân viên nghỉ việc)
+- [ ] **Analytics Dashboard** (kéo từ Phase 2 lên): charts volume theo ngày, feedback rate (up/down), top câu hỏi — gọi `GET /admin/metrics`
+
+_Realtime / Notification Center (SSE) (FE)_
+- [ ] Stream SSE `GET /notifications` mở sẵn ngay sau khi đăng nhập (app-level)
+- [ ] Tài liệu ingest xong (indexed) → Document Service phát `notify.doc_new` → Query Service đẩy "Có tài liệu mới: X" qua SSE `/notifications` tới **mọi user đang online có quyền xem** (lọc classification/ACL)
+- [ ] **Notification Center**: toast realtime + badge số chưa đọc + dropdown lịch sử + mark-as-read (`GET /notifications/history`, `/unread-count`, `POST /{id}/read`)
+
+_Document Viewer + Conversation History (FE)_
+- [ ] Click nguồn → mở **Document Viewer** (PDF.js): nhảy đúng trang + highlight đoạn citation (presigned URL từ `GET /documents/{id}/file`)
+- [ ] **Conversation history UI**: list / search / rename / delete hội thoại
 
 _Guardrails_
 - [ ] Prompt injection bị chặn — user không thể override system prompt bằng câu hỏi
@@ -79,7 +88,7 @@ _Feedback & Observability_
 - [ ] Langfuse trace hoạt động: xem được latency, token cost, retrieved chunks
 
 _Cloud Deployment_
-- [ ] Toàn bộ stack chạy ổn định trên AWS EC2 bằng Docker Compose (10 containers: nginx, next-frontend, user-service, document-service, query-service, rag-worker, nats [JetStream], Qdrant, Redis, Langfuse :3100 — PostgreSQL = AWS RDS external)
+- [ ] Toàn bộ stack chạy ổn định trên AWS EC2 bằng Docker Compose (11 containers: nginx, nuxt-frontend, user-service, document-service, query-service, rag-worker, mcp-service, nats [JetStream], Qdrant, Redis, Langfuse :3100 — PostgreSQL = AWS RDS external)
 - [ ] RDS PostgreSQL thay thế local DB — data không mất khi restart
 - [ ] File upload lưu vào S3, không lưu local
 - [ ] Qdrant self-hosted trên AWS, có persistent volume
@@ -167,10 +176,8 @@ Investigate nguyên nhân:
 
 > **Mục tiêu:** Nâng chất lượng sản phẩm, đưa bot vào workflow thực tế của nhân viên.
 
-**Admin Dashboard nâng cao:**
-- Tổng số câu hỏi theo ngày/tuần
-- Tỉ lệ feedback tốt / xấu (thumbs up/down)
-- Top 10 câu hỏi được hỏi nhiều nhất
+**Admin Dashboard nâng cao** _(analytics cơ bản: volume / feedback / top questions đã làm ở Phase 1):_
+- Mở rộng filter / drill-down theo phòng ban, theo tài liệu
 - Danh sách câu hỏi bot **không trả lời được** (không tìm thấy tài liệu liên quan)
 
 **Knowledge Gap Detection:**

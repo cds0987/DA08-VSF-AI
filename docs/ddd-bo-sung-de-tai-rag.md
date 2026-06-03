@@ -177,7 +177,7 @@ DDD yêu cầu xác định rõ đâu là **Core Domain** (điểm tạo ra giá
 | **Generic Subdomain** | Authentication (JWT, SSO) | Dùng thư viện có sẵn (python-jose, msal) |
 | **Generic Subdomain** | File Storage (S3) | Infrastructure chuẩn |
 | **Generic Subdomain** | Logging, Monitoring | Langfuse + CloudWatch |
-| **Generic Subdomain** | UI/UX Chat Interface | Next.js + Tailwind, không phải điểm sáng |
+| **Generic Subdomain** | UI/UX Chat Interface | Nuxt 4 + Tailwind, không phải điểm sáng |
 
 **Kết luận:** Đầu tư chính vào Core Domain — chunking strategy, threshold tuning, citation format. Đừng tự build lại Generic Subdomain.
 

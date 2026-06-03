@@ -110,18 +110,7 @@ class ConversationRepository(ABC):
         """Xóa toàn bộ lịch sử và summary của user."""
 ```
 
-```python
-# src/query-service/app/domain/repositories/rerank_service.py
-from abc import ABC, abstractmethod
-from typing import List
-from app.domain.entities.search_result import SearchResult
-
-class RerankService(ABC):
-
-    @abstractmethod
-    async def rerank(self, query: str, sections: List[SearchResult], top_n: int = 3) -> List[SearchResult]:
-        """Rerank sections bằng BGE-Reranker-v2-m3, trả về top_n có score cao nhất."""
-```
+> `RerankService` ABC **đã chuyển sang mcp-service** (reranker nằm trong tool `rag_search`) — xem section mcp-service bên dưới.
 
 ```python
 # src/query-service/app/domain/repositories/document_access_repository.py
@@ -145,6 +134,46 @@ class DocumentAccessRepository(ABC):
         Kết quả nên được cache Redis TTL ~60s.
         """
 ```
+
+---
+
+## mcp-service — Domain
+
+MCP Tool Service expose tool qua giao thức MCP. Mỗi tool self-contained. `RerankService` nằm ở đây (trong tool `rag_search`).
+
+```python
+# src/mcp-service/app/domain/repositories/rerank_service.py
+from abc import ABC, abstractmethod
+from typing import List
+from app.domain.entities.search_result import SearchResult   # SearchResult = contract NATS reply từ rag-worker
+
+class RerankService(ABC):
+
+    @abstractmethod
+    async def rerank(self, query: str, sections: List[SearchResult], top_n: int = 3) -> List[SearchResult]:
+        """Rerank sections bằng BGE-Reranker-v2-m3, trả về top_n có score cao nhất."""
+```
+
+```python
+# src/mcp-service/app/domain/entities/tool_io.py — I/O contract của MCP tool
+from dataclasses import dataclass, field
+from typing import List, Optional
+
+@dataclass
+class RagSearchInput:
+    query: str
+    document_ids: Optional[List[str]]   # do MCP client (Query Service) inject sau khi lọc ACL; None = chỉ public
+    top_k: int = 5
+
+@dataclass
+class HrQueryInput:
+    user_id: str                        # do MCP client inject từ JWT — KHÔNG để LLM tự điền
+    intent: str                         # 'leave_balance' | 'leave_requests' | 'payroll'
+```
+
+> **MCP tool**: `rag_search(RagSearchInput) -> List[SearchResult]` (Top-3 sau rerank);
+> `hr_query(HrQueryInput) -> dict`. Query Service là MCP client; tham số nhạy cảm (`document_ids`, `user_id`)
+> do client inject, không tin LLM.
 
 ---
 

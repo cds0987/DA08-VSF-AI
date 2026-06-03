@@ -22,7 +22,7 @@ cd rag-chatbot
 
 ## 2. Backend setup
 
-Project có **4 backend services** độc lập. Mỗi service có `requirements.txt` riêng.
+Project có **5 backend services** độc lập (user-service, document-service, query-service, rag-worker, mcp-service). Mỗi service có `requirements.txt` riêng.
 
 ```bash
 # User Service (Backend Dev)
@@ -49,9 +49,16 @@ cd ../rag-worker
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
+
+# MCP Tool Service (AI/Agent Engineer)
+cd ../mcp-service
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
 > Mỗi thành viên chỉ cần setup service mình phụ trách. Setup tất cả nếu chạy full local.
+> (AI/Agent Engineer phụ trách `query-service`; **RAG Engineer** phụ trách `rag-worker` + `mcp-service`.)
 
 ---
 
@@ -64,11 +71,12 @@ cp src/user-service/.env.example    src/user-service/.env
 cp src/document-service/.env.example  src/document-service/.env
 cp src/query-service/.env.example   src/query-service/.env
 cp src/rag-worker/.env.example      src/rag-worker/.env
+cp src/mcp-service/.env.example     src/mcp-service/.env
 ```
 
 Xem đầy đủ nội dung từng file và hướng dẫn lấy API keys tại **[docs/env-setup.md](env-setup.md)**.
 
-> **Quan trọng:** `JWT_SECRET_KEY` phải giống nhau ở cả 4 services. Generate bằng `openssl rand -hex 32` rồi điền vào cả 4 file `.env`.
+> **Quan trọng:** `JWT_SECRET_KEY` phải giống nhau ở cả 5 services. Generate bằng `openssl rand -hex 32` rồi điền vào cả 5 file `.env`.
 >
 > **NATS URL:** Tất cả services kết nối NATS qua `NATS_URL=nats://nats:4222` (Docker network) hoặc `nats://localhost:4222` (local dev).
 
@@ -81,7 +89,7 @@ Xem đầy đủ nội dung từng file và hướng dẫn lấy API keys tại 
 **Local dev:** Có thể dùng PostgreSQL Docker để test nhanh mà không cần RDS:
 
 ```bash
-# PostgreSQL local — tạo 4 databases riêng như production
+# PostgreSQL local — tạo 5 databases riêng như production
 docker run -d \
   --name rag-postgres \
   -e POSTGRES_USER=user \
@@ -90,11 +98,12 @@ docker run -d \
   -p 5432:5432 \
   postgres:15
 
-# Tạo 4 databases
+# Tạo 5 databases
 docker exec -it rag-postgres psql -U user -c "
   CREATE DATABASE user_db;
   CREATE DATABASE doc_db;
   CREATE DATABASE query_db;
+  CREATE DATABASE mcp_db;
   CREATE DATABASE langfuse_db;
 "
 
@@ -115,19 +124,20 @@ docker run -d \
 Tạo tables bằng Alembic (mỗi service có `alembic/` riêng):
 
 ```bash
-cd src/user-service    && alembic upgrade head
-cd ../document-service  && alembic upgrade head
-cd ../query-service    && alembic upgrade head
-cd ../rag-worker       && alembic upgrade head
+cd src/user-service    && alembic upgrade head   # user_db
+cd ../document-service  && alembic upgrade head   # doc_db
+cd ../query-service    && alembic upgrade head   # query_db (conversations, messages, document_access)
+cd ../mcp-service      && alembic upgrade head   # mcp_db (hr_mock)
 ```
 
+> RAG Worker **không có** migration — không dùng PostgreSQL (chỉ Qdrant + S3 + NATS).
 > Schema thay đổi → tạo migration mới (`alembic revision --autogenerate -m "..."`) thay vì sửa DDL trực tiếp.
 
 ---
 
 ## 5. Chạy services local
 
-Mỗi service chạy trên port riêng. Mở 5 terminal (hoặc dùng Docker Compose — Section 8):
+Mỗi service chạy trên port riêng. Mở 6 terminal (hoặc dùng Docker Compose — Section 8):
 
 ```bash
 # Terminal 0 — NATS (cần chạy trước)
@@ -152,12 +162,18 @@ uvicorn app.interfaces.api.main:app --reload --port 8001
 cd src/rag-worker
 venv\Scripts\activate
 python app/main.py
+
+# Terminal 5 — MCP Tool Service (port 8003)
+cd src/mcp-service
+venv\Scripts\activate
+python app/main.py        # khởi MCP server (Streamable HTTP/SSE) :8003
 ```
 
 API docs tự động:
 - User Service: http://localhost:8000/docs
 - Document Service: http://localhost:8002/docs
 - Query Service: http://localhost:8001/docs
+- MCP Service: http://localhost:8003 (MCP endpoint — không phải OpenAPI /docs)
 - NATS Monitoring: http://localhost:8222
 
 ---
@@ -171,9 +187,9 @@ npm install
 
 cp .env.local.example .env.local
 # Điền:
-#   NEXT_PUBLIC_USER_SERVICE_URL=http://localhost:8000
-#   NEXT_PUBLIC_DOCUMENT_SERVICE_URL=http://localhost:8002
-#   NEXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8001
+#   NUXT_PUBLIC_USER_SERVICE_URL=http://localhost:8000
+#   NUXT_PUBLIC_DOCUMENT_SERVICE_URL=http://localhost:8002
+#   NUXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8001
 
 npm run dev
 ```
@@ -199,6 +215,10 @@ pytest tests/ -v
 
 # RAG Worker
 cd src/rag-worker
+pytest tests/ -v
+
+# MCP Tool Service
+cd src/mcp-service
 pytest tests/ -v
 
 # Với coverage (ví dụ RAG Worker)
@@ -231,17 +251,18 @@ Services sau khi `docker compose up`:
 | Container | Port | Mô tả |
 |-----------|------|-------|
 | nginx | 80 / 443 | Reverse proxy, entry point — route `/` → frontend, `/api/*` → backend |
-| next-frontend | 3000 | Next.js UI (production build) |
+| nuxt-frontend | 3000 | Nuxt UI (production build) |
 | user-service | 8000 | Auth / User management |
 | document-service | 8002 | Document management (Admin only) |
-| query-service | 8001 | User chat / LLM Orchestration + Function Calling Agent |
+| query-service | 8001 | User chat / LLM Orchestration (MCP client) — SSE `/query` + `/notifications` |
 | rag-worker | — | NATS Worker — ingestion pipeline (no HTTP port) |
+| mcp-service | 8003 | MCP server — tool `rag_search`, `hr_query` (dùng chung cho mọi agent) |
 | nats | 4222 / 8222 | Message broker — JetStream enabled (4222: client, 8222: monitoring UI) |
 | qdrant | 6333 | Vector database |
 | redis | 6379 | JWT blacklist + rate limiting + semantic cache |
 | langfuse | 3100 | LLM observability dashboard (IT/DevOps only) |
 
-> **PostgreSQL:** Không có container — dùng **AWS RDS db.t3.micro** với 4 databases riêng: `user_db`, `doc_db`, `query_db`, `langfuse_db`. Mỗi service kết nối đến database của mình qua cùng 1 RDS endpoint.
+> **PostgreSQL:** Không có container — dùng **AWS RDS db.t3.micro** với 5 databases riêng: `user_db`, `doc_db`, `query_db`, `mcp_db`, `langfuse_db`. Mỗi service kết nối đến database của mình qua cùng 1 RDS endpoint.
 
 ---
 
@@ -252,7 +273,7 @@ Services sau khi `docker compose up`:
 | `Connection refused 5432` | PostgreSQL chưa chạy | Chạy lại docker run postgres |
 | `Connection refused 6333` | Qdrant chưa chạy | Chạy lại docker run qdrant |
 | `Connection refused 6379` | Redis chưa chạy | Chạy lại docker run redis |
-| `Invalid signature` (JWT) | `JWT_SECRET_KEY` không khớp giữa services | Kiểm tra `.env` của 3 services phải dùng cùng key |
+| `Invalid signature` (JWT) | `JWT_SECRET_KEY` không khớp giữa services | Kiểm tra `.env` của tất cả 5 services phải dùng cùng key |
 | `Invalid API Key` | `.env` chưa điền đúng | Kiểm tra lại `.env` |
 | `ModuleNotFoundError` | Chưa activate venv đúng service | `cd <service-folder> && venv\Scripts\activate` |
 | `QDRANT_URL not set` | Thiếu env var | Kiểm tra `src/rag-worker/.env` |

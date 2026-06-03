@@ -4,11 +4,11 @@
 
 | Role | Người phụ trách | Phụ trách chính | Service / Folder | Bắt đầu sau |
 |------|----------------|----------------|-----------------|-------------|
-| **SA** | Lê Hữu Hưng | Domain design, contracts, API schemas, code review | `app/domain/` (cả 4 services) | Ngay — làm đầu tiên |
-| **Frontend Dev** | Đặng Hồ Hải | Web UI chat, admin dashboard, streaming | `src/frontend/` (Next.js) | Sau khi SA freeze schemas |
-| **Backend Dev** | Vũ Quang Dũng | User Service + Document Service: auth, JWT, document management | `src/user-service/`, `src/document-service/` | Sau khi SA freeze domain |
-| **RAG Engineer** | Trần Thanh Nguyên | RAG Worker: ingestion pipeline + retrieval pipeline, NATS subscriber | `src/rag-worker/app/` | Sau khi SA freeze domain |
-| **AI/Agent Engineer** | Phạm Quốc Dũng | Query Service: LLM orchestration, streaming, memory, NATS client | `src/query-service/app/` | Sau khi SA freeze domain |
+| **SA** | Lê Hữu Hưng | Domain design, contracts, API schemas, code review | `app/domain/` (cả 5 services) | Ngay — làm đầu tiên |
+| **Frontend Dev** | Đặng Hồ Hải | Web UI chat, admin dashboard + analytics, notification center, document viewer | `src/frontend/` (Nuxt 4) | Sau khi SA freeze schemas |
+| **Backend Dev** | Vũ Quang Dũng | User Service + Document Service: auth, JWT, document management + **chủ NATS subject contract & JetStream config** | `src/user-service/`, `src/document-service/`, `infra/nats/` | Sau khi SA freeze domain |
+| **RAG Engineer** | Trần Thanh Nguyên | RAG Worker (ingestion + retrieval, NATS) + **MCP Tool Service** (tool rag_search/hr_query + rerank) | `src/rag-worker/app/`, `src/mcp-service/app/` | Sau khi SA freeze domain |
+| **AI/Agent Engineer** | Phạm Quốc Dũng | Query Service: LLM orchestration, SSE streaming, notify, memory, MCP client | `src/query-service/app/` | Sau khi SA freeze domain |
 | **DevOps** | Trần Hữu Gia Huy | Docker, AWS, CI/CD, Nginx, NATS setup, monitoring | `infra/`, `docker-compose.yml` | Ngay — song song với SA |
 
 ---
@@ -37,8 +37,17 @@ src/query-service/app/domain/
 │   └── conversation.py          ← Message, ConversationContext, Conversation dataclass
 └── repositories/
     ├── conversation_repository.py  ← ConversationRepository ABC (get_context, save_message, ...)
-    ├── rerank_service.py           ← RerankService ABC (rerank)
     └── document_access_repository.py ← DocumentAccessRepository ABC (get_allowed_doc_ids)
+```
+> `RerankService` ABC **không còn ở query-service** — chuyển sang mcp-service (reranker nằm trong tool `rag_search`).
+
+**Files SA tạo — mcp-service:**
+```
+src/mcp-service/app/domain/
+├── entities/
+│   └── tool_io.py              ← Dataclass I/O cho tool: RagSearchInput/Result, HrQueryInput/Result
+└── repositories/
+    └── rerank_service.py       ← RerankService ABC (rerank Top-5 → Top-3) — implement bằng BGE-Reranker
 ```
 
 **Files SA tạo — rag-worker:**
@@ -85,35 +94,56 @@ src/document-service/app/interfaces/api/schemas/
 
 **Bắt đầu Ngày 3. Mock API bằng schemas SA đã viết — không chờ backend xong.**
 
+**Stack: Nuxt 4 + Vue 3 + TypeScript + TailwindCSS** (code gom trong `app/`).
+
 **Files Frontend Dev tạo:**
 ```
 src/frontend/
-├── app/                         ← Next.js App Router
-│   ├── (auth)/
-│   │   └── login/page.tsx       ← Form đăng nhập (email/password + Microsoft SSO button)
-│   ├── (main)/
-│   │   ├── chat/page.tsx        ← Giao diện chat chính, WebSocket consumer (End User only)
+├── nuxt.config.ts                  ← Cấu hình Nuxt 4: runtimeConfig (NUXT_PUBLIC_*), modules (tailwind)
+├── app/
+│   ├── app.vue                     ← Root component + layout
+│   ├── pages/
+│   │   ├── login.vue               ← Form đăng nhập (email/password + Microsoft SSO)
+│   │   ├── chat.vue                ← Chat chính, SSE consumer (End User only)
 │   │   └── admin/
-│   │       ├── documents/page.tsx  ← Upload file + danh sách tài liệu + ingestion status (Admin only)
-│   │       └── users/page.tsx      ← Danh sách user, deactivate/reactivate (Admin only)
-├── providers/
-│   └── WebSocketProvider.tsx    ← Mở 1 WebSocket app-level sau khi đăng nhập (dùng chung cho chat + notify); cung cấp qua React context
-├── components/
-│   ├── ChatMessage.tsx          ← Render 1 tin nhắn (user / bot), source citations
-│   ├── SourceCard.tsx           ← Hiển thị nguồn tài liệu + highlight text
-│   ├── FileUpload.tsx           ← Drag-drop upload, chọn classification
-│   ├── StreamingText.tsx        ← Nhận message WebSocket type=token, render token từng cái
-│   └── NotificationToast.tsx    ← Hiển thị toast/badge khi nhận message type=notify (vd "Có tài liệu mới: X")
-├── hooks/
-│   ├── useChat.ts               ← Dùng WS chung (provider): gửi question, nhận token/done; auto-reconnect đã lo ở provider
-│   ├── useNotifications.ts      ← Nghe message type=notify từ WS chung → đẩy vào toast/badge
-│   ├── useDocuments.ts          ← Gọi GET/POST /documents
-│   └── useAuth.ts               ← JWT lưu localStorage, auto-refresh
-└── lib/
-    ├── api.ts                   ← Axios/fetch base client, attach Bearer token
-    └── ws.ts                    ← WebSocket wrapper: kết nối kèm token, ping/pong heartbeat, reconnect backoff
+│   │       ├── documents.vue       ← Upload + danh sách tài liệu + ingestion status (Admin)
+│   │       ├── users.vue           ← Quản lý user: deactivate/reactivate (Admin)
+│   │       └── analytics.vue       ← [MỚI] Dashboard: charts volume / feedback rate / top questions
+│   ├── middleware/
+│   │   └── auth.ts                 ← Route guard: chưa login → /login; route admin → check role
+│   ├── plugins/
+│   │   └── notifications.client.ts ← Mở EventSource(`GET /notifications`) app-level sau đăng nhập (provide qua useState)
+│   ├── components/
+│   │   ├── ChatMessage.vue         ← Render 1 tin nhắn (user/bot) + source citations
+│   │   ├── SourceCard.vue          ← Nguồn tài liệu; click → mở DocumentViewer
+│   │   ├── FileUpload.vue          ← Drag-drop upload, chọn classification
+│   │   ├── StreamingText.vue       ← Nhận SSE token (POST /query), render token từng cái
+│   │   ├── NotificationToast.vue   ← Toast realtime khi nhận event notify
+│   │   ├── NotificationCenter.vue  ← [MỚI] badge số chưa đọc + dropdown lịch sử + mark-as-read
+│   │   ├── DocumentViewer.vue      ← [MỚI] PDF.js: nhảy đúng trang + highlight đoạn citation
+│   │   ├── ConversationList.vue    ← [MỚI] lịch sử hội thoại: list / search / rename / delete
+│   │   └── AnalyticsCharts.vue     ← [MỚI] charts (Chart.js / ApexCharts)
+│   ├── composables/
+│   │   ├── useApi.ts               ← `$fetch` base client, attach Bearer token
+│   │   ├── useAuth.ts              ← JWT lưu cookie/localStorage, auto-refresh
+│   │   ├── useChat.ts              ← POST /query, đọc SSE bằng fetch + ReadableStream (token/done)
+│   │   ├── useNotifications.ts     ← Stream /notifications realtime + history (GET /notifications/history, unread-count, mark read)
+│   │   ├── useDocuments.ts         ← GET/POST /documents + GET /documents/{id}/file (presigned)
+│   │   ├── useConversations.ts     ← [MỚI] GET/DELETE /conversations, rename
+│   │   └── useAnalytics.ts         ← [MỚI] GET /admin/metrics
+│   └── utils/
+│       └── sse.ts                  ← Helper đọc SSE: EventSource cho GET, fetch-stream cho POST
+└── server/                         ← (tùy chọn) Nitro route nếu cần BFF — Phase 1 chưa cần
 ```
-> **WebSocket mở ở app-level** (trong `WebSocketProvider`, ngay sau đăng nhập) — không gắn riêng trang chat. Nhờ vậy user nhận được notify "tài liệu mới" kể cả khi đang ở Admin Dashboard hay trang khác.
+
+**Việc thêm cho FE (Phase 1):**
+- **Notification Center đầy đủ** (`NotificationCenter.vue` + `useNotifications`): badge số chưa đọc, dropdown lịch sử thông báo, mark-as-read. Realtime qua SSE `/notifications`; lịch sử/đếm chưa đọc qua API (`GET /notifications/history`, `/unread-count`, `POST /notifications/{id}/read`).
+- **Admin Analytics Dashboard** (`analytics.vue` + `AnalyticsCharts.vue`): charts volume / feedback rate / top questions (gọi `GET /admin/metrics`). Kéo từ Phase 2 lên Phase 1.
+- **Document Viewer + highlight** (`DocumentViewer.vue`): PDF.js — click nguồn (`SourceCard`) → mở file gốc (presigned URL từ `GET /documents/{id}/file`), nhảy đúng trang + highlight đoạn citation. Kèm **Conversation history UI** (`ConversationList.vue`).
+
+> **2 stream SSE riêng:** `POST /query` (mở theo từng câu hỏi, đóng khi trả xong) và `GET /notifications`
+> (mở **app-level** ngay sau đăng nhập, giữ lâu) → user nhận thông báo kể cả khi đang ở Admin Dashboard.
+> EventSource chỉ hỗ trợ GET → `/query` (POST) đọc SSE bằng fetch-stream.
 
 **Không được đụng:** bất kỳ file Python nào, docker-compose.yml.
 
@@ -168,6 +198,7 @@ src/document-service/app/
 │           ├── upload_document_use_case.py   ← Lưu S3 → tạo record status=queued → publish doc.ingest
 │           ├── list_documents_use_case.py    ← Liệt kê (filter status, phân trang)
 │           ├── get_document_use_case.py       ← Chi tiết 1 document
+│           ├── get_document_file_use_case.py  ← Trả presigned S3 URL (cho FE Document Viewer) — check ACL
 │           └── delete_document_use_case.py    ← Xóa S3 + record + trigger xóa vectors Qdrant
 │
 ├── infrastructure/
@@ -187,7 +218,7 @@ src/document-service/app/
         ├── main.py
         ├── dependencies.py                    ← require_admin(), get upload/list/delete use cases
         └── routers/
-            └── documents.py                   ← POST /documents/upload, GET /documents, GET /documents/{id}, DELETE /documents/{id} (admin only)
+            └── documents.py                   ← POST /documents/upload, GET /documents, GET /documents/{id}, GET /documents/{id}/file (presigned), DELETE /documents/{id} (admin only)
 ```
 
 **Key logic — document-service:**
@@ -203,7 +234,7 @@ src/document-service/app/
 
 ### RAG Engineer — Trần Thanh Nguyên
 
-**Phụ trách rag-worker toàn bộ. Bắt đầu Ngày 3. Workload nặng nhất Phase 1.**
+**Phụ trách rag-worker + mcp-service. Bắt đầu Ngày 3. Workload nặng nhất Phase 1 (cả đường RAG: retrieval + rerank + tool).**
 
 **Files RAG Engineer tạo:**
 ```
@@ -253,13 +284,43 @@ src/rag-worker/app/
 - **OpenAI Embedding**: Nếu unreachable → ingestion fail, publish `doc.status` với status `failed`, Admin retry thủ công
 - **Gemini Vision API**: Tương tự — fail ingestion, không ảnh hưởng query flow
 
-**Không được đụng:** `app/domain/` (SA owns), bất kỳ file nào trong user-service, document-service hoặc query-service.
+#### MCP Tool Service (RAG Engineer cũng phụ trách)
+
+> Service riêng expose tool qua giao thức **MCP** (transport Streamable HTTP/SSE, port 8003). Query Service
+> agent — và agent tương lai (Teams bot…) — là MCP client dùng chung tool. Self-contained: mỗi tool tự lo backend.
+> RAG Engineer ôm cả đường RAG: rag-worker (retrieval) + mcp-service (tool rag_search + rerank).
+
+**Files RAG Engineer tạo — mcp-service:**
+```
+src/mcp-service/app/
+├── interfaces/
+│   └── mcp_server.py                         ← Khai báo + expose 2 tool qua MCP: rag_search, hr_query
+├── application/
+│   └── tools/
+│       ├── rag_search.py                     ← (query rewrite) → NATS rag.search (Top-5) → rerank → Top-3 SearchResult
+│       └── hr_query.py                        ← query mcp_db.hr_mock.* filter user_id → dữ liệu HR cá nhân
+├── infrastructure/
+│   ├── nats_rag_client.py                    ← NATS request-reply rag.search tới rag-worker (timeout 10s)
+│   ├── bge_reranker_client.py                ← Implement RerankService — BGE-Reranker-v2-m3 (Top-5 → Top-3)
+│   ├── langfuse_client.py                    ← Trace tool rag_search/hr_query (fail-silently)
+│   └── db/
+│       ├── models.py                          ← SQLAlchemy model hr_mock.* (mcp_db)
+│       └── postgres_hr_repository.py          ← Query hr_mock filter user_id
+└── main.py                                    ← Khởi MCP server (HTTP/SSE) :8003
+```
+
+**Key logic:**
+- `rag_search(query, document_ids, top_k)`: nhận `document_ids` từ Query Service (đã lọc ACL) → NATS `rag.search` tới rag-worker → rerank Top-3. **Tool không tự quyết quyền** — chỉ dùng `document_ids` được truyền vào.
+- `hr_query(user_id, intent)`: nhận `user_id` từ Query Service → query `mcp_db.hr_mock.*` với `WHERE user_id`. Không tin user_id do LLM bịa — Query Service inject từ JWT.
+- **Bảo mật**: mọi tham số nhạy cảm (`document_ids`, `user_id`) do **MCP client (Query Service) inject**, không để LLM tự điền.
+
+**Không được đụng:** `app/domain/` (SA owns), user-service, document-service, query-service.
 
 ---
 
 ### AI/Agent Engineer — Phạm Quốc Dũng
 
-**Phụ trách query-service toàn bộ. Bắt đầu Ngày 3. Phase 1 nặng (LlamaIndex FunctionCallingAgent).**
+**Phụ trách query-service. Bắt đầu Ngày 3. Phase 1 nặng (FunctionCallingAgent + MCP client + SSE + notify).**
 
 **Files AI/Agent Engineer tạo:**
 ```
@@ -267,11 +328,11 @@ src/query-service/app/
 ├── application/
 │   └── use_cases/
 │       └── query/
-│           └── orchestration.py              ← FunctionCallingAgent → rag_search_tool / hr_query_tool → stream OpenAI GPT-4o mini
+│           └── orchestration.py              ← FunctionCallingAgent (MCP client) → tool rag_search / hr_query ở mcp-service → stream OpenAI GPT-4o mini
 │
 ├── infrastructure/
 │   ├── db/
-│   │   ├── models.py                         ← SQLAlchemy model cho conversations, messages, document_access (projection ACL)
+│   │   ├── models.py                         ← SQLAlchemy model cho conversations, messages, document_access (projection ACL), notifications
 │   │   ├── postgres_conversation_repo.py     ← Implement ConversationRepository
 │   │   └── postgres_document_access_repo.py  ← Implement DocumentAccessRepository — query bảng projection `document_access` trong query_db (KHÔNG đụng doc_db)
 │   ├── messaging/
@@ -280,25 +341,28 @@ src/query-service/app/
 │   │   └── redis_access_cache.py             ← Cache allowed_doc_ids theo user_id, TTL ~60s
 │   ├── external/
 │   │   ├── openai_client.py                  ← OpenAI GPT-4o mini — streaming + tool_call. Timeout 30s, không retry.
-│   │   ├── nats_rag_client.py                ← NATS request-reply rag.search (timeout 10s).
+│   │   ├── mcp_client.py                     ← MCP client: kết nối mcp-service (Streamable HTTP/SSE), list + gọi tool (rag_search, hr_query).
 │   │   │                                        Circuit Breaker (pybreaker, fail_max=5, reset_timeout=30s).
-│   │   ├── bge_reranker_client.py            ← Implement RerankService — BGE-Reranker-v2-m3 (loaded inline trong container, Top-5→Top-3)
 │   │   └── langfuse_client.py                ← Ghi trace query vào Langfuse: latency từng bước, token cost, retrieved chunks, feedback. Fail-silently.
 │   ├── memory/                               ← Redis short-term memory
-│   └── ws/
-│       ├── connection_manager.py            ← Sổ đăng ký { user_id, role, department } → WebSocket đang mở
+│   └── sse/
+│       ├── connection_manager.py            ← Sổ đăng ký { user_id, role, department } → SSE stream /notifications đang mở
 │       └── notify_subscriber.py             ← Subscribe notify.doc_new → lọc user đang online đủ quyền (ACL theo
-│                                               classification/department/user_id) → đẩy {type:"notify",event:"doc_new"} qua ConnectionManager
+│                                               classification/department/user_id) → LƯU vào bảng notifications + đẩy event xuống SSE /notifications
 │
 └── interfaces/
     └── api/
         ├── main.py
         ├── dependencies.py                   ← get_orchestration_use_case()
         └── routers/
-            ├── query.py                      ← WS /query (WebSocket): nhận question → stream token → done; đẩy notify bất kỳ lúc nào
-            ├── conversations.py              ← GET /conversations, DELETE /conversations
+            ├── query.py                      ← POST /query (SSE): nhận question → stream token → done
+            ├── notifications.py              ← GET /notifications (SSE) + GET /notifications/history, /unread-count, POST /{id}/read
+            ├── conversations.py              ← GET /conversations, DELETE /conversations (+ rename)
+            ├── admin.py                      ← GET /admin/metrics (Admin only) — volume, feedback rate, top questions
             └── feedback.py                   ← POST /feedback
 ```
+> Reranker + NATS rag.search **không còn ở Query Service** — đã chuyển sang **mcp-service** (tool `rag_search`).
+> Query Service giờ là **MCP client**, gọi tool qua `mcp_client.py`.
 
 **Key logic cần implement:**
 
@@ -306,32 +370,33 @@ src/query-service/app/
 1. Lấy conversation context: `conv_repo.get_context(user_id, recent_k=5)` → summary + 5 turns gần nhất
 2. **ACL pre-filter:** `doc_access_repo.get_allowed_doc_ids(user_id, role, department)` → đọc bản sao trong `query_db.document_access` (do `doc_access_subscriber` cập nhật qua event) → `allowed_doc_ids` (cache Redis TTL ~60s). **Không gọi sang Document Service** — Document Service chết vẫn query được.
 3. **Semantic Cache check:** embed câu hỏi → cosine similarity > 0.95 → return cached response ngay
-4. **LlamaIndex FunctionCallingAgent** nhận câu hỏi → tự quyết định gọi tool:
-   - `rag_search_tool`: câu hỏi về tài liệu nội bộ → Query Rewriting (3 variations) → NATS `rag.search` → RRF merge → Top-5 candidates → rerank BGE-Reranker-v2-m3 Top-3
-   - `hr_query_tool`: câu hỏi HR cá nhân → query `query_db.hr_mock.*` tables (cùng DB của Query Service) với filter `WHERE user_id = current_user`
+4. **LlamaIndex FunctionCallingAgent** (MCP client) liệt kê tool từ **mcp-service** → LLM tự chọn tool:
+   - `rag_search`: MCP tool ở mcp-service → (query rewrite) → NATS `rag.search` → RRF → Top-5 → rerank → Top-3
+   - `hr_query`: MCP tool ở mcp-service → query `mcp_db.hr_mock.*` filter `user_id`
+   - **Bảo mật:** Query Service **tự inject** `document_ids = allowed_doc_ids` (từ bước 2) và `user_id = current_user` vào lời gọi tool — KHÔNG để LLM tự điền (tránh vượt quyền).
 5. Build prompt: system prompt + summary + recent messages + retrieved context
-6. Gọi OpenAI GPT-4o mini streaming: yield từng token → gửi WebSocket message `{"type":"token","content":"..."}`, kết thúc gửi `{"type":"done","sources":[...]}`
+6. Gọi OpenAI GPT-4o mini streaming: yield từng token → gửi SSE `data: {"token":"..."}`, kết thúc gửi `data: {"done":true,"sources":[...]}`
 7. Lưu message: `conv_repo.save_message(user_id, "user", question)` + `save_message(user_id, "assistant", full_answer)`
 8. Summary buffer: nếu conversation > 10 turns → gọi LLM compress → `conv_repo.update_summary()`
 
 *Failure Handling:*
-- **NATS RAG search**: Circuit Breaker (`pybreaker`, fail_max=5, reset_timeout=30s) — Circuit Open → trả 503 ngay
+- **MCP call (query-service → mcp-service)**: Circuit Breaker (`pybreaker`, fail_max=5, reset_timeout=30s) trong `mcp_client.py` — Circuit Open → trả 503 ngay
 - **OpenAI**: Timeout 30s, không retry — trả 503 ngay, log token count vào Langfuse trước khi fail
 - **Redis**: Fail-open — nếu Redis unreachable, `redis_access_cache.py` fallback về query projection `document_access` trong query_db trực tiếp
 - **Document Service down**: không ảnh hưởng query — ACL đọc từ projection local; chỉ là thay đổi quyền mới (eventual consistency) tạm chưa cập nhật tới khi Document Service sống lại và event `doc.access` được JetStream giao lại
 
 *Realtime notify — "có tài liệu mới" (`notify_subscriber.py`):*
-1. Khi WebSocket connect: decode JWT → `connection_manager.add(user_id, role, department, socket)`.
+1. Khi client mở SSE `GET /notifications`: decode JWT → `connection_manager.add(user_id, role, department, sse_stream)`.
 2. `notify_subscriber` nhận `notify.doc_new { doc_id, document_name, classification, allowed_departments, allowed_user_ids }`.
 3. Duyệt user đang online trong `connection_manager`, áp ACL: public → tất cả; internal → mọi nhân viên; secret → khớp department; top_secret → khớp user_id.
 4. Đẩy `{type:"notify", event:"doc_new", message:"Có tài liệu mới: <document_name>", doc_id}` tới các socket đủ quyền.
-5. WebSocket disconnect → `connection_manager.remove`.
+5. SSE `/notifications` đóng (client rời đi) → `connection_manager.remove`.
 
 **Observability — AI/Agent Engineer làm chủ:**
-- Định nghĩa **trace convention** chung (tên trace/span, field bắt buộc) để cả query-service và rag-worker log nhất quán vào cùng 1 Langfuse project.
+- Định nghĩa **trace convention** chung (tên trace/span, field bắt buộc) để query-service, rag-worker và mcp-service log nhất quán vào cùng 1 Langfuse project.
 - **RAGAS evaluation** (Phase 1.5, cuối tuần 3): chạy offline trên query trace data (retrieved chunks, scores) — Faithfulness, Answer Relevancy, Context Precision/Recall, Answer Correctness.
 
-**Không được đụng:** `app/domain/` (SA owns), bất kỳ file nào trong user-service, document-service hoặc rag-worker.
+**Không được đụng:** `app/domain/` (SA owns), bất kỳ file nào trong user-service, document-service, rag-worker hoặc mcp-service.
 
 ---
 
@@ -341,8 +406,8 @@ src/query-service/app/
 
 **Files DevOps tạo:**
 ```
-docker-compose.yml               ← 10 containers: nginx, next-frontend, user-service,
-                                    document-service, query-service, rag-worker,
+docker-compose.yml               ← 11 containers: nginx, nuxt-frontend, user-service,
+                                    document-service, query-service, rag-worker, mcp-service,
                                     nats (JetStream), qdrant, redis, langfuse :3100
                                     (PostgreSQL = AWS RDS external, không có container)
 
@@ -350,15 +415,17 @@ src/user-service/Dockerfile
 src/document-service/Dockerfile
 src/query-service/Dockerfile
 src/rag-worker/Dockerfile
+src/mcp-service/Dockerfile
 src/frontend/Dockerfile
 
 nginx/
 ├── nginx.conf                   ← Route /api/user/*       → user-service:8000
 │                                   Route /api/documents/* → document-service:8002
 │                                   Route /api/query/*     → query-service:8001
-│                                     • WS /api/query/query: bật `Upgrade`/`Connection` header (WebSocket),
-│                                       tắt proxy_buffering, proxy_read_timeout dài (vd 3600s) cho kết nối lâu
-│                                   Route /                → next-frontend:3000
+│                                     • SSE /api/query/query + /api/query/notifications: tắt `proxy_buffering`,
+│                                       `proxy_read_timeout` dài (vd 3600s) để giữ stream SSE lâu
+│                                   Route /api/mcp/*        → mcp-service:8003
+│                                   Route /                → nuxt-frontend:3000
 └── ssl/                         ← Let's Encrypt cert (production)
 
 infra/
@@ -376,7 +443,7 @@ infra/
 **Key setup cần làm:**
 - **Langfuse server**: dựng + vận hành container `langfuse :3100` (DB backing, expose port, retention). Cấp **API key (public/secret) qua AWS Secrets Manager** cho rag-worker + query-service dùng chung 1 project. DevOps chỉ lo hạ tầng — **không** viết `langfuse_client.py` (chủ service tự nhúng client).
 - **NATS JetStream**: enable persist message cho `doc.ingest` / `doc.status`.
-- **CloudWatch alarm**: ngưỡng phải đồng bộ với Circuit Breaker (`fail_max`, `reset_timeout`) của `nats_rag_client.py`.
+- **CloudWatch alarm**: ngưỡng phải đồng bộ với Circuit Breaker (`fail_max`, `reset_timeout`) của `mcp_client.py` (query-service → mcp-service).
 
 **Không được đụng:** bất kỳ file Python `.py` logic nào.
 
@@ -390,10 +457,10 @@ Ngày 1–2:
   DevOps    → Dockerfile + docker-compose.yml cơ bản + CI pipeline skeleton
 
 Ngày 3+ (song song):
-  Frontend  → mock API bằng schemas, build UI
+  Frontend  → mock API bằng schemas, build UI Nuxt 4 (chat SSE, admin, analytics, notification center, document viewer)
   Backend Dev       → user-service (auth, DB, JWT, quản lý user) + document-service (upload, S3, NATS doc.ingest/doc.status)
-  RAG Engineer      → rag-worker: ingestion pipeline (Parent-Child chunking, Gemini OCR) + retrieval
-  AI/Agent Engineer → query-service: FunctionCallingAgent + rerank + langfuse trace + streaming + conversation history
+  RAG Engineer      → rag-worker (ingestion Parent-Child + Gemini OCR + retrieval) + mcp-service (tool rag_search/hr_query + rerank)
+  AI/Agent Engineer → query-service (FunctionCallingAgent + MCP client + SSE streaming + notify + history)
   DevOps            → AWS EC2 setup + CI/CD + Langfuse server
 ```
 
@@ -408,22 +475,23 @@ Câu hỏi user
      ↓
 [AI/Agent Engineer]   doc_access_repo: đọc projection query_db.document_access (fed by doc.access event) → allowed_doc_ids (cache Redis ~60s)
      ↓
-[AI/Agent Engineer]   FunctionCallingAgent: LLM quyết định gọi tool nào
-     ├── rag_search_tool → nats_rag_client.py: NATS request-reply rag.search { query, top_k=5, document_ids }
+[AI Eng / Query Service]   FunctionCallingAgent (MCP client): inject document_ids=allowed_doc_ids + user_id → gọi tool ở mcp-service
+     ├── [RAG Eng] tool rag_search (mcp-service) → nats_rag_client: NATS request-reply rag.search { query, top_k=5, document_ids }
      │        ↓  NATS
-     │   [RAG Engineer] retrieval.py: embed → hybrid search → Top-5 → SearchResult[]
+     │   [RAG Eng] retrieval.py (rag-worker): embed → hybrid search → Top-5 → SearchResult[]
      │        ↓
-     │   [AI/Agent Engineer] BGE-Reranker-v2-m3 (trong query-service): Top-5 → Top-3
+     │   [RAG Eng] BGE-Reranker-v2-m3 (mcp-service): Top-5 → Top-3
      │
-     └── hr_query_tool → query query_db.hr_mock.* tables WHERE user_id = current_user
+     └── [RAG Eng] tool hr_query (mcp-service) → query mcp_db.hr_mock.* WHERE user_id = current_user
      ↓
-[AI/Agent Engineer]   build prompt → OpenAI GPT-4o mini streaming → WebSocket về FE
+[AI Eng / Query Service]   build prompt → OpenAI GPT-4o mini streaming → SSE về FE
 ```
 
 **Ranh giới dữ liệu:**
-- RAG Engineer: (1) embed query, (2) hybrid search Top-5 — trả về `List[SearchResult]` (Top-5) qua NATS reply. **Không rerank.**
-- AI/Agent Engineer: (1) quyết định document_ids nào được search, (2) **rerank Top-5 → Top-3** (BGE-Reranker trong query-service), (3) build prompt, (4) stream về FE
-- RAG Engineer không biết ACL logic, không biết user là ai — chỉ nhận `document_ids` như filter thông thường
+- **RAG Engineer** ôm cả đường RAG: rag-worker (embed + hybrid search Top-5) **và** mcp-service (tool `rag_search` =
+  rag.search + **rerank Top-5→Top-3**; `hr_query` = đọc `mcp_db.hr_mock`). Tool self-contained, agent nào gọi cũng được.
+- **AI/Agent Engineer** (Query Service, MCP client): quyết định `document_ids`/`user_id` (ACL), gọi tool qua MCP, build prompt, stream SSE.
+- mcp-service không tự quyết quyền — chỉ nhận `document_ids`/`user_id` do Query Service inject.
 
 ---
 
@@ -432,10 +500,10 @@ Câu hỏi user
 | Role | Phase 1 (3 tuần) | Phase 2+ |
 |------|-----------------|----------|
 | SA | Nặng tuần 1 → nhẹ dần (review PR) | Review, không code |
-| Frontend Dev | Trung bình — UI chat + admin cơ bản | Trung bình — dashboard analytics |
+| Frontend Dev | **Nặng** — Nuxt 4 (chat SSE + admin) + Notification Center + Analytics Dashboard + Document Viewer + conversation history | Trung bình — mở rộng dashboard, realtime 2 chiều |
 | Backend Dev | **Nặng hơn trước** — user-service (auth + user CRUD) + document-service (upload, S3, NATS doc.ingest/doc.status, delete) | Nhẹ — ít thay đổi |
-| RAG Engineer | **Nặng** — ingestion (Parent-Child chunking, Gemini OCR) + retrieval (hybrid search Top-5; rerank do query-service làm) | Tune chất lượng, chunk config |
-| AI/Agent Engineer | **Nặng** — LlamaIndex FunctionCallingAgent + rerank + prompt + stream + history | Teams Bot, dashboard analytics |
+| RAG Engineer | **Rất nặng** — rag-worker (ingestion Parent-Child + Gemini OCR + retrieval Top-5) + mcp-service (tool rag_search/hr_query + rerank) | Tune chất lượng, chunk config |
+| AI/Agent Engineer | **Nặng** — query-service (FunctionCallingAgent + MCP client + SSE + notify + history) | Teams Bot (cũng là MCP client), dashboard analytics |
 | DevOps | Trung bình — Docker + AWS setup | Nhẹ — maintain |
 
 ---
@@ -476,6 +544,7 @@ feature branches:
   feat/nguyen/rag-ingestion
   feat/hung/auth-jwt
   feat/dung-pq/llm-orchestration
+  feat/nguyen/mcp-service
   feat/huy/docker-setup
   feat/hai/chat-ui
   feat/dung-vq/user-service
@@ -497,15 +566,18 @@ feature branches:
 | `app/domain/` (entities + repos) | SA owns, tất cả đọc | SA freeze trước khi team code — không ai tự sửa |
 | `SearchResult` dataclass | SA define, RAG Engineer implement (trả về), AI/Agent Engineer consume (rerank + build prompt) | Sửa → báo SA → SA update contracts.md → tất cả update |
 | `DocumentAccessRepository` ABC | SA define, AI/Agent Engineer implement (`postgres_document_access_repo.py`) | Sửa → báo SA |
-| `RerankService` ABC | SA define, AI/Agent Engineer implement (`bge_reranker_client.py`) | Sửa → báo SA |
+| `RerankService` ABC | SA define, **RAG Engineer** implement trong **mcp-service** (`bge_reranker_client.py`) | Sửa → báo SA |
+| MCP tool contract (`rag_search`, `hr_query` I/O) | SA define; **RAG Engineer** implement (mcp-service), AI Engineer consume (Query Service MCP client) | Đổi tên/tham số tool → báo cả RAG Eng + AI Eng |
 | API schemas (Pydantic) | SA define, Backend Dev + AI/Agent Engineer implement, Frontend Dev consume | Sửa → báo SA |
 | `requirements.txt` | Tất cả | Thêm package → mở PR, không tự pip install rồi push |
 | `docker-compose.yml` | DevOps owns | Thêm env var mới → báo DevOps |
 | `openai_client.py` (query-service) | AI/Agent Engineer owns | RAG Engineer không dùng, không đụng |
 | `openai_embedding_client.py` (rag-worker) | RAG Engineer owns | AI/Agent Engineer không dùng, không đụng |
-| `nats_rag_client.py` (query-service) | AI/Agent Engineer owns | Circuit Breaker state (fail_max, reset_timeout) cần đồng bộ với CloudWatch alarm threshold |
+| `mcp_client.py` (query-service) | AI/Agent Engineer owns | Circuit Breaker (fail_max, reset_timeout) cho call query-service → mcp-service; đồng bộ CloudWatch alarm |
+| `nats_rag_client.py` (mcp-service) | **RAG Engineer** owns | Trong tool rag_search của mcp-service (gọi rag-worker qua NATS) |
 | `langfuse_client.py` (rag-worker) | RAG Engineer owns | Bắt buộc fail silently — không throw exception ra ngoài, không ảnh hưởng request |
 | `langfuse_client.py` (query-service) | AI/Agent Engineer owns | File riêng, độc lập với client rag-worker. Bắt buộc fail silently |
 | Langfuse trace schema/convention | AI/Agent Engineer define, RAG Engineer + AI/Agent Engineer tuân theo | Đổi tên trace/span hoặc field → báo AI/Agent Engineer để 2 service đồng bộ |
 | Langfuse server (container :3100, keys) | DevOps owns | Đổi endpoint/key → báo cả 2 service owner |
-| `bge_reranker_client.py` (query-service) | AI/Agent Engineer owns — implement `RerankService` | Đã chuyển từ rag-worker sang; RAG Worker chỉ trả Top-5 qua NATS, rerank ở query-service |
+| `bge_reranker_client.py` (mcp-service) | **RAG Engineer** owns — implement `RerankService` | Nằm trong tool `rag_search` của mcp-service; RAG Worker chỉ trả Top-5 qua NATS, rerank ở mcp-service |
+| `langfuse_client.py` (mcp-service) | **RAG Engineer** owns | Trace tool rag_search/hr_query; fail-silently |

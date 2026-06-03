@@ -73,7 +73,7 @@ src/query-service/                  ← Container 2: LLM Orchestration, Conversa
 │   ├── application/
 │   │   └── use_cases/
 │   │       └── query/
-│   │           └── orchestration.py       # Function Calling Agent → rag_search_tool / hr_query_tool → stream OpenAI
+│   │           └── orchestration.py       # FunctionCallingAgent (MCP client) → tool rag_search/hr_query ở mcp-service → stream OpenAI (SSE)
 │   │
 │   ├── infrastructure/
 │   │   ├── db/
@@ -81,7 +81,8 @@ src/query-service/                  ← Container 2: LLM Orchestration, Conversa
 │   │   │   └── postgres_conversation_repo.py
 │   │   ├── external/
 │   │   │   ├── openai_client.py    # OpenAI GPT-4o mini — streaming + tool_call
-│   │   │   └── nats_client.py      # NATS request-reply rag.search
+│   │   │   └── mcp_client.py       # MCP client → mcp-service (tool rag_search, hr_query)
+│   │   ├── sse/                    # connection_manager + notify_subscriber (SSE /notifications)
 │   │   └── memory/                # Redis short-term memory
 │   │
 │   └── interfaces/
@@ -107,14 +108,13 @@ src/document-service/               ← Container 3: Document management (Admin)
 │           └── routers/
 │               └── documents.py    # POST /documents/upload, GET /documents, DELETE
 │
-src/rag-worker/                     ← Container 4: OCR, Ingestion (NATS only)
+src/rag-worker/                     ← Container 4: Ingestion + Retrieval (NATS only, KHÔNG dùng DB)
 ├── app/
 │   ├── domain/
 │   │   ├── entities/
-│   │   │   └── document.py         # Document, Chunk
+│   │   │   └── document.py         # Document, Section (xử lý in-memory)
 │   │   └── repositories/
 │   │       ├── vector_repository.py       # Abstract VectorRepository + SearchResult
-│   │       ├── document_repository.py     # Abstract DocumentRepository
 │   │       └── embedding_service.py       # Abstract EmbeddingService (OpenAI interface)
 │   │
 │   ├── application/
@@ -125,20 +125,37 @@ src/rag-worker/                     ← Container 4: OCR, Ingestion (NATS only)
 │   │           └── retrieval.py    # Embed → Hybrid search (vector+BM25 RRF) → Top-K=5 → SearchResult
 │   │
 │   ├── infrastructure/
-│   │   ├── db/
-│   │   │   ├── models.py
-│   │   │   └── postgres_document_repository.py
 │   │   ├── vector/
 │   │   │   └── qdrant_vector_repository.py
 │   │   └── external/
 │   │       ├── openai_embedding_client.py  # OpenAI text-embedding-3-small (1536 dims)
 │   │       ├── gemini_ocr_client.py        # Gemini Vision API — OCR PDF scan
-│   │       ├── bge_reranker_client.py      # BGE-Reranker-v2-m3 (loaded inline, Top-5→Top-3)
 │   │       └── langfuse_client.py          # Trace ingestion + retrieval
 │   │
-│   └── main.py                     # NATS subscriber — không có HTTP server
+│   └── main.py                     # NATS subscriber — không có HTTP server, không có DB
 
-src/frontend/                       ← AWS EC2 deployment (Next.js container, Docker Compose)
+src/mcp-service/                    ← Container 5: MCP Tool Service (:8003)
+├── app/
+│   ├── domain/
+│   │   ├── entities/
+│   │   │   └── tool_io.py          # RagSearchInput/Result, HrQueryInput
+│   │   └── repositories/
+│   │       └── rerank_service.py           # Abstract RerankService (BGE-Reranker)
+│   ├── application/
+│   │   └── tools/
+│   │       ├── rag_search.py       # (rewrite) → NATS rag.search → rerank → Top-3
+│   │       └── hr_query.py         # query mcp_db.hr_mock filter user_id
+│   ├── infrastructure/
+│   │   ├── db/
+│   │   │   ├── models.py                   # hr_mock.* (mcp_db)
+│   │   │   └── postgres_hr_repository.py
+│   │   ├── nats_rag_client.py      # NATS request-reply rag.search → RAG Worker
+│   │   └── bge_reranker_client.py  # BGE-Reranker-v2-m3 (loaded inline, Top-5→Top-3)
+│   ├── interfaces/
+│   │   └── mcp_server.py           # Expose tool qua MCP (Streamable HTTP/SSE)
+│   └── main.py                     # MCP server :8003
+
+src/frontend/                       ← AWS EC2 deployment (Nuxt 4 container, Docker Compose)
 ```
 
 ---
@@ -185,7 +202,7 @@ class QdrantVectorRepository(VectorRepository):  # implement interface từ doma
 
 FastAPI router nhận use case qua `Depends()` — use case nhận repository qua constructor.
 
-> **Lưu ý Microservices:** Query Service không gọi Qdrant trực tiếp — nó giao tiếp với RAG Worker qua NATS request-reply (`rag.search`). `NatsClient` là Infrastructure adapter đóng gói NATS call đó. User Service không gọi RAG Worker — chỉ xử lý auth/user data.
+> **Lưu ý Microservices:** Query Service không gọi Qdrant/RAG Worker trực tiếp — nó là **MCP client**, gọi tool ở mcp-service (`MCPClient`). Chính mcp-service mới giao tiếp với RAG Worker qua NATS request-reply (`rag.search`). User Service không gọi RAG Worker — chỉ xử lý auth/user data.
 
 ```python
 # src/user-service/app/interfaces/api/dependencies.py
@@ -195,10 +212,17 @@ def get_login_use_case() -> LoginUseCase:
 
 # src/query-service/app/interfaces/api/dependencies.py
 def get_orchestration_use_case() -> OrchestrationUseCase:
-    nats_client = NatsClient(url=settings.NATS_URL)   # NATS request-reply rag.search
+    mcp_client = MCPClient(url=settings.MCP_SERVICE_URL)   # gọi tool rag_search / hr_query
     conversation_repo = PostgresConversationRepo()
-    openai_client = OpenAIClient()                    # OpenAI GPT-4o mini — streaming + tool_call
-    return OrchestrationUseCase(nats_client, conversation_repo, openai_client)
+    doc_access_repo = PostgresDocumentAccessRepo()        # projection ACL (query_db)
+    openai_client = OpenAIClient()                        # OpenAI GPT-4o mini — streaming + tool_call
+    return OrchestrationUseCase(mcp_client, conversation_repo, doc_access_repo, openai_client)
+
+# src/mcp-service/app/interfaces/mcp_server.py  (tool dependencies)
+def get_rag_search_tool() -> RagSearchTool:
+    nats_client = NatsClient(url=settings.NATS_URL)   # NATS request-reply rag.search → RAG Worker
+    reranker = BGERerankerClient()                    # implement RerankService
+    return RagSearchTool(nats_client, reranker)
 
 # src/rag-worker/app/interfaces/api/dependencies.py
 def get_retrieval_use_case() -> RetrievalUseCase:
@@ -207,10 +231,9 @@ def get_retrieval_use_case() -> RetrievalUseCase:
     return RetrievalUseCase(vector_repo, embedding_svc)
 
 def get_ingest_use_case() -> IngestDocumentUseCase:
-    document_repo = PostgresDocumentRepository()
     vector_repo = QdrantVectorRepository()
     embedding_svc = OpenAIEmbeddingService()      # dùng chung interface, cùng 1 instance
-    return IngestDocumentUseCase(document_repo, vector_repo, embedding_svc)
+    return IngestDocumentUseCase(vector_repo, embedding_svc)   # RAG Worker không ghi DB — publish doc.status
 
 # src/query-service/app/interfaces/api/routers/query.py
 @router.post("/query")

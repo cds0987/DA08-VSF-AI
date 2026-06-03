@@ -145,7 +145,7 @@ graph LR
     end
     OPS["IT/DevOps Operator"]
 
-    UI["Web UI — Next.js :3000\nNginx · WebSocket streaming"]
+    UI["Web UI — Nuxt :3000\nNginx · SSE streaming"]
 
     subgraph USER_SVC["User Service :8000"]
         AUTH["Auth Module\nJWT · bcrypt · RBAC"]
@@ -158,11 +158,16 @@ graph LR
     NATS[("NATS :4222\nJetStream enabled")]
 
     subgraph QUERY_SVC["Query Service :8001"]
-        ORCH["Single Agent\nFunction Calling"]
-        RETR["Query Retrieval\n+ Query Rewriting"]
-        RERANK["BGE-Reranker-v2-m3"]
+        ORCH["Single Agent\n(MCP client)"]
         CONV["Conversation Memory\nSummary Buffer · 5 turns"]
         LFI["Langfuse SDK"]
+    end
+
+    subgraph MCP_SVC["MCP Tool Service :8003"]
+        MCPSRV["MCP Server\ntool: rag_search · hr_query"]
+        RETR["rag_search\nQuery Rewriting + retrieval"]
+        RERANK["BGE-Reranker-v2-m3"]
+        HRQ["hr_query"]
     end
 
     subgraph RAG_SVC["RAG Worker — NATS only"]
@@ -178,7 +183,7 @@ graph LR
         QUERY_PG[("query_db\nRDS PostgreSQL")]
         REDIS[("Redis\nblacklist · cache")]
         QDRANT[("Qdrant")]
-        HR_DB[("hr_mock schema\n(trong query_db)")]
+        MCP_DB[("mcp_db\nhr_mock schema")]
     end
 
     subgraph LF_SVC["Langfuse Service :3100"]
@@ -208,15 +213,17 @@ graph LR
     NATS -->|"doc.ingest"| INGEST
     NATS -->|"doc.access (ACL projection)"| ORCH
     NATS -->|"notify.doc_new"| ORCH
-    ORCH -->|"WebSocket notify"| UI
+    ORCH -->|"SSE /notifications"| UI
     ORCH --> CONV
-    ORCH --> RETR
+    ORCH -->|"MCP: rag_search / hr_query"| MCPSRV
+    MCPSRV --> RETR
     RETR --> RERANK
+    MCPSRV --> HRQ
+    HRQ --> MCP_DB
     ORCH --> LFI
     ORCH --> GPT
     ORCH --> QUERY_PG
     ORCH --> REDIS
-    ORCH --> HR_DB
     CONV --> QUERY_PG
     LFI --> LF
     LF --> LF_PG
@@ -276,8 +283,8 @@ graph LR
 
 ```mermaid
 graph LR
-    USER["End User"] -->|Question| UI["Web UI Next.js :3000"]
-    UI -->|WS /query| API["Query Service :8001"]
+    USER["End User"] -->|Question| UI["Web UI Nuxt :3000"]
+    UI -->|POST /query SSE| API["Query Service :8001"]
 
     API --> JWT{"JWT + Redis Blacklist\n+ Rate Limit 20/min"}
     JWT -->|Invalid / Rate exceeded| ERR["401 / 429"]
@@ -289,10 +296,10 @@ graph LR
     TRACE --> ACL["ACL pre-filter\nallowed_doc_ids (cache Redis ~60s)"]
     ACL --> CACHE{"Semantic Cache\ncosine > 0.95?"}
     CACHE -->|Hit| CACHED["Return Cached Response"]
-    CACHE -->|Miss| AGENT["Single Agent\nFunction Calling — pick tool"]
+    CACHE -->|Miss| AGENT["Single Agent (MCP client)\npick tool, inject document_ids/user_id"]
 
-    AGENT -->|"rag_search_tool"| EMB["OpenAI Embed Question\ntext-embedding-3-small"]
-    AGENT -->|"hr_query_tool"| HR["Query hr_mock (query_db)\nfilter user_id = me"]
+    AGENT -->|"MCP: rag_search"| EMB["mcp-service: Embed Question\ntext-embedding-3-small"]
+    AGENT -->|"MCP: hr_query"| HR["mcp-service: query mcp_db.hr_mock\nfilter user_id = me"]
 
     EMB --> SRCH["Qdrant Hybrid Search\nTop-K=5 + document_ids filter"]
     SRCH --> FILT{"Max Score >= 0.7?"}
@@ -306,8 +313,8 @@ graph LR
     PROMPT --> LLM["OpenAI GPT-4o mini\nstreaming · tool_call"]
     LLM --> GUARD_OUT["Output Guardrail\nllm-guard PII Redaction"]
 
-    GUARD_OUT -->|WebSocket stream| UI
-    CACHED -->|WebSocket stream| UI
+    GUARD_OUT -->|SSE stream| UI
+    CACHED -->|SSE stream| UI
     FB --> UI
     CANNED --> UI
     GUARD_OUT --> LOG["Langfuse Log\n+ PostgreSQL Save"]
@@ -317,13 +324,14 @@ graph LR
 
 | **STT** | **Tên Module** | **Mục đích** | **Phase** |
 |--------|--------------|-------------|---------|
-| 1 | Web UI (Next.js) | Giao diện chat streaming cho nhân viên + Admin Dashboard upload tài liệu. | ✅ MVP |
+| 1 | Web UI (Nuxt 4 + Vue 3) | Giao diện chat streaming (SSE) cho nhân viên + Admin Dashboard (upload tài liệu, quản lý user, **analytics charts**) + **Notification Center** (badge/lịch sử) + **Document Viewer** (PDF.js highlight citation) + lịch sử hội thoại. | ✅ MVP |
 | 2 | User Service (FastAPI) | Microservice 1: Auth/JWT, user management, login. Issue JWT token khi login. Chia sẻ `JWT_SECRET_KEY` với Document Service, Query Service và RAG Worker để verify locally — không cần gọi lại User Service mỗi request. | ✅ MVP |
 | 2b | Document Service (FastAPI) | Microservice 2: Admin document management — upload và xóa tài liệu. Lưu file lên S3, tạo record PostgreSQL (status=queued). Publish NATS subject `doc.ingest` ngay sau khi upload. Subscribe `doc.status` để cập nhật trạng thái ingestion từ RAG Worker. Chỉ Admin mới có quyền truy cập. | ✅ MVP |
 | 2c | RAG Worker (Python/NATS) | Worker thuần NATS — không expose HTTP. Subscribe `doc.ingest` → chạy pipeline ingestion (OCR→chunk→embed→store Qdrant). Subscribe `rag.search` từ Query Service → embed query → hybrid search → trả sections. | ✅ MVP |
-| 2d | Query Service (FastAPI) | Microservice 3: User chat — nhận câu hỏi, ACL check, Semantic Cache check, Single Agent Function Calling (pick tool), NATS request `rag.search`, nhận sections, rerank, gọi LLM, stream qua WebSocket về frontend. Conversation history, feedback. Verify JWT locally. | ✅ MVP |
+| 2d | Query Service (FastAPI) | Microservice 3: User chat — nhận câu hỏi, ACL check, Semantic Cache check, Single Agent (MCP client) gọi tool ở mcp-service, nhận kết quả, gọi LLM, stream **SSE** về frontend (+ stream `/notifications` đẩy thông báo). Conversation history, feedback. Verify JWT locally. | ✅ MVP |
 | 2e | NATS Message Broker | Message broker trung tâm: (1) Async ingestion — Document Service publish `doc.ingest`, RAG Worker subscribe. (2) Request-reply retrieval — Query Service request `rag.search`, RAG Worker reply. Port 4222. **JetStream enabled** — persist message, tránh mất khi RAG Worker restart. | ✅ MVP |
-| 2f | Single Agent / Function Calling | LLM Orchestration dùng LlamaIndex FunctionCallingAgent với 2 tools: `rag_search_tool` (gọi RAG pipeline khi câu hỏi về tài liệu nội bộ) và `hr_query_tool` (query PostgreSQL HR tables khi câu hỏi cá nhân HR). LLM tự quyết định tool nào phù hợp. | ✅ MVP |
+| 2f | Single Agent / Function Calling | LLM Orchestration dùng LlamaIndex FunctionCallingAgent là **MCP client** — liệt kê tool từ mcp-service và để LLM tự chọn. Query Service inject `document_ids`/`user_id` vào lời gọi tool. | ✅ MVP |
+| 2g | MCP Tool Service (port 8003) | Microservice 5: **MCP server** expose tool dùng chung cho mọi agent. `rag_search` (NATS rag.search → rerank BGE-Reranker → Top-3) và `hr_query` (đọc `mcp_db.hr_mock`). Self-contained; transport Streamable HTTP/SSE. | ✅ MVP |
 | 3 | OCR Module | Detect PDF scan → Gemini Vision API (OCR). PDF text-based → PyMuPDF (local). | ✅ MVP |
 | 4 | Ingestion Module | Parse tài liệu (PDF/DOCX/TXT/Excel/CSV), normalize tiếng Việt, **Parent-Child Chunking** (LlamaIndex HierarchicalNodeParser), generate caption, embed, lưu Qdrant + PostgreSQL. | ✅ MVP |
 | 5 | Query Module | Nhận query + allowed_doc_ids từ Query Service (qua NATS request-reply), embed câu hỏi (OpenAI), hybrid search Qdrant với document_ids filter, filter score threshold. Query Rewriting: LLM sinh 3 variations → RRF merge. | ✅ MVP |
@@ -395,7 +403,7 @@ graph LR
 | 4 | Tiếng Việt Handling | Normalize Unicode NFC sau khi extract text. Fix encoding lỗi. Hỗ trợ tài liệu tiếng Việt và tiếng Anh lẫn lộn trong cùng file. | ✅ MVP |
 | 5 | Q&A Chatbot – Policy/Document | Nhân viên nhập câu hỏi tiếng Việt / Anh về quy trình, chính sách, tài liệu kỹ thuật. Single Agent dùng RAG tool: embed câu hỏi → Qdrant search → LLM build answer. Response streaming – chữ xuất hiện dần. | ✅ MVP |
 | 5b | Personal HR Q&A (Function Calling) | Trả lời câu hỏi cá nhân HR: ngày nghỉ còn lại, số ngày đã nghỉ, trạng thái đơn nghỉ phép, thông tin khấu trừ lương. Single Agent dùng HR tool: Function Calling query PostgreSQL HR tables. Luôn filter `WHERE user_id = current_user` — không thể xem data người khác. Phase 1: mock data. | ✅ MVP |
-| 5c | Realtime Notify – Tài liệu mới (WebSocket) | Khi tài liệu ingest xong (`indexed`), Document Service publish `notify.doc_new`; Query Service đẩy thông báo "Có tài liệu mới: X" qua WebSocket tới **mọi user đang online có quyền xem** (lọc theo classification/ACL). WebSocket mở sẵn ở app-level sau đăng nhập. | ✅ MVP |
+| 5c | Realtime Notify – Tài liệu mới (SSE) | Khi tài liệu ingest xong (`indexed`), Document Service publish `notify.doc_new`; Query Service đẩy thông báo "Có tài liệu mới: X" qua stream **SSE `GET /notifications`** tới **mọi user đang online có quyền xem** (lọc theo classification/ACL). Stream notifications mở sẵn ở app-level sau đăng nhập. | ✅ MVP |
 | 6 | Citation / Source Reference | Mỗi câu trả lời kèm nguồn tài liệu (tên file, trang/section). Người dùng click xem trích dẫn gốc. | ✅ MVP |
 | 7 | Fallback – Không có thông tin | Nếu retrieval score < 0.7 → trả về "Không tìm thấy thông tin trong tài liệu nội bộ". Không gọi LLM – tiết kiệm cost, tránh hallucination. | ✅ MVP |
 | 8 | Conversation History – Multi-turn | Lưu lịch sử hội thoại theo từng user. Summary Buffer: LLM tóm tắt các turns cũ, giữ 5 turns gần nhất verbatim. Câu hỏi sau luôn hiểu đủ ngữ cảnh mà không tốn nhiều token. | ✅ MVP |
@@ -442,7 +450,7 @@ graph LR
 
 ```mermaid
 flowchart TB
-    NEXTJS["Next.js :3000 — AWS EC2 Docker Compose"]
+    NEXTJS["Nuxt :3000 — AWS EC2 Docker Compose"]
 
     subgraph AWS["AWS ap-southeast-1 Singapore"]
         USVC["User Service :8000 — FastAPI"]
@@ -450,7 +458,7 @@ flowchart TB
         QUERY["Query Service :8001 — FastAPI"]
         RAG["RAG Worker — NATS only"]
         NATS_B[("NATS :4222\nJetStream")]
-        PG[("RDS PostgreSQL\n4 databases")]
+        PG[("RDS PostgreSQL\n5 databases")]
         S3[("S3 Storage")]
         QDRANT["Qdrant (self-hosted)"]
         LF["Langfuse :3100 (self-hosted)"]
@@ -464,7 +472,7 @@ flowchart TB
     GEMINI_EXT["Gemini Vision API"]
 
     NEXTJS -- "9. HTTPS / Sync" --> USVC
-    NEXTJS -- "8. HTTPS + WebSocket" --> QUERY
+    NEXTJS -- "8. HTTPS + SSE" --> QUERY
     USVC -- "TCP SSL" --> PG
     QUERY -- "TCP SSL" --> PG
     RAG -- "TCP SSL" --> PG
@@ -494,12 +502,12 @@ flowchart TB
 | 3 | Gemini Vision API | RAG Worker / OCR Module | Gemini Vision API | HTTPS/TLS – Sync | PDF scan image → extracted text + layout. Chỉ gọi khi phát hiện PDF scan (không có text layer). API Key qua Secrets Manager. |
 | 3b | PyMuPDF | RAG Worker / OCR Module | Local processing (không gọi API) | In-process | PDF có text layer → extract text trực tiếp. Nhanh, miễn phí. |
 | 4 | Qdrant REST API | RAG Worker / Query + Ingestion Module | Qdrant (self-hosted on AWS) | HTTPS / REST | Upsert vectors khi ingest (payload: section_id, document_id, classification, heading_path). Hybrid search Top-K=5 (vector + BM25 via RRF) với document_ids filter khi query. API Key auth. |
-| 5 | RDS PostgreSQL | User Service / Document Service / Query Service / RAG Worker | AWS RDS PostgreSQL 15 | TCP/SSL | 4 databases: user_db (users/sessions), doc_db (document metadata), query_db (conversations/messages/feedback), langfuse_db (traces/evaluations). SSL required. |
+| 5 | RDS PostgreSQL | User Service / Document Service / Query Service / MCP Service | AWS RDS PostgreSQL 15 | TCP/SSL | 5 databases: user_db (users/sessions/audit), doc_db (document metadata/audit), query_db (conversations/messages/document_access projection), mcp_db (hr_mock), langfuse_db (traces). RAG Worker không dùng RDS. SSL required. |
 | 6 | AWS S3 SDK | RAG Worker / Ingestion Module | AWS S3 (Private Bucket) | HTTPS / S3 SDK | PUT file gốc khi ingest. GET để xử lý. IAM Role-based access. |
 | 7 | Langfuse SDK | Query Service + RAG Worker | Langfuse :3100 (self-hosted on AWS) | HTTP nội bộ (VPC) | Query Service: LLM trace. RAG Worker: ingestion trace. Trace data không ra ngoài AWS. |
-| 8 | Frontend → Document Service | Next.js :3000 (AWS EC2) | Document Service :8002 (EC2) | HTTPS | REST API cho document management (Admin only). Nginx route /api/documents → document-service:8002. |
-| 8b | Frontend → Query Service | Next.js :3000 (AWS EC2) | Query Service :8001 (EC2) | HTTPS + WebSocket (WSS) | `WS /query` cho chat realtime 2 chiều: stream token trả lời + server đẩy notify. Các endpoint khác (/conversations, /feedback) là REST. Nginx route /api/query → query-service:8001 (bật Upgrade header). |
-| 9 | Frontend → User Service | Next.js :3000 (AWS EC2) | User Service :8000 (EC2) | HTTPS | REST API cho login, user management. Nginx route /api/user → user-service:8000. |
+| 8 | Frontend → Document Service | Nuxt :3000 (AWS EC2) | Document Service :8002 (EC2) | HTTPS | REST API cho document management (Admin only). Nginx route /api/documents → document-service:8002. |
+| 8b | Frontend → Query Service | Nuxt :3000 (AWS EC2) | Query Service :8001 (EC2) | HTTPS + SSE | `POST /query` (SSE) stream token trả lời; `GET /notifications` (SSE app-level) server đẩy thông báo. Các endpoint khác (/conversations, /feedback) là REST. Nginx route /api/query → query-service:8001 (tắt buffering cho SSE). |
+| 9 | Frontend → User Service | Nuxt :3000 (AWS EC2) | User Service :8000 (EC2) | HTTPS | REST API cho login, user management. Nginx route /api/user → user-service:8000. |
 | 10 | Query Service → RAG Worker (rag.search) | Query Service | RAG Worker | NATS request-reply | Query vector + document_ids → Top-5 sections. Query Service rerank bằng BGE-Reranker-v2-m3 (Top-5 → Top-3). |
 | 11 | Document Service → RAG Worker (doc.ingest) | Document Service | RAG Worker | NATS publish/subscribe (JetStream) | Admin upload → publish `{ doc_id, s3_key, file_type, classification }` → RAG Worker trigger ingestion pipeline. JetStream đảm bảo message không bị mất khi RAG Worker restart. |
 
@@ -525,7 +533,7 @@ flowchart LR
     end
 
     S3[("S3\nfile gốc")]
-    PG[("RDS PostgreSQL\nuser_db · doc_db · query_db · langfuse_db")]
+    PG[("RDS PostgreSQL\nuser_db · doc_db · query_db · mcp_db · langfuse_db")]
     QD[("Qdrant\nvectors")]
     REDIS[("Redis\ncache + rate limit")]
 
@@ -554,7 +562,7 @@ flowchart LR
     QUERY -->|"embed query"| EMB
     QUERY -->|"conversation context"| PG
     QUERY -->|"prompt + Top-3 sections"| LLM
-    LLM -->|"streaming tokens (WebSocket)"| EU
+    LLM -->|"streaming tokens (SSE)"| EU
     QUERY -->|"trace"| LF
     RAG -->|"trace"| LF
     LF -->|"trace data"| PG
@@ -593,7 +601,7 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Ingestion Pipel
 | 12 | Langfuse | Log ingestion metrics: parse_time, chunk_count, embed_time, total_latency, status (success/failed). Error message nếu thất bại. | Ingestion trace data |
 | 13 | RAG Worker | Publish NATS subject `doc.status` với `{ doc_id, status: 'indexed' \| 'failed', error? }`. | NATS message |
 | 14 | Document Service | Subscribe `doc.status` — nhận kết quả, cập nhật PostgreSQL record. Admin thấy trạng thái realtime trên dashboard. | Document status update |
-| 15 | Document Service | Nếu `indexed` → publish `notify.doc_new { doc_id, document_name, classification, allowed_departments, allowed_user_ids }`. Query Service lọc user online đủ quyền → đẩy thông báo "Có tài liệu mới" qua WebSocket. | NATS message → WebSocket notify |
+| 15 | Document Service | Nếu `indexed` → publish `notify.doc_new { doc_id, document_name, classification, allowed_departments, allowed_user_ids }`. Query Service lọc user online đủ quyền → đẩy thông báo "Có tài liệu mới" qua SSE `/notifications`. | NATS message → SSE notify |
 
 > _Nếu RAG Worker thất bại → publish `doc.status` với status `failed` → Document Service cập nhật DB → Admin thấy trên dashboard và retry thủ công._
 >
@@ -611,9 +619,9 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 | 4 | Langfuse | Khởi tạo trace mới cho request này. | trace_id, user_id, timestamp |
 | 4b | Query Service | ACL pre-filter: Query projection `query_db.document_access` (bản sao cập nhật qua event `doc.access` từ Document Service — database-per-service, **không đọc thẳng `doc_db`**) → lấy `allowed_doc_ids` theo role/department của user. Cache kết quả trong Redis TTL ~60s. `None` nếu user chỉ có quyền public (fail-secure). | allowed_doc_ids list |
 | 4c | Query Service | Semantic Cache check: embed câu hỏi → cosine similarity so với cache Redis. Hit (> 0.95) → trả cached response ngay, không gọi LLM. | Cache hit / miss |
-| 5 | Single Agent (Function Calling) | LLM nhận diện intent của câu hỏi và quyết định gọi tool nào: `rag_search_tool` (câu hỏi về tài liệu nội bộ) hoặc `hr_query_tool` (câu hỏi cá nhân HR). | Tool selection decision |
-| 5b | rag_search_tool — Query Rewriting | LLM sinh 3 variations của câu hỏi gốc → embed cả 3 (OpenAI text-embedding-3-small) → hybrid search Qdrant với cả 3 → kết hợp kết quả bằng Reciprocal Rank Fusion (RRF) → candidates pool. | 3 query variants + merged candidates |
-| 5c | hr_query_tool | Query PostgreSQL HR tables: `hr_leave_balance`, `hr_leave_requests`, `hr_payroll_summary`. Luôn filter `WHERE user_id = current_user` — không thể xem data người khác. | HR personal data |
+| 5 | Single Agent (MCP client) | LLM nhận diện intent → quyết định gọi MCP tool nào: `rag_search` (tài liệu nội bộ) hoặc `hr_query` (HR cá nhân). Query Service inject `document_ids`/`user_id`. | Tool selection decision |
+| 5b | `rag_search` (MCP tool, mcp-service) — Query Rewriting | LLM sinh 3 variations của câu hỏi gốc → hybrid search Qdrant (qua NATS rag.search) với cả 3 → kết hợp bằng Reciprocal Rank Fusion (RRF) → candidates pool. | 3 query variants + merged candidates |
+| 5c | `hr_query` (MCP tool, mcp-service) | Query `mcp_db.hr_mock.*` (`leave_balance`, `leave_requests`, `payroll_summary`). Luôn filter `WHERE user_id = current_user` — không thể xem data người khác. | HR personal data |
 | 6 | RAG Worker / Qdrant | Query Service publish NATS request `rag.search` với `{ query_vector, document_ids, top_k: 5 }`. RAG Worker hybrid search Qdrant (vector + BM25), filter `document_ids`, reply kết quả. Top-K=5 candidates vượt ngưỡng score 0.5. | List of `{ node_id, content, caption, heading_path, score, ... }` |
 | 7 | Query Service | Kiểm tra score threshold: max score < 0.7 → trả fallback, không gọi LLM. | "Không tìm thấy thông tin trong tài liệu nội bộ" |
 | 7b | Query Service / BGE-Reranker-v2-m3 | Rerank Top-5 chunks theo độ liên quan với query gốc. Trả về Top-3 chunks để đưa vào LLM prompt. | Top-3 chunk_content (Markdown) |
@@ -621,10 +629,10 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 | 9 | Query Module | Build prompt: System prompt + Conversation context + Top-3 chunk_content (Markdown) + Question. | Full prompt (~2000–4000 tokens) |
 | 10 | LLM Service | Gọi OpenAI GPT-4o mini streaming. Buffer full response trước khi qua Output Guardrail. | Full response text |
 | 11 | **Output Guardrail** (llm-guard) | Scan output: PII detection — redact nếu phát hiện thông tin cá nhân người khác. | Cleaned response |
-| 12 | FastAPI | Forward response đã clean về frontend qua WebSocket (message `{type:token}`). | Streaming tokens |
+| 12 | FastAPI | Forward response đã clean về frontend qua SSE (`data: {token}`). | Streaming tokens |
 | 13 | Langfuse | Log: latency từng bước, input/output tokens, retrieved chunks, scores, guardrail events, tool used. | Trace data (PII masked) |
 | 14 | PostgreSQL (query_db) | Lưu conversation turn: user_id, question, answer, sources, latency, timestamp, tool_used. | Conversation record |
-| 15 | Next.js | Hiển thị streaming response + citation + nút feedback cho user. | Rendered UI |
+| 15 | Nuxt | Hiển thị streaming response + citation + nút feedback cho user. | Rendered UI |
 
 > **RAGAS Evaluation (Phase 1.5 — Offline, cuối tuần 3):**
 > Phase 1 chỉ collect trace data (latency, token, retrieved chunks, scores). RAGAS chạy offline trong Phase 1.5 (cuối tuần 3) bằng cách:
@@ -640,7 +648,7 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 > - **Open** (≥5 timeout/failure liên tiếp trong 60s): fail-fast, trả 503 ngay không chờ NATS timeout
 > - **Half-Open** (sau 30s): cho 1 request thử — success → Closed, fail → Open lại
 >
-> Khi circuit Open: gửi WebSocket message `{ "type": "error", "code": 503, "message": "Hệ thống tìm kiếm tài liệu tạm thời không khả dụng. Vui lòng thử lại sau ít phút." }`. Log state change vào Langfuse + CloudWatch. `GET /health` trả `"rag_worker": "circuit_open"`.
+> Khi circuit Open: gửi SSE event `data: { "error": true, "code": 503, "message": "Hệ thống tìm kiếm tài liệu tạm thời không khả dụng. Vui lòng thử lại sau ít phút." }`. Log state change vào Langfuse + CloudWatch. `GET /health` trả `"mcp_service": "circuit_open"`.
 
 ## 5.3 Evaluation Criteria — Phase 1.5 (Cuối tuần 3)
 
@@ -706,12 +714,13 @@ graph TB
         subgraph PUBLIC["Public Subnet — Security Group: 80/443/22"]
             subgraph EC2["EC2 t3.medium"]
                 NGINX["nginx :80/:443\nSSL termination + reverse proxy"]
-                subgraph COMPOSE["Docker Compose — 9 containers"]
-                    NEXT["next-frontend :3000"]
+                subgraph COMPOSE["Docker Compose — 11 containers (gồm nginx)"]
+                    NEXT["nuxt-frontend :3000"]
                     USVC["user-service :8000"]
                     INGEST["document-service :8002"]
                     QUERY["query-service :8001"]
                     RAGW["rag-worker (NATS only)"]
+                    MCP_C["mcp-service :8003"]
                     NATS_C["nats :4222\nJetStream enabled"]
                     QD["qdrant :6333"]
                     REDIS_C["redis :6379"]
@@ -719,7 +728,7 @@ graph TB
                 end
             end
         end
-        RDS[("RDS PostgreSQL 15\ndb.t3.micro\nuser_db · doc_db · query_db · langfuse_db")]
+        RDS[("RDS PostgreSQL 15\ndb.t3.micro\nuser_db · doc_db · query_db · mcp_db · langfuse_db")]
         S3[("S3 — Private Bucket\nversioning + SSE-S3")]
         SM["Secrets Manager\nAPI Keys + DB password"]
         CW["CloudWatch Logs"]
@@ -736,13 +745,16 @@ graph TB
     NGINX -->|"/api/user"| USVC
     NGINX -->|"/api/documents"| INGEST
     NGINX -->|"/api/query"| QUERY
+    NGINX -->|"/api/mcp"| MCP_C
     NGINX -->|"/_langfuse"| LF
     INGEST -->|"pub doc.ingest"| NATS_C
-    QUERY -->|"request rag.search"| NATS_C
+    QUERY -->|"MCP (HTTP/SSE)"| MCP_C
+    MCP_C -->|"request rag.search"| NATS_C
     NATS_C -->|"subscribe"| RAGW
     USVC -->|"TCP/SSL"| RDS
     QUERY -->|"TCP/SSL"| RDS
     INGEST -->|"TCP/SSL"| RDS
+    MCP_C -->|"TCP/SSL (mcp_db)"| RDS
     LF -->|"TCP/SSL"| RDS
     QUERY -->|"TCP/SSL"| REDIS_C
     USVC -->|"TCP/SSL"| REDIS_C
@@ -759,10 +771,10 @@ graph TB
 **Hình vẽ kiến trúc triển khai cần có:**
 - Loại hạ tầng: **Cloud (AWS ap-southeast-1 Singapore)** — stack chính trên AWS, các API ngoài (OpenAI, Gemini) gọi qua HTTPS.
 - Network Topology: EC2 trong Public Subnet với Security Group chặt. RDS trong Private Subnet, chỉ EC2 truy cập được.
-- Entry từ Internet: HTTPS → Nginx (EC2) → route theo path: `/` → Next.js frontend, `/api/*` → backend services.
-- Các server / container: 1 EC2 t3.medium chạy Docker Compose với **9 containers**: nginx, next-frontend, user-service, query-service, document-service, rag-worker, nats, qdrant, redis, langfuse.
-- Mapping service/module → node: User Service (:8000) + Query Service (:8001) + Document Service (:8002) + RAG Worker (NATS only, no port) + NATS (:4222, JetStream) + Langfuse (:3100) trên EC2. RDS và S3 là managed AWS services. Phase 3 tách sang ECS Fargate.
-- Database: **RDS PostgreSQL 15 (db.t3.micro)** — 1 instance, 4 databases riêng: `user_db`, `doc_db`, `query_db`, `langfuse_db`. S3 với versioning.
+- Entry từ Internet: HTTPS → Nginx (EC2) → route theo path: `/` → Nuxt frontend, `/api/*` → backend services.
+- Các server / container: 1 EC2 t3.medium chạy Docker Compose với **11 containers**: nginx, nuxt-frontend, user-service, query-service, document-service, rag-worker, mcp-service, nats, qdrant, redis, langfuse.
+- Mapping service/module → node: User Service (:8000) + Query Service (:8001) + Document Service (:8002) + MCP Tool Service (:8003) + RAG Worker (NATS only, no port) + NATS (:4222, JetStream) + Langfuse (:3100) trên EC2. RDS và S3 là managed AWS services. Phase 3 tách sang ECS Fargate.
+- Database: **RDS PostgreSQL 15 (db.t3.micro)** — 1 instance, 5 databases riêng: `user_db`, `doc_db`, `query_db`, `mcp_db`, `langfuse_db`. S3 với versioning.
 - External APIs: OpenAI GPT-4o mini (LLM), OpenAI text-embedding-3-small (Embedding), Gemini Vision API (OCR). API Keys quản lý qua Secrets Manager.
 - Quản lý truy cập: SSH vào EC2 chỉ từ IP cố định (port 22). AWS Secrets Manager inject API Keys runtime.
 
@@ -770,12 +782,12 @@ graph TB
 
 | **Thành phần** | **Service** | **Ghi chú** |
 |--------------|-----------|-----------|
-| Web UI (Next.js) | AWS EC2 (Docker Compose) | Container trong cùng EC2 (:3000), Nginx route `/` → next-frontend:3000. Toàn bộ traffic nằm trong AWS — không có CORS. |
+| Web UI (Nuxt) | AWS EC2 (Docker Compose) | Container trong cùng EC2 (:3000), Nginx route `/` → nuxt-frontend:3000. Toàn bộ traffic nằm trong AWS — không có CORS. |
 | Backend (FastAPI + NATS Worker) | AWS EC2 t3.medium (4GB RAM) | Docker Compose. User Service (:8000) + Query Service (:8001) + Document Service (:8002) + RAG Worker (NATS only, no port). NATS broker (:4222, JetStream enabled, internal only). Security Group: chỉ mở 80/443/22. |
 | Message Broker | NATS 2.10 (Docker Compose) | JetStream enabled — persist message, tránh mất khi RAG Worker restart. Subjects: `doc.ingest` (pub/sub), `doc.status` (pub/sub), `rag.search` (request-reply). Port 4222 — internal only. |
 | Cache / Rate Limit | Redis 7 (Docker Compose, :6379) | JWT blacklist (logout thật sự) + per-user rate limiting + Semantic Cache TTL 1h. |
 | Vector DB | Qdrant (Docker Compose, :6333) | Self-hosted trên EC2. Dữ liệu nằm trong VPC — không ra ngoài. |
-| Database | AWS RDS PostgreSQL 15 (db.t3.micro) | 1 instance, 4 databases: `user_db`, `doc_db`, `query_db`, `langfuse_db`. Automated backup 7 ngày + PITR 5 phút. Single-AZ cho MVP. |
+| Database | AWS RDS PostgreSQL 15 (db.t3.micro) | 1 instance, 5 databases: `user_db`, `doc_db`, `query_db`, `mcp_db`, `langfuse_db`. Automated backup 7 ngày + PITR 5 phút. Single-AZ cho MVP. |
 | File Storage | AWS S3 (Private Bucket) | Lưu tài liệu gốc. Versioning bật. SSE-S3 encryption. |
 | Tracing | Langfuse (Docker Compose, :3100) | Self-hosted trên EC2. Dashboard latency, RAGAS, cost. Trace data nằm trong VPC. |
 | Secret Management | AWS Secrets Manager | OpenAI API Key, Gemini Vision API Key, DB password, Langfuse Key. Inject vào EC2 lúc runtime. |
@@ -787,7 +799,7 @@ graph TB
 
 | **Thành phần** | **MVP (Phase 1)** | **Phase 2 (Production Scale)** |
 |--------------|-----------------|------------------------|
-| Backend | 1 EC2 t3.medium, Docker Compose (9 containers) | ECS Fargate, min 2 tasks/service, auto-scale |
+| Backend | 1 EC2 t3.medium, Docker Compose (11 containers) | ECS Fargate, min 2 tasks/service, auto-scale |
 | Database | RDS Single-AZ db.t3.micro | RDS Multi-AZ + Read Replica |
 | Vector DB | Qdrant (self-hosted on AWS) — 1 container Docker Compose | Qdrant cluster riêng trên ECS (nhiều replica, persistent volume) |
 | Ingestion | NATS Worker (self-hosted, in-memory) | AWS SQS + Worker Service riêng (persistent, DLQ) |
@@ -825,15 +837,16 @@ graph TB
 
 | **Hạng mục** | **Công nghệ** | **Lý do chọn** |
 |-------------|-------------|--------------|
-| Frontend | Next.js 14 + TypeScript + TailwindCSS | Production-ready, streaming response qua WebSocket (realtime 2 chiều), container hóa dễ với Docker. |
+| Frontend | Nuxt 4 + Vue 3 + TypeScript + TailwindCSS | Code gom trong `app/`, data fetching shared-key. Streaming response qua SSE (đơn giản, hợp 1 chiều), container hóa dễ với Docker. |
 | Backend | Python 3.11 – FastAPI | Async native, hệ sinh thái AI/ML tốt nhất, phát triển nhanh. |
 | Architecture | Microservices + Event-driven (NATS) | User Service + Document Service + Query Service + RAG Worker. HTTP REST cho user-facing. NATS cho internal async (ingestion) và request-reply (retrieval). JWT verify locally bằng shared secret. Mỗi service dùng Clean Architecture nội bộ. |
-| LLM Orchestration | LlamaIndex + FunctionCallingAgent | RAG-focused, ít boilerplate hơn LangChain. FunctionCallingAgent cho Single Agent pattern với 2 tools. |
+| LLM Orchestration | LlamaIndex + FunctionCallingAgent (MCP client) | RAG-focused, ít boilerplate hơn LangChain. Agent gọi tool qua MCP. |
+| Tool Service | MCP server (Streamable HTTP/SSE) — Python | Tách tool (`rag_search`, `hr_query`) ra service riêng để mọi agent (Query Service, Teams bot tương lai) dùng chung. |
 | Embedding Model | OpenAI text-embedding-3-small (API) | 1536 dims, đa ngôn ngữ, cost thấp. Dùng cho cả ingestion (RAG Worker) và query (Query Service). |
 | Reranking Model | BGE-Reranker-v2-m3 (self-hosted, trong Query Service) | Cross-encoder rerank Top-5 chunks → Top-3 trước khi đưa vào LLM prompt. Thuộc Query Service — AI Engineer implement trong `RerankService`. |
 | LLM | OpenAI GPT-4o mini (public API) | Streaming response, Function Calling (tool_call) cho Single Agent. API Key qua Secrets Manager. |
 | OCR PDF scan | Gemini Vision API | Chất lượng cao cho tiếng Việt, hỗ trợ bảng + layout phức tạp. Chỉ gọi khi phát hiện PDF scan. API Key qua Secrets Manager. |
-| Single Agent | LlamaIndex FunctionCallingAgent | Tự chọn tool phù hợp: `rag_search_tool` (tài liệu nội bộ) hoặc `hr_query_tool` (HR cá nhân). |
+| Single Agent | LlamaIndex FunctionCallingAgent (MCP client) | Tự chọn MCP tool phù hợp: `rag_search` (tài liệu nội bộ) hoặc `hr_query` (HR cá nhân) — host ở mcp-service. |
 | OCR PDF văn bản | PyMuPDF (local) | Nhanh, miễn phí, không cần OCR khi PDF đã có text layer. |
 | DOCX Parser | python-docx | Standard library cho DOCX. |
 | Excel/CSV Parser | openpyxl + pandas | openpyxl đọc .xlsx; pandas convert rows sang text có header. |
@@ -948,7 +961,7 @@ graph TB
 > _Bổ sung chi tiết logic bảo mật đặc thù cho hệ thống:_
 > - **Prompt Injection Prevention:** Sanitize và escape user input. System prompt hardcode server-side, không lấy từ user input.
 > - **Hallucination Control:** Retrieval score < 0.7 → trả fallback, không gọi LLM. LLM chỉ được dùng thông tin từ context chunks đã retrieve.
-> - **CORS:** Frontend (Next.js :3000) và backend (FastAPI :8000/:8001/:8002) cùng EC2, traffic qua Nginx — không cross-origin. FastAPI CORS middleware: `allow_origins=["http://localhost:3000"]` local dev, production dùng domain nội bộ (vd: `https://chatbot.vinsmartfuture.vn`). Không dùng wildcard `*`. Langfuse (:3100) chỉ truy cập nội bộ — không expose qua Nginx cho End User.
+> - **CORS:** Frontend (Nuxt :3000) và backend (FastAPI :8000/:8001/:8002) cùng EC2, traffic qua Nginx — không cross-origin. FastAPI CORS middleware: `allow_origins=["http://localhost:3000"]` local dev, production dùng domain nội bộ (vd: `https://chatbot.vinsmartfuture.vn`). Không dùng wildcard `*`. Langfuse (:3100) chỉ truy cập nội bộ — không expose qua Nginx cho End User.
 > - **SQL Injection:** SQLAlchemy ORM với parameterized queries. Không dùng raw SQL string.
 
 ### 7.1.4 Governance & Compliance
@@ -1057,7 +1070,7 @@ graph TB
 
 | **Hạng mục** | **Thông tin** |
 |-------------|-------------|
-| Dữ liệu cần backup | PostgreSQL RDS — 4 databases (user_db, doc_db, query_db, langfuse_db), Qdrant (vector data), AWS S3 (file tài liệu gốc) |
+| Dữ liệu cần backup | PostgreSQL RDS — 5 databases (user_db, doc_db, query_db, mcp_db, langfuse_db), Qdrant (vector data), AWS S3 (file tài liệu gốc) |
 | Vị trí lưu backup | PostgreSQL: RDS automated backup (AWS managed, same region). S3: Versioning real-time. Qdrant: Snapshot hàng ngày. |
 | Tần suất backup định kỳ | PostgreSQL: Automated daily backup + PITR mỗi 5 phút. Qdrant: Snapshot hàng ngày lúc 03:00 AM. S3: Versioning real-time. |
 | Thời gian lưu backup | PostgreSQL: 7 ngày (Phase 1), 30 ngày (Phase 2). Qdrant snapshot: 7 ngày. S3: Versioning vĩnh viễn. |
@@ -1164,7 +1177,8 @@ Kết quả ghi vào DR Drill Report. Nếu RTO vượt 4h → tối ưu runbook
 | Semantic Cache | Cache dựa trên cosine similarity của câu hỏi. TTL 1 giờ. Redis key: `semantic_cache:{query_hash}`. |
 | NATS | Lightweight message broker (port 4222). Hỗ trợ publish/subscribe (async ingestion) và request-reply (sync retrieval). RAG Worker subscribe các subjects, không expose HTTP. |
 | Microservices | Kiến trúc backend chia thành nhiều service độc lập. Project này dùng 4 components: User Service + Document Service + Query Service + RAG Worker. Giao tiếp qua HTTP REST (user-facing) và NATS (internal async + request-reply). |
-| WebSocket (WS/WSS) | Kênh realtime 2 chiều giữa Next.js và FastAPI: stream token trả lời của bot + server đẩy notify. Thay cho SSE để hỗ trợ tương tác 2 chiều (Phase 2: typing, multi-user). |
+| SSE | Server-Sent Events — server đẩy 1 chiều xuống Nuxt: `POST /query` stream token trả lời; `GET /notifications` đẩy thông báo (tài liệu mới). 2 chiều (typing…) để Phase 2 cân nhắc WebSocket. |
+| MCP | Model Context Protocol — chuẩn expose tool cho LLM agent. mcp-service là MCP server (tool `rag_search`, `hr_query`); Query Service agent (và agent tương lai) là MCP client dùng chung tool. |
 | JWT | JSON Web Token – chuẩn xác thực stateless. Token chứa user_id và role. |
 | DSR | Data Subject Request – yêu cầu của chủ thể dữ liệu về quyền truy xuất/xóa dữ liệu cá nhân. |
 | RTO | Recovery Time Objective – thời gian tối đa cho phép hệ thống ngừng hoạt động. |

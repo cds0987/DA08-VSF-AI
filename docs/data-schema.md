@@ -1,6 +1,6 @@
 # Data Schema — RAG Chatbot
 
-Mỗi service kết nối đến **database riêng** trên cùng 1 AWS RDS db.t3.micro: `user_db`, `doc_db`, `query_db`, `langfuse_db`.
+Mỗi service kết nối đến **database riêng** trên cùng 1 AWS RDS db.t3.micro: `user_db`, `doc_db`, `query_db`, `mcp_db`, `langfuse_db`.
 
 > **Convention chung:**
 > - `id`: `UUID PRIMARY KEY DEFAULT gen_random_uuid()`
@@ -107,6 +107,21 @@ CREATE TABLE query_svc.document_access (
 );
 
 CREATE INDEX idx_doc_access_classification ON query_svc.document_access(classification);
+
+-- Notification Center: lưu thông báo để xem lại + đếm chưa đọc (badge).
+-- notify_subscriber ghi 1 bản ghi/user khi đẩy event SSE; FE đọc qua GET /notifications/history.
+CREATE TABLE query_svc.notifications (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID NOT NULL,
+    event       VARCHAR(50) NOT NULL,        -- 'doc_new' | ...
+    message     TEXT NOT NULL,
+    doc_id      UUID,
+    is_read     BOOLEAN NOT NULL DEFAULT false,
+    created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_notifications_user ON query_svc.notifications(user_id, created_at DESC);
+CREATE INDEX idx_notifications_unread ON query_svc.notifications(user_id) WHERE is_read = false;
 ```
 
 > Đây là **read-model** (eventual consistency): khi Admin đổi quyền ở Document Service → event `doc.access`
@@ -159,9 +174,9 @@ CREATE INDEX idx_audit_actor ON doc_svc.audit_logs(actor_id, created_at DESC);
 
 ---
 
-## HR Mock Data — Schema `hr_mock` (trong `query_db` — Query Service)
+## HR Mock Data — Schema `hr_mock` (trong `mcp_db` — MCP Tool Service)
 
-> Mock data cho Feature 5b (Personal HR Q&A). `hr_query_tool` của Query Service query trực tiếp — đặt trong `query_db` để giữ database-per-service (Query Service không đụng DB của service khác). Filter bắt buộc `WHERE user_id = :current_user_id`.
+> Mock data cho Feature 5b (Personal HR Q&A). Tool **`hr_query`** của **mcp-service** query trực tiếp — đặt trong `mcp_db` để giữ database-per-service (tool nào sở hữu data của tool đó; Query Service gọi qua MCP chứ không đụng DB này). Filter bắt buộc `WHERE user_id = :current_user_id` (user_id do MCP client inject từ JWT).
 
 ```sql
 CREATE TABLE hr_mock.leave_balance (

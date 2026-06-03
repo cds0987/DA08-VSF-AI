@@ -146,6 +146,16 @@ Response 200:  { "message": "Document deleted" }
 Response 403:  { "detail": "Admin only" }
 ```
 
+### `GET /documents/{document_id}/file`
+
+> Trả **presigned S3 URL** (TTL ngắn) để Frontend Document Viewer mở file gốc + highlight citation. Kiểm tra ACL theo user.
+
+```
+Response 200:  { "url": "https://<bucket>.s3.../...&X-Amz-Expires=300", "file_type": "pdf", "expires_in": 300 }
+Response 403:  { "detail": "Không có quyền xem tài liệu này" }
+Response 404:  { "detail": "Document not found" }
+```
+
 ### `GET /health`
 
 ```
@@ -157,34 +167,67 @@ Response 503:  { "status": "degraded", "degraded_reasons": ["nats unreachable"] 
 
 ## Query Service — `/query`, `/conversations`, `/feedback`
 
-### `WS /query`  (WebSocket)
+### `POST /query`
 
-Kênh realtime 2 chiều. Dùng cho: (1) stream câu trả lời của bot theo token, (2) server chủ động
-**đẩy thông báo** ("có gì mới") xuống client. Token JWT truyền lúc handshake (query param `?token=` hoặc header).
+Streaming câu trả lời qua **Server-Sent Events (SSE)** — request-scoped: mở stream cho 1 câu hỏi, trả xong thì đóng.
 
 ```
-Kết nối:  ws(s)://<host>/api/query/query?token=<jwt>
+Request:
+  Authorization: Bearer <token>
+  Body: { "question": "string (max 500 ký tự)", "user_id": "uuid" }
 
-Client → Server (gửi câu hỏi):
-  { "type": "question", "question": "string (max 500 ký tự)" }
+Response 200 (SSE):
+  data: {"token": "Theo "}
+  data: {"token": "chính sách..."}
+  data: {"done": true, "sources": [{"document_name": "string", "caption": "string", "heading_path": ["string"], "score": 0.85, "source_s3_uri": "s3://..."}], "session_id": "uuid"}
 
-Server → Client (stream trả lời):
-  { "type": "token", "content": "Theo " }
-  { "type": "token", "content": "chính sách..." }
-  { "type": "done", "sources": [{"document_name": "string", "caption": "string", "heading_path": ["string"], "score": 0.85, "source_s3_uri": "s3://..."}], "session_id": "uuid" }
-
-Server → Client (đẩy thông báo bất kỳ lúc nào — không cần client hỏi):
-  { "type": "notify", "event": "doc_new", "message": "Có tài liệu mới: Chính sách công tác 2026", "doc_id": "uuid" }
-
-Lỗi:
-  { "type": "error", "code": 429, "detail": "Rate limit exceeded. Max 20 requests/minute." }
-  { "type": "error", "code": 401, "detail": "Invalid or expired token" }     # → server đóng socket
-
-Heartbeat: server gửi ping mỗi ~30s; client không pong → đóng socket. Client tự reconnect (exponential backoff).
+Response 429:  { "detail": "Rate limit exceeded. Max 20 requests/minute." }
 ```
 
-> **Vì sao WebSocket (thay SSE):** cần realtime 2 chiều — ngoài stream trả lời, server còn chủ động đẩy
-> thông báo, và roadmap Phase 2 có typing indicator / multi-user. Nginx cần bật `Upgrade`/`Connection` header.
+### `GET /notifications`
+
+Stream **SSE app-level** (mở sẵn sau đăng nhập, giữ lâu) để server **đẩy thông báo** xuống client — ví dụ "có tài liệu mới". Một chiều server → client.
+
+```
+Request:
+  Authorization: Bearer <token>
+  (EventSource giữ kết nối; server push khi có sự kiện)
+
+Response 200 (SSE):
+  data: {"type": "notify", "event": "doc_new", "message": "Có tài liệu mới: Chính sách công tác 2026", "doc_id": "uuid"}
+
+Server gửi comment `:keep-alive` định kỳ (~25s) để giữ kết nối qua proxy. Client (EventSource) tự reconnect khi rớt.
+```
+
+> **Vì sao SSE (không WebSocket):** chỉ cần server đẩy 1 chiều (stream trả lời + thông báo) → SSE đủ và đơn giản hơn. Tương tác 2 chiều (typing, multi-user) để Phase 2 mới cân nhắc WebSocket.
+
+### `GET /notifications/history`
+
+> Lịch sử thông báo đã lưu (cho Notification Center). Realtime qua SSE ở trên; cái này để xem lại khi offline/reload.
+
+```
+Query params: ?limit=20&offset=0&unread_only=false
+Response 200:
+  {
+    "items": [
+      { "id": "uuid", "event": "doc_new", "message": "Có tài liệu mới: ...", "doc_id": "uuid",
+        "is_read": false, "created_at": "iso8601" }
+    ],
+    "total": 8
+  }
+```
+
+### `GET /notifications/unread-count`
+
+```
+Response 200:  { "unread": 3 }
+```
+
+### `POST /notifications/{notification_id}/read`
+
+```
+Response 200:  { "id": "uuid", "is_read": true }
+```
 
 ### `GET /conversations`
 
@@ -207,10 +250,26 @@ Request Body: { "session_id": "uuid", "score": 1 | -1 }   # 1 = thumbs up, -1 = 
 Response 200:  { "message": "Feedback recorded" }
 ```
 
+### `GET /admin/metrics`  (Admin only)
+
+> Dữ liệu cho Admin Analytics Dashboard. Đọc từ `query_db` (messages, feedback). Admin only.
+
+```
+Query params: ?from=2026-06-01&to=2026-06-03
+Response 200:
+  {
+    "total_questions": 1280,
+    "by_day": [ { "date": "2026-06-01", "count": 420 } ],
+    "feedback": { "up": 310, "down": 24, "rate": 0.93 },
+    "top_questions": [ { "question": "Chính sách nghỉ phép?", "count": 57 } ]
+  }
+Response 403:  { "detail": "Admin only" }
+```
+
 ### `GET /health`
 
 ```
-Response 200:  { "status": "ok", "database": "ok", "rag_worker": "ok", "reranker": "ok" }
+Response 200:  { "status": "ok", "database": "ok", "mcp_service": "ok" }
 Response 503:  { "status": "degraded", "degraded_reasons": ["rag_worker unreachable"] }
 ```
 
@@ -235,7 +294,7 @@ Response 503:  { "status": "degraded", "degraded_reasons": ["rag_worker unreacha
 | Subject | Type | Payload | Mô tả |
 |---------|------|---------|-------|
 | `doc.access` | Publish (Document Service) / Subscribe (Query Service) | `{ doc_id, classification, allowed_departments, allowed_user_ids, deleted: bool }` | Document Service publish mỗi khi upload / đổi quyền / xóa tài liệu. Query Service subscribe (JetStream durable) → upsert/xóa bản ghi trong projection `document_access`. Dùng cho ACL pre-filter. |
-| `notify.doc_new` | Publish (Document Service) / Subscribe (Query Service) | `{ doc_id, document_name, classification, allowed_departments, allowed_user_ids }` | Document Service publish khi tài liệu ingest xong (nhận `doc.status=indexed`). Query Service subscribe → lọc các user **đang online** (trong `connection_manager`) có quyền xem theo ACL → đẩy `{type:"notify", event:"doc_new"}` qua WebSocket. |
+| `notify.doc_new` | Publish (Document Service) / Subscribe (Query Service) | `{ doc_id, document_name, classification, allowed_departments, allowed_user_ids }` | Document Service publish khi tài liệu ingest xong (nhận `doc.status=indexed`). Query Service subscribe → lọc các user **đang online** (trong `connection_manager`) có quyền xem theo ACL → đẩy `{type:"notify", event:"doc_new"}` xuống stream **SSE `GET /notifications`** của các user đó. |
 
 ---
 
