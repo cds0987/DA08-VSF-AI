@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import List, Optional
 from uuid import uuid4
 
@@ -12,6 +13,7 @@ from app.domain.repositories.vector_repository import SearchResult, VectorReposi
 from haystack_interface.caption import Captioner
 from haystack_interface.chunking import split_sections
 from haystack_interface.config import HaystackSettings, load_settings
+from haystack_interface.logging_utils import log_event
 from haystack_interface.rerank import Reranker
 from haystack_interface.vectorstore.types import VectorRecord
 
@@ -40,23 +42,32 @@ class HaystackRagEngine:
         self.vectors = vectors
         self.reranker = reranker
         self.captioner = captioner
+        self._logger = logging.getLogger(__name__)
 
     async def ingest(self, doc: IngestInput) -> int:
-        s = self.settings
+        log_event(
+            self._logger,
+            logging.INFO,
+            "ingest_started",
+            stage="ingest",
+            document_id=doc.document_id,
+            document_name=doc.document_name,
+        )
+        settings = self.settings
         source_uri = doc.source_uri or f"local://{doc.document_id}"
         artifact_uri = doc.artifact_uri or f"{source_uri}#artifact"
         sections = split_sections(
             doc.markdown,
-            parent_max_words=s.parent_max_words,
-            child_max_words=s.child_max_words,
-            child_overlap_words=s.child_overlap_words,
+            parent_max_words=settings.parent_max_words,
+            child_max_words=settings.child_max_words,
+            child_overlap_words=settings.child_overlap_words,
         )
 
         chunk_ids: List[str] = []
         embed_texts: List[str] = []
         payloads: List[dict] = []
-        for pi, section in enumerate(sections):
-            parent_id = f"{doc.document_id}::p{pi}"
+        for parent_index, section in enumerate(sections):
+            parent_id = f"{doc.document_id}::p{parent_index}"
             heading_path = [section.section_title] if section.section_title else []
 
             if self.captioner is not None:
@@ -64,8 +75,8 @@ class HaystackRagEngine:
                 units = [(f"{parent_id}::c0", caption, caption, section.parent_text)]
             else:
                 units = [
-                    (f"{parent_id}::c{ci}", child, child, child)
-                    for ci, child in enumerate(section.children)
+                    (f"{parent_id}::c{child_index}", child, child, child)
+                    for child_index, child in enumerate(section.children)
                 ]
 
             for chunk_id, to_embed, caption, bm25_text in units:
@@ -90,6 +101,13 @@ class HaystackRagEngine:
                 )
 
         if not chunk_ids:
+            log_event(
+                self._logger,
+                logging.INFO,
+                "ingest_skipped_empty",
+                stage="ingest",
+                document_id=doc.document_id,
+            )
             return 0
 
         existing_chunk_ids = set(await self.vectors.list_chunk_ids_by_document(doc.document_id))
@@ -102,6 +120,15 @@ class HaystackRagEngine:
         stale_chunk_ids = sorted(existing_chunk_ids - set(chunk_ids))
         if stale_chunk_ids:
             await self.vectors.delete_many(stale_chunk_ids)
+        log_event(
+            self._logger,
+            logging.INFO,
+            "ingest_completed",
+            stage="ingest",
+            document_id=doc.document_id,
+            chunk_count=len(chunk_ids),
+            pruned_chunk_count=len(stale_chunk_ids),
+        )
         return len(chunk_ids)
 
     async def search(
@@ -111,16 +138,43 @@ class HaystackRagEngine:
         rerank_threshold: Optional[float] = None,
         correlation_id: Optional[str] = None,
     ) -> List[SearchResult]:
-        s = self.settings
-        k = top_k if top_k is not None else s.rerank_top_k
-        th = rerank_threshold if rerank_threshold is not None else s.rerank_threshold
-        request_correlation_id = correlation_id or str(uuid4())
-
-        qvec = await self.embedder.embed(query_text)
-        candidates = await self.vectors.hybrid_search(
-            qvec, query_text, top_k=s.top_k_candidates
+        settings = self.settings
+        effective_top_k = top_k if top_k is not None else settings.rerank_top_k
+        threshold = (
+            rerank_threshold if rerank_threshold is not None else settings.rerank_threshold
         )
-        results = await self.reranker.rerank(query_text, candidates, top_k=k, threshold=th)
+        request_correlation_id = correlation_id or str(uuid4())
+        log_event(
+            self._logger,
+            logging.INFO,
+            "search_started",
+            stage="search",
+            correlation_id=request_correlation_id,
+            top_k=effective_top_k,
+            rerank_threshold=threshold,
+        )
+
+        query_vector = await self.embedder.embed(query_text)
+        candidates = await self.vectors.hybrid_search(
+            query_vector,
+            query_text,
+            top_k=settings.top_k_candidates,
+        )
+        results = await self.reranker.rerank(
+            query_text,
+            candidates,
+            top_k=effective_top_k,
+            threshold=threshold,
+        )
         for result in results:
             result.correlation_id = request_correlation_id
+        log_event(
+            self._logger,
+            logging.INFO,
+            "search_completed",
+            stage="search",
+            correlation_id=request_correlation_id,
+            candidate_count=len(candidates),
+            result_count=len(results),
+        )
         return results

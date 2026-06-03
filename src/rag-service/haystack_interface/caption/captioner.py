@@ -1,48 +1,48 @@
-"""Caption — sinh ý-nghĩa-nén của section để embed (ingestion.md §6).
-
-Caption khử vocabulary-mismatch giữa câu hỏi tự nhiên và văn phong tài liệu; nó
-là thành phần quyết định recall (caption tệ ⇒ search lệch dù full content vẫn
-nằm payload). Mọi call AI đi qua AI gateway (provider) → retry/backoff đồng nhất.
-
-Một implementation duy nhất cho cả offline & OpenAI; chế độ do provider quyết định.
-"""
+"""Captioning for section-level semantic indexing."""
 
 from __future__ import annotations
 
+import logging
 from typing import Optional, Protocol, runtime_checkable
 
 from haystack_interface.ai import AIProvider, CAPTION, get_ai_provider
+from haystack_interface.logging_utils import log_event
 
 CAPTION_SYSTEM = (
-    "Bạn nén ý nghĩa của một đoạn tài liệu thành 1-2 câu, tập trung vào CHỦ ĐỀ "
-    "và CÁC THỰC THỂ/THUẬT NGỮ chính để phục vụ semantic search. "
-    "Chỉ trả về câu tóm tắt, không thêm lời dẫn."
+    "Ban nen y nghia cua mot doan tai lieu thanh 1-2 cau, tap trung vao chu de "
+    "va cac thuc the/thuat ngu chinh de phuc vu semantic search. "
+    "Chi tra ve cau tom tat, khong them loi dan."
 )
 
 
 @runtime_checkable
 class Captioner(Protocol):
     async def caption(self, text: str) -> str:
-        """Trả caption (ý-nghĩa-nén) của section; không bao giờ rỗng."""
-        ...
+        """Return a non-empty semantic caption for a section."""
 
 
 class ProviderCaptioner:
-    """Caption qua AI gateway. Lỗi/caption rỗng → fallback snippet (không để rỗng
-    đi embed). Đồng nhất với hành vi notebook."""
-
     def __init__(self, provider: AIProvider | None = None, *, max_chars: int = 6000):
         self._provider = provider or get_ai_provider()
         self._max_chars = max_chars
+        self._logger = logging.getLogger(__name__)
 
     async def caption(self, text: str) -> str:
-        src = (text or "").strip()
+        source_text = (text or "").strip()
         try:
-            out = await self._provider.chat(
-                src[: self._max_chars], system=CAPTION_SYSTEM, capability=CAPTION
+            output = await self._provider.chat(
+                source_text[: self._max_chars],
+                system=CAPTION_SYSTEM,
+                capability=CAPTION,
             )
-        except Exception as e:  # noqa: BLE001 — caption lỗi KHÔNG được làm vỡ ingest
-            print("  caption fail -> snippet fallback:", e)
-            out = ""
-        out = (out or "").strip()
-        return out or src[:600] or "(no content)"
+        except Exception as exc:  # noqa: BLE001
+            log_event(
+                self._logger,
+                logging.WARNING,
+                "caption_fallback",
+                stage="caption",
+                error=str(exc),
+            )
+            output = ""
+        output = (output or "").strip()
+        return output or source_text[:600] or "(no content)"

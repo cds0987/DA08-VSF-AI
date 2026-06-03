@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
@@ -12,6 +13,7 @@ from app.application.use_cases.query import RetrievalUseCase
 from haystack_interface.ai import get_ai_provider, load_ai_settings, reset_ai_provider
 from haystack_interface.config import load_settings
 from haystack_interface.factory import build_engine
+from haystack_interface.logging_utils import log_event
 from haystack_interface.vectorstore import VectorStoreConfig, available_providers
 
 
@@ -61,9 +63,12 @@ def validate_vector_config(vector_config: VectorStoreConfig) -> None:
         )
     if vector_config.dimension <= 0:
         raise ValueError("Vector store dimension must be > 0")
+    if vector_config.deployment == "remote" and not vector_config.url.strip():
+        raise ValueError("VECTOR_DB_URL must not be empty for remote vector deployment")
 
 
 def bootstrap_runtime() -> RuntimeState:
+    logger = logging.getLogger(__name__)
     app_env = os.getenv("APP_ENV", "development")
     validate_runtime_settings()
     ai_settings = load_ai_settings()
@@ -82,9 +87,15 @@ def bootstrap_runtime() -> RuntimeState:
         reasons.append("Vector dimension differs from embed dimension before engine wiring.")
 
     if _is_production(app_env) and reasons:
-        raise RuntimeError(
-            "Production fail-closed: " + " ".join(reasons)
+        log_event(
+            logger,
+            logging.ERROR,
+            "runtime_fail_closed",
+            stage="startup",
+            app_env=app_env,
+            reasons=reasons,
         )
+        raise RuntimeError("Production fail-closed: " + " ".join(reasons))
 
     ingest_use_case = None
     retrieval_use_case = None
@@ -105,6 +116,17 @@ def bootstrap_runtime() -> RuntimeState:
         vector_deployment=vector_config.deployment,
         vector_index=vector_config.index_id(),
         reasons=reasons,
+    )
+    log_event(
+        logger,
+        logging.INFO,
+        "runtime_bootstrap",
+        stage="startup",
+        app_env=app_env,
+        status=health.status,
+        ai_provider=provider.name,
+        vector_provider=vector_config.provider,
+        vector_deployment=vector_config.deployment,
     )
     return RuntimeState(
         ingest_use_case=ingest_use_case,
