@@ -51,6 +51,21 @@ CREATE TABLE user_svc.refresh_tokens (
 
 CREATE INDEX idx_refresh_tokens_user ON user_svc.refresh_tokens(user_id);
 CREATE INDEX idx_refresh_tokens_hash ON user_svc.refresh_tokens(token_hash);
+
+-- Per-service audit: các hành động auth + quản lý user (User Service tự ghi).
+CREATE TABLE user_svc.audit_logs (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    actor_id      UUID NOT NULL,
+    actor_role    VARCHAR(50) NOT NULL,
+    action        VARCHAR(100) NOT NULL,     -- 'login'|'logout'|'login_failed'|'password_change'|'account_locked'|'grant_admin'|'revoke_admin'|'deactivate'|'reactivate'
+    resource_type VARCHAR(100),             -- 'user'
+    resource_id   UUID,
+    detail        JSONB,
+    ip_address    VARCHAR(45),
+    created_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_user_audit_actor ON user_svc.audit_logs(actor_id, created_at DESC);
 ```
 
 ---
@@ -79,11 +94,30 @@ CREATE TABLE query_svc.messages (
 );
 
 CREATE INDEX idx_messages_user_created ON query_svc.messages(user_id, created_at DESC);
+
+-- Projection ACL (event-driven, database-per-service).
+-- Bản sao quyền truy cập tài liệu, do doc_access_subscriber cập nhật từ event NATS `doc.access`
+-- (Document Service publish). Query Service đọc bảng này cho ACL pre-filter — KHÔNG đọc thẳng doc_db.
+CREATE TABLE query_svc.document_access (
+    document_id         UUID PRIMARY KEY,                            -- = doc_id bên doc_db
+    classification      VARCHAR(20) NOT NULL,                        -- public|internal|secret|top_secret
+    allowed_departments TEXT[] NOT NULL DEFAULT '{}',
+    allowed_user_ids    TEXT[] NOT NULL DEFAULT '{}',
+    updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()  -- thời điểm event gần nhất
+);
+
+CREATE INDEX idx_doc_access_classification ON query_svc.document_access(classification);
 ```
+
+> Đây là **read-model** (eventual consistency): khi Admin đổi quyền ở Document Service → event `doc.access`
+> → bảng này cập nhật sau vài giây. Document Service chết không ảnh hưởng — Query Service vẫn đọc bản sao local.
+> Xóa tài liệu: event `doc.access { deleted:true }` → xóa bản ghi tương ứng.
 
 ---
 
-## Document Service / RAG Worker — Database `doc_db`
+## Document Service — Database `doc_db`
+
+> RAG Worker **không dùng PostgreSQL** — chỉ Qdrant + S3 + NATS, ingestion log đẩy qua Langfuse.
 
 ```sql
 CREATE TABLE doc_svc.documents (
@@ -107,12 +141,13 @@ CREATE TABLE doc_svc.documents (
 CREATE INDEX idx_documents_status ON doc_svc.documents(status) WHERE deleted_at IS NULL;
 CREATE INDEX idx_documents_uploader ON doc_svc.documents(uploaded_by) WHERE deleted_at IS NULL;
 
+-- Per-service audit: chỉ các hành động liên quan tài liệu (Document Service tự ghi).
 CREATE TABLE doc_svc.audit_logs (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     actor_id      UUID NOT NULL,
     actor_role    VARCHAR(50) NOT NULL,
-    action        VARCHAR(100) NOT NULL,     -- 'upload'|'approve'|'reject'|'delete'|'login'|'login_failed'
-    resource_type VARCHAR(100),             -- 'document'|'user'
+    action        VARCHAR(100) NOT NULL,     -- 'upload'|'approve'|'reject'|'delete'|'reindex'
+    resource_type VARCHAR(100),             -- 'document'
     resource_id   UUID,
     detail        JSONB,
     ip_address    VARCHAR(45),
@@ -124,9 +159,9 @@ CREATE INDEX idx_audit_actor ON doc_svc.audit_logs(actor_id, created_at DESC);
 
 ---
 
-## HR Mock Data — Schema `hr_mock` (trong `doc_db` — RAG Worker)
+## HR Mock Data — Schema `hr_mock` (trong `query_db` — Query Service)
 
-> Mock data cho Feature 5b (Personal HR Q&A). Filter bắt buộc `WHERE user_id = :current_user_id`.
+> Mock data cho Feature 5b (Personal HR Q&A). `hr_query_tool` của Query Service query trực tiếp — đặt trong `query_db` để giữ database-per-service (Query Service không đụng DB của service khác). Filter bắt buộc `WHERE user_id = :current_user_id`.
 
 ```sql
 CREATE TABLE hr_mock.leave_balance (

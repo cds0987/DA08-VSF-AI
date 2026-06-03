@@ -31,7 +31,7 @@ class User:
 ```python
 # src/user-service/app/domain/repositories/user_repository.py
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import List, Optional
 from app.domain.entities.user import User
 
 class UserRepository(ABC):
@@ -47,6 +47,14 @@ class UserRepository(ABC):
     @abstractmethod
     async def create(self, user: User) -> User:
         """Tạo user mới."""
+
+    @abstractmethod
+    async def list_all(self, is_active: Optional[bool] = None, limit: int = 50, offset: int = 0) -> List[User]:
+        """Liệt kê user cho trang quản lý Admin (filter theo is_active, phân trang)."""
+
+    @abstractmethod
+    async def set_active(self, user_id: str, is_active: bool) -> None:
+        """Deactivate / reactivate user (Admin)."""
 ```
 
 ---
@@ -124,7 +132,9 @@ class DocumentAccessRepository(ABC):
 
     @abstractmethod
     async def get_allowed_doc_ids(self, user_id: str, role: str, department: str) -> Optional[List[str]]:
-        """Query PostgreSQL doc_svc.documents → trả list doc_id user được phép đọc.
+        """Query bảng projection `document_access` trong query_db → trả list doc_id user được phép đọc.
+        Database-per-service: KHÔNG đọc thẳng doc_db của Document Service. Projection này do
+        `doc_access_subscriber` cập nhật từ event `doc.access` (NATS JetStream) — eventual consistency.
         None = user chỉ có quyền đọc public docs.
         Logic:
           admin       → None (search tất cả)
@@ -181,34 +191,9 @@ class Section:
     markdown_s3_uri: str        # URI full document Markdown — dùng khi cần context rộng hơn
 ```
 
-```python
-# src/rag-worker/app/domain/repositories/document_repository.py
-from abc import ABC, abstractmethod
-from typing import List, Optional
-from app.domain.entities.document import Document, DocumentStatus
-
-class DocumentRepository(ABC):
-
-    @abstractmethod
-    async def create(self, document: Document) -> Document:
-        """Tạo document record mới."""
-
-    @abstractmethod
-    async def get_by_id(self, document_id: str) -> Optional[Document]:
-        """Lấy document theo ID."""
-
-    @abstractmethod
-    async def list_all(self, limit: int = 50, offset: int = 0) -> List[Document]:
-        """Liệt kê tất cả documents."""
-
-    @abstractmethod
-    async def update_status(self, document_id: str, status: DocumentStatus, error: Optional[str] = None) -> None:
-        """Cập nhật trạng thái ingestion."""
-
-    @abstractmethod
-    async def delete(self, document_id: str) -> None:
-        """Soft delete document."""
-```
+> `Document` + `Section` ở đây chỉ là **entity xử lý in-memory** cho ingestion (parse → chunk → embed).
+> Việc ghi/đọc bảng `documents` (`DocumentRepository`) thuộc **document-service** — xem section riêng bên dưới.
+> RAG Worker không ghi bảng documents, chỉ publish `doc.status`.
 
 ```python
 # src/rag-worker/app/domain/repositories/embedding_service.py
@@ -271,6 +256,71 @@ class VectorRepository(ABC):
 
 ---
 
+## document-service — Domain
+
+Document Service là **chủ sở hữu vòng đời tài liệu** và bảng `documents` (create khi upload, update status
+khi nhận `doc.status` từ RAG Worker). Có entity riêng — không import từ rag-worker.
+
+```python
+# src/document-service/app/domain/entities/document.py
+from dataclasses import dataclass, field
+from typing import List, Optional
+from datetime import datetime
+from enum import Enum
+
+class DocumentStatus(str, Enum):
+    QUEUED = "queued"           # Admin upload → publish doc.ingest, chờ RAG Worker xử lý
+    PROCESSING = "processing"
+    INDEXED = "indexed"         # RAG Worker ingest + index Qdrant xong (cập nhật qua doc.status)
+    FAILED = "failed"
+
+@dataclass
+class Document:
+    id: str
+    name: str
+    file_type: str              # pdf, docx, txt, xlsx, csv, pptx, md
+    s3_key: str
+    status: DocumentStatus
+    uploaded_by: str            # user_id (Admin)
+    created_at: datetime
+    chunk_count: int = 0
+    error_message: Optional[str] = None
+    classification: str = "internal"                                # public | internal | secret | top_secret
+    allowed_departments: List[str] = field(default_factory=list)   # bắt buộc nếu secret
+    allowed_user_ids: List[str] = field(default_factory=list)      # bắt buộc nếu top_secret
+```
+
+```python
+# src/document-service/app/domain/repositories/document_repository.py
+from abc import ABC, abstractmethod
+from typing import List, Optional
+from app.domain.entities.document import Document, DocumentStatus
+
+class DocumentRepository(ABC):
+
+    @abstractmethod
+    async def create(self, document: Document) -> Document:
+        """Tạo document record mới (status=queued) khi Admin upload."""
+
+    @abstractmethod
+    async def get_by_id(self, document_id: str) -> Optional[Document]:
+        """Lấy document theo ID."""
+
+    @abstractmethod
+    async def list_all(self, status: Optional[DocumentStatus] = None, limit: int = 50, offset: int = 0) -> List[Document]:
+        """Liệt kê documents (filter status, phân trang)."""
+
+    @abstractmethod
+    async def update_status(self, document_id: str, status: DocumentStatus, chunk_count: int = 0, error: Optional[str] = None) -> None:
+        """Cập nhật trạng thái ingestion khi nhận doc.status từ RAG Worker."""
+
+    @abstractmethod
+    async def delete(self, document_id: str) -> None:
+        """Xóa document (record + báo xóa S3/Qdrant)."""
+```
+
+---
+
 ## API Schemas (Pydantic)
 
 Contract giữa **Frontend Dev** và **Backend Dev / AI/Agent Engineer**.
@@ -296,11 +346,25 @@ class QueryResponse(BaseModel):
     sources: List[Source]
     session_id: str
 
-# src/query-service/app/interfaces/api/schemas/document.py
+# src/document-service/app/interfaces/api/schemas/document.py
 class UploadResponse(BaseModel):
     document_id: str
-    status: str             # "queued" (Admin upload) | "pending" (End User upload)
+    status: str             # "queued" — Admin upload đi thẳng vào ingestion, không qua approve
     message: str
+
+class DocumentItem(BaseModel):
+    id: str
+    name: str
+    file_type: str
+    status: str             # queued | processing | indexed | failed
+    classification: str
+    uploaded_by: str
+    chunk_count: int
+    created_at: str
+
+class DocumentList(BaseModel):
+    items: List[DocumentItem]
+    total: int
 
 # src/user-service/app/interfaces/api/schemas/auth.py
 class LoginRequest(BaseModel):
@@ -310,6 +374,18 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+# src/user-service/app/interfaces/api/schemas/user.py  (Quản lý user — Admin)
+class UserItem(BaseModel):
+    id: str
+    email: str
+    role: str               # "user" | "admin"
+    department: str
+    is_active: bool
+
+class UserList(BaseModel):
+    items: List[UserItem]
+    total: int
 ```
 
 ---

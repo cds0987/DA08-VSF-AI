@@ -55,6 +55,46 @@ Response 503:  { "status": "degraded", "degraded_reasons": ["database unreachabl
 
 ---
 
+## User Service — `/users` (Quản lý user — Admin)
+
+> **Admin only** — tất cả endpoint yêu cầu role `admin`. Backing cho trang `admin/users` của Frontend.
+
+### `GET /users`
+
+```
+Query params: ?is_active=true|false&limit=50&offset=0
+
+Response 200:
+  {
+    "items": [
+      { "id": "uuid", "email": "string", "role": "user" | "admin",
+        "department": "string", "is_active": true }
+    ],
+    "total": 12
+  }
+Response 403:  { "detail": "Admin only" }
+```
+
+### `PATCH /users/{user_id}/deactivate`
+
+```
+Response 200:  { "id": "uuid", "is_active": false }
+Response 403:  { "detail": "Admin only" }
+Response 404:  { "detail": "User not found" }
+```
+
+> Deactivate → user không đăng nhập được; token đang hoạt động bị từ chối ở bước verify (kiểm tra `is_active`).
+
+### `PATCH /users/{user_id}/reactivate`
+
+```
+Response 200:  { "id": "uuid", "is_active": true }
+Response 403:  { "detail": "Admin only" }
+Response 404:  { "detail": "User not found" }
+```
+
+---
+
 ## Document Service — `/documents`
 
 > **Admin only** — tất cả endpoint yêu cầu role `admin`. End User không có quyền truy cập Document Service.
@@ -176,6 +216,16 @@ Response 503:  { "status": "degraded", "degraded_reasons": ["rag_worker unreacha
 
 ---
 
+## Document Service → Query Service — NATS Event (ACL event-driven)
+
+> Database-per-service: Query Service **không đọc thẳng `doc_db`**. Document Service phát event quyền truy cập; Query Service giữ bản sao trong `query_db.document_access` (eventual consistency).
+
+| Subject | Type | Payload | Mô tả |
+|---------|------|---------|-------|
+| `doc.access` | Publish (Document Service) / Subscribe (Query Service) | `{ doc_id, classification, allowed_departments, allowed_user_ids, deleted: bool }` | Document Service publish mỗi khi upload / đổi quyền / xóa tài liệu. Query Service subscribe (JetStream durable) → upsert/xóa bản ghi trong projection `document_access`. Dùng cho ACL pre-filter. |
+
+---
+
 ## Pydantic Schemas (tham khảo thêm)
 
 ```python
@@ -210,4 +260,16 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+# user-service/interfaces/api/schemas/user.py  (Quản lý user — Admin)
+class UserItem(BaseModel):
+    id: str
+    email: str
+    role: str               # "user" | "admin"
+    department: str
+    is_active: bool
+
+class UserList(BaseModel):
+    items: List[UserItem]
+    total: int
 ```

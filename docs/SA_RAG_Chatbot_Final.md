@@ -178,7 +178,7 @@ graph LR
         QUERY_PG[("query_db\nRDS PostgreSQL")]
         REDIS[("Redis\nblacklist · cache")]
         QDRANT[("Qdrant")]
-        HR_DB[("HR Mock DB\nhr_* tables")]
+        HR_DB[("hr_mock schema\n(trong query_db)")]
     end
 
     subgraph LF_SVC["Langfuse Service :3100"]
@@ -203,7 +203,9 @@ graph LR
     DOCMGMT --> DOC_PG
     DOCMGMT -->|"upload"| S3
     DOCMGMT -->|"doc.ingest"| NATS
+    DOCMGMT -->|"doc.access"| NATS
     NATS -->|"doc.ingest"| INGEST
+    NATS -->|"doc.access (ACL projection)"| ORCH
     ORCH --> CONV
     ORCH --> RETR
     RETR --> RERANK
@@ -224,7 +226,8 @@ graph LR
     OCR --> GEMINI
     PARSER --> EMB
     EMB --> QDRANT
-    INGEST --> DOC_PG
+    INGEST -->|"doc.status"| NATS
+    NATS -->|"doc.status"| DOCMGMT
     INGEST --> LFI
 ```
 
@@ -242,6 +245,7 @@ graph LR
 
     API --> NATS[("NATS :4222\ndoc.ingest")]
     NATS --> DET{"File Type Detection\n(RAG Worker)"}
+    S3 -->|"Đọc file (s3_key)"| DET
     DET -->|PDF scan| GV["Gemini Vision API\nOCR"]
     DET -->|PDF text| MU["PyMuPDF"]
     DET -->|DOCX / TXT| DC["python-docx"]
@@ -285,7 +289,7 @@ graph LR
     CACHE -->|Miss| AGENT["Single Agent\nFunction Calling — pick tool"]
 
     AGENT -->|"rag_search_tool"| EMB["OpenAI Embed Question\ntext-embedding-3-small"]
-    AGENT -->|"hr_query_tool"| HR["Query HR Mock DB\nfilter user_id = me"]
+    AGENT -->|"hr_query_tool"| HR["Query hr_mock (query_db)\nfilter user_id = me"]
 
     EMB --> SRCH["Qdrant Hybrid Search\nTop-K=5 + document_ids filter"]
     SRCH --> FILT{"Max Score >= 0.7?"}
@@ -581,7 +585,7 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Ingestion Pipel
 | 8b | Ingestion Module | Generate caption cho mỗi node: thử dùng LLM nếu có, fallback về heuristic từ heading đầu tiên. | node_id → caption |
 | 9 | Embedding Service | Gọi OpenAI text-embedding-3-small (API), batch embed child node content. | Child node text → vector [1536 dims] |
 | 10 | Qdrant | Upsert vectors với payload: node_id, document_id, document_name, caption, heading_path, source_s3_uri, classification, ocr_confidence. | Vector + payload |
-| 11 | PostgreSQL (doc_db) | Lưu document record: tên, S3 key, số chunk, status: `indexed`. | Document record |
+| 11 | RAG Worker | **Không ghi `doc_db`** (database-per-service). Document record + status `indexed` do Document Service cập nhật ở bước 14 qua `doc.status`. RAG Worker chỉ giữ vectors trong Qdrant. | — |
 | 12 | Langfuse | Log ingestion metrics: parse_time, chunk_count, embed_time, total_latency, status (success/failed). Error message nếu thất bại. | Ingestion trace data |
 | 13 | RAG Worker | Publish NATS subject `doc.status` với `{ doc_id, status: 'indexed' \| 'failed', error? }`. | NATS message |
 | 14 | Document Service | Subscribe `doc.status` — nhận kết quả, cập nhật PostgreSQL record. Admin thấy trạng thái realtime trên dashboard. | Document status update |
@@ -600,7 +604,7 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 | 2 | FastAPI | Xác thực JWT (kiểm tra blacklist Redis). Kiểm tra rate limit Redis (20 req/phút/user). | Authenticated request |
 | 3 | **Input Guardrail** (llm-guard) | Scan input: (1) Prompt injection detection, (2) Off-topic classifier — nếu fail → trả canned response ngay, không gọi LLM. | Pass / Block + lý do |
 | 4 | Langfuse | Khởi tạo trace mới cho request này. | trace_id, user_id, timestamp |
-| 4b | Query Service | ACL pre-filter: Query PostgreSQL `doc_db.documents` → lấy `allowed_doc_ids` theo role/department của user. Cache kết quả trong Redis TTL ~60s. `None` nếu user chỉ có quyền public (fail-secure). | allowed_doc_ids list |
+| 4b | Query Service | ACL pre-filter: Query projection `query_db.document_access` (bản sao cập nhật qua event `doc.access` từ Document Service — database-per-service, **không đọc thẳng `doc_db`**) → lấy `allowed_doc_ids` theo role/department của user. Cache kết quả trong Redis TTL ~60s. `None` nếu user chỉ có quyền public (fail-secure). | allowed_doc_ids list |
 | 4c | Query Service | Semantic Cache check: embed câu hỏi → cosine similarity so với cache Redis. Hit (> 0.95) → trả cached response ngay, không gọi LLM. | Cache hit / miss |
 | 5 | Single Agent (Function Calling) | LLM nhận diện intent của câu hỏi và quyết định gọi tool nào: `rag_search_tool` (câu hỏi về tài liệu nội bộ) hoặc `hr_query_tool` (câu hỏi cá nhân HR). | Tool selection decision |
 | 5b | rag_search_tool — Query Rewriting | LLM sinh 3 variations của câu hỏi gốc → embed cả 3 (OpenAI text-embedding-3-small) → hybrid search Qdrant với cả 3 → kết hợp kết quả bằng Reciprocal Rank Fusion (RRF) → candidates pool. | 3 query variants + merged candidates |
@@ -734,7 +738,6 @@ graph TB
     USVC -->|"TCP/SSL"| RDS
     QUERY -->|"TCP/SSL"| RDS
     INGEST -->|"TCP/SSL"| RDS
-    RAGW -->|"TCP/SSL"| RDS
     LF -->|"TCP/SSL"| RDS
     QUERY -->|"TCP/SSL"| REDIS_C
     USVC -->|"TCP/SSL"| REDIS_C
@@ -961,6 +964,8 @@ graph TB
 | Admin | User Management | Cấp quyền Admin, Thu hồi quyền Admin. |
 | System (BackgroundTask) | Ingestion Module | Ingestion start, success (số chunk), failure (error message). |
 | System (Auth) | Auth Module | Account bị khóa do brute force (kèm IP). |
+
+> **Lưu trữ per-service (database-per-service):** mỗi service tự ghi audit vào DB của mình — Auth/User Management → `user_db.audit_logs`; Upload/Approve/Reject/Delete tài liệu → `doc_db.audit_logs`. Query/Ingestion metrics (latency, chunk count, feedback) → **Langfuse**, không phải bảng audit. Không service nào ghi audit vào DB của service khác.
 
 ## 7.2 Data Privacy
 
