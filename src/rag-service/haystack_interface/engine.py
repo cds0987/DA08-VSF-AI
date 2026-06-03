@@ -26,6 +26,7 @@ class IngestInput:
     markdown: str
     source_uri: Optional[str] = None
     artifact_uri: Optional[str] = None
+    correlation_id: Optional[str] = None
 
 
 class HaystackRagEngine:
@@ -45,11 +46,13 @@ class HaystackRagEngine:
         self._logger = logging.getLogger(__name__)
 
     async def ingest(self, doc: IngestInput) -> int:
+        request_correlation_id = doc.correlation_id or str(uuid4())
         log_event(
             self._logger,
             logging.INFO,
             "ingest_started",
             stage="ingest",
+            correlation_id=request_correlation_id,
             document_id=doc.document_id,
             document_name=doc.document_name,
         )
@@ -106,6 +109,7 @@ class HaystackRagEngine:
                 logging.INFO,
                 "ingest_skipped_empty",
                 stage="ingest",
+                correlation_id=request_correlation_id,
                 document_id=doc.document_id,
             )
             return 0
@@ -125,6 +129,7 @@ class HaystackRagEngine:
             logging.INFO,
             "ingest_completed",
             stage="ingest",
+            correlation_id=request_correlation_id,
             document_id=doc.document_id,
             chunk_count=len(chunk_ids),
             pruned_chunk_count=len(stale_chunk_ids),

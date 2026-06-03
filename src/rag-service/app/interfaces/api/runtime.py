@@ -10,6 +10,8 @@ from fastapi import FastAPI
 
 from app.application.use_cases.ingestion import IngestDocumentUseCase
 from app.application.use_cases.query import RetrievalUseCase
+from app.domain.repositories.document_repository import DocumentRepository
+from app.infrastructure.db import InMemoryDocumentRepository
 from haystack_interface.ai import get_ai_provider, load_ai_settings, reset_ai_provider
 from haystack_interface.config import load_settings
 from haystack_interface.factory import build_engine
@@ -101,7 +103,8 @@ def bootstrap_runtime() -> RuntimeState:
     retrieval_use_case = None
     try:
         engine = build_engine(provider=provider, vector_config=vector_config)
-        ingest_use_case = IngestDocumentUseCase(engine)
+        document_repository = build_document_repository()
+        ingest_use_case = IngestDocumentUseCase(engine, document_repository)
         retrieval_use_case = RetrievalUseCase(engine)
     except Exception as exc:
         reasons.append(f"Engine bootstrap failed: {exc}")
@@ -133,6 +136,15 @@ def bootstrap_runtime() -> RuntimeState:
         retrieval_use_case=retrieval_use_case,
         health=health,
     )
+
+
+def build_document_repository() -> DocumentRepository:
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if not database_url:
+        return InMemoryDocumentRepository()
+    from app.infrastructure.db import PostgresDocumentRepository
+
+    return PostgresDocumentRepository(database_url)
 
 
 @asynccontextmanager

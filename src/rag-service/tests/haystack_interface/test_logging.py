@@ -93,6 +93,8 @@ async def test_engine_emits_structured_ingest_and_search_logs(caplog: pytest.Log
 
     events = {record.event: record for record in caplog.records if hasattr(record, "event")}
     assert events["ingest_started"].document_id == "doc-log"
+    assert events["ingest_started"].correlation_id
+    assert events["ingest_completed"].correlation_id == events["ingest_started"].correlation_id
     assert events["ingest_completed"].chunk_count >= 1
     assert events["search_started"].correlation_id == "cid-log"
     assert events["search_completed"].result_count == 1
