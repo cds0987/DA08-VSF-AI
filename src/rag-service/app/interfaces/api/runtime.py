@@ -15,7 +15,7 @@ from app.infrastructure.db import InMemoryDocumentRepository
 from haystack_interface.ai import get_ai_provider, load_ai_settings, reset_ai_provider
 from haystack_interface.config import load_settings
 from haystack_interface.factory import build_engine
-from haystack_interface.logging_utils import log_event
+from haystack_interface.logging_utils import configure_logging, log_event
 from haystack_interface.vectorstore import VectorStoreConfig, available_providers
 
 
@@ -70,6 +70,7 @@ def validate_vector_config(vector_config: VectorStoreConfig) -> None:
 
 
 def bootstrap_runtime() -> RuntimeState:
+    configure_logging(logging.getLevelNamesMapping().get(os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO))
     logger = logging.getLogger(__name__)
     app_env = os.getenv("APP_ENV", "development")
     validate_runtime_settings()

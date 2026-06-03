@@ -1,4 +1,11 @@
-"""Captioning for section-level semantic indexing."""
+"""Caption — sinh ý-nghĩa-nén của section để embed (ingestion.md §6).
+
+Caption khử vocabulary-mismatch giữa câu hỏi tự nhiên và văn phong tài liệu; nó là
+thành phần quyết định recall (caption tệ ⇒ search lệch dù full content vẫn nằm
+payload). Mọi call AI đi qua AI gateway (provider) → retry/backoff đồng nhất. Một
+implementation duy nhất cho cả offline & OpenAI; chế độ do provider quyết định.
+Lỗi/caption rỗng → fallback snippet (log_event WARNING, không để rỗng đi embed).
+"""
 
 from __future__ import annotations
 

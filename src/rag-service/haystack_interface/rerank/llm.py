@@ -1,4 +1,10 @@
-"""LLM-based reranking through the shared AI gateway."""
+"""LLMReranker — rerank bằng LLM qua AI gateway (LLM-as-reranker, search.md §4).
+
+Chạy CẢ offline lẫn OpenAI: chỉ gọi `provider.chat(capability="rerank")`. Offline
+provider trả JSON điểm overlap (mô phỏng contract), OpenAI provider gọi LLM thật —
+code path y hệt. Lỗi/parse-fail → fallback lexical (log_event WARNING, không làm vỡ
+search). Rerank trên FULL content (parent_text) để bù caption-only (search.md §4).
+"""
 
 from __future__ import annotations
 
