@@ -22,5 +22,9 @@ class DocumentRepository(ABC):
         """Cập nhật trạng thái ingestion."""
 
     @abstractmethod
+    async def update_chunk_count(self, document_id: str, chunk_count: int) -> None:
+        """Cập nhật số chunk đã index của document (sau khi ingest xong)."""
+
+    @abstractmethod
     async def delete(self, document_id: str) -> None:
         """Soft delete document."""

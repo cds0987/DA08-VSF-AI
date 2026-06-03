@@ -1,0 +1,35 @@
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("alembic")
+pytest.importorskip("sqlalchemy")
+
+import sqlalchemy as sa
+from alembic import command
+from alembic.config import Config
+
+RAG_ROOT = Path(__file__).resolve().parents[3]  # .../src/rag-service
+
+
+def _alembic_config(database_url: str) -> Config:
+    cfg = Config(str(RAG_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(RAG_ROOT / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", database_url)
+    return cfg
+
+
+def test_migration_upgrade_creates_documents_with_index(tmp_path, monkeypatch) -> None:
+    url = f"sqlite:///{tmp_path / 'm.db'}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    cfg = _alembic_config(url)
+
+    command.upgrade(cfg, "head")
+
+    inspector = sa.inspect(sa.create_engine(url))
+    assert "documents" in inspector.get_table_names()
+    index_names = {index["name"] for index in inspector.get_indexes("documents")}
+    assert "ix_documents_created_at" in index_names
+
+    command.downgrade(cfg, "base")
+    assert "documents" not in sa.inspect(sa.create_engine(url)).get_table_names()

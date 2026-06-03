@@ -37,5 +37,11 @@ class InMemoryDocumentRepository(DocumentRepository):
             error_message=error,
         )
 
+    async def update_chunk_count(self, document_id: str, chunk_count: int) -> None:
+        document = self._documents.get(document_id)
+        if document is None:
+            return
+        self._documents[document_id] = replace(document, chunk_count=chunk_count)
+
     async def delete(self, document_id: str) -> None:
         self._documents.pop(document_id, None)

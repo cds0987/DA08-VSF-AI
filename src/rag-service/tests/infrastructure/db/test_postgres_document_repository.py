@@ -12,6 +12,7 @@ from app.infrastructure.db import PostgresDocumentRepository
 async def test_postgres_document_repository_crud_roundtrip(tmp_path) -> None:
     database_path = tmp_path / "documents.db"
     repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
 
     created = await repository.create(
         Document(
@@ -50,6 +51,7 @@ async def test_postgres_document_repository_crud_roundtrip(tmp_path) -> None:
 async def test_postgres_document_repository_update_missing_document_raises(tmp_path) -> None:
     database_path = tmp_path / "documents.db"
     repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
 
     with pytest.raises(KeyError, match="document not found"):
         await repository.update_status("missing", DocumentStatus.FAILED, error="boom")

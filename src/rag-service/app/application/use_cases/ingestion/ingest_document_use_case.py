@@ -53,12 +53,7 @@ class IngestDocumentUseCase:
             )
             raise
         await self._documents.update_status(document_id, DocumentStatus.COMPLETED)
-        if hasattr(self._documents, "update_chunk_count"):
-            await self._documents.update_chunk_count(document_id, chunk_count)
-        else:
-            stored = await self._documents.get_by_id(document_id)
-            if stored is not None:
-                stored.chunk_count = chunk_count
+        await self._documents.update_chunk_count(document_id, chunk_count)
         return chunk_count
 
     async def delete(self, document_id: str) -> None:

@@ -15,19 +15,25 @@ from app.infrastructure.db.models import Base, DocumentRecord
 class PostgresDocumentRepository(DocumentRepository):
     """SQLAlchemy-backed repository for document metadata.
 
-    The implementation uses synchronous SQLAlchemy sessions wrapped in
-    `asyncio.to_thread()` so it can run without requiring an async DB driver
-    in tests. Production can still point it at PostgreSQL via `DATABASE_URL`.
+    Synchronous SQLAlchemy sessions wrapped in `asyncio.to_thread()` (no async
+    driver needed). Production points it at PostgreSQL via `DATABASE_URL`.
+
+    Schema KHÔNG tạo ad-hoc ở đây (CONSTRAINTS §3 / DAY0 §2): production phải chạy
+    `alembic upgrade head` (migrations/). Dev/test tạo nhanh bằng
+    `create_schema()` hoặc `Base.metadata.create_all(repo.engine)`.
     """
 
     def __init__(self, database_url: str):
         self._engine = create_engine(database_url, future=True)
         self._session_factory = sessionmaker(self._engine, expire_on_commit=False)
-        Base.metadata.create_all(self._engine)
 
     @property
     def engine(self) -> Engine:
         return self._engine
+
+    def create_schema(self) -> None:
+        """Tạo schema trực tiếp từ models — CHỈ cho dev/test. Production dùng alembic."""
+        Base.metadata.create_all(self._engine)
 
     @contextmanager
     def _session(self) -> Session:
