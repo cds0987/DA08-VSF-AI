@@ -34,9 +34,10 @@ provider/model/dimension** — đảm bảo bằng kiến trúc, không bằng k
 cd src/rag-service
 .venv\Scripts\python -m pip install -r haystack_interface/requirements.txt
 
-.venv\Scripts\python -m haystack_interface.demo              # demo end-to-end
-.venv\Scripts\python -m haystack_interface.selftest          # assert bất biến (offline)
-.venv\Scripts\python -m haystack_interface.selftest_provider # AI gateway: SDK wiring + e2e
+.venv\Scripts\python -m haystack_interface.demo                    # demo end-to-end
+.venv\Scripts\python -m haystack_interface.tests.selftest          # assert bất biến (offline)
+.venv\Scripts\python -m haystack_interface.tests.selftest_provider # AI gateway: SDK wiring + e2e
+.venv\Scripts\python -m haystack_interface.tests.selftest_async    # async qua các stage (concurrency/to_thread/retry)
 ```
 
 > Offline dùng `OfflineProvider` (hash-embed tất định + LLM-rerank giả lập) +

@@ -1,6 +1,6 @@
 """Self-test AI gateway — chạy OFFLINE (không cần API key):
 
-    python -m haystack_interface.selftest_provider
+    python -m haystack_interface.tests.selftest_provider
 
 Hai phần:
   A. Construct OpenAIProvider THẬT (openai.AsyncOpenAI) với key giả + validate()

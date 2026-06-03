@@ -1,6 +1,6 @@
 """Self-test offline bằng assert (không cần pytest / network):
 
-    python -m haystack_interface.selftest
+    python -m haystack_interface.tests.selftest
 
 Khóa các bất biến: embedder cùng dimension & tất định (ingest==query), ingest tạo
 chunk, retrieval đúng tài liệu, classification filter cô lập secret, idempotent
