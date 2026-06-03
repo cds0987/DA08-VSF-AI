@@ -9,7 +9,7 @@ class DocumentRepository(ABC):
 
     @abstractmethod
     async def create(self, document: Document) -> Document:
-        """Tạo document record mới."""
+        """Create or overwrite document metadata keyed by deterministic document_id."""
 
     @abstractmethod
     async def get_by_id(self, document_id: str) -> Optional[Document]:

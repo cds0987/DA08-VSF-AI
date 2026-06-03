@@ -7,15 +7,20 @@ import re
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 from urllib.parse import urlparse
 
 from fastapi import FastAPI
 
 from app.application.use_cases.ingestion import IngestDocumentUseCase
 from app.application.use_cases.query import RetrievalUseCase
+from app.domain.repositories.artifact_store import ArtifactStore
 from app.domain.repositories.document_repository import DocumentRepository
+from app.domain.repositories.ingest_job_repository import IngestJobRepository
+from app.domain.repositories.parser import Parser
 from app.infrastructure.db import InMemoryDocumentRepository
+from app.infrastructure.external.local_artifact_store import LocalArtifactStore
+from app.infrastructure.external.local_parser import LocalFileParser
 from haystack_interface.ai import AISettings, get_ai_provider, load_ai_settings, reset_ai_provider
 from haystack_interface.config import HaystackSettings, load_settings
 from haystack_interface.factory import build_engine
@@ -47,6 +52,12 @@ class RuntimeState:
     ingest_use_case: IngestDocumentUseCase | None
     retrieval_use_case: RetrievalUseCase | None
     document_repository: DocumentRepository
+    job_repository: IngestJobRepository
+    parser: Parser
+    artifact_store: ArtifactStore
+    engine: Any | None
+    provider: Any
+    vector_config: VectorStoreConfig
     health: HealthReport
 
 
@@ -71,6 +82,10 @@ def validate_runtime_settings() -> None:
     if settings.child_overlap_words >= settings.child_max_words:
         raise ValueError("CHILD_OVERLAP_WORDS must be < CHILD_MAX_WORDS")
     validate_job_log_retention_settings()
+    if int(os.getenv("INGEST_WORKER_COUNT", "1")) <= 0:
+        raise ValueError("INGEST_WORKER_COUNT must be > 0")
+    if float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5")) <= 0:
+        raise ValueError("INGEST_WORKER_POLL_INTERVAL_SECONDS must be > 0")
 
 
 def validate_vector_config(
@@ -200,6 +215,82 @@ async def run_job_log_pruner(
         await asyncio.sleep(settings.prune_interval_seconds)
 
 
+async def run_ingest_worker(
+    name: str,
+    ingest_use_case: IngestDocumentUseCase,
+    poll_interval_seconds: float,
+    logger: logging.Logger,
+) -> None:
+    while True:
+        try:
+            job = await ingest_use_case.process_next_job()
+            if job is None:
+                await asyncio.sleep(poll_interval_seconds)
+            else:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "ingest_worker_processed_job",
+                    stage="worker",
+                    worker=name,
+                    job_id=job.id,
+                    document_id=job.document_id,
+                    status=job.status.value,
+                )
+        except Exception as exc:  # noqa: BLE001 - worker must stay alive and keep polling
+            log_event(
+                logger,
+                logging.WARNING,
+                "ingest_worker_failed",
+                stage="worker",
+                worker=name,
+                error=str(exc),
+            )
+            await asyncio.sleep(poll_interval_seconds)
+
+
+def build_parser() -> Parser:
+    return LocalFileParser()
+
+
+def build_artifact_store() -> ArtifactStore:
+    return LocalArtifactStore()
+
+
+async def compute_health(runtime: RuntimeState) -> HealthReport:
+    reasons: list[str] = []
+    if runtime.provider.name == "offline":
+        reasons.append("AI provider is offline.")
+    if runtime.vector_config.deployment != "remote":
+        reasons.append("Vector backend is running in_process.")
+    if metadata_backend_name(os.getenv("DATABASE_URL", "").strip()) != "postgres":
+        reasons.append("Document metadata repository is in_memory.")
+    if runtime.engine is None:
+        reasons.append("Engine is not configured.")
+    else:
+        try:
+            await asyncio.wait_for(
+                runtime.engine.vectors.list_chunk_ids_by_document("__healthcheck__"),
+                timeout=3.0,
+            )
+        except Exception as exc:  # noqa: BLE001
+            reasons.append(f"Vector readiness probe failed: {exc}")
+    try:
+        await asyncio.wait_for(runtime.document_repository.list_all(limit=1, offset=0), timeout=3.0)
+    except Exception as exc:  # noqa: BLE001
+        reasons.append(f"Metadata readiness probe failed: {exc}")
+    return HealthReport(
+        status="healthy" if not reasons else "unhealthy",
+        app_env=os.getenv("APP_ENV", "development"),
+        ai_provider=runtime.provider.name,
+        vector_provider=runtime.vector_config.provider,
+        vector_deployment=runtime.vector_config.deployment,
+        vector_index=runtime.vector_config.index_id(),
+        metadata_backend=metadata_backend_name(os.getenv("DATABASE_URL", "").strip()),
+        reasons=reasons,
+    )
+
+
 def bootstrap_runtime() -> RuntimeState:
     configure_logging(logging.getLevelNamesMapping().get(os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO))
     logger = logging.getLogger(__name__)
@@ -239,10 +330,21 @@ def bootstrap_runtime() -> RuntimeState:
 
     ingest_use_case = None
     retrieval_use_case = None
+    engine = None
     document_repository = build_document_repository()
+    if not isinstance(document_repository, IngestJobRepository):
+        raise TypeError("document repository must implement IngestJobRepository")
+    parser = build_parser()
+    artifact_store = build_artifact_store()
     try:
         engine = build_engine(provider=provider, vector_config=vector_config)
-        ingest_use_case = IngestDocumentUseCase(engine, document_repository)
+        ingest_use_case = IngestDocumentUseCase(
+            engine,
+            document_repository,
+            document_repository,
+            parser,
+            artifact_store,
+        )
         retrieval_use_case = RetrievalUseCase(engine)
     except Exception as exc:
         reasons.append(f"Engine bootstrap failed: {exc}")
@@ -275,6 +377,12 @@ def bootstrap_runtime() -> RuntimeState:
         ingest_use_case=ingest_use_case,
         retrieval_use_case=retrieval_use_case,
         document_repository=document_repository,
+        job_repository=document_repository,
+        parser=parser,
+        artifact_store=artifact_store,
+        engine=engine,
+        provider=provider,
+        vector_config=vector_config,
         health=health,
     )
 
@@ -296,14 +404,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     prune_task = asyncio.create_task(
         run_job_log_pruner(runtime.document_repository, retention_settings, logger)
     )
+    worker_count = int(os.getenv("INGEST_WORKER_COUNT", "1"))
+    worker_poll_interval = float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5"))
+    worker_tasks = []
+    if runtime.ingest_use_case is not None:
+        worker_tasks = [
+            asyncio.create_task(
+                run_ingest_worker(
+                    f"ingest-worker-{index + 1}",
+                    runtime.ingest_use_case,
+                    worker_poll_interval,
+                    logger,
+                )
+            )
+            for index in range(worker_count)
+        ]
     app.state.ingest_use_case = runtime.ingest_use_case
     app.state.retrieval_use_case = runtime.retrieval_use_case
+    app.state.runtime = runtime
     app.state.health = runtime.health
     app.state.job_log_prune_task = prune_task
+    app.state.ingest_worker_tasks = worker_tasks
     try:
         yield
     finally:
         prune_task.cancel()
+        for task in worker_tasks:
+            task.cancel()
         try:
             await prune_task
         except asyncio.CancelledError:
@@ -313,3 +440,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "job_log_prune_stopped",
                 stage="retention",
             )
+        for task in worker_tasks:
+            try:
+                await task
+            except asyncio.CancelledError:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "ingest_worker_stopped",
+                    stage="worker",
+                )

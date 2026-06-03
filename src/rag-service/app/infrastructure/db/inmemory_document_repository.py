@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import List, Optional
 
 from app.domain.entities.document import Document, DocumentStatus
+from app.domain.entities.ingest_job import IngestJob, IngestJobStatus
 from app.domain.entities.job_log import JobLog
 from app.domain.repositories.document_repository import DocumentRepository
+from app.domain.repositories.ingest_job_repository import IngestJobRepository
 
 
-class InMemoryDocumentRepository(DocumentRepository):
+class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
     def __init__(self) -> None:
         self._documents: dict[str, Document] = {}
         self._job_logs: list[JobLog] = []
+        self._jobs: dict[str, IngestJob] = {}
 
     async def create(self, document: Document) -> Document:
         self._documents[document.id] = document
@@ -72,3 +75,97 @@ class InMemoryDocumentRepository(DocumentRepository):
         before = len(self._job_logs)
         self._job_logs = [entry for entry in self._job_logs if entry.created_at >= cutoff]
         return before - len(self._job_logs)
+
+    async def enqueue(self, job: IngestJob) -> IngestJob:
+        self._jobs[job.id] = job
+        return job
+
+    async def get_job(self, job_id: str) -> IngestJob | None:
+        return self._jobs.get(job_id)
+
+    async def claim_next_pending(self, claim_id: str) -> IngestJob | None:
+        candidates = sorted(
+            self._jobs.values(),
+            key=lambda item: (item.created_at, item.id),
+        )
+        for job in candidates:
+            if job.status not in {IngestJobStatus.PENDING, IngestJobStatus.STALE}:
+                continue
+            updated = IngestJob(
+                id=job.id,
+                document_id=job.document_id,
+                document_name=job.document_name,
+                file_type=job.file_type,
+                source_uri=job.source_uri,
+                markdown=job.markdown,
+                artifact_uri=job.artifact_uri,
+                correlation_id=job.correlation_id,
+                status=IngestJobStatus.PROCESSING,
+                claim_id=claim_id,
+                attempt=job.attempt + 1,
+                chunk_count=job.chunk_count,
+                error_message=None,
+                created_at=job.created_at,
+                updated_at=datetime.now(UTC),
+            )
+            self._jobs[job.id] = updated
+            return updated
+        return None
+
+    async def complete_job(
+        self,
+        job_id: str,
+        claim_id: str,
+        *,
+        chunk_count: int,
+    ) -> bool:
+        job = self._jobs.get(job_id)
+        if job is None or job.claim_id != claim_id:
+            return False
+        self._jobs[job_id] = IngestJob(
+            id=job.id,
+            document_id=job.document_id,
+            document_name=job.document_name,
+            file_type=job.file_type,
+            source_uri=job.source_uri,
+            markdown=job.markdown,
+            artifact_uri=job.artifact_uri,
+            correlation_id=job.correlation_id,
+            status=IngestJobStatus.COMPLETED,
+            claim_id=claim_id,
+            attempt=job.attempt,
+            chunk_count=chunk_count,
+            error_message=None,
+            created_at=job.created_at,
+            updated_at=datetime.now(UTC),
+        )
+        return True
+
+    async def fail_job(
+        self,
+        job_id: str,
+        claim_id: str,
+        *,
+        error_message: str,
+    ) -> bool:
+        job = self._jobs.get(job_id)
+        if job is None or job.claim_id != claim_id:
+            return False
+        self._jobs[job_id] = IngestJob(
+            id=job.id,
+            document_id=job.document_id,
+            document_name=job.document_name,
+            file_type=job.file_type,
+            source_uri=job.source_uri,
+            markdown=job.markdown,
+            artifact_uri=job.artifact_uri,
+            correlation_id=job.correlation_id,
+            status=IngestJobStatus.FAILED,
+            claim_id=claim_id,
+            attempt=job.attempt,
+            chunk_count=job.chunk_count,
+            error_message=error_message,
+            created_at=job.created_at,
+            updated_at=datetime.now(UTC),
+        )
+        return True

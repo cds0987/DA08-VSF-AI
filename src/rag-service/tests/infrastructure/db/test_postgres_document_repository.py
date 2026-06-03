@@ -5,6 +5,7 @@ import pytest
 pytest.importorskip("sqlalchemy")
 
 from app.domain.entities.document import Document, DocumentStatus
+from app.domain.entities.ingest_job import IngestJob, IngestJobStatus
 from app.domain.entities.job_log import JobLog
 from app.infrastructure.db import PostgresDocumentRepository
 
@@ -22,7 +23,6 @@ async def test_postgres_document_repository_crud_roundtrip(tmp_path) -> None:
             file_type="md",
             s3_key="local://doc-1",
             status=DocumentStatus.PROCESSING,
-            uploaded_by="system",
             created_at=datetime.now(UTC),
         )
     )
@@ -58,6 +58,72 @@ async def test_postgres_document_repository_crud_roundtrip(tmp_path) -> None:
 
     await repository.delete("doc-1")
     assert await repository.get_by_id("doc-1") is None
+
+
+@pytest.mark.asyncio
+async def test_postgres_document_repository_claims_and_completes_ingest_jobs(tmp_path) -> None:
+    database_path = tmp_path / "documents.db"
+    repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
+
+    created = await repository.enqueue(
+        IngestJob(
+            id="job-1",
+            document_id="doc-1",
+            document_name="Policy",
+            file_type="md",
+            source_uri="local://doc-1.md",
+            markdown="# Policy",
+            artifact_uri=None,
+            correlation_id="cid-1",
+            status=IngestJobStatus.PENDING,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+    )
+
+    assert created.id == "job-1"
+
+    claimed = await repository.claim_next_pending("claim-1")
+
+    assert claimed is not None
+    assert claimed.id == "job-1"
+    assert claimed.status is IngestJobStatus.PROCESSING
+    assert claimed.claim_id == "claim-1"
+    assert claimed.attempt == 1
+    assert await repository.complete_job("job-1", "claim-1", chunk_count=4) is True
+    stored = await repository.get_job("job-1")
+    assert stored is not None
+    assert stored.status is IngestJobStatus.COMPLETED
+    assert stored.chunk_count == 4
+
+
+@pytest.mark.asyncio
+async def test_postgres_document_repository_terminal_claim_guard_rejects_stale_worker(tmp_path) -> None:
+    database_path = tmp_path / "documents.db"
+    repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
+
+    await repository.enqueue(
+        IngestJob(
+            id="job-1",
+            document_id="doc-1",
+            document_name="Policy",
+            file_type="md",
+            source_uri="local://doc-1.md",
+            markdown="# Policy",
+            artifact_uri=None,
+            correlation_id="cid-1",
+            status=IngestJobStatus.PROCESSING,
+            claim_id="claim-new",
+            attempt=1,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+    )
+
+    assert await repository.complete_job("job-1", "claim-old", chunk_count=4) is False
+    assert await repository.fail_job("job-1", "claim-old", error_message="boom") is False
 
 
 @pytest.mark.asyncio

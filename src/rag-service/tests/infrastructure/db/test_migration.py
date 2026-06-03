@@ -19,7 +19,7 @@ def _alembic_config(database_url: str) -> Config:
     return cfg
 
 
-def test_migration_upgrade_creates_documents_with_index(tmp_path, monkeypatch) -> None:
+def test_migration_upgrade_creates_metadata_and_job_tables(tmp_path, monkeypatch) -> None:
     url = f"sqlite:///{tmp_path / 'm.db'}"
     monkeypatch.setenv("DATABASE_URL", url)
     cfg = _alembic_config(url)
@@ -29,11 +29,20 @@ def test_migration_upgrade_creates_documents_with_index(tmp_path, monkeypatch) -
     inspector = sa.inspect(sa.create_engine(url))
     assert "documents" in inspector.get_table_names()
     assert "job_logs" in inspector.get_table_names()
+    assert "ingest_jobs" in inspector.get_table_names()
     index_names = {index["name"] for index in inspector.get_indexes("documents")}
     assert "ix_documents_created_at" in index_names
     job_log_index_names = {index["name"] for index in inspector.get_indexes("job_logs")}
     assert "ix_job_logs_created_at" in job_log_index_names
     assert "ix_job_logs_document_id" in job_log_index_names
+    ingest_job_index_names = {
+        index["name"] for index in inspector.get_indexes("ingest_jobs")
+    }
+    assert "ix_ingest_jobs_created_at" in ingest_job_index_names
+    assert "ix_ingest_jobs_updated_at" in ingest_job_index_names
+    assert "ix_ingest_jobs_document_id" in ingest_job_index_names
+    assert "ix_ingest_jobs_status" in ingest_job_index_names
+    assert "ix_ingest_jobs_claim_id" in ingest_job_index_names
 
     command.downgrade(cfg, "base")
     assert "documents" not in sa.inspect(sa.create_engine(url)).get_table_names()

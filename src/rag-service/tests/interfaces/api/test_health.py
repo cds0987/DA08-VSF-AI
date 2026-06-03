@@ -1,7 +1,9 @@
 from fastapi.testclient import TestClient
 import pytest
 
+from app.interfaces.api import main as main_module
 from app.interfaces.api.main import create_app
+from app.interfaces.api.runtime import HealthReport
 
 
 def test_health_reports_unhealthy_when_running_degraded(
@@ -140,3 +142,67 @@ def test_invalid_job_log_retention_days_fail_startup(
     with pytest.raises(ValueError, match="JOBLOG_RETENTION_DAYS must be > 0"):
         with TestClient(create_app()):
             pass
+
+
+def test_readiness_recomputes_live_health_on_each_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AI_PROVIDER", "offline")
+    calls = {"count": 0}
+
+    async def fake_compute_health(runtime) -> HealthReport:
+        calls["count"] += 1
+        return HealthReport(
+            status="healthy" if calls["count"] == 1 else "unhealthy",
+            app_env="development",
+            ai_provider="offline",
+            vector_provider="qdrant",
+            vector_deployment="in_process",
+            vector_index="rag_chatbot__d1024",
+            metadata_backend="in_memory",
+            reasons=[] if calls["count"] == 1 else ["vector down"],
+        )
+
+    monkeypatch.setattr(main_module, "compute_health", fake_compute_health)
+
+    with TestClient(create_app()) as client:
+        first = client.get("/readyz")
+        second = client.get("/readyz")
+
+    assert first.status_code == 200
+    assert second.status_code == 503
+    assert second.json()["reasons"] == ["vector down"]
+
+
+def test_request_body_limit_is_enforced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AI_PROVIDER", "offline")
+    monkeypatch.setenv("MAX_REQUEST_BODY_BYTES", "8")
+
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/api/ingest",
+            content=b"0123456789",
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 413
+
+
+def test_rate_limit_is_enforced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AI_PROVIDER", "offline")
+    monkeypatch.setenv("RATE_LIMIT_REQUESTS", "1")
+    monkeypatch.setenv("RATE_LIMIT_WINDOW_SECONDS", "60")
+
+    with TestClient(create_app()) as client:
+        first = client.get("/livez")
+        second = client.get("/livez")
+
+    assert first.status_code == 200
+    assert second.status_code == 429

@@ -1,29 +1,45 @@
 from fastapi.testclient import TestClient
 
-from app.application.use_cases.ingestion import IngestDocumentUseCase
 from app.interfaces.api.dependencies import get_ingest_use_case
 from app.interfaces.api.main import app
 
 
-class StubIngestUseCase(IngestDocumentUseCase):
+class StubIngestUseCase:
     def __init__(self) -> None:
-        self.ingest_calls = []
+        self.enqueue_calls = []
         self.delete_calls = []
         self.documents = {}
+        self.jobs = {}
 
-    async def ingest(self, **kwargs):
-        self.ingest_calls.append(kwargs)
+    async def enqueue(self, **kwargs):
+        self.enqueue_calls.append(kwargs)
         self.documents[kwargs["document_id"]] = {
             "document_id": kwargs["document_id"],
             "document_name": kwargs["document_name"],
             "file_type": kwargs["file_type"],
             "source_uri": kwargs.get("source_uri") or f"local://{kwargs['document_id']}",
-            "status": "completed",
-            "chunk_count": 2,
+            "status": "queued",
+            "chunk_count": 0,
             "created_at": "2026-06-03T00:00:00Z",
             "error_message": None,
         }
-        return 2
+        job = type(
+            "Job",
+            (),
+            {
+                "id": "job-1",
+                "document_id": kwargs["document_id"],
+                "status": "pending",
+                "claim_id": None,
+                "attempt": 0,
+                "chunk_count": 0,
+                "error_message": None,
+                "created_at": "2026-06-03T00:00:00Z",
+                "updated_at": "2026-06-03T00:00:00Z",
+            },
+        )()
+        self.jobs[job.id] = job
+        return job
 
     async def delete(self, document_id: str) -> None:
         self.delete_calls.append(document_id)
@@ -45,6 +61,9 @@ class StubIngestUseCase(IngestDocumentUseCase):
             error_message = payload["error_message"]
 
         return Doc()
+
+    async def get_job(self, job_id: str):
+        return self.jobs.get(job_id)
 
     async def list_documents(self):
         return [await self.get_document(document_id) for document_id in self.documents]
@@ -69,10 +88,11 @@ def test_ingest_router_accepts_markdown_payload() -> None:
 
     app.dependency_overrides.clear()
 
-    assert response.status_code == 200
-    assert stub.ingest_calls[0]["document_id"] == "doc-1"
-    assert stub.ingest_calls[0]["correlation_id"] == "cid-ingest-1"
-    assert response.json()["chunk_count"] == 2
+    assert response.status_code == 202
+    assert stub.enqueue_calls[0]["document_id"] == "doc-1"
+    assert stub.enqueue_calls[0]["correlation_id"] == "cid-ingest-1"
+    assert response.json()["chunk_count"] == 0
+    assert response.json()["job_id"] == "job-1"
 
 
 def test_delete_ingest_router_deletes_document() -> None:
@@ -107,7 +127,7 @@ def test_get_ingest_router_returns_document_status() -> None:
     app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.json()["status"] == "completed"
+    assert response.json()["status"] == "queued"
 
 
 def test_list_ingest_router_returns_documents() -> None:
@@ -130,3 +150,26 @@ def test_list_ingest_router_returns_documents() -> None:
 
     assert response.status_code == 200
     assert len(response.json()) == 1
+
+
+def test_get_ingest_job_router_returns_job_status() -> None:
+    stub = StubIngestUseCase()
+    app.dependency_overrides[get_ingest_use_case] = lambda: stub
+
+    with TestClient(app) as client:
+        client.post(
+            "/api/ingest",
+            json={
+                "document_id": "doc-1",
+                "document_name": "Guide",
+                "file_type": "md",
+                "markdown": "# Title\nBody",
+            },
+        )
+        response = client.get("/api/ingest/jobs/job-1")
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["job_id"] == "job-1"
+    assert response.json()["status"] == "pending"

@@ -2,17 +2,22 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from app.application.use_cases.ingestion import IngestDocumentUseCase
 from app.interfaces.api.dependencies import get_ingest_use_case
-from app.interfaces.api.schemas.ingest import DocumentResponse, IngestRequest, IngestResponse
+from app.interfaces.api.schemas.ingest import (
+    DocumentResponse,
+    IngestJobResponse,
+    IngestRequest,
+    IngestResponse,
+)
 
 router = APIRouter()
 
 
-@router.post("/ingest", response_model=IngestResponse)
+@router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_202_ACCEPTED)
 async def ingest_document(
     payload: IngestRequest,
     use_case: IngestDocumentUseCase = Depends(get_ingest_use_case),
 ) -> IngestResponse:
-    chunk_count = await use_case.ingest(
+    job = await use_case.enqueue(
         document_id=payload.document_id,
         document_name=payload.document_name,
         file_type=payload.file_type,
@@ -22,10 +27,11 @@ async def ingest_document(
         correlation_id=payload.correlation_id,
     )
     return IngestResponse(
+        job_id=job.id,
         document_id=payload.document_id,
-        status="completed",
-        chunk_count=chunk_count,
-        message="document ingested",
+        status="queued",
+        chunk_count=0,
+        message="document queued",
     )
 
 
@@ -46,6 +52,27 @@ async def get_document(
         chunk_count=document.chunk_count,
         created_at=document.created_at,
         error_message=document.error_message,
+    )
+
+
+@router.get("/ingest/jobs/{job_id}", response_model=IngestJobResponse)
+async def get_ingest_job(
+    job_id: str,
+    use_case: IngestDocumentUseCase = Depends(get_ingest_use_case),
+) -> IngestJobResponse:
+    job = await use_case.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found")
+    return IngestJobResponse(
+        job_id=job.id,
+        document_id=job.document_id,
+        status=job.status.value if hasattr(job.status, "value") else str(job.status),
+        claim_id=job.claim_id,
+        attempt=job.attempt,
+        chunk_count=job.chunk_count,
+        error_message=job.error_message,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
     )
 
 

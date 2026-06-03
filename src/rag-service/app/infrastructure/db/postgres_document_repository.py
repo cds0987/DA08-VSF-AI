@@ -2,19 +2,21 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 
-from sqlalchemy import create_engine, delete, select
+from sqlalchemy import create_engine, delete, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.domain.entities.document import Document, DocumentStatus
+from app.domain.entities.ingest_job import IngestJob, IngestJobStatus
 from app.domain.entities.job_log import JobLog
 from app.domain.repositories.document_repository import DocumentRepository
-from app.infrastructure.db.models import Base, DocumentRecord, JobLogRecord
+from app.domain.repositories.ingest_job_repository import IngestJobRepository
+from app.infrastructure.db.models import Base, DocumentRecord, IngestJobRecord, JobLogRecord
 
 
-class PostgresDocumentRepository(DocumentRepository):
+class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
     """SQLAlchemy-backed repository for document metadata.
 
     Synchronous SQLAlchemy sessions wrapped in `asyncio.to_thread()` (no async
@@ -60,7 +62,6 @@ class PostgresDocumentRepository(DocumentRepository):
                 file_type=document.file_type,
                 s3_key=document.s3_key,
                 status=document.status.value,
-                uploaded_by=document.uploaded_by,
                 created_at=document.created_at,
                 chunk_count=document.chunk_count,
                 error_message=document.error_message,
@@ -139,7 +140,6 @@ class PostgresDocumentRepository(DocumentRepository):
             file_type=record.file_type,
             s3_key=record.s3_key,
             status=DocumentStatus(record.status),
-            uploaded_by=record.uploaded_by,
             created_at=record.created_at,
             chunk_count=record.chunk_count,
             error_message=record.error_message,
@@ -208,4 +208,155 @@ class PostgresDocumentRepository(DocumentRepository):
             error_type=record.error_type,
             error_message=record.error_message,
             created_at=record.created_at,
+        )
+
+    async def enqueue(self, job: IngestJob) -> IngestJob:
+        return await asyncio.to_thread(self._enqueue_sync, job)
+
+    def _enqueue_sync(self, job: IngestJob) -> IngestJob:
+        with self._session() as session:
+            record = IngestJobRecord(
+                id=job.id,
+                document_id=job.document_id,
+                document_name=job.document_name,
+                file_type=job.file_type,
+                source_uri=job.source_uri,
+                markdown=job.markdown,
+                artifact_uri=job.artifact_uri,
+                correlation_id=job.correlation_id,
+                status=job.status.value,
+                claim_id=job.claim_id,
+                attempt=job.attempt,
+                chunk_count=job.chunk_count,
+                error_message=job.error_message,
+                created_at=job.created_at,
+                updated_at=job.updated_at,
+            )
+            session.merge(record)
+            return self._to_job(record)
+
+    async def get_job(self, job_id: str) -> IngestJob | None:
+        return await asyncio.to_thread(self._get_job_sync, job_id)
+
+    def _get_job_sync(self, job_id: str) -> IngestJob | None:
+        with self._session() as session:
+            record = session.get(IngestJobRecord, job_id)
+            if record is None:
+                return None
+            return self._to_job(record)
+
+    async def claim_next_pending(self, claim_id: str) -> IngestJob | None:
+        return await asyncio.to_thread(self._claim_next_pending_sync, claim_id)
+
+    def _claim_next_pending_sync(self, claim_id: str) -> IngestJob | None:
+        now = datetime.now(UTC)
+        with self._session() as session:
+            stmt = (
+                select(IngestJobRecord)
+                .where(
+                    IngestJobRecord.status.in_(
+                        [IngestJobStatus.PENDING.value, IngestJobStatus.STALE.value]
+                    )
+                )
+                .order_by(IngestJobRecord.created_at.asc(), IngestJobRecord.id.asc())
+                .limit(1)
+            )
+            record = session.execute(stmt).scalars().first()
+            if record is None:
+                return None
+            result = session.execute(
+                update(IngestJobRecord)
+                .where(
+                    IngestJobRecord.id == record.id,
+                    IngestJobRecord.status.in_(
+                        [IngestJobStatus.PENDING.value, IngestJobStatus.STALE.value]
+                    ),
+                )
+                .values(
+                    status=IngestJobStatus.PROCESSING.value,
+                    claim_id=claim_id,
+                    attempt=record.attempt + 1,
+                    updated_at=now,
+                    error_message=None,
+                )
+            )
+            if (result.rowcount or 0) != 1:
+                return None
+            claimed = session.get(IngestJobRecord, record.id)
+            return self._to_job(claimed) if claimed is not None else None
+
+    async def complete_job(
+        self,
+        job_id: str,
+        claim_id: str,
+        *,
+        chunk_count: int,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._complete_job_sync, job_id, claim_id, chunk_count
+        )
+
+    def _complete_job_sync(self, job_id: str, claim_id: str, chunk_count: int) -> bool:
+        with self._session() as session:
+            result = session.execute(
+                update(IngestJobRecord)
+                .where(
+                    IngestJobRecord.id == job_id,
+                    IngestJobRecord.claim_id == claim_id,
+                    IngestJobRecord.status == IngestJobStatus.PROCESSING.value,
+                )
+                .values(
+                    status=IngestJobStatus.COMPLETED.value,
+                    chunk_count=chunk_count,
+                    updated_at=datetime.now(UTC),
+                    error_message=None,
+                )
+            )
+            return (result.rowcount or 0) == 1
+
+    async def fail_job(
+        self,
+        job_id: str,
+        claim_id: str,
+        *,
+        error_message: str,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._fail_job_sync, job_id, claim_id, error_message
+        )
+
+    def _fail_job_sync(self, job_id: str, claim_id: str, error_message: str) -> bool:
+        with self._session() as session:
+            result = session.execute(
+                update(IngestJobRecord)
+                .where(
+                    IngestJobRecord.id == job_id,
+                    IngestJobRecord.claim_id == claim_id,
+                    IngestJobRecord.status == IngestJobStatus.PROCESSING.value,
+                )
+                .values(
+                    status=IngestJobStatus.FAILED.value,
+                    updated_at=datetime.now(UTC),
+                    error_message=error_message,
+                )
+            )
+            return (result.rowcount or 0) == 1
+
+    def _to_job(self, record: IngestJobRecord) -> IngestJob:
+        return IngestJob(
+            id=record.id,
+            document_id=record.document_id,
+            document_name=record.document_name,
+            file_type=record.file_type,
+            source_uri=record.source_uri,
+            markdown=record.markdown,
+            artifact_uri=record.artifact_uri,
+            correlation_id=record.correlation_id,
+            status=IngestJobStatus(record.status),
+            claim_id=record.claim_id,
+            attempt=record.attempt,
+            chunk_count=record.chunk_count,
+            error_message=record.error_message,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
         )
