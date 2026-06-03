@@ -71,6 +71,13 @@ class ChromaBase(VectorStoreProvider):
         ids = (existing or {}).get("ids") or []
         return sorted(ids)[0] if ids else None
 
+    @staticmethod
+    def _ids(existing: dict) -> list[str]:
+        ids = (existing or {}).get("ids") or []
+        if ids and isinstance(ids[0], list):
+            return list(ids[0])
+        return list(ids)
+
     def _assemble(self, res: dict, top_k: int) -> list[SearchResult]:
         metas = (res.get("metadatas") or [[]])[0]
         dists = (res.get("distances") or [[]])[0]

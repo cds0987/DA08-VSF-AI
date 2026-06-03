@@ -64,6 +64,16 @@ class QdrantBase(VectorStoreProvider):
             )
         )
 
+    def _document_filter(self, document_id: str) -> "models.Filter":
+        return models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="document_id",
+                    match=models.MatchValue(value=document_id),
+                )
+            ]
+        )
+
     @staticmethod
     def _ids_selector(chunk_ids: Sequence[str]) -> "models.PointIdsList":
         return models.PointIdsList(points=[point_id(c) for c in chunk_ids])

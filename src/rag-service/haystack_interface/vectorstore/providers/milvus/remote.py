@@ -83,6 +83,15 @@ class MilvusRemoteProvider(MilvusBase):
         res = await self._client.search(**self._search_kwargs(vector, top_k))
         return self._assemble(res[0] if res else [], top_k)
 
+    async def list_chunk_ids_by_document(self, document_id: str) -> list[str]:
+        await self._ensure()
+        rows = await self._client.query(
+            collection_name=self.collection_name,
+            filter=self._doc_filter(document_id),
+            output_fields=[PK],
+        )
+        return sorted(row.get(PK) for row in (rows or []) if row.get(PK))
+
     async def delete_many(self, chunk_ids: Sequence[str]) -> None:
         await self._ensure()
         ids = list(chunk_ids)

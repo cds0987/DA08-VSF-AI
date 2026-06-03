@@ -10,12 +10,6 @@ from haystack_interface.vectorstore.types import VectorRecord
 
 
 class VectorStore(VectorRepository):
-    """Facade async thống nhất cho mọi vector backend.
-
-    Bên ngoài chỉ thấy cùng một hành vi: insert / upsert / search / delete.
-    Bên trong có thể là provider local (sync -> to_thread) hoặc cloud (async-native).
-    """
-
     def __init__(self, provider: VectorStoreProvider, config: VectorStoreConfig | None = None):
         self._provider = provider
         self._config = config or provider.config
@@ -55,6 +49,9 @@ class VectorStore(VectorRepository):
         top_k: int = 20,
     ) -> list[SearchResult]:
         return await self.search(vector, query_text, top_k=top_k)
+
+    async def list_chunk_ids_by_document(self, document_id: str) -> list[str]:
+        return await self._provider.list_chunk_ids_by_document(document_id)
 
     async def delete(self, chunk_id: str) -> None:
         await self.delete_many([chunk_id])

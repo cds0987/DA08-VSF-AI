@@ -13,6 +13,7 @@ from haystack_interface.caption import Captioner
 from haystack_interface.chunking import split_sections
 from haystack_interface.config import HaystackSettings, load_settings
 from haystack_interface.rerank import Reranker
+from haystack_interface.vectorstore.types import VectorRecord
 
 
 @dataclass
@@ -91,9 +92,16 @@ class HaystackRagEngine:
         if not chunk_ids:
             return 0
 
+        existing_chunk_ids = set(await self.vectors.list_chunk_ids_by_document(doc.document_id))
         vectors = await self.embedder.embed_batch(embed_texts)
-        for chunk_id, vector, payload in zip(chunk_ids, vectors, payloads):
-            await self.vectors.upsert(chunk_id, vector, payload)
+        records = [
+            VectorRecord(chunk_id=chunk_id, vector=vector, payload=payload)
+            for chunk_id, vector, payload in zip(chunk_ids, vectors, payloads)
+        ]
+        await self.vectors.upsert_many(records)
+        stale_chunk_ids = sorted(existing_chunk_ids - set(chunk_ids))
+        if stale_chunk_ids:
+            await self.vectors.delete_many(stale_chunk_ids)
         return len(chunk_ids)
 
     async def search(

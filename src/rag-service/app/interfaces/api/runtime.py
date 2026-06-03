@@ -7,10 +7,12 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 
+from app.application.use_cases.ingestion import IngestDocumentUseCase
 from app.application.use_cases.query import RetrievalUseCase
 from haystack_interface.ai import get_ai_provider, load_ai_settings, reset_ai_provider
+from haystack_interface.config import load_settings
 from haystack_interface.factory import build_engine
-from haystack_interface.vectorstore import VectorStoreConfig
+from haystack_interface.vectorstore import VectorStoreConfig, available_providers
 
 
 def _is_production(app_env: str) -> bool:
@@ -33,14 +35,40 @@ class HealthReport:
 
 @dataclass
 class RuntimeState:
+    ingest_use_case: IngestDocumentUseCase | None
     retrieval_use_case: RetrievalUseCase | None
     health: HealthReport
 
 
+def validate_runtime_settings() -> None:
+    settings = load_settings()
+    if settings.embed_dimension <= 0:
+        raise ValueError("EMBED_DIMENSION must be > 0")
+    if settings.top_k_candidates <= 0:
+        raise ValueError("SEARCH_TOP_K must be > 0")
+    if settings.rerank_top_k <= 0:
+        raise ValueError("RERANK_TOP_K must be > 0")
+    if settings.top_k_candidates < settings.rerank_top_k:
+        raise ValueError("SEARCH_TOP_K must be >= RERANK_TOP_K")
+
+
+def validate_vector_config(vector_config: VectorStoreConfig) -> None:
+    if not vector_config.collection.strip():
+        raise ValueError("VECTOR_COLLECTION must not be empty")
+    if vector_config.provider.lower() not in available_providers():
+        raise ValueError(
+            f"VECTOR_DB_PROVIDER {vector_config.provider!r} is not registered"
+        )
+    if vector_config.dimension <= 0:
+        raise ValueError("Vector store dimension must be > 0")
+
+
 def bootstrap_runtime() -> RuntimeState:
     app_env = os.getenv("APP_ENV", "development")
+    validate_runtime_settings()
     ai_settings = load_ai_settings()
     vector_config = VectorStoreConfig.from_env()
+    validate_vector_config(vector_config)
 
     reset_ai_provider()
     provider = get_ai_provider()
@@ -50,15 +78,19 @@ def bootstrap_runtime() -> RuntimeState:
         reasons.append("AI provider is offline.")
     if vector_config.deployment != "remote":
         reasons.append("Vector backend is running in_process.")
+    if ai_settings.embed_dimension and ai_settings.embed_dimension != vector_config.dimension:
+        reasons.append("Vector dimension differs from embed dimension before engine wiring.")
 
     if _is_production(app_env) and reasons:
         raise RuntimeError(
             "Production fail-closed: " + " ".join(reasons)
         )
 
+    ingest_use_case = None
     retrieval_use_case = None
     try:
         engine = build_engine(provider=provider, vector_config=vector_config)
+        ingest_use_case = IngestDocumentUseCase(engine)
         retrieval_use_case = RetrievalUseCase(engine)
     except Exception as exc:
         reasons.append(f"Engine bootstrap failed: {exc}")
@@ -74,12 +106,17 @@ def bootstrap_runtime() -> RuntimeState:
         vector_index=vector_config.index_id(),
         reasons=reasons,
     )
-    return RuntimeState(retrieval_use_case=retrieval_use_case, health=health)
+    return RuntimeState(
+        ingest_use_case=ingest_use_case,
+        retrieval_use_case=retrieval_use_case,
+        health=health,
+    )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     runtime = bootstrap_runtime()
+    app.state.ingest_use_case = runtime.ingest_use_case
     app.state.retrieval_use_case = runtime.retrieval_use_case
     app.state.health = runtime.health
     yield

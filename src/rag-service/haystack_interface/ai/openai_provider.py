@@ -9,9 +9,7 @@ tái dùng connection pool.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
-
-from openai import AsyncOpenAI
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from haystack_interface.ai.base import (
     AIProvider,
@@ -22,21 +20,30 @@ from haystack_interface.ai.base import (
     retry_async,
 )
 
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
+
 
 class OpenAIProvider(AIProvider):
     def __init__(self, settings: AISettings | None = None):
         self._s = settings or load_ai_settings()
-        self._clients: Dict[Tuple[Optional[str], str], AsyncOpenAI] = {}
+        self._clients: Dict[Tuple[Optional[str], str], Any] = {}
 
     @property
     def name(self) -> str:
         return "openai"
 
     # --- client pool (1 AsyncOpenAI / endpoint) ---------------------------- #
-    def _client(self, cfg: CapabilityConfig) -> AsyncOpenAI:
+    def _client(self, cfg: CapabilityConfig):
         key = (cfg.base_url, cfg.api_key)
         client = self._clients.get(key)
         if client is None:
+            try:
+                from openai import AsyncOpenAI
+            except ModuleNotFoundError as exc:
+                raise ModuleNotFoundError(
+                    "OpenAIProvider can openai package. Cai: pip install openai"
+                ) from exc
             client = AsyncOpenAI(
                 api_key=cfg.api_key or "EMPTY",   # OpenAI-compatible local thường bỏ qua key
                 base_url=cfg.base_url,

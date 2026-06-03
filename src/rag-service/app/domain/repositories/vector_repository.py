@@ -47,6 +47,9 @@ class SearchResult:
 
 
 class VectorRepository(ABC):
+    @abstractmethod
+    async def upsert_many(self, records) -> None:
+        """Luu/overwrite nhieu vectors cung luc."""
 
     @abstractmethod
     async def upsert(self, chunk_id: str, vector: List[float], payload: dict) -> None:
@@ -60,6 +63,14 @@ class VectorRepository(ABC):
         top_k: int = 20
     ) -> List[SearchResult]:
         """Hybrid search (dense; BM25/RRF con TODO) tra raw unit + lineage."""
+
+    @abstractmethod
+    async def list_chunk_ids_by_document(self, document_id: str) -> List[str]:
+        """Tra ve chunk ids hien co cua mot document."""
+
+    @abstractmethod
+    async def delete_many(self, chunk_ids: List[str]) -> None:
+        """Xoa mot tap chunk ids."""
 
     @abstractmethod
     async def delete_by_document(self, document_id: str) -> None:

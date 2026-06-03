@@ -96,6 +96,19 @@ class QdrantInProcessProvider(QdrantBase):
         )
         return [self._to_result(point) for point in res.points]
 
+    async def list_chunk_ids_by_document(self, document_id: str) -> list[str]:
+        await self._ensure()
+        res = await asyncio.to_thread(
+            self._client.scroll,
+            collection_name=self._collection,
+            scroll_filter=self._document_filter(document_id),
+            with_payload=True,
+            with_vectors=False,
+            limit=10000,
+        )
+        points = res[0] if isinstance(res, tuple) else res
+        return sorted(self._existing_from_points(points))
+
     async def delete_many(self, chunk_ids: Sequence[str]) -> None:
         await self._ensure()
         ids = list(chunk_ids)

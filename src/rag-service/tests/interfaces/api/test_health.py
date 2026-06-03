@@ -30,3 +30,14 @@ def test_production_startup_fails_closed_when_degraded(monkeypatch: pytest.Monke
     with pytest.raises(RuntimeError, match="Production fail-closed"):
         with TestClient(create_app()):
             pass
+
+
+def test_invalid_runtime_settings_fail_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AI_PROVIDER", "offline")
+    monkeypatch.setenv("SEARCH_TOP_K", "1")
+    monkeypatch.setenv("RERANK_TOP_K", "3")
+
+    with pytest.raises(ValueError, match="SEARCH_TOP_K must be >= RERANK_TOP_K"):
+        with TestClient(create_app()):
+            pass

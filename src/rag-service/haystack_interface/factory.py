@@ -21,7 +21,6 @@ from typing import Optional
 
 from haystack_interface.ai import AIProvider, get_ai_provider
 from haystack_interface.ai.offline_provider import OfflineProvider
-from haystack_interface.ai.openai_provider import OpenAIProvider
 from haystack_interface.caption import ProviderCaptioner
 from haystack_interface.config import HaystackSettings, load_settings
 from haystack_interface.embedding import ProviderEmbeddingService
@@ -81,7 +80,7 @@ async def build_engine_probe(
     """Như build_engine nhưng probe dimension thật từ OpenAI model (cần key/network)."""
     provider = provider or get_ai_provider()
     settings = settings or load_settings()
-    if isinstance(provider, OpenAIProvider):
+    if provider.name == "openai":
         dim = await provider.probe_dimension()
     elif isinstance(provider, OfflineProvider):
         dim = provider.dimension

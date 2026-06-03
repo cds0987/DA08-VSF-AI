@@ -77,6 +77,14 @@ class ChromaInProcessProvider(ChromaBase):
         )
         return self._assemble(res, top_k)
 
+    async def list_chunk_ids_by_document(self, document_id: str) -> list[str]:
+        existing = await asyncio.to_thread(
+            self._collection.get,
+            where={"document_id": document_id},
+            include=[],
+        )
+        return sorted(self._ids(existing))
+
     async def delete_many(self, chunk_ids: Sequence[str]) -> None:
         ids = list(chunk_ids)
         if ids:

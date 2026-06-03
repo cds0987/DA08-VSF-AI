@@ -15,11 +15,11 @@ class VectorStoreProvider(ABC):
 
     @abstractmethod
     async def insert_many(self, records: Sequence[VectorRecord]) -> None:
-        """Insert mới hoàn toàn; trùng id phải fail."""
+        """Insert moi hoan toan; trung id phai fail."""
 
     @abstractmethod
     async def upsert_many(self, records: Sequence[VectorRecord]) -> None:
-        """Insert hoặc overwrite theo chunk_id."""
+        """Insert hoac overwrite theo chunk_id."""
 
     @abstractmethod
     async def search(
@@ -28,15 +28,16 @@ class VectorStoreProvider(ABC):
         query_text: str,
         top_k: int = 20,
     ) -> list[SearchResult]:
-        """Search thống nhất ra ngoài; bên trong backend có thể hybrid hay dense-only.
+        """Search thong nhat ra ngoai; backend ben trong co the dense-only."""
 
-        KHÔNG enforce access control — trả raw unit + lineage (search.md §6).
-        """
+    @abstractmethod
+    async def list_chunk_ids_by_document(self, document_id: str) -> list[str]:
+        """Tra ve toan bo chunk ids hien co cua mot document."""
 
     @abstractmethod
     async def delete_many(self, chunk_ids: Sequence[str]) -> None:
-        """Xóa theo chunk_id."""
+        """Xoa theo chunk_id."""
 
     @abstractmethod
     async def delete_by_document(self, document_id: str) -> None:
-        """Xóa mọi chunk của một document."""
+        """Xoa moi chunk cua mot document."""
