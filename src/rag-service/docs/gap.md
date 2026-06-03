@@ -46,12 +46,12 @@
 | 15 | Canonical artifact (markdown) trước split | ingestion §4 | **Chưa có** — engine nhận sẵn markdown, không lưu artifact, không replay | 🟡 |
 | 16 | Parser (MarkItDown + OCR/vision), I/O guard | parser.md, ingestion §3 | **Chưa có** — `azure_doc_intel_client.py` là vỏ; không size-guard/allow-list/path-traversal | 🟡 (★D2) |
 | 17 | Change detector (event + reconciliation scanner) | ingestion §1 | **Chưa có** — không S3, không event, không scanner | 🟢 (★D1) |
-| 18 | Metadata DB + job log + retention/prune | ingestion §8,10 | **Chưa có** — `postgres_document_repository.py` stub | 🟡 |
+| 18 | Metadata DB + job log + retention/prune | ingestion §8,10 | ✅ **Phần lớn** (90fbc2a + 0b7f4f1): `DocumentRepository` (InMemory + Postgres), Alembic migration (bỏ create_all ad-hoc), index `created_at`, status PROCESSING/COMPLETED/FAILED; **còn** job-log table + retention/prune job | 🟡 |
 | 19 | Embedding coalescer + cache content_hash | ingestion §6 | **Chưa có** — `embed_batch` gọi thẳng, không gom cross-call, không cache, không dedup | 🟢 (★D4) |
 | 20 | Hybrid (BM25 + RRF) bù caption-only | search §4 | **Dense-only**; `bm25_text`/`query_text` lưu nhưng không dùng; docstring/demo gọi "RRF" gây hiểu nhầm | 🟢 (★D7) |
 | 21 | Eval gate (golden queries + lineage + recall/p95) | search §7, CONSTRAINTS §2 | `eval/pipeline_prototype.ipynb` là prototype; **không có gate** chặn merge | 🟡 |
 | 22 | Config validation startup (provider+url+model, model+dim+index) | ingestion §10 | `OpenAIProvider.validate()` chỉ check model+key; **không** validate dim↔index, backend↔credential | 🟡 |
-| 23 | Observability: correlation_id, structured log theo stage | ingestion §10 | Dùng `print()`; không correlation_id, không structured log | 🟡 |
+| 23 | Observability: correlation_id, structured log theo stage | ingestion §10 | ✅ **Đã làm** (3729d09 + 3abbd04): `log_event` + `JsonLogFormatter` (stdlib) bật ở composition root; event `ingest/search_started/completed`, `*_fallback` kèm `correlation_id`/`stage`/counts; hết `print()` | ✅ |
 | 24 | Cost guardrail (trần AI/OCR, metric cost theo stage) | ingestion §10 | **Chưa có** | 🟢 |
 | 25 | Deploy verify (pin digest, verify image/health/migration) | CONSTRAINTS §2 | **Chưa có** Dockerfile/K8s/migration | 🟢 |
 | 26 | Contract test chạy trên backend THẬT (không chỉ in-memory) | LESSONS §4 | `_contract.py` chạy qdrant `:memory:`; **chưa** chạy remote Qdrant; chroma/milvus chưa verify | 🟡 |
@@ -163,14 +163,20 @@ thay thế (tránh hai nguồn sự thật).
 - **#15/#16 Canonical artifact + Parser chưa có.** Engine nhận markdown sẵn; chưa có bước
   S3→parse→artifact→split. → thuộc ★D2 nhưng cần cho luồng ingest thật; tối thiểu thêm adapter
   `Parser` + lưu artifact để replay rẻ.
-- **#18 Metadata DB + job log + retention.** Chưa có; cần cho trạng thái document, lineage, audit.
-  Goal cảnh báo "mỗi storage path phải có consumer + retention".
+- **#18 Metadata DB — ✅ phần lớn (90fbc2a + 0b7f4f1).** `DocumentRepository` (InMemory + Postgres
+  sync-bọc-to_thread), schema qua **Alembic migration** (`migrations/0001_create_documents`, đã bỏ
+  `create_all` ad-hoc khỏi runtime path — đúng CONSTRAINTS §3/DAY0 §2), index `created_at`,
+  `update_chunk_count` trên port. **Còn thiếu:** bảng job-log + retention/prune job (DAY0 §14),
+  và atomic-claim cho status (gắn #13).
 - **#21 Eval gate.** Có notebook prototype, chưa thành gate chặn merge (golden queries + expected
   lineage + recall/precision/no-answer + p50/p95). Goal coi đây là ràng buộc cứng cho mọi thay
   đổi parser/caption/model/index/rerank.
 - **#22 Config validation chưa đủ.** `validate()` mới check model+key; thiếu kiểm cặp
   model↔dimension↔index id và backend↔credential lúc startup.
-- **#23 Observability.** `print()` thay logging; thiếu `correlation_id`/structured log theo stage —
+- **#23 Observability — ✅ ĐÃ LÀM (3729d09 + 3abbd04).** `log_event` + `JsonLogFormatter` (stdlib,
+  không dep mới) bật ở composition root; event có `correlation_id`/`stage`/counts; hết `print()`.
+  (Mục cũ bên dưới giữ để tham chiếu lịch sử.)
+- ~~#23 Observability.~~ `print()` thay logging; thiếu `correlation_id`/structured log theo stage —
   liên quan #7 (correlation_id là field contract).
 - **#26 Contract test chưa chạy backend thật.** Mới `:memory:`; cần chạy remote Qdrant trong CI để
   chứng minh semantics production (lesson "in-memory không chứng minh production semantics").
