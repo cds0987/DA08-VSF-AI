@@ -92,22 +92,28 @@ src/frontend/
 │   ├── (auth)/
 │   │   └── login/page.tsx       ← Form đăng nhập (email/password + Microsoft SSO button)
 │   ├── (main)/
-│   │   ├── chat/page.tsx        ← Giao diện chat chính, SSE streaming consumer (End User only)
+│   │   ├── chat/page.tsx        ← Giao diện chat chính, WebSocket consumer (End User only)
 │   │   └── admin/
 │   │       ├── documents/page.tsx  ← Upload file + danh sách tài liệu + ingestion status (Admin only)
 │   │       └── users/page.tsx      ← Danh sách user, deactivate/reactivate (Admin only)
+├── providers/
+│   └── WebSocketProvider.tsx    ← Mở 1 WebSocket app-level sau khi đăng nhập (dùng chung cho chat + notify); cung cấp qua React context
 ├── components/
 │   ├── ChatMessage.tsx          ← Render 1 tin nhắn (user / bot), source citations
 │   ├── SourceCard.tsx           ← Hiển thị nguồn tài liệu + highlight text
 │   ├── FileUpload.tsx           ← Drag-drop upload, chọn classification
-│   └── StreamingText.tsx        ← Nhận SSE stream, render token từng cái
+│   ├── StreamingText.tsx        ← Nhận message WebSocket type=token, render token từng cái
+│   └── NotificationToast.tsx    ← Hiển thị toast/badge khi nhận message type=notify (vd "Có tài liệu mới: X")
 ├── hooks/
-│   ├── useChat.ts               ← Gọi POST /query, handle SSE stream
+│   ├── useChat.ts               ← Dùng WS chung (provider): gửi question, nhận token/done; auto-reconnect đã lo ở provider
+│   ├── useNotifications.ts      ← Nghe message type=notify từ WS chung → đẩy vào toast/badge
 │   ├── useDocuments.ts          ← Gọi GET/POST /documents
 │   └── useAuth.ts               ← JWT lưu localStorage, auto-refresh
 └── lib/
-    └── api.ts                   ← Axios/fetch base client, attach Bearer token
+    ├── api.ts                   ← Axios/fetch base client, attach Bearer token
+    └── ws.ts                    ← WebSocket wrapper: kết nối kèm token, ping/pong heartbeat, reconnect backoff
 ```
+> **WebSocket mở ở app-level** (trong `WebSocketProvider`, ngay sau đăng nhập) — không gắn riêng trang chat. Nhờ vậy user nhận được notify "tài liệu mới" kể cả khi đang ở Admin Dashboard hay trang khác.
 
 **Không được đụng:** bất kỳ file Python nào, docker-compose.yml.
 
@@ -171,9 +177,10 @@ src/document-service/app/
 │   ├── storage/
 │   │   └── s3_client.py                       ← Upload / xóa file gốc trên S3
 │   └── messaging/
-│       ├── nats_publisher.py                  ← Publish doc.ingest (cho RAG Worker) + doc.access (cho Query Service)
-│       │                                         doc.access { doc_id, classification, allowed_departments, allowed_user_ids, deleted }
-│       └── nats_subscriber.py                 ← Subscribe doc.status → update status indexed/failed + chunk_count
+│       ├── nats_publisher.py                  ← Publish doc.ingest (RAG Worker) + doc.access (Query Service ACL)
+│       │                                         + notify.doc_new (khi indexed → Query Service đẩy thông báo)
+│       └── nats_subscriber.py                 ← Subscribe doc.status → update status indexed/failed + chunk_count;
+│                                                 nếu indexed → publish notify.doc_new { doc_id, document_name, classification, allowed_departments, allowed_user_ids }
 │
 └── interfaces/
     └── api/
@@ -185,7 +192,7 @@ src/document-service/app/
 
 **Key logic — document-service:**
 - `upload_document_use_case.py`: validate file (≤50MB, đúng loại) → upload S3 → `doc_repo.create(status=queued)` → publish `doc.ingest` (RAG Worker xử lý) **và** `doc.access` (Query Service cập nhật phân quyền). Trả `202 { document_id, status:"queued" }`.
-- `nats_subscriber.py`: lắng nghe `doc.status` từ RAG Worker → `doc_repo.update_status(indexed/failed, chunk_count)`. **Đây là nơi DUY NHẤT cập nhật trạng thái ingestion** — RAG Worker chỉ publish event, không ghi bảng documents.
+- `nats_subscriber.py`: lắng nghe `doc.status` từ RAG Worker → `doc_repo.update_status(indexed/failed, chunk_count)`. **Đây là nơi DUY NHẤT cập nhật trạng thái ingestion** — RAG Worker chỉ publish event, không ghi bảng documents. Khi `indexed` → publish thêm `notify.doc_new` để Query Service đẩy thông báo "có tài liệu mới".
 - `delete_document_use_case.py`: xóa record + file S3, publish `doc.access { deleted:true }` (Query Service gỡ khỏi projection) + trigger xóa vectors Qdrant.
 - **Event-driven ACL (database-per-service)**: mọi thay đổi quyền (upload / đổi classification / xóa) → publish `doc.access` lên NATS JetStream. Query Service tự giữ bản sao — **không ai đọc thẳng `doc_db` của service khác**.
 - **Document Service là chủ duy nhất bảng `documents`** (create + update status). Khớp [api-spec.md](api-spec.md) — `doc.status`: "Document Service subscribe để cập nhật PostgreSQL".
@@ -277,14 +284,18 @@ src/query-service/app/
 │   │   │                                        Circuit Breaker (pybreaker, fail_max=5, reset_timeout=30s).
 │   │   ├── bge_reranker_client.py            ← Implement RerankService — BGE-Reranker-v2-m3 (loaded inline trong container, Top-5→Top-3)
 │   │   └── langfuse_client.py                ← Ghi trace query vào Langfuse: latency từng bước, token cost, retrieved chunks, feedback. Fail-silently.
-│   └── memory/                               ← Redis short-term memory
+│   ├── memory/                               ← Redis short-term memory
+│   └── ws/
+│       ├── connection_manager.py            ← Sổ đăng ký { user_id, role, department } → WebSocket đang mở
+│       └── notify_subscriber.py             ← Subscribe notify.doc_new → lọc user đang online đủ quyền (ACL theo
+│                                               classification/department/user_id) → đẩy {type:"notify",event:"doc_new"} qua ConnectionManager
 │
 └── interfaces/
     └── api/
         ├── main.py
         ├── dependencies.py                   ← get_orchestration_use_case()
         └── routers/
-            ├── query.py                      ← POST /query (streaming SSE)
+            ├── query.py                      ← WS /query (WebSocket): nhận question → stream token → done; đẩy notify bất kỳ lúc nào
             ├── conversations.py              ← GET /conversations, DELETE /conversations
             └── feedback.py                   ← POST /feedback
 ```
@@ -299,7 +310,7 @@ src/query-service/app/
    - `rag_search_tool`: câu hỏi về tài liệu nội bộ → Query Rewriting (3 variations) → NATS `rag.search` → RRF merge → Top-5 candidates → rerank BGE-Reranker-v2-m3 Top-3
    - `hr_query_tool`: câu hỏi HR cá nhân → query `query_db.hr_mock.*` tables (cùng DB của Query Service) với filter `WHERE user_id = current_user`
 5. Build prompt: system prompt + summary + recent messages + retrieved context
-6. Gọi OpenAI GPT-4o mini streaming: yield từng token → SSE event `data: {"token": "..."}`
+6. Gọi OpenAI GPT-4o mini streaming: yield từng token → gửi WebSocket message `{"type":"token","content":"..."}`, kết thúc gửi `{"type":"done","sources":[...]}`
 7. Lưu message: `conv_repo.save_message(user_id, "user", question)` + `save_message(user_id, "assistant", full_answer)`
 8. Summary buffer: nếu conversation > 10 turns → gọi LLM compress → `conv_repo.update_summary()`
 
@@ -308,6 +319,13 @@ src/query-service/app/
 - **OpenAI**: Timeout 30s, không retry — trả 503 ngay, log token count vào Langfuse trước khi fail
 - **Redis**: Fail-open — nếu Redis unreachable, `redis_access_cache.py` fallback về query projection `document_access` trong query_db trực tiếp
 - **Document Service down**: không ảnh hưởng query — ACL đọc từ projection local; chỉ là thay đổi quyền mới (eventual consistency) tạm chưa cập nhật tới khi Document Service sống lại và event `doc.access` được JetStream giao lại
+
+*Realtime notify — "có tài liệu mới" (`notify_subscriber.py`):*
+1. Khi WebSocket connect: decode JWT → `connection_manager.add(user_id, role, department, socket)`.
+2. `notify_subscriber` nhận `notify.doc_new { doc_id, document_name, classification, allowed_departments, allowed_user_ids }`.
+3. Duyệt user đang online trong `connection_manager`, áp ACL: public → tất cả; internal → mọi nhân viên; secret → khớp department; top_secret → khớp user_id.
+4. Đẩy `{type:"notify", event:"doc_new", message:"Có tài liệu mới: <document_name>", doc_id}` tới các socket đủ quyền.
+5. WebSocket disconnect → `connection_manager.remove`.
 
 **Observability — AI/Agent Engineer làm chủ:**
 - Định nghĩa **trace convention** chung (tên trace/span, field bắt buộc) để cả query-service và rag-worker log nhất quán vào cùng 1 Langfuse project.
@@ -338,6 +356,8 @@ nginx/
 ├── nginx.conf                   ← Route /api/user/*       → user-service:8000
 │                                   Route /api/documents/* → document-service:8002
 │                                   Route /api/query/*     → query-service:8001
+│                                     • WS /api/query/query: bật `Upgrade`/`Connection` header (WebSocket),
+│                                       tắt proxy_buffering, proxy_read_timeout dài (vd 3600s) cho kết nối lâu
 │                                   Route /                → next-frontend:3000
 └── ssl/                         ← Let's Encrypt cert (production)
 
@@ -397,7 +417,7 @@ Câu hỏi user
      │
      └── hr_query_tool → query query_db.hr_mock.* tables WHERE user_id = current_user
      ↓
-[AI/Agent Engineer]   build prompt → OpenAI GPT-4o mini streaming → SSE về FE
+[AI/Agent Engineer]   build prompt → OpenAI GPT-4o mini streaming → WebSocket về FE
 ```
 
 **Ranh giới dữ liệu:**

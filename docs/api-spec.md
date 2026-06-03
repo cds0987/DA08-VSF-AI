@@ -157,22 +157,34 @@ Response 503:  { "status": "degraded", "degraded_reasons": ["nats unreachable"] 
 
 ## Query Service — `/query`, `/conversations`, `/feedback`
 
-### `POST /query`
+### `WS /query`  (WebSocket)
 
-Streaming response qua Server-Sent Events.
+Kênh realtime 2 chiều. Dùng cho: (1) stream câu trả lời của bot theo token, (2) server chủ động
+**đẩy thông báo** ("có gì mới") xuống client. Token JWT truyền lúc handshake (query param `?token=` hoặc header).
 
 ```
-Request:
-  Authorization: Bearer <token>
-  Body: { "question": "string (max 500 ký tự)", "user_id": "uuid" }
+Kết nối:  ws(s)://<host>/api/query/query?token=<jwt>
 
-Response 200 (SSE):
-  data: {"token": "Theo "}
-  data: {"token": "chính sách..."}
-  data: {"done": true, "sources": [{"document_name": "string", "caption": "string", "heading_path": ["string"], "score": 0.85, "source_s3_uri": "s3://..."}], "session_id": "uuid"}
+Client → Server (gửi câu hỏi):
+  { "type": "question", "question": "string (max 500 ký tự)" }
 
-Response 429:  { "detail": "Rate limit exceeded. Max 20 requests/minute." }
+Server → Client (stream trả lời):
+  { "type": "token", "content": "Theo " }
+  { "type": "token", "content": "chính sách..." }
+  { "type": "done", "sources": [{"document_name": "string", "caption": "string", "heading_path": ["string"], "score": 0.85, "source_s3_uri": "s3://..."}], "session_id": "uuid" }
+
+Server → Client (đẩy thông báo bất kỳ lúc nào — không cần client hỏi):
+  { "type": "notify", "event": "doc_new", "message": "Có tài liệu mới: Chính sách công tác 2026", "doc_id": "uuid" }
+
+Lỗi:
+  { "type": "error", "code": 429, "detail": "Rate limit exceeded. Max 20 requests/minute." }
+  { "type": "error", "code": 401, "detail": "Invalid or expired token" }     # → server đóng socket
+
+Heartbeat: server gửi ping mỗi ~30s; client không pong → đóng socket. Client tự reconnect (exponential backoff).
 ```
+
+> **Vì sao WebSocket (thay SSE):** cần realtime 2 chiều — ngoài stream trả lời, server còn chủ động đẩy
+> thông báo, và roadmap Phase 2 có typing indicator / multi-user. Nginx cần bật `Upgrade`/`Connection` header.
 
 ### `GET /conversations`
 
@@ -223,6 +235,7 @@ Response 503:  { "status": "degraded", "degraded_reasons": ["rag_worker unreacha
 | Subject | Type | Payload | Mô tả |
 |---------|------|---------|-------|
 | `doc.access` | Publish (Document Service) / Subscribe (Query Service) | `{ doc_id, classification, allowed_departments, allowed_user_ids, deleted: bool }` | Document Service publish mỗi khi upload / đổi quyền / xóa tài liệu. Query Service subscribe (JetStream durable) → upsert/xóa bản ghi trong projection `document_access`. Dùng cho ACL pre-filter. |
+| `notify.doc_new` | Publish (Document Service) / Subscribe (Query Service) | `{ doc_id, document_name, classification, allowed_departments, allowed_user_ids }` | Document Service publish khi tài liệu ingest xong (nhận `doc.status=indexed`). Query Service subscribe → lọc các user **đang online** (trong `connection_manager`) có quyền xem theo ACL → đẩy `{type:"notify", event:"doc_new"}` qua WebSocket. |
 
 ---
 

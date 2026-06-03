@@ -49,7 +49,7 @@ _Upload & Ingestion_
 
 _Q&A Chatbot_
 - [ ] Semantic Cache hoạt động — câu hỏi tương tự (cosine similarity > 0.95) trả kết quả từ cache Redis, không gọi OpenAI
-- [ ] Hỏi câu hỏi → bot trả lời streaming (chữ xuất hiện dần, không đợi toàn bộ)
+- [ ] Hỏi câu hỏi → bot trả lời streaming qua **WebSocket** (chữ xuất hiện dần, không đợi toàn bộ); client tự reconnect khi rớt
 - [ ] Mỗi câu trả lời kèm nguồn: tên tài liệu + số trang + đoạn văn bản được trích dẫn
 - [ ] Click vào nguồn → mở document viewer, nhảy đến đúng trang, highlight đúng đoạn text đó
 - [ ] Không có tài liệu liên quan → bot trả về "Không tìm thấy thông tin" — không bịa
@@ -64,6 +64,11 @@ _Admin Dashboard_
 - [ ] Xem usage metrics cơ bản (số câu hỏi, feedback rate)
 - [ ] Deactivate / Reactivate tài khoản user (xử lý nhân viên nghỉ việc)
 
+_Realtime / Thông báo tài liệu mới (WebSocket)_
+- [ ] WebSocket mở sẵn ngay sau khi đăng nhập (app-level), dùng chung cho chat + thông báo
+- [ ] Tài liệu ingest xong (indexed) → Document Service phát `notify.doc_new` → Query Service đẩy thông báo "Có tài liệu mới: X" qua WebSocket tới **mọi user đang online có quyền xem** tài liệu đó (lọc theo classification/ACL — public/internal/secret/top_secret)
+- [ ] User thấy toast/badge thông báo ngay, không cần reload trang
+
 _Guardrails_
 - [ ] Prompt injection bị chặn — user không thể override system prompt bằng câu hỏi
 - [ ] Off-topic filter — câu hỏi không liên quan công việc → bot từ chối lịch sự, không gọi LLM
@@ -74,7 +79,7 @@ _Feedback & Observability_
 - [ ] Langfuse trace hoạt động: xem được latency, token cost, retrieved chunks
 
 _Cloud Deployment_
-- [ ] Toàn bộ stack chạy ổn định trên AWS EC2 bằng Docker Compose (9 containers: nginx, next-frontend, user-service, document-service, query-service, rag-worker, nats [JetStream], Qdrant, Redis, Langfuse :3100 — PostgreSQL = AWS RDS external)
+- [ ] Toàn bộ stack chạy ổn định trên AWS EC2 bằng Docker Compose (10 containers: nginx, next-frontend, user-service, document-service, query-service, rag-worker, nats [JetStream], Qdrant, Redis, Langfuse :3100 — PostgreSQL = AWS RDS external)
 - [ ] RDS PostgreSQL thay thế local DB — data không mất khi restart
 - [ ] File upload lưu vào S3, không lưu local
 - [ ] Qdrant self-hosted trên AWS, có persistent volume
@@ -177,10 +182,16 @@ Investigate nguyên nhân:
 - Hỗ trợ DM bot hoặc mention trong channel
 - Kỹ thuật: `botbuilder-python` (Microsoft Bot Framework) — cùng hệ sinh thái Azure AD đã dùng cho SSO
 
+**Realtime 2 chiều nâng cao** _(Phase 1 đã có notify "tài liệu mới"):_
+- Mở rộng loại notify: admin đăng chính sách mới, nhắc nhở cá nhân…
+- Khi scale nhiều instance: backplane (NATS/Redis pub-sub) route sự kiện tới đúng instance đang giữ socket của user
+- Tương tác 2 chiều: typing indicator, (xa hơn) chat nhiều người
+
 **Definition of Done:**
 - [ ] Dashboard hiển thị đủ 4 metrics: volume, feedback rate, top questions, knowledge gaps
 - [ ] Admin thấy được danh sách knowledge gaps từ câu hỏi không trả lời được
 - [ ] Hỏi bot ngay trong Microsoft Teams → nhận câu trả lời với nguồn tài liệu
+- [ ] Notify hoạt động khi scale nhiều instance (qua backplane) + có typing indicator
 
 ---
 

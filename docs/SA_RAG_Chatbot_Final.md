@@ -145,7 +145,7 @@ graph LR
     end
     OPS["IT/DevOps Operator"]
 
-    UI["Web UI — Next.js :3000\nNginx · SSE streaming"]
+    UI["Web UI — Next.js :3000\nNginx · WebSocket streaming"]
 
     subgraph USER_SVC["User Service :8000"]
         AUTH["Auth Module\nJWT · bcrypt · RBAC"]
@@ -204,8 +204,11 @@ graph LR
     DOCMGMT -->|"upload"| S3
     DOCMGMT -->|"doc.ingest"| NATS
     DOCMGMT -->|"doc.access"| NATS
+    DOCMGMT -->|"notify.doc_new"| NATS
     NATS -->|"doc.ingest"| INGEST
     NATS -->|"doc.access (ACL projection)"| ORCH
+    NATS -->|"notify.doc_new"| ORCH
+    ORCH -->|"WebSocket notify"| UI
     ORCH --> CONV
     ORCH --> RETR
     RETR --> RERANK
@@ -274,7 +277,7 @@ graph LR
 ```mermaid
 graph LR
     USER["End User"] -->|Question| UI["Web UI Next.js :3000"]
-    UI -->|POST /query SSE| API["Query Service :8001"]
+    UI -->|WS /query| API["Query Service :8001"]
 
     API --> JWT{"JWT + Redis Blacklist\n+ Rate Limit 20/min"}
     JWT -->|Invalid / Rate exceeded| ERR["401 / 429"]
@@ -303,8 +306,8 @@ graph LR
     PROMPT --> LLM["OpenAI GPT-4o mini\nstreaming · tool_call"]
     LLM --> GUARD_OUT["Output Guardrail\nllm-guard PII Redaction"]
 
-    GUARD_OUT -->|SSE stream| UI
-    CACHED -->|SSE stream| UI
+    GUARD_OUT -->|WebSocket stream| UI
+    CACHED -->|WebSocket stream| UI
     FB --> UI
     CANNED --> UI
     GUARD_OUT --> LOG["Langfuse Log\n+ PostgreSQL Save"]
@@ -318,7 +321,7 @@ graph LR
 | 2 | User Service (FastAPI) | Microservice 1: Auth/JWT, user management, login. Issue JWT token khi login. Chia sẻ `JWT_SECRET_KEY` với Document Service, Query Service và RAG Worker để verify locally — không cần gọi lại User Service mỗi request. | ✅ MVP |
 | 2b | Document Service (FastAPI) | Microservice 2: Admin document management — upload và xóa tài liệu. Lưu file lên S3, tạo record PostgreSQL (status=queued). Publish NATS subject `doc.ingest` ngay sau khi upload. Subscribe `doc.status` để cập nhật trạng thái ingestion từ RAG Worker. Chỉ Admin mới có quyền truy cập. | ✅ MVP |
 | 2c | RAG Worker (Python/NATS) | Worker thuần NATS — không expose HTTP. Subscribe `doc.ingest` → chạy pipeline ingestion (OCR→chunk→embed→store Qdrant). Subscribe `rag.search` từ Query Service → embed query → hybrid search → trả sections. | ✅ MVP |
-| 2d | Query Service (FastAPI) | Microservice 3: User chat — nhận câu hỏi, ACL check, Semantic Cache check, Single Agent Function Calling (pick tool), NATS request `rag.search`, nhận sections, rerank, gọi LLM, stream SSE về frontend. Conversation history, feedback. Verify JWT locally. | ✅ MVP |
+| 2d | Query Service (FastAPI) | Microservice 3: User chat — nhận câu hỏi, ACL check, Semantic Cache check, Single Agent Function Calling (pick tool), NATS request `rag.search`, nhận sections, rerank, gọi LLM, stream qua WebSocket về frontend. Conversation history, feedback. Verify JWT locally. | ✅ MVP |
 | 2e | NATS Message Broker | Message broker trung tâm: (1) Async ingestion — Document Service publish `doc.ingest`, RAG Worker subscribe. (2) Request-reply retrieval — Query Service request `rag.search`, RAG Worker reply. Port 4222. **JetStream enabled** — persist message, tránh mất khi RAG Worker restart. | ✅ MVP |
 | 2f | Single Agent / Function Calling | LLM Orchestration dùng LlamaIndex FunctionCallingAgent với 2 tools: `rag_search_tool` (gọi RAG pipeline khi câu hỏi về tài liệu nội bộ) và `hr_query_tool` (query PostgreSQL HR tables khi câu hỏi cá nhân HR). LLM tự quyết định tool nào phù hợp. | ✅ MVP |
 | 3 | OCR Module | Detect PDF scan → Gemini Vision API (OCR). PDF text-based → PyMuPDF (local). | ✅ MVP |
@@ -392,6 +395,7 @@ graph LR
 | 4 | Tiếng Việt Handling | Normalize Unicode NFC sau khi extract text. Fix encoding lỗi. Hỗ trợ tài liệu tiếng Việt và tiếng Anh lẫn lộn trong cùng file. | ✅ MVP |
 | 5 | Q&A Chatbot – Policy/Document | Nhân viên nhập câu hỏi tiếng Việt / Anh về quy trình, chính sách, tài liệu kỹ thuật. Single Agent dùng RAG tool: embed câu hỏi → Qdrant search → LLM build answer. Response streaming – chữ xuất hiện dần. | ✅ MVP |
 | 5b | Personal HR Q&A (Function Calling) | Trả lời câu hỏi cá nhân HR: ngày nghỉ còn lại, số ngày đã nghỉ, trạng thái đơn nghỉ phép, thông tin khấu trừ lương. Single Agent dùng HR tool: Function Calling query PostgreSQL HR tables. Luôn filter `WHERE user_id = current_user` — không thể xem data người khác. Phase 1: mock data. | ✅ MVP |
+| 5c | Realtime Notify – Tài liệu mới (WebSocket) | Khi tài liệu ingest xong (`indexed`), Document Service publish `notify.doc_new`; Query Service đẩy thông báo "Có tài liệu mới: X" qua WebSocket tới **mọi user đang online có quyền xem** (lọc theo classification/ACL). WebSocket mở sẵn ở app-level sau đăng nhập. | ✅ MVP |
 | 6 | Citation / Source Reference | Mỗi câu trả lời kèm nguồn tài liệu (tên file, trang/section). Người dùng click xem trích dẫn gốc. | ✅ MVP |
 | 7 | Fallback – Không có thông tin | Nếu retrieval score < 0.7 → trả về "Không tìm thấy thông tin trong tài liệu nội bộ". Không gọi LLM – tiết kiệm cost, tránh hallucination. | ✅ MVP |
 | 8 | Conversation History – Multi-turn | Lưu lịch sử hội thoại theo từng user. Summary Buffer: LLM tóm tắt các turns cũ, giữ 5 turns gần nhất verbatim. Câu hỏi sau luôn hiểu đủ ngữ cảnh mà không tốn nhiều token. | ✅ MVP |
@@ -460,7 +464,7 @@ flowchart TB
     GEMINI_EXT["Gemini Vision API"]
 
     NEXTJS -- "9. HTTPS / Sync" --> USVC
-    NEXTJS -- "8. HTTPS + SSE / Sync" --> QUERY
+    NEXTJS -- "8. HTTPS + WebSocket" --> QUERY
     USVC -- "TCP SSL" --> PG
     QUERY -- "TCP SSL" --> PG
     RAG -- "TCP SSL" --> PG
@@ -494,7 +498,7 @@ flowchart TB
 | 6 | AWS S3 SDK | RAG Worker / Ingestion Module | AWS S3 (Private Bucket) | HTTPS / S3 SDK | PUT file gốc khi ingest. GET để xử lý. IAM Role-based access. |
 | 7 | Langfuse SDK | Query Service + RAG Worker | Langfuse :3100 (self-hosted on AWS) | HTTP nội bộ (VPC) | Query Service: LLM trace. RAG Worker: ingestion trace. Trace data không ra ngoài AWS. |
 | 8 | Frontend → Document Service | Next.js :3000 (AWS EC2) | Document Service :8002 (EC2) | HTTPS | REST API cho document management (Admin only). Nginx route /api/documents → document-service:8002. |
-| 8b | Frontend → Query Service | Next.js :3000 (AWS EC2) | Query Service :8001 (EC2) | HTTPS + SSE | REST API cho chat/query. Server-Sent Events cho streaming response. Nginx route /api/query → query-service:8001. |
+| 8b | Frontend → Query Service | Next.js :3000 (AWS EC2) | Query Service :8001 (EC2) | HTTPS + WebSocket (WSS) | `WS /query` cho chat realtime 2 chiều: stream token trả lời + server đẩy notify. Các endpoint khác (/conversations, /feedback) là REST. Nginx route /api/query → query-service:8001 (bật Upgrade header). |
 | 9 | Frontend → User Service | Next.js :3000 (AWS EC2) | User Service :8000 (EC2) | HTTPS | REST API cho login, user management. Nginx route /api/user → user-service:8000. |
 | 10 | Query Service → RAG Worker (rag.search) | Query Service | RAG Worker | NATS request-reply | Query vector + document_ids → Top-5 sections. Query Service rerank bằng BGE-Reranker-v2-m3 (Top-5 → Top-3). |
 | 11 | Document Service → RAG Worker (doc.ingest) | Document Service | RAG Worker | NATS publish/subscribe (JetStream) | Admin upload → publish `{ doc_id, s3_key, file_type, classification }` → RAG Worker trigger ingestion pipeline. JetStream đảm bảo message không bị mất khi RAG Worker restart. |
@@ -550,7 +554,7 @@ flowchart LR
     QUERY -->|"embed query"| EMB
     QUERY -->|"conversation context"| PG
     QUERY -->|"prompt + Top-3 sections"| LLM
-    LLM -->|"streaming tokens (SSE)"| EU
+    LLM -->|"streaming tokens (WebSocket)"| EU
     QUERY -->|"trace"| LF
     RAG -->|"trace"| LF
     LF -->|"trace data"| PG
@@ -589,6 +593,7 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Ingestion Pipel
 | 12 | Langfuse | Log ingestion metrics: parse_time, chunk_count, embed_time, total_latency, status (success/failed). Error message nếu thất bại. | Ingestion trace data |
 | 13 | RAG Worker | Publish NATS subject `doc.status` với `{ doc_id, status: 'indexed' \| 'failed', error? }`. | NATS message |
 | 14 | Document Service | Subscribe `doc.status` — nhận kết quả, cập nhật PostgreSQL record. Admin thấy trạng thái realtime trên dashboard. | Document status update |
+| 15 | Document Service | Nếu `indexed` → publish `notify.doc_new { doc_id, document_name, classification, allowed_departments, allowed_user_ids }`. Query Service lọc user online đủ quyền → đẩy thông báo "Có tài liệu mới" qua WebSocket. | NATS message → WebSocket notify |
 
 > _Nếu RAG Worker thất bại → publish `doc.status` với status `failed` → Document Service cập nhật DB → Admin thấy trên dashboard và retry thủ công._
 >
@@ -616,7 +621,7 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 | 9 | Query Module | Build prompt: System prompt + Conversation context + Top-3 chunk_content (Markdown) + Question. | Full prompt (~2000–4000 tokens) |
 | 10 | LLM Service | Gọi OpenAI GPT-4o mini streaming. Buffer full response trước khi qua Output Guardrail. | Full response text |
 | 11 | **Output Guardrail** (llm-guard) | Scan output: PII detection — redact nếu phát hiện thông tin cá nhân người khác. | Cleaned response |
-| 12 | FastAPI | Forward response đã clean về frontend qua SSE streaming. | Streaming tokens |
+| 12 | FastAPI | Forward response đã clean về frontend qua WebSocket (message `{type:token}`). | Streaming tokens |
 | 13 | Langfuse | Log: latency từng bước, input/output tokens, retrieved chunks, scores, guardrail events, tool used. | Trace data (PII masked) |
 | 14 | PostgreSQL (query_db) | Lưu conversation turn: user_id, question, answer, sources, latency, timestamp, tool_used. | Conversation record |
 | 15 | Next.js | Hiển thị streaming response + citation + nút feedback cho user. | Rendered UI |
@@ -635,7 +640,7 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 > - **Open** (≥5 timeout/failure liên tiếp trong 60s): fail-fast, trả 503 ngay không chờ NATS timeout
 > - **Half-Open** (sau 30s): cho 1 request thử — success → Closed, fail → Open lại
 >
-> Khi circuit Open: SSE `{ "error": true, "message": "Hệ thống tìm kiếm tài liệu tạm thời không khả dụng. Vui lòng thử lại sau ít phút." }`, HTTP 503. Log state change vào Langfuse + CloudWatch. `GET /health` trả `"rag_worker": "circuit_open"`.
+> Khi circuit Open: gửi WebSocket message `{ "type": "error", "code": 503, "message": "Hệ thống tìm kiếm tài liệu tạm thời không khả dụng. Vui lòng thử lại sau ít phút." }`. Log state change vào Langfuse + CloudWatch. `GET /health` trả `"rag_worker": "circuit_open"`.
 
 ## 5.3 Evaluation Criteria — Phase 1.5 (Cuối tuần 3)
 
@@ -820,7 +825,7 @@ graph TB
 
 | **Hạng mục** | **Công nghệ** | **Lý do chọn** |
 |-------------|-------------|--------------|
-| Frontend | Next.js 14 + TypeScript + TailwindCSS | Production-ready, streaming response tốt qua SSE, container hóa dễ với Docker. |
+| Frontend | Next.js 14 + TypeScript + TailwindCSS | Production-ready, streaming response qua WebSocket (realtime 2 chiều), container hóa dễ với Docker. |
 | Backend | Python 3.11 – FastAPI | Async native, hệ sinh thái AI/ML tốt nhất, phát triển nhanh. |
 | Architecture | Microservices + Event-driven (NATS) | User Service + Document Service + Query Service + RAG Worker. HTTP REST cho user-facing. NATS cho internal async (ingestion) và request-reply (retrieval). JWT verify locally bằng shared secret. Mỗi service dùng Clean Architecture nội bộ. |
 | LLM Orchestration | LlamaIndex + FunctionCallingAgent | RAG-focused, ít boilerplate hơn LangChain. FunctionCallingAgent cho Single Agent pattern với 2 tools. |
@@ -1159,7 +1164,7 @@ Kết quả ghi vào DR Drill Report. Nếu RTO vượt 4h → tối ưu runbook
 | Semantic Cache | Cache dựa trên cosine similarity của câu hỏi. TTL 1 giờ. Redis key: `semantic_cache:{query_hash}`. |
 | NATS | Lightweight message broker (port 4222). Hỗ trợ publish/subscribe (async ingestion) và request-reply (sync retrieval). RAG Worker subscribe các subjects, không expose HTTP. |
 | Microservices | Kiến trúc backend chia thành nhiều service độc lập. Project này dùng 4 components: User Service + Document Service + Query Service + RAG Worker. Giao tiếp qua HTTP REST (user-facing) và NATS (internal async + request-reply). |
-| SSE | Server-Sent Events – cơ chế streaming response từ FastAPI về Next.js. |
+| WebSocket (WS/WSS) | Kênh realtime 2 chiều giữa Next.js và FastAPI: stream token trả lời của bot + server đẩy notify. Thay cho SSE để hỗ trợ tương tác 2 chiều (Phase 2: typing, multi-user). |
 | JWT | JSON Web Token – chuẩn xác thực stateless. Token chứa user_id và role. |
 | DSR | Data Subject Request – yêu cầu của chủ thể dữ liệu về quyền truy xuất/xóa dữ liệu cá nhân. |
 | RTO | Recovery Time Objective – thời gian tối đa cho phép hệ thống ngừng hoạt động. |
