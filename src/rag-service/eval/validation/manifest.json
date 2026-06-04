@@ -40,6 +40,22 @@
       "document_name": "Security Incident Reporting",
       "query": "how to report a security incident data breach",
       "expect_keyword": "breach"
+    },
+    {
+      "file": "remote_work_policy.pptx",
+      "file_type": "pptx",
+      "document_id": "doc-remote-work",
+      "document_name": "Remote Work Policy",
+      "query": "how many days per week can employees work remotely",
+      "expect_keyword": "three"
+    },
+    {
+      "file": "travel_per_diem.xlsx",
+      "file_type": "xlsx",
+      "document_id": "doc-per-diem",
+      "document_name": "Travel Per Diem Rates",
+      "query": "what is the daily meal allowance per diem for travel",
+      "expect_keyword": "fifty"
     }
   ]
 }

@@ -1,0 +1,37 @@
+{
+  "description": "OCR/vision validation corpus. Every source carries its text ONLY inside images (image files, a scanned PDF with no text-layer, a docx with an embedded image), so parsing requires the AI gateway vision path. The gated e2e tests/e2e/test_validation_ocr_corpus.py skips unless RAG_EVAL_REAL_PROVIDER=1 + a configured provider. Same data-driven shape as manifest.json: add a file + entry to extend. expect_keyword must be reproducible OCR output (kept short and unambiguous).",
+  "documents": [
+    {
+      "file": "guest_wifi.png",
+      "file_type": "png",
+      "document_id": "doc-guest-wifi",
+      "document_name": "Guest Wifi Access",
+      "query": "what is the guest wifi network password",
+      "expect_keyword": "welcome2026"
+    },
+    {
+      "file": "visitor_parking.jpg",
+      "file_type": "jpg",
+      "document_id": "doc-visitor-parking",
+      "document_name": "Visitor Parking Notice",
+      "query": "where can visitors park their car",
+      "expect_keyword": "b2"
+    },
+    {
+      "file": "fire_evacuation_scanned.pdf",
+      "file_type": "pdf",
+      "document_id": "doc-fire-evacuation",
+      "document_name": "Fire Evacuation Procedure",
+      "query": "what should I do when the fire alarm sounds",
+      "expect_keyword": "staircase"
+    },
+    {
+      "file": "emergency_contacts.docx",
+      "file_type": "docx",
+      "document_id": "doc-emergency-contacts",
+      "document_name": "Emergency Contact Card",
+      "query": "what is the facilities hotline phone number",
+      "expect_keyword": "1800"
+    }
+  ]
+}

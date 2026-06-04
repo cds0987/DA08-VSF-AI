@@ -87,8 +87,11 @@ class OfflineProvider(AIProvider):
         """
         qm = re.search(re.escape(RERANK_QUERY_MARKER) + r"\s*(.*)", prompt)
         query = qm.group(1).strip() if qm else ""
+        # Passage `[i] ...` có thể trải NHIỀU dòng (markitdown chèn comment slide,
+        # bảng xlsx nhiều hàng...). Chấm trọn passage tới marker `[i+1]` kế tiếp
+        # (hoặc hết chuỗi) — LLM thật đọc full content nên stub phải bám theo.
         scores = {
             int(m.group(1)): overlap_score(query, m.group(2))
-            for m in re.finditer(r"\[(\d+)\]\s*(.*)", prompt)
+            for m in re.finditer(r"\[(\d+)\]\s*(.*?)(?=\n\[\d+\]|\Z)", prompt, re.DOTALL)
         }
         return json.dumps(scores)
