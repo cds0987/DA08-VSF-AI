@@ -140,14 +140,13 @@ CREATE TABLE doc_svc.documents (
     name                VARCHAR(500) NOT NULL,
     file_type           VARCHAR(20) NOT NULL,                        -- pdf | docx | txt | xlsx | csv | pptx | md
     s3_key              VARCHAR(1000) NOT NULL,
-    status              VARCHAR(20) NOT NULL DEFAULT 'pending',      -- DocumentStatus enum
+    status              VARCHAR(20) NOT NULL DEFAULT 'queued',       -- DocumentStatus: queued|processing|indexed|failed (Admin upload → queued thẳng, không có approve/reject)
     uploaded_by         UUID NOT NULL,                               -- user_id từ User Service
     classification      VARCHAR(20) NOT NULL DEFAULT 'internal',     -- public|internal|secret|top_secret
     allowed_departments TEXT[] NOT NULL DEFAULT '{}',
     allowed_user_ids    TEXT[] NOT NULL DEFAULT '{}',
     chunk_count         INTEGER NOT NULL DEFAULT 0,
     error_message       TEXT,
-    rejection_reason    TEXT,
     created_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     deleted_at          TIMESTAMP WITH TIME ZONE
@@ -161,7 +160,7 @@ CREATE TABLE doc_svc.audit_logs (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     actor_id      UUID NOT NULL,
     actor_role    VARCHAR(50) NOT NULL,
-    action        VARCHAR(100) NOT NULL,     -- 'upload'|'approve'|'reject'|'delete'|'reindex'
+    action        VARCHAR(100) NOT NULL,     -- 'upload'|'delete'|'reindex'
     resource_type VARCHAR(100),             -- 'document'
     resource_id   UUID,
     detail        JSONB,
@@ -234,6 +233,9 @@ Collection name: `rag_chatbot`
   "file_type": "pdf | docx | txt | xlsx | csv | pptx | md",
   "page_number": 1,
   "section_title": "string",
+  "heading_path": ["Chính sách công tác", "Hoàn tiền vé máy bay"],
+  "source_s3_uri": "s3://bucket/raw/{doc_id}.pdf",
+  "markdown_s3_uri": "s3://bucket/processed/{doc_id}.md",
   "classification": "public | internal | secret | top_secret",
   "allowed_departments": ["HR", "Finance"],
   "allowed_user_ids": ["uuid"],
@@ -242,7 +244,7 @@ Collection name: `rag_chatbot`
 }
 ```
 
-> Vector dimension: 1536 (text-embedding-3-small). Chỉ embed `child_text`. `parent_text` lưu trong payload để đưa vào LLM context. `ocr_confidence` chỉ có với PDF scan, dùng để flag low-quality chunks. Chunk size: Parent-Child (LlamaIndex HierarchicalNodeParser) — config TBD sau khi implement.
+> Vector dimension: 1536 (text-embedding-3-small). Chỉ embed `child_text`. `parent_text` lưu trong payload để đưa vào LLM context. `source_s3_uri` (file gốc) + `markdown_s3_uri` (full Markdown) lưu trong payload để RAG Worker populate trực tiếp `SearchResult` khi reply `rag.search` — **không cần tra DB** (rag-worker không dùng PostgreSQL). `section_title` → map sang `caption`, `heading_path` (breadcrumb) → map thẳng sang SearchResult. `ocr_confidence` chỉ có với PDF scan, dùng để flag low-quality chunks. Chunk size: Parent-Child (LlamaIndex HierarchicalNodeParser) — config TBD sau khi implement.
 
 ---
 

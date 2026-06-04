@@ -108,6 +108,11 @@ class ConversationRepository(ABC):
     @abstractmethod
     async def clear_history(self, user_id: str) -> None:
         """Xóa toàn bộ lịch sử và summary của user."""
+
+    @abstractmethod
+    async def save_feedback(self, session_id: str, score: int) -> None:
+        """Lưu feedback (1 = thumbs up | -1 = down) vào cột `messages.feedback`
+        của câu trả lời assistant gần nhất trong session (POST /feedback)."""
 ```
 
 > `RerankService` ABC **đã chuyển sang mcp-service** (reranker nằm trong tool `rag_search`) — xem section mcp-service bên dưới.
@@ -133,6 +138,58 @@ class DocumentAccessRepository(ABC):
           top_secret  → doc có allowed_user_ids contains user_id
         Kết quả nên được cache Redis TTL ~60s.
         """
+
+    @abstractmethod
+    async def upsert_access(self, document_id: str, classification: str,
+                            allowed_departments: List[str], allowed_user_ids: List[str]) -> None:
+        """`doc_access_subscriber` gọi khi nhận event `doc.access` → upsert projection."""
+
+    @abstractmethod
+    async def delete_access(self, document_id: str) -> None:
+        """Xóa bản ghi projection khi nhận `doc.access { deleted:true }`."""
+```
+
+```python
+# src/query-service/app/domain/entities/notification.py
+from dataclasses import dataclass
+from typing import Optional
+from datetime import datetime
+
+@dataclass
+class Notification:
+    id: str
+    user_id: str
+    event: str                  # 'doc_new' | ...
+    message: str
+    doc_id: Optional[str]
+    is_read: bool
+    created_at: datetime
+```
+
+```python
+# src/query-service/app/domain/repositories/notification_repository.py
+from abc import ABC, abstractmethod
+from typing import List, Optional
+from app.domain.entities.notification import Notification
+
+class NotificationRepository(ABC):
+
+    @abstractmethod
+    async def save(self, user_id: str, event: str, message: str, doc_id: Optional[str]) -> Notification:
+        """`notify_subscriber` ghi 1 bản ghi khi đẩy event SSE (cho Notification Center xem lại)."""
+
+    @abstractmethod
+    async def list_history(self, user_id: str, limit: int = 20, offset: int = 0,
+                           unread_only: bool = False) -> List[Notification]:
+        """GET /notifications/history — lịch sử thông báo (phân trang, lọc chưa đọc)."""
+
+    @abstractmethod
+    async def unread_count(self, user_id: str) -> int:
+        """GET /notifications/unread-count — badge số chưa đọc."""
+
+    @abstractmethod
+    async def mark_read(self, notification_id: str) -> None:
+        """POST /notifications/{id}/read — đánh dấu đã đọc."""
 ```
 
 ---
@@ -142,16 +199,36 @@ class DocumentAccessRepository(ABC):
 MCP Tool Service expose tool qua giao thức MCP. Mỗi tool self-contained. `RerankService` nằm ở đây (trong tool `rag_search`).
 
 ```python
+# src/mcp-service/app/domain/entities/search_result.py
+# Bản sao contract NATS reply rag.search (database-per-service → mỗi service giữ bản riêng,
+# đồng bộ shape qua infra/nats/subjects.md). CÙNG shape với SearchResult của rag-worker:
+#   chunk_id, document_id, document_name, caption, parent_text, heading_path, score,
+#   page_number, source_s3_uri, markdown_s3_uri
+@dataclass
+class SearchResult:
+    chunk_id: str
+    document_id: str
+    document_name: str
+    caption: str
+    parent_text: str
+    heading_path: List[str]
+    score: float
+    page_number: Optional[int] = None
+    source_s3_uri: str = ""
+    markdown_s3_uri: str = ""
+```
+
+```python
 # src/mcp-service/app/domain/repositories/rerank_service.py
 from abc import ABC, abstractmethod
 from typing import List
-from app.domain.entities.search_result import SearchResult   # SearchResult = contract NATS reply từ rag-worker
+from app.domain.entities.search_result import SearchResult
 
 class RerankService(ABC):
 
     @abstractmethod
-    async def rerank(self, query: str, sections: List[SearchResult], top_n: int = 3) -> List[SearchResult]:
-        """Rerank sections bằng BGE-Reranker-v2-m3, trả về top_n có score cao nhất."""
+    async def rerank(self, query: str, chunks: List[SearchResult], top_n: int = 3) -> List[SearchResult]:
+        """Rerank chunks bằng BGE-Reranker-v2-m3, trả về top_n có score cao nhất."""
 ```
 
 ```python
@@ -169,11 +246,67 @@ class RagSearchInput:
 class HrQueryInput:
     user_id: str                        # do MCP client inject từ JWT — KHÔNG để LLM tự điền
     intent: str                         # 'leave_balance' | 'leave_requests' | 'payroll'
+
+# --- Output DTO (field bám đúng schema hr_mock trong data-schema.md) ---
+@dataclass
+class LeaveBalanceDTO:
+    annual_total: int
+    annual_used: int
+    annual_remaining: int               # = annual_total - annual_used
+    sick_total: int
+    sick_used: int
+    sick_remaining: int                 # = sick_total - sick_used
+
+@dataclass
+class LeaveRequestDTO:
+    leave_type: str                     # 'annual' | 'sick' | 'personal'
+    start_date: str                     # 'YYYY-MM-DD'
+    end_date: str                       # 'YYYY-MM-DD'
+    days_count: int
+    status: str                         # 'pending' | 'approved' | 'rejected'
+
+@dataclass
+class PayrollDTO:
+    period: str                         # 'YYYY-MM'
+    gross_salary: float
+    deductions: float
+    net_salary: float
+
+@dataclass
+class HrQueryResult:
+    intent: str                                              # echo intent đã hỏi
+    leave_balance: Optional[LeaveBalanceDTO] = None          # set khi intent='leave_balance'
+    leave_requests: Optional[List[LeaveRequestDTO]] = None   # set khi intent='leave_requests'
+    payroll: Optional[List[PayrollDTO]] = None               # set khi intent='payroll' (theo period)
+    summary: str = ""                                        # câu tóm tắt tự nhiên cho LLM đưa vào câu trả lời
 ```
 
 > **MCP tool**: `rag_search(RagSearchInput) -> List[SearchResult]` (Top-3 sau rerank);
-> `hr_query(HrQueryInput) -> dict`. Query Service là MCP client; tham số nhạy cảm (`document_ids`, `user_id`)
+> `hr_query(HrQueryInput) -> HrQueryResult` (output typed — tùy `intent` mà field tương ứng được set,
+> kèm `summary` để LLM dùng trực tiếp). Query Service là MCP client; tham số nhạy cảm (`document_ids`, `user_id`)
 > do client inject, không tin LLM.
+
+```python
+# src/mcp-service/app/domain/repositories/hr_repository.py — đọc hr_mock (mcp_db)
+from abc import ABC, abstractmethod
+from typing import List, Optional
+from app.domain.entities.tool_io import LeaveBalanceDTO, LeaveRequestDTO, PayrollDTO
+
+class HrRepository(ABC):
+    """Query schema hr_mock trong mcp_db. LUÔN filter WHERE user_id (do MCP client inject từ JWT)."""
+
+    @abstractmethod
+    async def get_leave_balance(self, user_id: str) -> Optional[LeaveBalanceDTO]:
+        """Số phép năm/ốm còn lại (hr_mock.leave_balance)."""
+
+    @abstractmethod
+    async def get_leave_requests(self, user_id: str) -> List[LeaveRequestDTO]:
+        """Danh sách đơn nghỉ phép + trạng thái (hr_mock.leave_requests)."""
+
+    @abstractmethod
+    async def get_payroll(self, user_id: str) -> List[PayrollDTO]:
+        """Bảng lương theo period (hr_mock.payroll_summary)."""
+```
 
 ---
 
@@ -187,12 +320,10 @@ from datetime import datetime
 from enum import Enum
 
 class DocumentStatus(str, Enum):
-    PENDING = "pending"         # End User upload, chờ Admin approve
-    QUEUED = "queued"           # Admin upload trực tiếp, hoặc đã được approve
-    PROCESSING = "processing"
+    QUEUED = "queued"           # Admin upload → publish doc.ingest, chờ RAG Worker xử lý
+    PROCESSING = "processing"   # RAG Worker đang ingest
     INDEXED = "indexed"         # Đã ingest và index vào Qdrant thành công
     FAILED = "failed"
-    REJECTED = "rejected"       # Admin reject
 
 @dataclass
 class Document:
@@ -203,24 +334,27 @@ class Document:
     status: DocumentStatus
     uploaded_by: str            # user_id
     created_at: datetime
-    section_count: int = 0
+    chunk_count: int = 0
     error_message: Optional[str] = None
     classification: str = "internal"                                # public | internal | secret | top_secret
     allowed_departments: List[str] = field(default_factory=list)   # bắt buộc nếu secret
     allowed_user_ids: List[str] = field(default_factory=list)      # bắt buộc nếu top_secret
 
 @dataclass
-class Section:
-    section_id: str             # format: {doc_id}_section_{index}
+class Chunk:                     # Parent-Child Chunking (LlamaIndex HierarchicalNodeParser)
+    chunk_id: str               # uuid — point id trong Qdrant
+    parent_id: str              # uuid của parent node
     document_id: str
-    section_content: str        # processed Markdown — đưa thẳng vào LLM prompt
-    caption: str                # nhãn ngắn (AI-generated hoặc heuristic từ heading)
+    child_text: str             # đoạn nhỏ — dùng để EMBED + search
+    parent_text: str            # đoạn cha lớn hơn — đưa vào LLM context khi child match
+    caption: str                # nhãn ngắn (= section_title trong Qdrant payload; AI-gen/heuristic từ heading)
     heading_path: List[str]     # breadcrumb: ["Chính sách công tác", "Hoàn tiền vé máy bay"]
-    source_s3_uri: str          # URI file gốc — dùng để cite nguồn
-    markdown_s3_uri: str        # URI full document Markdown — dùng khi cần context rộng hơn
+    page_number: Optional[int] = None
+    source_s3_uri: str = ""     # URI file gốc — dùng để cite nguồn
+    markdown_s3_uri: str = ""   # URI full document Markdown — dùng khi cần context rộng hơn
 ```
 
-> `Document` + `Section` ở đây chỉ là **entity xử lý in-memory** cho ingestion (parse → chunk → embed).
+> `Document` + `Chunk` ở đây chỉ là **entity xử lý in-memory** cho ingestion (parse → **Parent-Child chunk** → embed).
 > Việc ghi/đọc bảng `documents` (`DocumentRepository`) thuộc **document-service** — xem section riêng bên dưới.
 > RAG Worker không ghi bảng documents, chỉ publish `doc.status`.
 
@@ -247,22 +381,23 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 @dataclass
-class SearchResult:
-    section_id: str
+class SearchResult:           # = contract NATS reply rag.search (Top-K chunks sau threshold)
+    chunk_id: str
     document_id: str
     document_name: str
     caption: str
-    section_content: str    # processed Markdown — đưa thẳng vào LLM prompt
-    heading_path: List[str] # breadcrumb từ root đến section
-    score: float            # similarity score sau vector search và threshold filter
-    source_s3_uri: str      # URI file gốc — dùng để cite nguồn
-    markdown_s3_uri: str    # URI full document Markdown
+    parent_text: str        # Parent-Child: trả parent_text để đưa vào LLM prompt (match trên child_text)
+    heading_path: List[str] # breadcrumb từ root đến chunk
+    score: float            # similarity của child_text sau vector search + threshold filter
+    page_number: Optional[int] = None
+    source_s3_uri: str = "" # URI file gốc — dùng để cite nguồn
+    markdown_s3_uri: str = ""  # URI full document Markdown
 
 class VectorRepository(ABC):
 
     @abstractmethod
-    async def upsert(self, section_id: str, vector: List[float], payload: dict) -> None:
-        """Lưu vector + metadata vào Qdrant."""
+    async def upsert(self, chunk_id: str, vector: List[float], payload: dict) -> None:
+        """Lưu vector (embed từ child_text) + metadata Parent-Child vào Qdrant."""
 
     @abstractmethod
     async def hybrid_search(
@@ -272,10 +407,10 @@ class VectorRepository(ABC):
         top_k: int = 5,
         document_ids: Optional[List[str]] = None,
     ) -> List[SearchResult]:
-        """Hybrid search (vector + BM25 RRF).
-        document_ids: filter chỉ search trong các doc này.
-        None = chỉ search public docs (fail-secure default).
-        Query Service tự query allowed_doc_ids từ PostgreSQL trước khi gọi.
+        """Hybrid search (vector + BM25 RRF) trên child_text.
+        document_ids: filter chỉ search trong các doc này. None = chỉ public docs (fail-secure default).
+        document_ids do **mcp-service** truyền vào (Query Service đã lọc ACL từ projection
+        `query_db.document_access` và inject qua MCP — rag-worker không biết logic ACL).
         """
 
     @abstractmethod

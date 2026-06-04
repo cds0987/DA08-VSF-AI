@@ -229,7 +229,7 @@ graph LR
     LF --> LF_PG
     RETR --> EMB
     RETR -->|"rag.search"| NATS
-    NATS -->|"reply sections"| RETR
+    NATS -->|"reply chunks"| RETR
     S3 --> INGEST
     INGEST --> PARSER
     PARSER -->|"PDF scan"| OCR
@@ -327,7 +327,7 @@ graph LR
 | 1 | Web UI — **2 micro-frontend** (Nuxt 4 + Vue 3) | **Chat app** (End User, :3000): chat streaming (SSE) + **Notification Center** (badge/lịch sử) + **Document Viewer** (PDF.js highlight citation) + lịch sử hội thoại. **Admin console** (Admin, :3001): upload tài liệu, quản lý user, **analytics charts**. Dùng chung **Nuxt base layer** (auth qua User Service `/auth`, design system). | ✅ MVP |
 | 2 | User Service (FastAPI) | Microservice 1: Auth/JWT, user management, login. Issue JWT token khi login. Chia sẻ `JWT_SECRET_KEY` với Document Service, Query Service và RAG Worker để verify locally — không cần gọi lại User Service mỗi request. | ✅ MVP |
 | 2b | Document Service (FastAPI) | Microservice 2: Admin document management — upload và xóa tài liệu. Lưu file lên S3, tạo record PostgreSQL (status=queued). Publish NATS subject `doc.ingest` ngay sau khi upload. Subscribe `doc.status` để cập nhật trạng thái ingestion từ RAG Worker. Chỉ Admin mới có quyền truy cập. | ✅ MVP |
-| 2c | RAG Worker (Python/NATS) | Worker thuần NATS — không expose HTTP. Subscribe `doc.ingest` → chạy pipeline ingestion (OCR→chunk→embed→store Qdrant). Subscribe `rag.search` từ Query Service → embed query → hybrid search → trả sections. | ✅ MVP |
+| 2c | RAG Worker (Python/NATS) | Worker thuần NATS — không expose HTTP. Subscribe `doc.ingest` → chạy pipeline ingestion (OCR→chunk→embed→store Qdrant). Subscribe `rag.search` từ MCP Service → embed query → hybrid search → trả chunks. | ✅ MVP |
 | 2d | Query Service (FastAPI) | Microservice 3: User chat — nhận câu hỏi, ACL check, Semantic Cache check, Single Agent (MCP client) gọi tool ở mcp-service, nhận kết quả, gọi LLM, stream **SSE** về frontend (+ stream `/notifications` đẩy thông báo). Conversation history, feedback. Verify JWT locally. | ✅ MVP |
 | 2e | NATS Message Broker | Message broker trung tâm: (1) Async ingestion — Document Service publish `doc.ingest`, RAG Worker subscribe. (2) Request-reply retrieval — Query Service request `rag.search`, RAG Worker reply. Port 4222. **JetStream enabled** — persist message, tránh mất khi RAG Worker restart. | ✅ MVP |
 | 2f | Single Agent / Function Calling | LLM Orchestration dùng LlamaIndex FunctionCallingAgent là **MCP client** — liệt kê tool từ mcp-service và để LLM tự chọn. Query Service inject `document_ids`/`user_id` vào lời gọi tool. | ✅ MVP |
@@ -505,7 +505,7 @@ flowchart TB
 | 2 | OpenAI Chat Completion API | Query Service / Single Agent | OpenAI GPT-4o mini | HTTPS/TLS – Sync, Streaming, tool_call | Full prompt → streaming tokens. Function Calling (tool_call) cho Single Agent. API Key qua Secrets Manager. |
 | 3 | Gemini Vision API | RAG Worker / OCR Module | Gemini Vision API | HTTPS/TLS – Sync | PDF scan image → extracted text + layout. Chỉ gọi khi phát hiện PDF scan (không có text layer). API Key qua Secrets Manager. |
 | 3b | PyMuPDF | RAG Worker / OCR Module | Local processing (không gọi API) | In-process | PDF có text layer → extract text trực tiếp. Nhanh, miễn phí. |
-| 4 | Qdrant REST API | RAG Worker / Query + Ingestion Module | Qdrant (self-hosted on AWS) | HTTPS / REST | Upsert vectors khi ingest (payload: section_id, document_id, classification, heading_path). Hybrid search Top-K=5 (vector + BM25 via RRF) với document_ids filter khi query. API Key auth. |
+| 4 | Qdrant REST API | RAG Worker / Query + Ingestion Module | Qdrant (self-hosted on AWS) | HTTPS / REST | Upsert vectors khi ingest (payload: chunk_id, parent_id, document_id, classification, heading_path). Hybrid search Top-K=5 (vector + BM25 via RRF) với document_ids filter khi query. API Key auth. |
 | 5 | RDS PostgreSQL | User Service / Document Service / Query Service / MCP Service | AWS RDS PostgreSQL 15 | TCP/SSL | 5 databases: user_db (users/sessions/audit), doc_db (document metadata/audit), query_db (conversations/messages/document_access projection), mcp_db (hr_mock), langfuse_db (traces). RAG Worker không dùng RDS. SSL required. |
 | 6 | AWS S3 SDK | RAG Worker / Ingestion Module | AWS S3 (Private Bucket) | HTTPS / S3 SDK | PUT file gốc khi ingest. GET để xử lý. IAM Role-based access. |
 | 7 | Langfuse SDK | Query Service + RAG Worker | Langfuse :3100 (self-hosted on AWS) | HTTP nội bộ (VPC) | Query Service: LLM trace. RAG Worker: ingestion trace. Trace data không ra ngoài AWS. |
@@ -513,7 +513,7 @@ flowchart TB
 | 8b | Chat app → Query Service | nuxt-chat :3000 (AWS EC2) | Query Service :8001 (EC2) | HTTPS + SSE | `POST /query` (SSE) stream token trả lời; `GET /notifications` (SSE app-level) server đẩy thông báo. Các endpoint khác (/conversations, /feedback) là REST. Nginx route /api/query → query-service:8001 (tắt buffering cho SSE). Analytics (`GET /admin/metrics`) thì Admin app gọi. |
 | 9 | Chat app + Admin app → User Service | nuxt-chat :3000 + nuxt-admin :3001 | User Service :8000 (EC2) | HTTPS | **Auth `/auth/*` (login/refresh/me) — cả 2 app dùng chung** (qua Nuxt base layer). **`/users/*` (quản lý user) — chỉ Admin app**. Nginx route /api/user → user-service:8000. |
 | 9b | Query Service → MCP Service | Query Service (MCP client) | MCP Service :8003 | MCP (Streamable HTTP/SSE) | Liệt kê + gọi tool `rag_search`/`hr_query`. Query Service inject `document_ids`/`user_id`. Circuit Breaker (pybreaker, fail_max=5, reset_timeout=30s). |
-| 10 | MCP Service → RAG Worker (rag.search) | MCP Service (tool rag_search) | RAG Worker | NATS request-reply | query_text + document_ids → RAG Worker embed + hybrid search → Top-5 sections. mcp-service rerank bằng BGE-Reranker-v2-m3 (Top-5 → Top-3). |
+| 10 | MCP Service → RAG Worker (rag.search) | MCP Service (tool rag_search) | RAG Worker | NATS request-reply | query_text + document_ids → RAG Worker embed + hybrid search → Top-5 chunks. mcp-service rerank bằng BGE-Reranker-v2-m3 (Top-5 → Top-3). |
 | 11 | Document Service → RAG Worker (doc.ingest) | Document Service | RAG Worker | NATS publish/subscribe (JetStream) | Admin upload → publish `{ doc_id, s3_key, file_type, classification }` → RAG Worker trigger ingestion pipeline. JetStream đảm bảo message không bị mất khi RAG Worker restart. |
 
 ---
@@ -564,10 +564,10 @@ flowchart LR
     QUERY -->|"ACL query"| PG
     QUERY -->|"allowed_doc_ids (TTL ~60s)"| REDIS
     QUERY -->|"request rag.search"| NATS
-    NATS -->|"reply sections"| QUERY
+    NATS -->|"reply chunks"| QUERY
     QUERY -->|"embed query"| EMB
     QUERY -->|"conversation context"| PG
-    QUERY -->|"prompt + Top-3 sections"| LLM
+    QUERY -->|"prompt + Top-3 chunks"| LLM
     LLM -->|"streaming tokens (SSE)"| EU
     QUERY -->|"trace"| LF
     RAG -->|"trace"| LF
@@ -627,7 +627,7 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 | 4c | Query Service | Semantic Cache check: embed câu hỏi → cosine similarity so với cache Redis. Hit (> 0.95) → trả cached response ngay, không gọi LLM. | Cache hit / miss |
 | 5 | Single Agent (MCP client) | LLM nhận diện intent → quyết định gọi MCP tool nào: `rag_search` (tài liệu nội bộ) hoặc `hr_query` (HR cá nhân). Query Service inject `document_ids`/`user_id`. | Tool selection decision |
 | 5b | `rag_search` (MCP tool, mcp-service) — Query Rewriting | LLM sinh 3 variations của câu hỏi gốc → hybrid search Qdrant (qua NATS rag.search) với cả 3 → kết hợp bằng Reciprocal Rank Fusion (RRF) → candidates pool. | 3 query variants + merged candidates |
-| 5c | `hr_query` (MCP tool, mcp-service) | Query `mcp_db.hr_mock.*` (`leave_balance`, `leave_requests`, `payroll_summary`). Luôn filter `WHERE user_id = current_user` — không thể xem data người khác. | HR personal data |
+| 5c | `hr_query` (MCP tool, mcp-service) | Query `mcp_db.hr_mock.*` (`leave_balance`, `leave_requests`, `payroll_summary`). Luôn filter `WHERE user_id = current_user` — không thể xem data người khác. | `HrQueryResult` (typed theo intent + summary) |
 | 6 | RAG Worker / Qdrant | mcp-service (tool `rag_search`) publish NATS request `rag.search` với `{ query_text, document_ids, top_k: 5 }`. RAG Worker embed query (text-embedding-3-small) → hybrid search Qdrant (vector + BM25), filter `document_ids`, reply kết quả. Top-K=5 candidates vượt ngưỡng score 0.5. | List of `{ node_id, content, caption, heading_path, score, ... }` |
 | 7 | Query Service | Kiểm tra score threshold: max score < 0.7 → trả fallback, không gọi LLM. | "Không tìm thấy thông tin trong tài liệu nội bộ" |
 | 7b | mcp-service / BGE-Reranker-v2-m3 | Rerank Top-5 chunks theo độ liên quan với query gốc (trong tool `rag_search`). Trả về Top-3 chunks để đưa vào LLM prompt. | Top-3 chunk_content (Markdown) |
