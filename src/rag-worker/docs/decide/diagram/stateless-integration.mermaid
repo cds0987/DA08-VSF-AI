@@ -1,0 +1,126 @@
+%% =====================================================================
+%% V2 — STATELESS SERVER INTEGRATION (luồng nguyên bản S3 → Qdrant)
+%% Spine (nét liền): S3 → Detector → Q1 → Parse mode → Artifact → Q2 → Index mode → Qdrant
+%% Helpers nặng tách ra: Parser Pool (CPU) + Embedding Gateway (I/O), gọi qua Router(+CB).
+%% Chỉnh theo review:
+%%   - tách File Claim (Q1, TTL dài) vs Section Claim (Q2, TTL ngắn)
+%%   - orchestrator 2 mode riêng: Parse (từ Q1) vs Index (từ Q2)
+%%   - circuit OPEN → PAUSE claim (không hot-requeue loop); đã-claim-mà-lỗi → release+backoff
+%%   - shared embedding cache (không local-only)
+%%   - local search fallback CHỈ khi cùng dimension/space với Qdrant
+%% Chi tiết: ../technique/execution-fallback.md · parser.md · embedding.md
+%% =====================================================================
+%%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 38, "rankSpacing": 58}}}%%
+
+flowchart LR
+
+    %% ----------------------- SOURCE + TRIGGER ---------------------
+    S3[("S3 / Object Store<br/>raw documents")]
+    subgraph DET["Change Detector"]
+        direction TB
+        EVT["Event Listener<br/>PRIMARY"]
+        SCAN["Reconciliation<br/>Scanner"]
+    end
+    S3 --> EVT
+    S3 --> SCAN
+
+    %% --------------------- MAIN INGESTION SERVICE -----------------
+    subgraph MAIN["Main Ingestion Service — orchestrator (KHÔNG import vendor SDK)"]
+        direction TB
+        Q1[("Queue 1<br/>File Tasks · durable")]
+        CL1{{"File Claim<br/>claim_id · TTL 10-30m<br/>(parse/OCR lâu)"}}
+        PMODE["Orchestrator · PARSE mode (từ Q1)<br/>gọi parser · write artifact · enqueue sections"]
+        Q2[("Queue 2<br/>Section Tasks · durable")]
+        CL2{{"Section Claim<br/>claim_id · TTL 1-5m<br/>(embed/upsert nhanh)"}}
+        IMODE["Orchestrator · INDEX mode (từ Q2)<br/>build caption · request vector · upsert"]
+        RPARSE["Parser Router<br/>+ circuit breaker"]
+        REMBED["Embedder Router<br/>+ circuit breaker"]
+
+        Q1 --> CL1 --> PMODE
+        PMODE -->|"section tasks"| Q2 --> CL2 --> IMODE
+    end
+
+    EVT -->|"new / update / delete"| Q1
+    SCAN -->|"repair missing/changed/deleted"| Q1
+
+    %% -------------------- STATELESS HELPER POOLS ------------------
+    subgraph HELP["Stateless Helper Pools — remote adapters"]
+        direction TB
+        PPOOL["Parser Pool × N<br/>CPU · MarkItDown + OCR/vision<br/>autoscale CPU / Queue1"]
+        GW["Embedding / AI Gateway × M<br/>I/O async · batch · per-model<br/>autoscale Queue2 / rate-limit"]
+        ECACHE[("Shared Embedding Cache<br/>Redis / cache table<br/>key = content_hash")]
+        GW <-->|"hit / miss"| ECACHE
+    end
+    subgraph FB["In-process Fallback — bounded"]
+        direction TB
+        LEMBED["Local Embedder · bounded 1-2 · CHỈ search<br/>điều kiện: CÙNG dimension/space với Qdrant<br/>(KHÔNG local-parse)"]
+    end
+
+    %% Parse step uses Parser Pool
+    PMODE -->|"parse"| RPARSE
+    RPARSE -->|"POST /parse (object_key)"| PPOOL
+    PPOOL -->|"markdown + sections"| PMODE
+
+    %% Index step uses Embedding Gateway
+    IMODE -->|"embed caption"| REMBED
+    REMBED -->|"batch-path"| GW
+    GW -->|"vectors"| IMODE
+
+    %% ----------------------- STORES (spine end) -------------------
+    ART[("Canonical Artifact<br/>Markdown · {prefix}/{document_id}")]
+    QDR[("Qdrant<br/>vector=embedding(caption)<br/>payload: content + lineage")]
+    META[("Metadata DB<br/>status · claim · version · job log")]
+
+    PMODE --> ART
+    IMODE -->|"upsert vector + payload"| QDR
+    IMODE -->|"status + job log"| META
+
+    %% --------------------------- SEARCH ---------------------------
+    subgraph SR["Search Service"]
+        direction TB
+        SQ["Query"]
+        SSEARCH["Vector search"]
+        SRES["Results<br/>content + lineage + score"]
+        SQ --> SSEARCH --> SRES
+    end
+    SQ -->|"embed query (fast-path)"| REMBED
+    REMBED -->|"query vector"| SSEARCH
+    QDR --> SSEARCH
+
+    %% --------- FALLBACK: circuit breaker điều khiển CLAIM ---------
+    RPARSE -. "circuit OPEN → PAUSE claim Q1<br/>queued-degraded · KHÔNG local-parse" .-> CL1
+    REMBED -. "ingest circuit OPEN → PAUSE claim Q2" .-> CL2
+    REMBED -. "search circuit OPEN → local (nếu vector-compatible)" .-> LEMBED
+    LEMBED -. "query vector (degraded)" .-> SSEARCH
+    %% đã-claim rồi remote lỗi → release + backoff (không hot-loop)
+    PMODE -. "remote lỗi sau claim → release + backoff" .-> Q1
+    IMODE -. "remote lỗi sau claim → release + backoff" .-> Q2
+
+    %% ----------------------- FAILURE + HEALTH ---------------------
+    DLQ[("Dead Letter Queue<br/>classified: stage · transient/permanent")]
+    PMODE -. failed .-> DLQ
+    IMODE -. failed .-> DLQ
+    DLQ -.-> META
+
+    HEALTH["Health / Readiness — fail-closed<br/>mode = remote / local-fallback / queued-degraded"]
+    HEALTH -.-> PPOOL
+    HEALTH -.-> GW
+    HEALTH -.-> QDR
+
+    %% ----------------------------- STYLE --------------------------
+    classDef store fill:#eef,stroke:#88a,stroke-width:1px;
+    classDef queue fill:#f5f7ff,stroke:#667,stroke-width:1px;
+    classDef gate fill:#fff7cc,stroke:#aa6,stroke-width:1px;
+    classDef router fill:#fdf2ff,stroke:#a6a,stroke-width:1px;
+    classDef remote fill:#eefbea,stroke:#6a6,stroke-width:1px;
+    classDef local fill:#fff0e6,stroke:#c83,stroke-width:1px,stroke-dasharray:4 3;
+    classDef ops fill:#f7f7f7,stroke:#888,stroke-width:1px,stroke-dasharray:3 3;
+
+    class S3,ART,QDR,META,ECACHE store;
+    class Q1,Q2 queue;
+    class CL1,CL2 gate;
+    class RPARSE,REMBED router;
+    class PPOOL,GW remote;
+    class LEMBED local;
+    class DLQ ops;
+    class HEALTH ops;
