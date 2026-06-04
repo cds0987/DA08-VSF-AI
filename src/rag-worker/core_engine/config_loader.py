@@ -13,6 +13,9 @@ _ENV_PATTERN = re.compile(r"^\$\{([A-Z0-9_]+)(?::-(.*))?\}$")
 
 
 def _interpolate_value(value: Any) -> Any:
+    # Whole-value only: `${VAR}` được expand khi nó là TOÀN BỘ scalar (anchored).
+    # `${VAR}` lồng trong chuỗi lớn hơn (vd "http://${HOST}:6333") KHÔNG được expand —
+    # trả về literal, không làm hỏng giá trị. Cần inline thì set sẵn giá trị đầy đủ qua env.
     if isinstance(value, dict):
         return {key: _interpolate_value(inner) for key, inner in value.items()}
     if isinstance(value, list):
@@ -83,14 +86,20 @@ def _reject_nested_embed_keys(cfg: dict[str, Any]) -> None:
 
 def load_config(path: str | os.PathLike[str]) -> PipelineConfig:
     payload = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-    payload = _interpolate_value(payload)
     profiles = payload.get("profiles")
     if profiles:
-        active = os.getenv("PIPELINE_PROFILE") or payload.get("active")
+        # Interpolate `active` riêng để chọn profile; KHÔNG interpolate cả payload ở đây —
+        # nếu không, một `${VAR}` bắt buộc ở profile KHÔNG active vẫn làm vỡ việc load.
+        active_raw = payload.get("active")
+        active = os.getenv("PIPELINE_PROFILE") or (
+            _interpolate_value(active_raw) if active_raw is not None else None
+        )
         if not active:
             raise ValueError("Pipeline config must declare active profile or PIPELINE_PROFILE")
         resolved = _resolve_profile(str(active), profiles)
     else:
         resolved = payload
+    # Chỉ interpolate profile đã chọn + đã merge `extends`.
+    resolved = _interpolate_value(resolved)
     _reject_nested_embed_keys(resolved)
     return PipelineConfig.model_validate(resolved)
