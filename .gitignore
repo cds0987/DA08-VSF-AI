@@ -1,2 +1,12 @@
 .claude/
 proposal/
+.env
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.py[cod]
+query-body.json
+feedback-body.json
+notify-body.json

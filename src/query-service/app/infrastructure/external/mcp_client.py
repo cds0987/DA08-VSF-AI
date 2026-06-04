@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+import re
 from typing import Any
+import unicodedata
 
 from app.infrastructure.db.mock_data import MOCK_DOCUMENTS, MOCK_HR_DATA
 
@@ -83,11 +85,11 @@ class MockMCPClient:
             return []
 
         query_lower = query.lower()
+        query_tokens = _query_tokens(query)
         results: list[SearchResult] = []
         for document in MOCK_DOCUMENTS:
             if document.id not in document_ids:
                 continue
-            score = document.score
             haystack = " ".join(
                 [
                     document.name,
@@ -96,10 +98,18 @@ class MockMCPClient:
                     document.section_content,
                     " ".join(document.heading_path),
                 ]
-            ).lower()
-            if any(token in haystack for token in query_lower.split()):
-                score += 0.03
-            if "khong lien quan" in query_lower or "không liên quan" in query_lower or "alien" in query_lower:
+            )
+            haystack_tokens = _token_set(haystack)
+            matched_tokens = [
+                token
+                for token in query_tokens
+                if token in haystack_tokens
+            ]
+            if not matched_tokens:
+                score = 0.2
+            else:
+                score = document.score + min(0.08, len(set(matched_tokens)) * 0.02)
+            if "khong lien quan" in _normalize_text(query_lower) or "alien" in query_lower:
                 score = 0.2
             results.append(
                 SearchResult(
@@ -202,3 +212,61 @@ def _payroll_summary(payroll: PayrollDTO) -> str:
         f"Kỳ lương {payroll.period}: lương gross {payroll.gross_salary:,.0f}, "
         f"khấu trừ {payroll.deductions:,.0f}, net {payroll.net_salary:,.0f}."
     )
+
+
+STOPWORDS = {
+    "ai",
+    "anh",
+    "an",
+    "ăn",
+    "ban",
+    "bạn",
+    "cai",
+    "cái",
+    "cho",
+    "co",
+    "có",
+    "cua",
+    "của",
+    "duoc",
+    "được",
+    "gi",
+    "gì",
+    "hom",
+    "hôm",
+    "la",
+    "là",
+    "nay",
+    "nhu",
+    "như",
+    "toi",
+    "tôi",
+    "ve",
+    "về",
+    "what",
+    "who",
+    "you",
+    "are",
+    "is",
+}
+
+
+def _query_tokens(text: str) -> list[str]:
+    tokens = _token_set(text)
+    return sorted(token for token in tokens if len(token) > 1 and token not in STOPWORDS)
+
+
+def _token_set(text: str) -> set[str]:
+    raw_tokens = re.findall(r"\w+", text.lower().replace("_", " "), re.UNICODE)
+    normalized_tokens = re.findall(r"\w+", _normalize_text(text), re.UNICODE)
+    return set(raw_tokens) | set(normalized_tokens)
+
+
+def _normalize_text(text: str) -> str:
+    without_accents = "".join(
+        character
+        for character in unicodedata.normalize("NFKD", text.lower())
+        if not unicodedata.combining(character)
+    )
+    without_punctuation = re.sub(r"[_\W]+", " ", without_accents, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", without_punctuation).strip()

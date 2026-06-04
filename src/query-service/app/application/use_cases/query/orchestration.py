@@ -1,16 +1,21 @@
 from collections.abc import AsyncIterator
-from time import perf_counter
-from uuid import uuid4
+import hashlib
 import re
+from time import perf_counter
+import unicodedata
+from uuid import uuid4
 
+from app.application.ports import (
+    AuthenticatedUser,
+    HrQueryResultLike,
+    LLMStreamingClient,
+    MCPToolClient,
+    SearchResultLike,
+    SemanticCache,
+)
 from app.domain.repositories.conversation_repository import ConversationRepository
 from app.domain.repositories.document_access_repository import DocumentAccessRepository
-from app.infrastructure.auth.auth_service import AuthenticatedUser
-from app.infrastructure.cache.semantic_cache import InMemorySemanticCache
 from app.infrastructure.config import Settings
-from app.infrastructure.db.mock_conversation_repo import InMemoryConversationRepository
-from app.infrastructure.external.mcp_client import HrQueryResult, MockMCPClient, SearchResult
-from app.infrastructure.external.openai_client import OpenAIStreamingClient
 
 
 class QueryOrchestrationUseCase:
@@ -19,9 +24,9 @@ class QueryOrchestrationUseCase:
         settings: Settings,
         conversation_repo: ConversationRepository,
         document_access_repo: DocumentAccessRepository,
-        semantic_cache: InMemorySemanticCache,
-        mcp_client: MockMCPClient,
-        openai_client: OpenAIStreamingClient,
+        semantic_cache: SemanticCache,
+        mcp_client: MCPToolClient,
+        openai_client: LLMStreamingClient,
     ) -> None:
         self._settings = settings
         self._conversation_repo = conversation_repo
@@ -39,18 +44,14 @@ class QueryOrchestrationUseCase:
         session_id = str(uuid4())
         await self._conversation_repo.save_message(user.id, "user", question)
 
-        cached = await self._semantic_cache.get(question)
-        if cached:
-            answer, sources = cached
-            for token in _word_chunks(answer):
-                yield {"token": token}
-            await self._save_assistant(user.id, session_id, answer, sources, started)
-            yield {"done": True, "sources": sources, "session_id": session_id, "cached": True}
-            return
-
         context = await self._conversation_repo.get_context(user.id, recent_k=5)
         recent_messages = [(message.role, message.content) for message in context.recent_messages]
         intent = self._detect_intent(question)
+        if intent == "identity":
+            async for event in self._handle_identity(user.id, session_id, started):
+                yield event
+            return
+
         if intent.startswith("hr:"):
             async for event in self._handle_hr(
                 question=question,
@@ -73,20 +74,34 @@ class QueryOrchestrationUseCase:
                 yield event
             return
 
+        cache_namespace = _rag_cache_namespace(allowed_doc_ids)
+        cached = await self._semantic_cache.get(cache_namespace, question)
+        if cached:
+            answer, sources = cached
+            for token in _word_chunks(answer):
+                yield {"token": token}
+            await self._save_assistant(user.id, session_id, answer, sources, started)
+            yield {"done": True, "sources": sources, "session_id": session_id, "cached": True}
+            return
+
         results = await self._mcp_client.rag_search(
             query=question,
             document_ids=list(allowed_doc_ids),
             top_k=5,
         )
-        if not results or max(result.score for result in results) < self._settings.rag_score_threshold:
+        grounded_results = [
+            result for result in results if result.score >= self._settings.rag_score_threshold
+        ]
+        if not grounded_results:
             async for event in self._fallback(user.id, session_id, started):
                 yield event
             return
 
-        sources = [self._source_payload(result) for result in results[:3]]
+        top_results = grounded_results[:3]
+        sources = [self._source_payload(result) for result in top_results]
         context_text = "\n\n".join(
             f"[{index + 1}] {result.document_name} / {result.caption}\n{result.parent_text}"
-            for index, result in enumerate(results[:3])
+            for index, result in enumerate(top_results)
         )
         answer_parts: list[str] = []
         async for token in _word_stream(
@@ -94,7 +109,7 @@ class QueryOrchestrationUseCase:
                 question=question,
                 context=context_text,
                 recent_messages=recent_messages,
-                sources=results[:3],
+                sources=top_results,
                 is_hr_answer=False,
             )
         ):
@@ -102,9 +117,29 @@ class QueryOrchestrationUseCase:
             yield {"token": token}
 
         answer = "".join(answer_parts)
-        await self._semantic_cache.put(question, answer, sources)
-        await self._save_assistant(user.id, session_id, answer, sources, started)
-        yield {"done": True, "sources": sources, "session_id": session_id}
+        final_sources = [] if _is_fallback_answer(answer) else sources
+        if final_sources:
+            await self._semantic_cache.put(cache_namespace, question, answer, final_sources)
+        await self._save_assistant(user.id, session_id, answer, final_sources, started)
+        done_event = {"done": True, "sources": final_sources, "session_id": session_id}
+        if not final_sources:
+            done_event["fallback"] = True
+        yield done_event
+
+    async def _handle_identity(
+        self,
+        user_id: str,
+        session_id: str,
+        started: float,
+    ) -> AsyncIterator[dict]:
+        answer = (
+            "Mình là trợ lý nội bộ VinSmartFuture, hỗ trợ trả lời dựa trên tài liệu nội bộ "
+            "và dữ liệu bạn được cấp quyền truy cập."
+        )
+        for token in _word_chunks(answer):
+            yield {"token": token}
+        await self._save_assistant(user_id, session_id, answer, [], started)
+        yield {"done": True, "sources": [], "session_id": session_id}
 
     async def _handle_hr(
         self,
@@ -155,8 +190,9 @@ class QueryOrchestrationUseCase:
         started: float,
     ) -> None:
         latency_ms = int((perf_counter() - started) * 1000)
-        if isinstance(self._conversation_repo, InMemoryConversationRepository):
-            await self._conversation_repo.save_message_detail(
+        save_message_detail = getattr(self._conversation_repo, "save_message_detail", None)
+        if save_message_detail:
+            await save_message_detail(
                 user_id=user_id,
                 role="assistant",
                 content=answer,
@@ -174,7 +210,7 @@ class QueryOrchestrationUseCase:
             await self._conversation_repo.save_message(user_id, "assistant", answer)
 
     @staticmethod
-    def _source_payload(result: SearchResult) -> dict:
+    def _source_payload(result: SearchResultLike) -> dict:
         return {
             "document_name": result.document_name,
             "caption": result.caption,
@@ -186,16 +222,41 @@ class QueryOrchestrationUseCase:
     @staticmethod
     def _detect_intent(question: str) -> str:
         lower = question.lower()
-        if any(keyword in lower for keyword in ["lương", "payroll", "khấu trừ"]):
+        normalized = _normalize_text(question)
+        if any(
+            keyword in normalized
+            for keyword in [
+                "ban la ai",
+                "ban lam duoc gi",
+                "ban co the lam gi",
+                "gioi thieu ve ban",
+                "who are you",
+                "what can you do",
+            ]
+        ):
+            return "identity"
+        if any(keyword in normalized for keyword in ["luong", "payroll", "khau tru"]) or any(
+            keyword in lower for keyword in ["lương", "payroll", "khấu trừ"]
+        ):
             return "hr:payroll"
-        if any(keyword in lower for keyword in ["đơn nghỉ", "leave request", "trạng thái nghỉ"]):
+        if any(
+            keyword in normalized
+            for keyword in ["don nghi", "leave request", "trang thai nghi"]
+        ) or any(
+            keyword in lower for keyword in ["đơn nghỉ", "leave request", "trạng thái nghỉ"]
+        ):
             return "hr:leave_requests"
-        if any(keyword in lower for keyword in ["ngày nghỉ", "nghỉ phép còn", "leave balance"]):
+        if any(
+            keyword in normalized
+            for keyword in ["ngay nghi", "nghi phep con", "leave balance"]
+        ) or any(
+            keyword in lower for keyword in ["ngày nghỉ", "nghỉ phép còn", "leave balance"]
+        ):
             return "hr:leave_balance"
         return "rag"
 
 
-def _hr_context_text(result: HrQueryResult) -> str:
+def _hr_context_text(result: HrQueryResultLike) -> str:
     if result.summary:
         return result.summary
     return f"Không có dữ liệu HR phù hợp cho intent {result.intent}."
@@ -218,3 +279,24 @@ async def _word_stream(chunks: AsyncIterator[str]) -> AsyncIterator[str]:
             yield token
     if buffer:
         yield buffer
+
+
+def _rag_cache_namespace(document_ids: list[str]) -> str:
+    joined = "\n".join(sorted(document_ids))
+    digest = hashlib.sha256(joined.encode("utf-8")).hexdigest()
+    return f"rag:{digest}"
+
+
+def _normalize_text(text: str) -> str:
+    without_accents = "".join(
+        character
+        for character in unicodedata.normalize("NFKD", text.lower())
+        if not unicodedata.combining(character)
+    )
+    without_punctuation = re.sub(r"[_\W]+", " ", without_accents, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", without_punctuation).strip()
+
+
+def _is_fallback_answer(answer: str) -> bool:
+    normalized = _normalize_text(answer)
+    return "khong tim thay thong tin trong tai lieu noi bo" in normalized

@@ -3,7 +3,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from app.infrastructure.auth.auth_service import AuthenticatedUser
+from app.application.ports import AuthenticatedUser
 from app.infrastructure.config import Settings, get_settings
 from app.infrastructure.db.mock_notification_repo import InMemoryNotificationRepository
 from app.infrastructure.messaging.notification_service import DocNewEvent, NotificationService

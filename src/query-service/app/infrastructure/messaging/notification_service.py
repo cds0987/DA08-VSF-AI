@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 
+from app.application.ports import AuthenticatedUser
 from app.domain.entities.notification import Notification
-from app.infrastructure.auth.auth_service import AuthenticatedUser
 from app.infrastructure.db.mock_data import mock_users
 from app.infrastructure.db.mock_document_access_repo import can_access_document
 from app.infrastructure.db.mock_notification_repo import InMemoryNotificationRepository

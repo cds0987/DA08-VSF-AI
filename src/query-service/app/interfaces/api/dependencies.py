@@ -3,8 +3,9 @@ from functools import lru_cache
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from app.application.ports import AuthenticatedUser
 from app.application.use_cases.query.orchestration import QueryOrchestrationUseCase
-from app.infrastructure.auth.auth_service import AuthService, AuthenticatedUser
+from app.infrastructure.auth.auth_service import AuthService
 from app.infrastructure.cache.rate_limiter import InMemoryRateLimiter
 from app.infrastructure.cache.semantic_cache import InMemorySemanticCache
 from app.infrastructure.config import Settings, get_settings
@@ -26,7 +27,7 @@ async def get_current_user(
     authorization = None
     if credentials:
         authorization = f"{credentials.scheme} {credentials.credentials}"
-    user = AuthService(settings).authenticate(authorization)
+    user = await AuthService(settings).authenticate(authorization)
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive user")
     return user

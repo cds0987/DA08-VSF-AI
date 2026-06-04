@@ -16,19 +16,29 @@ from app.infrastructure.auth.auth_service import AuthService
 @pytest.mark.asyncio
 async def test_semantic_cache_returns_similar_question():
     cache = InMemorySemanticCache(ttl_seconds=3600, threshold=0.95)
-    await cache.put("Chính sách nghỉ phép là gì", "answer", [{"document_name": "doc"}])
+    await cache.put("scope-1", "Chính sách nghỉ phép là gì", "answer", [{"document_name": "doc"}])
 
-    cached = await cache.get("Chính sách nghỉ phép là gì")
+    cached = await cache.get("scope-1", "Chính sách nghỉ phép là gì")
 
     assert cached is not None
     assert cached[0] == "answer"
 
 
 @pytest.mark.asyncio
+async def test_semantic_cache_does_not_cross_scope():
+    cache = InMemorySemanticCache(ttl_seconds=3600, threshold=0.95)
+    await cache.put("admin-scope", "Executive compensation", "answer", [{"document_name": "top"}])
+
+    cached = await cache.get("user-scope", "Executive compensation")
+
+    assert cached is None
+
+
+@pytest.mark.asyncio
 async def test_tool_arguments_are_injected_from_auth_context(tokens):
     reset_state_for_tests()
     settings = get_settings()
-    user = AuthService(settings).authenticate(f"Bearer {tokens['finance']}")
+    user = await AuthService(settings).authenticate(f"Bearer {tokens['finance']}")
     use_case = get_orchestration_use_case()
     events = [
         event
@@ -47,7 +57,7 @@ async def test_tool_arguments_are_injected_from_auth_context(tokens):
 async def test_conversation_save_feedback_contract(tokens):
     reset_state_for_tests()
     settings = get_settings()
-    user = AuthService(settings).authenticate(f"Bearer {tokens['hr']}")
+    user = await AuthService(settings).authenticate(f"Bearer {tokens['hr']}")
     use_case = get_orchestration_use_case()
     events = [event async for event in use_case.stream("Onboarding", user)]
     session_id = events[-1]["session_id"]

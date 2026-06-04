@@ -14,6 +14,11 @@ uv pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
+Luu y bao mat:
+
+- Khong commit `src/query-service/.env`.
+- Neu OpenAI key/JWT secret da tung bi paste vao chat/log cong khai, hay rotate key/secret truoc khi tiep tuc.
+
 De test offline khong ton OpenAI key, sua `.env`:
 
 ```env
@@ -21,6 +26,24 @@ AUTH_MODE=mock
 LLM_MODE=mock
 ENABLE_DEV_ENDPOINTS=true
 ```
+
+De test Query Service voi User Service that da chay o port `8000`, sua `.env`:
+
+```env
+AUTH_MODE=user_service
+USER_SERVICE_URL=http://localhost:8000
+AUTH_HTTP_TIMEOUT_SECONDS=5
+```
+
+Neu muon decode JWT local ma khong goi `/auth/me`, dung:
+
+```env
+AUTH_MODE=jwt
+JWT_SECRET_KEY=<same JWT_SECRET_KEY as user-service>
+JWT_ALGORITHM=HS256
+```
+
+`AUTH_MODE=user_service` la mode nen dung khi can chan user da bi deactivate, vi Query Service se goi `GET /auth/me` cua User Service cho moi request.
 
 Neu muon goi OpenAI that:
 
@@ -54,6 +77,32 @@ Tat ca endpoint tru `/health` can header `Authorization: Bearer <token>`.
 | `mock-user-hr` | `11111111-1111-4111-8111-111111111111` | `user` | `HR` |
 | `mock-user-finance` | `22222222-2222-4222-8222-222222222222` | `user` | `Finance` |
 | `mock-admin` | `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa` | `admin` | `Admin` |
+
+Neu `AUTH_MODE=user_service`, khong dung mock token. Lay token bang User Service:
+
+```powershell
+$loginBody = @{
+  email = "admin@company.com"
+  password = "***REDACTED-SEED-ADMIN-PW***"
+} | ConvertTo-Json -Compress
+
+$tokenResponse = Invoke-RestMethod `
+  -Uri "http://localhost:8000/auth/login" `
+  -Method Post `
+  -ContentType "application/json" `
+  -Body $loginBody
+
+$accessToken = $tokenResponse.access_token
+$headers = @{
+  Authorization = "Bearer $accessToken"
+}
+```
+
+Sau do goi Query Service bang `$headers`. Body `user_id` phai la `id` cua user trong token. Co the lay profile bang:
+
+```powershell
+Invoke-RestMethod http://localhost:8000/auth/me -Headers $headers
+```
 
 Mock documents:
 

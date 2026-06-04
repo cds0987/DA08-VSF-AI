@@ -2,8 +2,8 @@ from collections.abc import AsyncIterator
 
 from fastapi import HTTPException, status
 
+from app.application.ports import SearchResultLike
 from app.infrastructure.config import Settings
-from app.infrastructure.external.mcp_client import SearchResult
 
 
 class OpenAIStreamingClient:
@@ -23,7 +23,7 @@ class OpenAIStreamingClient:
         question: str,
         context: str,
         recent_messages: list[tuple[str, str]],
-        sources: list[SearchResult],
+        sources: list[SearchResultLike],
         is_hr_answer: bool = False,
     ) -> AsyncIterator[str]:
         if self._settings.llm_mode == "mock":
@@ -78,7 +78,7 @@ class OpenAIStreamingClient:
         self,
         question: str,
         context: str,
-        sources: list[SearchResult],
+        sources: list[SearchResultLike],
         is_hr_answer: bool,
     ) -> AsyncIterator[str]:
         if is_hr_answer:

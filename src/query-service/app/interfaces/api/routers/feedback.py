@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.infrastructure.auth.auth_service import AuthenticatedUser
+from app.application.ports import AuthenticatedUser
 from app.infrastructure.db.mock_conversation_repo import InMemoryConversationRepository
 from app.interfaces.api.dependencies import get_conversation_repo, get_current_user
 from app.interfaces.api.schemas.query import FeedbackRequest

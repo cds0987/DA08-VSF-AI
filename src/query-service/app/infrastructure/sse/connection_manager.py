@@ -1,7 +1,7 @@
 import asyncio
 from dataclasses import dataclass
 
-from app.infrastructure.auth.auth_service import AuthenticatedUser
+from app.application.ports import AuthenticatedUser
 
 
 @dataclass

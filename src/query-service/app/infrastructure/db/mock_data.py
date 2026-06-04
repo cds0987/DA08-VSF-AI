@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from app.infrastructure.auth.auth_service import MOCK_TOKENS, AuthenticatedUser
+from app.application.ports import AuthenticatedUser
+from app.infrastructure.auth.auth_service import MOCK_TOKENS
 
 
 @dataclass(frozen=True)

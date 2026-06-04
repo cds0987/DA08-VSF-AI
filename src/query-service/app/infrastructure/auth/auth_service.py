@@ -1,18 +1,9 @@
-from dataclasses import dataclass
-
+import httpx
 import jwt
 from fastapi import HTTPException, status
 
+from app.application.ports import AuthenticatedUser
 from app.infrastructure.config import Settings
-
-
-@dataclass(frozen=True)
-class AuthenticatedUser:
-    id: str
-    email: str
-    role: str
-    department: str
-    is_active: bool = True
 
 
 MOCK_TOKENS: dict[str, AuthenticatedUser] = {
@@ -41,7 +32,7 @@ class AuthService:
     def __init__(self, settings: Settings):
         self._settings = settings
 
-    def authenticate(self, authorization: str | None) -> AuthenticatedUser:
+    async def authenticate(self, authorization: str | None) -> AuthenticatedUser:
         token = self._extract_bearer_token(authorization)
         if self._settings.auth_mode == "mock":
             user = MOCK_TOKENS.get(token)
@@ -53,6 +44,8 @@ class AuthService:
             return user
         if self._settings.auth_mode == "jwt":
             return self._authenticate_jwt(token)
+        if self._settings.auth_mode == "user_service":
+            return await self._authenticate_user_service(authorization)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unsupported AUTH_MODE",
@@ -77,6 +70,43 @@ class AuthService:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token missing required claims",
+            )
+        return AuthenticatedUser(
+            id=str(user_id),
+            email=str(payload.get("email", "")),
+            role=str(role),
+            department=str(payload.get("department", "")),
+            is_active=bool(payload.get("is_active", True)),
+        )
+
+    async def _authenticate_user_service(self, authorization: str | None) -> AuthenticatedUser:
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._settings.user_service_url,
+                timeout=self._settings.auth_http_timeout_seconds,
+            ) as client:
+                response = await client.get("/auth/me", headers={"Authorization": authorization or ""})
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="user-service unavailable",
+            ) from exc
+
+        if response.status_code in {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN}:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        if response.status_code >= 400:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="user-service authentication failed",
+            )
+
+        payload = response.json()
+        user_id = payload.get("id")
+        role = payload.get("role")
+        if not user_id or not role:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="user-service returned invalid user profile",
             )
         return AuthenticatedUser(
             id=str(user_id),

@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from app.infrastructure.auth.auth_service import AuthenticatedUser
+from app.application.ports import AuthenticatedUser
 from app.infrastructure.db.mock_conversation_repo import InMemoryConversationRepository
 from app.interfaces.api.dependencies import get_conversation_repo, require_admin
 from app.interfaces.api.schemas.admin import AdminMetrics

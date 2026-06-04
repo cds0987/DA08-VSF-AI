@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     auth_mode: str = "mock"
     jwt_secret_key: str = "your-secret-key-change-in-production"
     jwt_algorithm: str = "HS256"
+    user_service_url: str = "http://localhost:8000"
+    auth_http_timeout_seconds: float = 5.0
 
     redis_url: str = "redis://localhost:6379/0"
 

@@ -9,6 +9,7 @@ TOKEN_PATTERN = re.compile(r"[\wÀ-ỹ]+", re.UNICODE)
 
 @dataclass
 class SemanticCacheEntry:
+    namespace: str
     question: str
     answer: str
     sources: list[dict]
@@ -22,18 +23,21 @@ class InMemorySemanticCache:
         self._threshold = threshold
         self._entries: list[SemanticCacheEntry] = []
 
-    async def get(self, question: str) -> tuple[str, list[dict]] | None:
+    async def get(self, namespace: str, question: str) -> tuple[str, list[dict]] | None:
         now = datetime.now(UTC)
         self._entries = [entry for entry in self._entries if entry.expires_at > now]
         vector = self._vectorize(question)
         for entry in self._entries:
+            if entry.namespace != namespace:
+                continue
             if self._cosine(vector, entry.vector) >= self._threshold:
                 return entry.answer, entry.sources
         return None
 
-    async def put(self, question: str, answer: str, sources: list[dict]) -> None:
+    async def put(self, namespace: str, question: str, answer: str, sources: list[dict]) -> None:
         self._entries.append(
             SemanticCacheEntry(
+                namespace=namespace,
                 question=question,
                 answer=answer,
                 sources=sources,

@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
+from app.application.ports import AuthenticatedUser
 from app.application.use_cases.query.orchestration import QueryOrchestrationUseCase
-from app.infrastructure.auth.auth_service import AuthenticatedUser
 from app.infrastructure.cache.rate_limiter import InMemoryRateLimiter
 from app.interfaces.api.dependencies import (
     get_current_user,

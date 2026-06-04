@@ -1,8 +1,13 @@
 import json
 
 import httpx
+import jwt
 import pytest
 
+from app.infrastructure.auth import auth_service
+from app.infrastructure.auth.auth_service import AuthService
+from app.infrastructure.config import Settings, get_settings
+from app.interfaces.api.dependencies import get_mcp_client
 from app.interfaces.api.main import app
 
 
@@ -22,6 +27,59 @@ def auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def done_event(response: httpx.Response) -> dict:
+    done_lines = [line for line in response.text.splitlines() if '"done": true' in line]
+    return json.loads(done_lines[-1].removeprefix("data: "))
+
+
+def streamed_answer(response: httpx.Response) -> str:
+    parts: list[str] = []
+    for line in response.text.splitlines():
+        if not line.startswith('data: {"token":'):
+            continue
+        event = json.loads(line.removeprefix("data: "))
+        parts.append(event["token"])
+    return "".join(parts)
+
+
+class FakeUserServiceResponse:
+    def __init__(self, status_code: int, payload: dict | None = None) -> None:
+        self.status_code = status_code
+        self._payload = payload or {}
+
+    def json(self) -> dict:
+        return self._payload
+
+
+class FakeUserServiceClient:
+    response = FakeUserServiceResponse(
+        200,
+        {
+            "id": HR_USER_ID,
+            "email": "hr.user@company.com",
+            "role": "user",
+            "department": "HR",
+        },
+    )
+    last_base_url = None
+    last_timeout = None
+    last_get = None
+
+    def __init__(self, *, base_url: str, timeout: float) -> None:
+        self.__class__.last_base_url = base_url
+        self.__class__.last_timeout = timeout
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    async def get(self, path: str, *, headers: dict[str, str]):
+        self.__class__.last_get = {"path": path, "headers": headers}
+        return self.__class__.response
+
+
 @pytest.mark.asyncio
 async def test_query_sse_streams_token_and_done(client, tokens):
     response = await client.post(
@@ -35,6 +93,117 @@ async def test_query_sse_streams_token_and_done(client, tokens):
     assert 'data: {"token":' in body
     assert '"done": true' in body
     assert '"session_id":' in body
+
+
+@pytest.mark.asyncio
+async def test_identity_question_bypasses_rag_and_returns_no_sources(client, tokens):
+    mcp_client = get_mcp_client()
+    mcp_client.reset()
+
+    response = await client.post(
+        "/query",
+        headers=auth(tokens["admin"]),
+        json={"question": "Bạn là ai?", "user_id": ADMIN_USER_ID},
+    )
+
+    assert response.status_code == 200
+    assert "trợ lý nội bộ VinSmartFuture" in streamed_answer(response)
+    done = done_event(response)
+    assert done["sources"] == []
+    assert not any(call.tool_name == "rag_search" for call in mcp_client.last_tool_calls)
+
+
+@pytest.mark.asyncio
+async def test_user_service_auth_mode_calls_auth_me(client, monkeypatch):
+    monkeypatch.setenv("AUTH_MODE", "user_service")
+    monkeypatch.setenv("USER_SERVICE_URL", "http://user-service.test")
+    monkeypatch.setenv("AUTH_HTTP_TIMEOUT_SECONDS", "3")
+    get_settings.cache_clear()
+    FakeUserServiceClient.response = FakeUserServiceResponse(
+        200,
+        {
+            "id": HR_USER_ID,
+            "email": "hr.user@company.com",
+            "role": "user",
+            "department": "HR",
+        },
+    )
+    monkeypatch.setattr(auth_service.httpx, "AsyncClient", FakeUserServiceClient)
+
+    response = await client.post(
+        "/query",
+        headers=auth("real-access-token"),
+        json={"question": "Chinh sach nghi phep la gi?", "user_id": HR_USER_ID},
+    )
+
+    assert response.status_code == 200
+    assert FakeUserServiceClient.last_base_url == "http://user-service.test"
+    assert FakeUserServiceClient.last_timeout == 3.0
+    assert FakeUserServiceClient.last_get == {
+        "path": "/auth/me",
+        "headers": {"Authorization": "Bearer real-access-token"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_user_service_auth_mode_maps_auth_failure_to_401(client, monkeypatch):
+    monkeypatch.setenv("AUTH_MODE", "user_service")
+    get_settings.cache_clear()
+    FakeUserServiceClient.response = FakeUserServiceResponse(401, {"detail": "Not authenticated"})
+    monkeypatch.setattr(auth_service.httpx, "AsyncClient", FakeUserServiceClient)
+
+    response = await client.post(
+        "/query",
+        headers=auth("expired-token"),
+        json={"question": "test", "user_id": HR_USER_ID},
+    )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_user_service_auth_mode_keeps_user_id_mismatch_forbidden(client, monkeypatch):
+    monkeypatch.setenv("AUTH_MODE", "user_service")
+    get_settings.cache_clear()
+    FakeUserServiceClient.response = FakeUserServiceResponse(
+        200,
+        {
+            "id": HR_USER_ID,
+            "email": "hr.user@company.com",
+            "role": "user",
+            "department": "HR",
+        },
+    )
+    monkeypatch.setattr(auth_service.httpx, "AsyncClient", FakeUserServiceClient)
+
+    response = await client.post(
+        "/query",
+        headers=auth("real-access-token"),
+        json={"question": "test", "user_id": FINANCE_USER_ID},
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_jwt_auth_mode_decodes_user_service_claims():
+    token = jwt.encode(
+        {
+            "sub": HR_USER_ID,
+            "role": "user",
+            "department": "HR",
+            "jti": "token-id-1",
+        },
+        "shared-secret-with-at-least-32-bytes",
+        algorithm="HS256",
+    )
+    settings = Settings(_env_file=None, auth_mode="jwt", jwt_secret_key="shared-secret-with-at-least-32-bytes")
+
+    user = await AuthService(settings).authenticate(f"Bearer {token}")
+
+    assert user.id == HR_USER_ID
+    assert user.role == "user"
+    assert user.department == "HR"
 
 
 @pytest.mark.asyncio
@@ -66,13 +235,60 @@ async def test_fallback_for_low_score_query(client, tokens):
     response = await client.post(
         "/query",
         headers=auth(tokens["hr"]),
-        json={"question": "alien không liên quan", "user_id": HR_USER_ID},
+        json={"question": "hôm nay ăn gì?", "user_id": HR_USER_ID},
     )
 
     assert response.status_code == 200
-    assert '"token": "Không "' in response.text
-    assert '"token": "tìm "' in response.text
-    assert '"fallback": true' in response.text
+    done = done_event(response)
+    assert done["sources"] == []
+    assert done["fallback"] is True
+
+
+@pytest.mark.asyncio
+async def test_rag_query_returns_relevant_sources_without_top_secret_for_regular_user(client, tokens):
+    response = await client.post(
+        "/query",
+        headers=auth(tokens["hr"]),
+        json={"question": "Chính sách nghỉ phép là gì?", "user_id": HR_USER_ID},
+    )
+
+    assert response.status_code == 200
+    done = done_event(response)
+    source_names = [source["document_name"] for source in done["sources"]]
+    assert "Chinh_sach_nghi_phep_2026.pdf" in source_names
+    assert "Executive_Compensation_Top_Secret.pdf" not in source_names
+
+
+@pytest.mark.asyncio
+async def test_rag_cache_does_not_leak_admin_sources_to_regular_user(client, tokens):
+    admin_response = await client.post(
+        "/query",
+        headers=auth(tokens["admin"]),
+        json={"question": "Executive compensation", "user_id": ADMIN_USER_ID},
+    )
+    assert admin_response.status_code == 200
+    admin_done = done_event(admin_response)
+    assert any(
+        source["document_name"] == "Executive_Compensation_Top_Secret.pdf"
+        for source in admin_done["sources"]
+    )
+
+    user_response = await client.post(
+        "/query",
+        headers=auth(tokens["hr"]),
+        json={"question": "Executive compensation", "user_id": HR_USER_ID},
+    )
+
+    assert user_response.status_code == 200
+    user_done = done_event(user_response)
+    assert all(
+        source["document_name"] != "Executive_Compensation_Top_Secret.pdf"
+        for source in user_done["sources"]
+    )
+    assert user_done["sources"] == []
+    last_call = get_mcp_client().last_tool_calls[-1]
+    assert last_call.tool_name == "rag_search"
+    assert "dddddddd-0004-4000-8000-000000000004" not in last_call.arguments["document_ids"]
 
 
 @pytest.mark.asyncio
