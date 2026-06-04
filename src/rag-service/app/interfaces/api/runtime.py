@@ -12,6 +12,7 @@ from typing import Any, AsyncIterator
 from urllib.parse import urlparse
 
 from fastapi import FastAPI
+from sqlalchemy.engine import make_url
 
 from app.application.use_cases.ingestion import IngestDocumentUseCase
 from app.application.use_cases.query import RetrievalUseCase
@@ -185,13 +186,29 @@ def validate_vector_backend_credentials(vector_config: VectorStoreConfig) -> Non
 
 
 def metadata_backend_name(database_url: str) -> str:
-    return "postgres" if database_url.strip() else "in_memory"
+    normalized = database_url.strip()
+    if not normalized:
+        return "in_memory"
+    backend = make_url(normalized).get_backend_name()
+    return "postgres" if backend == "postgresql" else backend
 
 
 def validate_metadata_backend(app_env: str, database_url: str) -> None:
-    if _is_production(app_env) and not database_url.strip():
+    normalized = database_url.strip()
+    if _is_production(app_env) and not normalized:
         raise ValueError(
             "DATABASE_URL must be configured in production; in-memory metadata is not durable"
+        )
+    if not normalized:
+        return
+    url = make_url(normalized)
+    if (
+        url.get_backend_name() == "postgresql"
+        and url.drivername != "postgresql+psycopg"
+    ):
+        raise ValueError(
+            "DATABASE_URL must use postgresql+psycopg:// because the metadata repository "
+            "uses sync SQLAlchemy with psycopg v3"
         )
 
 

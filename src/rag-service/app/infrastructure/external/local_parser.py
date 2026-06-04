@@ -260,7 +260,7 @@ def _convert_with_markitdown(path: Path) -> _ParseStep:
     try:
         from markitdown import MarkItDown
     except ModuleNotFoundError as exc:
-        raise ModuleNotFoundError("MarkItDown is not installed") from exc
+        raise ModuleNotFoundError("MarkItDown with the required extras is not installed") from exc
     return _text_step(MarkItDown().convert(str(path)).text_content)
 
 
@@ -336,6 +336,6 @@ class LocalFileParser(Parser):
             return _read_pdf_file
         if suffix in _IMAGE_MIME_BY_SUFFIX:
             return _read_image_file(suffix)
-        if suffix in {"doc", "ppt", "pptx", "xls", "xlsx"}:
+        if suffix in {"pptx", "xls", "xlsx"}:
             return _convert_with_markitdown
         raise ValueError(f"unsupported file_type for local parser: {suffix}")

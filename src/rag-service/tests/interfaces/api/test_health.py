@@ -70,6 +70,18 @@ def test_production_requires_durable_metadata_backend(
             pass
 
 
+def test_postgres_database_url_must_use_psycopg_driver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AI_PROVIDER", "offline")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/rag")
+
+    with pytest.raises(ValueError, match="postgresql\\+psycopg://"):
+        with TestClient(create_app()):
+            pass
+
+
 def test_collection_name_must_not_preencode_dimension(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -201,8 +213,24 @@ def test_rate_limit_is_enforced(
     monkeypatch.setenv("RATE_LIMIT_WINDOW_SECONDS", "60")
 
     with TestClient(create_app()) as client:
+        first = client.get("/api/does-not-exist")
+        second = client.get("/api/does-not-exist")
+
+    assert first.status_code == 404
+    assert second.status_code == 429
+
+
+def test_health_routes_bypass_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AI_PROVIDER", "offline")
+    monkeypatch.setenv("RATE_LIMIT_REQUESTS", "1")
+    monkeypatch.setenv("RATE_LIMIT_WINDOW_SECONDS", "60")
+
+    with TestClient(create_app()) as client:
         first = client.get("/livez")
         second = client.get("/livez")
 
     assert first.status_code == 200
-    assert second.status_code == 429
+    assert second.status_code == 200

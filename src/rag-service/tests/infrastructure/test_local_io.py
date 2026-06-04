@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+import sys
+import types
 import zipfile
 
 import pytest
@@ -128,6 +130,41 @@ def test_local_file_parser_reads_docx_source_under_source_root(
             parser.close()
 
         assert parsed.markdown == "Guide\n\nHello docx"
+
+    asyncio.run(scenario())
+
+
+def test_local_file_parser_reads_pptx_source_via_markitdown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeMarkItDown:
+        def convert(self, path: str):
+            return types.SimpleNamespace(text_content=f"Converted {Path(path).name}")
+
+    async def scenario() -> None:
+        source_root = tmp_path / "sources"
+        source_root.mkdir()
+        source_path = source_root / "deck.pptx"
+        source_path.write_bytes(b"fake-pptx")
+        monkeypatch.setenv("SOURCE_ROOT", str(source_root))
+        monkeypatch.setitem(
+            sys.modules,
+            "markitdown",
+            types.SimpleNamespace(MarkItDown=FakeMarkItDown),
+        )
+        parser = LocalFileParser(max_workers=1)
+
+        try:
+            parsed = await parser.parse(
+                document_id="doc-1",
+                file_type="pptx",
+                source_uri="local://deck.pptx",
+            )
+        finally:
+            parser.close()
+
+        assert parsed.markdown == "Converted deck.pptx"
 
     asyncio.run(scenario())
 
