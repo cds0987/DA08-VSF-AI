@@ -1,6 +1,6 @@
 .claude/
 proposal/
-src/rag-service/haystack/
+src/rag-worker/haystack/
 
 # Python
 __pycache__/
