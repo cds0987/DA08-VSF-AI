@@ -3,6 +3,10 @@
 > Thành phần: **Stateless Parser Server** (adapter ngoài-process cho capability `parse`).
 > Grounded trong [../../handoff/](../../handoff/). **Không ★** = bắt buộc theo handoff; **★** = quyết định v2 → ghi `PROPOSED` vào [../NEW_REPO_DECISIONS.md](../NEW_REPO_DECISIONS.md).
 
+> **Trạng thái hiện tại (2026-06-04) — đọc trước:** Bản đang chạy là **in-process adapter** `LocalFileParser` (`app/infrastructure/external/local_parser.py`), CHƯA phải HTTP service rời (việc tách service vẫn là D2 `PROPOSED`). Hai điểm đã RATIFIED và **khác** mô tả gốc bên dưới:
+> - **OCR/vision KHÔNG nằm trong parser** mà đi qua **AI gateway** (`core_engine/ocr` → `AIProvider.extract_text_from_images`, OpenAI vision SDK) — decision **R10** ([../../handoff/NEW_REPO_DECISIONS.md](../../handoff/NEW_REPO_DECISIONS.md)). Parser chỉ **render ảnh** (PyMuPDF) thành `VisionImage`; KHÔNG còn OCR engine cục bộ (tesseract đã gỡ).
+> - **Hybrid theo trang** cho tài liệu text+image: mỗi trang PDF giữ text-layer (free), trang không text → rasterize cả trang, ảnh nhúng trên trang có text → vision riêng rồi merge; docx media cũng OCR. Env thật: `MAX_OCR_PAGES`, `OCR_MIN_IMAGE_PIXELS`, `PDF_OCR_SCALE`, `PARSER_MAX_WORKERS`.
+
 ## 0. Vai trò
 
 CPU/convert thuần: `file ref → canonical Markdown (+ metadata)`. **Không** chứa state lâu dài, **không** biết queue/DB/Qdrant. Đây là một **adapter** (ngoài process) sau contract `Parser`; orchestration/claim/retry/write nằm ở **main ingestion service** (Option 2).
@@ -30,9 +34,9 @@ out: { status, markdown | artifact_key, sections[], pages, warnings[], content_h
 
 ## 2. Stack ★ — MarkItDown + OCR/vision
 
-- **MarkItDown (Microsoft)** cho format có cấu trúc/text (DOCX/PPTX/HTML/PDF-có-text) → Markdown.
-- **OCR/vision adapter** (vd OpenAI vision hoặc OCR engine) cho scan/ảnh không text-layer.
-- Dùng vendor SDK (OpenAI client, MarkItDown) **trong parser là ĐÚNG chỗ** — parser là adapter. Cấm là **main service** import các SDK này.
+- **MarkItDown (Microsoft)** cho format có cấu trúc/text (DOCX/PPTX/HTML/PDF-có-text) → Markdown; **PyMuPDF** đọc text-layer + render ảnh.
+- **OCR/vision KHÔNG ở parser** (cập nhật theo R10): parser render ảnh, bước ảnh→text gọi qua **AI gateway** (`core_engine/ocr`). OpenAI vision SDK chỉ sống trong `core_engine/ai`, không trong adapter.
+- Vendor lib **non-AI** (MarkItDown, PyMuPDF) trong parser là ĐÚNG chỗ — parser là adapter convert/render. Nhưng **client AI (OpenAI) thì KHÔNG** — mọi call model AI đi qua gateway (R10). Cấm cả **main service** lẫn parser tự gọi model AI.
 
 **Phân biệt 2 loại "caption" — đừng gộp:**
 - *Parse-time image description* (MarkItDown LLM mô tả ảnh → nhúng vào Markdown): **nội dung artifact**, ở parser.

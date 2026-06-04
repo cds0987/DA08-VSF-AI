@@ -1,7 +1,9 @@
 # core_engine
 
-**Core working RAG** của `rag-service`, dựng trên Haystack. Nằm *ngoài* thư mục
-`haystack/` (bản clone framework upstream — không sửa). Package này tổ chức theo
+**Core working RAG** của `rag-service` (đổi tên từ `haystack_interface` ngày
+2026-06-04). **Tự cuốn tay — KHÔNG import framework Haystack ở runtime**; thư mục
+`haystack/` chỉ là bản clone upstream dùng làm **tham khảo pattern** (vd OCR theo
+`LLMDocumentContentExtractor`), không phải dependency. Package tổ chức theo
 **module severable** (MOSA / hexagonal): mỗi thư mục một nhiệm vụ, giao tiếp qua
 interface mở, đổi backend không phá module khác.
 
@@ -10,11 +12,12 @@ interface mở, đổi backend không phá module khác.
 ```
 core_engine/
   ai/          ★ AI gateway — điểm vào DUY NHẤT cho mọi outbound AI call
-               (embed · caption · rerank). OpenAI SDK trước; swap provider 1 chỗ.
+               (embed · chat[caption/rerank] · ocr[vision]). CHỈ OpenAI SDK; swap provider 1 chỗ.
   embedding/   port EmbeddingService qua provider
   chunking/    section split (đơn vị nghĩa, không token-chunk mù)
   caption/     ý-nghĩa-nén section qua provider
   rerank/      Reranker: LLM-as-reranker (qua gateway) + lexical fallback
+  ocr/         image/scanned-doc → markdown qua gateway (vision); parser chỉ render ảnh
   vectorstore/ provider-first: VectorStoreConfig (provider, url) → registry chọn
                providers/<db>/ (qdrant · chromadb · milvus); mỗi db 2 file:
                remote.py (có url, async thuần) · inprocess.py (ko url, to_thread)
@@ -136,9 +139,11 @@ nhưng rag-service KHÔNG tự lọc.
 
 ## AI gateway (`ai/`) — MỌI call AI đi qua đây
 
-Một `AIProvider` (interface mở) với 2 năng lực `embed` / `chat`; `capability`
-định tuyến per-capability (embedding.md §5). Reliability policy đồng nhất
-(retry+backoff+jitter — LESSONS §4.9). Hai provider:
+Một `AIProvider` (interface mở) với 3 năng lực `embed` / `chat` /
+`extract_text_from_images` (vision OCR); `capability` định tuyến per-capability
+(embed · caption · rerank · ocr — embedding.md §5). **CHỈ dùng OpenAI SDK** để gọi
+model AI; không AI/ML model nào được gọi ngoài gateway (decision R10). Reliability
+policy đồng nhất (retry+backoff+jitter — LESSONS §4.9). Hai provider:
 
 | Provider | Khi nào | Cơ chế |
 |---|---|---|
@@ -152,6 +157,7 @@ Env (per-capability, kế thừa embed→caption→rerank nếu để trống):
 | Embedding | `EMBED_BASE_URL` · `EMBED_API_KEY`/`OPENAI_API_KEY` · `EMBED_MODEL` · `EMBED_DIMENSION` |
 | Caption (LLM) | `CAPTION_BASE_URL` · `CAPTION_API_KEY` · `CAPTION_MODEL` |
 | Rerank (LLM) | `RERANK_BASE_URL` · `RERANK_API_KEY` · `RERANK_MODEL` |
+| OCR (vision) | `OCR_BASE_URL` · `OCR_API_KEY` · `OCR_MODEL` (mặc định kế thừa caption — gpt-4o-mini hỗ trợ vision) |
 
 `AI_PROVIDER=auto|openai|offline` ép chế độ (auto: có key/base_url → openai).
 
@@ -196,8 +202,12 @@ Vì engine/use-case chỉ phụ thuộc **port** trừu tượng, đổi backend
 ## Giới hạn đã biết (bản offline)
 
 - `OfflineProvider` embed **không phải semantic thật** — chỉ để pipeline chạy/eval
-  cấu trúc; recall thật cần model embedding thật.
-- Chưa gắn S3 / Azure OCR (parser adapter ngoài — `parser.md`); engine nhận sẵn
+  cấu trúc; recall thật cần model embedding thật. `OfflineProvider` OCR trả stub
+  tất định (không vision thật).
+- **OCR/vision đã đi qua gateway** (`ocr/` → `AIProvider.extract_text_from_images`,
+  OpenAI vision SDK). Parser adapter (`app/.../local_parser.py`) chỉ render ảnh bằng
+  PyMuPDF (I/O xác định) thành `VisionImage`; PDF/doc text+image dùng hybrid theo
+  trang. KHÔNG còn OCR engine cục bộ (tesseract). Chưa gắn S3; engine nhận sẵn
   Markdown canonical.
 - Interface `VectorRepository`/`EmbeddingService` hiện là **Python ABC nội bộ**, chưa
   phải chuẩn mở cộng đồng (OpenAPI/gRPC IDL). Đủ cho mục tiêu severable + swap

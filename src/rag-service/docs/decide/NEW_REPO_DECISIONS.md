@@ -24,7 +24,7 @@
 ---
 
 ### D2. Parser = stateless service (Option 2) + stack MarkItDown + OCR/vision
-**Status:** PROPOSED
+**Status:** PARTIALLY RATIFIED 2026-06-04 — phần **OCR/vision đi qua AI gateway** đã chốt (xem **R10** trong [../handoff/NEW_REPO_DECISIONS.md](../handoff/NEW_REPO_DECISIONS.md)): OCR là vision LLM gọi qua `core_engine/ocr` (OpenAI SDK), parser chỉ render ảnh bằng PyMuPDF, hybrid theo trang, KHÔNG OCR engine cục bộ. Phần **tách stateless service rời** vẫn `PROPOSED` (bản chạy hiện tại là in-process `LocalFileParser`).
 **Khác prototype:** parse chạy in-process trộn với serving → repo này tách **stateless parser pool** ngoài process; main service orchestrate.
 **Vấn đề:** parse/OCR CPU-heavy (+remote AI) làm threadpool saturation v1; cần scale CPU độc lập.
 **Options:**
@@ -120,7 +120,7 @@
 | ID | Quyết định | Status | Điều kiện ratify |
 |---|---|---|---|
 | D1 | Trigger hybrid | PROPOSED | nguồn event + SLO + multi-instance? |
-| D2 | Parser stateless service | PROPOSED | xác nhận stack + ngưỡng OCR |
+| D2 | Parser stateless service + OCR/vision | OCR-qua-gateway **RATIFIED** (R10); tách service rời còn PROPOSED | xác nhận tách service + ngưỡng OCR |
 | D3 | Concurrency model parser | PROPOSED | đo GIL-bound? |
 | D4 | Embedding/AI gateway tách | PROPOSED | khi >1 instance |
 | D5 | Pluggable execution + fallback | PROPOSED | bảng policy per-capability |
