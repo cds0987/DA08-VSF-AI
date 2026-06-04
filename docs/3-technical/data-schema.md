@@ -1,6 +1,6 @@
 # Data Schema — RAG Chatbot
 
-Mỗi service dùng PostgreSQL schema riêng trên cùng 1 RDS instance, tách bằng `CREATE SCHEMA`.
+Mỗi service kết nối đến **database riêng** trên cùng 1 AWS RDS db.t3.micro: `user_db`, `doc_db`, `query_db`, `mcp_db`, `langfuse_db`.
 
 > **Convention chung:**
 > - `id`: `UUID PRIMARY KEY DEFAULT gen_random_uuid()`
@@ -51,14 +51,29 @@ CREATE TABLE user_svc.refresh_tokens (
 
 CREATE INDEX idx_refresh_tokens_user ON user_svc.refresh_tokens(user_id);
 CREATE INDEX idx_refresh_tokens_hash ON user_svc.refresh_tokens(token_hash);
+
+-- Per-service audit: các hành động auth + quản lý user (User Service tự ghi).
+CREATE TABLE user_svc.audit_logs (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    actor_id      UUID NOT NULL,
+    actor_role    VARCHAR(50) NOT NULL,
+    action        VARCHAR(100) NOT NULL,     -- 'login'|'logout'|'login_failed'|'password_change'|'account_locked'|'grant_admin'|'revoke_admin'|'deactivate'|'reactivate'
+    resource_type VARCHAR(100),             -- 'user'
+    resource_id   UUID,
+    detail        JSONB,
+    ip_address    VARCHAR(45),
+    created_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_user_audit_actor ON user_svc.audit_logs(actor_id, created_at DESC);
 ```
 
 ---
 
-## Chat Service — Schema `chat_svc`
+## Query Service — Database `query_db`
 
 ```sql
-CREATE TABLE chat_svc.conversations (
+CREATE TABLE query_svc.conversations (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     UUID NOT NULL,
     summary     TEXT,                                            -- LLM-generated summary của các turns cũ (Summary Buffer)
@@ -66,9 +81,9 @@ CREATE TABLE chat_svc.conversations (
     updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
-CREATE TABLE chat_svc.messages (
+CREATE TABLE query_svc.messages (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    conversation_id UUID NOT NULL REFERENCES chat_svc.conversations(id) ON DELETE CASCADE,
+    conversation_id UUID NOT NULL REFERENCES query_svc.conversations(id) ON DELETE CASCADE,
     user_id         UUID NOT NULL,
     role            VARCHAR(20) NOT NULL,        -- 'user' | 'assistant'
     content         TEXT NOT NULL,
@@ -78,55 +93,89 @@ CREATE TABLE chat_svc.messages (
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_messages_user_created ON chat_svc.messages(user_id, created_at DESC);
+CREATE INDEX idx_messages_user_created ON query_svc.messages(user_id, created_at DESC);
+
+-- Projection ACL (event-driven, database-per-service).
+-- Bản sao quyền truy cập tài liệu, do doc_access_subscriber cập nhật từ event NATS `doc.access`
+-- (Document Service publish). Query Service đọc bảng này cho ACL pre-filter — KHÔNG đọc thẳng doc_db.
+CREATE TABLE query_svc.document_access (
+    document_id         UUID PRIMARY KEY,                            -- = doc_id bên doc_db
+    classification      VARCHAR(20) NOT NULL,                        -- public|internal|secret|top_secret
+    allowed_departments TEXT[] NOT NULL DEFAULT '{}',
+    allowed_user_ids    TEXT[] NOT NULL DEFAULT '{}',
+    updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()  -- thời điểm event gần nhất
+);
+
+CREATE INDEX idx_doc_access_classification ON query_svc.document_access(classification);
+
+-- Notification Center: lưu thông báo để xem lại + đếm chưa đọc (badge).
+-- notify_subscriber ghi 1 bản ghi/user khi đẩy event SSE; FE đọc qua GET /notifications/history.
+CREATE TABLE query_svc.notifications (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID NOT NULL,
+    event       VARCHAR(50) NOT NULL,        -- 'doc_new' | ...
+    message     TEXT NOT NULL,
+    doc_id      UUID,
+    is_read     BOOLEAN NOT NULL DEFAULT false,
+    created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_notifications_user ON query_svc.notifications(user_id, created_at DESC);
+CREATE INDEX idx_notifications_unread ON query_svc.notifications(user_id) WHERE is_read = false;
 ```
+
+> Đây là **read-model** (eventual consistency): khi Admin đổi quyền ở Document Service → event `doc.access`
+> → bảng này cập nhật sau vài giây. Document Service chết không ảnh hưởng — Query Service vẫn đọc bản sao local.
+> Xóa tài liệu: event `doc.access { deleted:true }` → xóa bản ghi tương ứng.
 
 ---
 
-## RAG Service — Schema `rag_svc`
+## Document Service — Database `doc_db`
+
+> RAG Worker **không dùng PostgreSQL** — chỉ Qdrant + S3 + NATS, ingestion log đẩy qua Langfuse.
 
 ```sql
-CREATE TABLE rag_svc.documents (
+CREATE TABLE doc_svc.documents (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name                VARCHAR(500) NOT NULL,
     file_type           VARCHAR(20) NOT NULL,                        -- pdf | docx | txt | xlsx | csv | pptx | md
     s3_key              VARCHAR(1000) NOT NULL,
-    status              VARCHAR(20) NOT NULL DEFAULT 'pending',      -- DocumentStatus enum
+    status              VARCHAR(20) NOT NULL DEFAULT 'queued',       -- DocumentStatus: queued|processing|indexed|failed (Admin upload → queued thẳng, không có approve/reject)
     uploaded_by         UUID NOT NULL,                               -- user_id từ User Service
     classification      VARCHAR(20) NOT NULL DEFAULT 'internal',     -- public|internal|secret|top_secret
     allowed_departments TEXT[] NOT NULL DEFAULT '{}',
     allowed_user_ids    TEXT[] NOT NULL DEFAULT '{}',
     chunk_count         INTEGER NOT NULL DEFAULT 0,
     error_message       TEXT,
-    rejection_reason    TEXT,
     created_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     deleted_at          TIMESTAMP WITH TIME ZONE
 );
 
-CREATE INDEX idx_documents_status ON rag_svc.documents(status) WHERE deleted_at IS NULL;
-CREATE INDEX idx_documents_uploader ON rag_svc.documents(uploaded_by) WHERE deleted_at IS NULL;
+CREATE INDEX idx_documents_status ON doc_svc.documents(status) WHERE deleted_at IS NULL;
+CREATE INDEX idx_documents_uploader ON doc_svc.documents(uploaded_by) WHERE deleted_at IS NULL;
 
-CREATE TABLE rag_svc.audit_logs (
+-- Per-service audit: chỉ các hành động liên quan tài liệu (Document Service tự ghi).
+CREATE TABLE doc_svc.audit_logs (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     actor_id      UUID NOT NULL,
     actor_role    VARCHAR(50) NOT NULL,
-    action        VARCHAR(100) NOT NULL,     -- 'upload'|'approve'|'reject'|'delete'|'login'|'login_failed'
-    resource_type VARCHAR(100),             -- 'document'|'user'
+    action        VARCHAR(100) NOT NULL,     -- 'upload'|'delete'|'reindex'
+    resource_type VARCHAR(100),             -- 'document'
     resource_id   UUID,
     detail        JSONB,
     ip_address    VARCHAR(45),
     created_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_audit_actor ON rag_svc.audit_logs(actor_id, created_at DESC);
+CREATE INDEX idx_audit_actor ON doc_svc.audit_logs(actor_id, created_at DESC);
 ```
 
 ---
 
-## HR Mock Data — Schema `hr_mock` (trong RAG Service DB)
+## HR Mock Data — Schema `hr_mock` (trong `mcp_db` — MCP Tool Service)
 
-> Mock data cho Feature 5b (Personal HR Q&A). Filter bắt buộc `WHERE user_id = :current_user_id`.
+> Mock data cho Feature 5b (Personal HR Q&A). Tool **`hr_query`** của **mcp-service** query trực tiếp — đặt trong `mcp_db` để giữ database-per-service (tool nào sở hữu data của tool đó; Query Service gọi qua MCP chứ không đụng DB này). Filter bắt buộc `WHERE user_id = :current_user_id` (user_id do MCP client inject từ JWT).
 
 ```sql
 CREATE TABLE hr_mock.leave_balance (
@@ -184,6 +233,9 @@ Collection name: `rag_chatbot`
   "file_type": "pdf | docx | txt | xlsx | csv | pptx | md",
   "page_number": 1,
   "section_title": "string",
+  "heading_path": ["Chính sách công tác", "Hoàn tiền vé máy bay"],
+  "source_s3_uri": "s3://bucket/raw/{doc_id}.pdf",
+  "markdown_s3_uri": "s3://bucket/processed/{doc_id}.md",
   "classification": "public | internal | secret | top_secret",
   "allowed_departments": ["HR", "Finance"],
   "allowed_user_ids": ["uuid"],
@@ -192,7 +244,7 @@ Collection name: `rag_chatbot`
 }
 ```
 
-> Vector dimension: 1024 (BGE-M3). Chỉ embed `child_text`. `parent_text` lưu trong payload để đưa vào LLM context. `ocr_confidence` chỉ có với PDF scan, dùng để flag low-quality chunks. Chunk size: Child 128–256 token, Parent 512–1024 token, overlap 20–30 token.
+> Vector dimension: 1536 (text-embedding-3-small). Chỉ embed `child_text`. `parent_text` lưu trong payload để đưa vào LLM context. `source_s3_uri` (file gốc) + `markdown_s3_uri` (full Markdown) lưu trong payload để RAG Worker populate trực tiếp `SearchResult` khi reply `rag.search` — **không cần tra DB** (rag-worker không dùng PostgreSQL). `section_title` → map sang `caption`, `heading_path` (breadcrumb) → map thẳng sang SearchResult. `ocr_confidence` chỉ có với PDF scan, dùng để flag low-quality chunks. Chunk size: Parent-Child (LlamaIndex HierarchicalNodeParser) — config TBD sau khi implement.
 
 ---
 

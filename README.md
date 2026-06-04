@@ -1,6 +1,6 @@
 # RAG-based Internal Q&A Chatbot — VinSmartFuture
 
-Hệ thống chatbot nội bộ giúp ~4,000 nhân viên truy vấn tài liệu công ty qua giao diện hội thoại, sử dụng RAG pipeline + Azure OpenAI.
+Hệ thống chatbot nội bộ giúp ~800 DAU nhân viên truy vấn tài liệu công ty qua giao diện hội thoại, sử dụng RAG pipeline + OpenAI GPT-4o mini + LlamaIndex FunctionCallingAgent (MCP client) gọi tool qua **MCP Tool Service**. Trả lời stream qua **SSE**.
 
 ---
 
@@ -11,17 +11,20 @@ Hệ thống chatbot nội bộ giúp ~4,000 nhân viên truy vấn tài liệu 
 git clone <repo-url>
 
 # 2. Copy env files và điền API keys
-cp src/user-service/.env.example  src/user-service/.env
-cp src/chat-service/.env.example  src/chat-service/.env
-cp src/rag-service/.env.example   src/rag-service/.env
-cp src/frontend/.env.local.example src/frontend/.env.local
-# Xem hướng dẫn chi tiết: docs/operations/env-setup.md
+cp src/user-service/.env.example      src/user-service/.env
+cp src/document-service/.env.example  src/document-service/.env
+cp src/query-service/.env.example     src/query-service/.env
+cp src/rag-worker/.env.example        src/rag-worker/.env
+cp src/mcp-service/.env.example       src/mcp-service/.env
+cp src/frontend/chat/.env.local.example   src/frontend/chat/.env.local
+cp src/frontend/admin/.env.local.example  src/frontend/admin/.env.local
+# Xem hướng dẫn chi tiết: docs/env-setup.md
 
 # 3. Start toàn bộ stack
 docker compose up --build
 ```
 
-Sau khi start: mở http://localhost:3000
+Sau khi start: Chat (End User) http://localhost:3000 · Admin console http://localhost:3001
 
 ---
 
@@ -29,12 +32,19 @@ Sau khi start: mở http://localhost:3000
 
 ```
 Browser → Nginx :80
-               ├── /           → Next.js Frontend :3000
-               ├── /api/user/* → User Service     :8000  (Auth, JWT)
-               └── /api/chat/* → Chat Service     :8001  (LLM, Conversation)
-                                      └── gọi nội bộ → RAG Service :8002 (Ingestion, Retrieval)
+               ├── /                → Chat app (Nuxt)    :3000  (End User)
+               ├── /admin           → Admin console (Nuxt) :3001  (Admin)
+               │       (2 micro-frontend dùng chung Nuxt base layer: auth + design system)
+               ├── /api/user/*      → User Service          :8000  (Auth /auth dùng chung; /users chỉ Admin app)
+               ├── /api/documents/* → Document Service      :8002  (Upload, Admin only)
+               ├── /api/query/*     → Query Service         :8001  (LLM, Conversation; SSE /query + /notifications)
+               │                          └── MCP → MCP Tool Service :8003 (tool: rag_search, hr_query)
+               │                                          └── NATS :4222 → RAG Worker (Retrieval — no HTTP)
+               └── /api/mcp/*       → MCP Tool Service      :8003
 
-Infra: PostgreSQL :5432 | Qdrant :6333 | Redis :6379 | Langfuse :4000
+Ingestion: Document Service → NATS doc.ingest → RAG Worker (OCR, chunk, embed → Qdrant)
+Infra: Qdrant :6333 | Redis :6379 | NATS :4222 (JetStream) | Langfuse :3100
+PostgreSQL: AWS RDS db.t3.micro — 5 databases: user_db / doc_db / query_db / mcp_db / langfuse_db
 ```
 
 ---
@@ -44,34 +54,30 @@ Infra: PostgreSQL :5432 | Qdrant :6333 | Redis :6379 | Langfuse :4000
 | Service | Port | Mô tả |
 |---------|------|-------|
 | User Service | 8000 | Auth, User management |
-| Chat Service | 8001 | LLM Orchestration, Conversation |
-| RAG Service | 8002 | Document Ingestion, Vector Retrieval |
-| Frontend | 3000 | Next.js UI |
+| Query Service | 8001 | LLM Orchestration, FunctionCallingAgent (MCP client), Conversation, SSE |
+| Document Service | 8002 | Document upload & management (Admin only) |
+| RAG Worker | — | NATS subscriber — Ingestion + Retrieval (no HTTP port, no DB) |
+| MCP Tool Service | 8003 | MCP server — tool `rag_search`, `hr_query` (dùng chung cho mọi agent) |
+| Chat app (frontend/chat) | 3000 | Nuxt UI — End User: chat SSE, notifications, document viewer |
+| Admin console (frontend/admin) | 3001 | Nuxt UI — Admin: documents, users, analytics |
+| Langfuse | 3100 | LLM observability dashboard (IT/DevOps only) |
 
-API docs (local): http://localhost:8000/docs | http://localhost:8001/docs | http://localhost:8002/docs
+> 2 micro-frontend dùng chung `frontend/base` (Nuxt layer: auth qua User Service `/auth`, design system) — build-time, không phải container.
+
+API docs (local): http://localhost:8000/docs | http://localhost:8001/docs | http://localhost:8002/docs | http://localhost:8003 (MCP endpoint)
 
 ---
 
 ## Docs
 
-> **Trước khi thay đổi/thêm bất cứ gì:** đọc [GUIDELINE.md](GUIDELINE.md) — định hướng tư duy
-> (đi từ "tại sao", không đổi gì trong im lặng, bảo vệ cái cốt lõi).
->
-> Tài liệu tổ chức theo **chuỗi thiết kế 5 tầng**. Bắt đầu từ [docs/design-flow.md](docs/design-flow.md) —
-> bản đồ giải thích trật tự đọc và cách truy vết. Mục lục đầy đủ: [docs/README.md](docs/README.md).
-
-| Tầng | File | Dành cho |
-|------|------|---------|
-| 🗺️ Bản đồ | [docs/design-flow.md](docs/design-flow.md) | Tất cả — đọc đầu tiên |
-| 0. Requirement | [docs/0-requirements/problem-and-market.md](docs/0-requirements/problem-and-market.md) | Tất cả — bài toán & thị trường |
-| 1–2. Domain | [docs/1-domain/domain-model.md](docs/1-domain/domain-model.md) | SA, tất cả — WHAT + WHY |
-| 3. Architecture | [docs/2-architecture/architecture-mapping.md](docs/2-architecture/architecture-mapping.md) | SA — ma trận truy vết rule→component |
-| 3. Architecture | [docs/2-architecture/solution-architecture.md](docs/2-architecture/solution-architecture.md) | SA — kiến trúc giải pháp |
-| 3. Architecture | [docs/2-architecture/clean-architecture.md](docs/2-architecture/clean-architecture.md) | Tất cả Dev — Clean Architecture 4 layer |
-| 4. Technical | [docs/3-technical/contracts.md](docs/3-technical/contracts.md) | SA, Dev — Domain interfaces |
-| 4. Technical | [docs/3-technical/api-spec.md](docs/3-technical/api-spec.md) | Frontend, AI/Agent Eng — HTTP endpoints |
-| 4. Technical | [docs/3-technical/data-schema.md](docs/3-technical/data-schema.md) | Backend, RAG Eng — PostgreSQL + Qdrant schema |
-| Delivery | [docs/delivery/roadmap.md](docs/delivery/roadmap.md) | Tất cả — lộ trình theo phase |
-| Delivery | [docs/delivery/team-ownership.md](docs/delivery/team-ownership.md) | SA, Team Lead — ai làm file nào |
-| Operations | [docs/operations/setup.md](docs/operations/setup.md) | Tất cả — cài đặt & chạy local |
-| Operations | [docs/operations/env-setup.md](docs/operations/env-setup.md) | Tất cả — biến môi trường & API keys |
+| File | Dành cho |
+|------|---------|
+| [docs/setup.md](docs/setup.md) | Tất cả — hướng dẫn cài đặt và chạy local |
+| [docs/SA_RAG_Chatbot_Final.md](docs/SA_RAG_Chatbot_Final.md) | SA, tất cả Dev — kiến trúc tổng thể (source of truth) |
+| [docs/architecture.md](docs/architecture.md) | SA, tất cả Dev — Clean Architecture 4 layer |
+| [docs/contracts.md](docs/contracts.md) | SA, Dev Infra, Dev Use Case — Domain interfaces |
+| [docs/api-spec.md](docs/api-spec.md) | Frontend Dev, AI/Agent Eng — HTTP endpoints |
+| [docs/data-schema.md](docs/data-schema.md) | Backend Dev, RAG Eng — PostgreSQL + Qdrant schema |
+| [docs/env-setup.md](docs/env-setup.md) | Tất cả — biến môi trường và API keys |
+| [docs/team-ownership.md](docs/team-ownership.md) | SA, Team Lead — ai làm file nào |
+| [docs/roadmap.md](docs/roadmap.md) | PM, SA — lộ trình 5 tuần |

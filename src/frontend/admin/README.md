@@ -1,0 +1,1 @@
+# frontend/admin — Frontend Dev (Đặng Hồ Hải) · Nuxt 4 — Admin console (documents / users / analytics) · :3001 · `extends '../base'` · gọi Document Service + User Service `/users` + Query Service `/admin/metrics` · chi tiết: [docs/team-ownership.md](../../../docs/team-ownership.md)

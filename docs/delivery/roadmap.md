@@ -10,13 +10,15 @@ Không chỉ là một chatbot — mà là **hệ thống quản lý tri thức 
 
 ## Tại sao đề tài này khả thi
 
-- **Vibe coding**: 6 người, stack rõ ràng (FastAPI + Next.js + RAG), sprint nhanh
+- **Vibe coding**: 6 người, stack rõ ràng (FastAPI + Nuxt 4 + RAG), sprint nhanh
 - **Phase sau không phụ thuộc phase trước**: team có thể stop ở bất kỳ điểm nào và sản phẩm vẫn usable
 - **Có precedent**: các công ty như Notion, Confluence đều đang build tính năng này — chứng minh nhu cầu có thực
 
 ---
 
 ## 5 tuần — Lộ trình cụ thể
+
+> 📅 **Kế hoạch chi tiết từng tuần (ai làm gì theo Sprint):** [docs/sprints/](sprints/README.md) — roadmap này = *làm gì + DoD theo Phase*; folder sprints = *lịch thực thi từng tuần*.
 
 ### Phase 1 — Core MVP + Cloud Deploy _(Tuần 1–3)_
 
@@ -28,7 +30,7 @@ Không chỉ là một chatbot — mà là **hệ thống quản lý tri thức 
 - Giao diện chat: hỏi câu hỏi → bot trả lời + trích dẫn nguồn tài liệu
 - Admin duyệt/từ chối tài liệu trước khi đưa vào knowledge base
 - Guardrails: chặn prompt injection, lọc off-topic, redact PII trong output
-- Semantic Cache: cache câu hỏi tương tự (Redis TTL 1h), tiết kiệm ~60% Azure OpenAI API cost
+- Semantic Cache: cache câu hỏi tương tự (Redis TTL 1h), tiết kiệm ~60% OpenAI API cost
 - Deploy lên AWS: EC2 + Docker Compose, RDS, S3, HTTPS qua Nginx
 
 **Definition of Done:**
@@ -40,18 +42,16 @@ _Auth_
 - [ ] Local account có thể reset mật khẩu qua email
 
 _Upload & Ingestion_
-- [ ] Upload file (PDF, DOCX, TXT, XLSX, CSV, PPTX, MD — tối đa 50MB)
-- [ ] End User upload → status `pending`, chờ Admin approve
-- [ ] Admin approve → tự động index; reject → ghi lý do, user thấy được
-- [ ] PDF scan → OCR bằng Azure Document Intelligence, trích xuất được text tiếng Việt
+- [ ] Admin upload file (PDF, DOCX, TXT, XLSX, CSV, PPTX, MD — tối đa 50MB)
+- [ ] Upload xong → status `queued` ngay, trigger ingestion pipeline tự động (không cần duyệt)
+- [ ] PDF scan → OCR bằng Gemini Vision API, trích xuất được text tiếng Việt
 - [ ] Excel/XLSX → convert từng row thành text có header đúng
 - [ ] Upload có chọn classification (Public / Internal / Secret / Top Secret), field lưu vào DB
-- [ ] User nhận notification khi tài liệu được approve hoặc reject (in-app notification hoặc email)
 - [ ] Classification được enforce khi query — Top Secret chỉ uploader xem được, Internal chỉ nhân viên active, Public cho tất cả account
 
 _Q&A Chatbot_
-- [ ] Semantic Cache hoạt động — câu hỏi tương tự (cosine similarity > 0.95) trả kết quả từ cache Redis, không gọi Azure OpenAI
-- [ ] Hỏi câu hỏi → bot trả lời streaming (chữ xuất hiện dần, không đợi toàn bộ)
+- [ ] Semantic Cache hoạt động — câu hỏi tương tự (cosine similarity > 0.95) trả kết quả từ cache Redis, không gọi OpenAI
+- [ ] Hỏi câu hỏi → bot trả lời streaming qua **SSE** (`POST /query`, chữ xuất hiện dần, không đợi toàn bộ)
 - [ ] Mỗi câu trả lời kèm nguồn: tên tài liệu + số trang + đoạn văn bản được trích dẫn
 - [ ] Click vào nguồn → mở document viewer, nhảy đến đúng trang, highlight đúng đoạn text đó
 - [ ] Không có tài liệu liên quan → bot trả về "Không tìm thấy thông tin" — không bịa
@@ -61,11 +61,24 @@ _HR Personal Q&A_
 - [ ] Hỏi ngày nghỉ còn lại / trạng thái đơn nghỉ phép → bot trả lời đúng từ mock data
 - [ ] Không thể xem HR data của người khác (filter `user_id` đúng)
 
-_Admin Dashboard_
-- [ ] Xem danh sách tài liệu + trạng thái ingestion (pending / processing / indexed / failed)
-- [ ] Approve / Reject tài liệu từ pending queue
-- [ ] Xem usage metrics cơ bản (số câu hỏi, feedback rate)
+_MCP Tool Service_
+- [ ] mcp-service chạy như MCP server riêng (port 8003), expose 2 tool: `rag_search`, `hr_query`
+- [ ] Query Service agent là MCP client — liệt kê + gọi tool qua MCP; inject `document_ids`/`user_id` (không để LLM tự điền)
+- [ ] `rag_search` self-contained: NATS rag.search → rerank BGE-Reranker → Top-3; `hr_query` đọc `mcp_db.hr_mock`
+
+_Admin Dashboard + Analytics (FE — Admin app `frontend/admin`)_
+- [ ] Xem danh sách tài liệu + trạng thái ingestion (queued / processing / indexed / failed)
 - [ ] Deactivate / Reactivate tài khoản user (xử lý nhân viên nghỉ việc)
+- [ ] **Analytics Dashboard** (kéo từ Phase 2 lên): charts volume theo ngày, feedback rate (up/down), top câu hỏi — gọi `GET /admin/metrics`
+
+_Realtime / Notification Center (SSE) (FE — Chat app `frontend/chat`)_
+- [ ] Stream SSE `GET /notifications` mở sẵn ngay sau khi đăng nhập (app-level)
+- [ ] Tài liệu ingest xong (indexed) → Document Service phát `notify.doc_new` → Query Service đẩy "Có tài liệu mới: X" qua SSE `/notifications` tới **mọi user đang online có quyền xem** (lọc classification/ACL)
+- [ ] **Notification Center**: toast realtime + badge số chưa đọc + dropdown lịch sử + mark-as-read (`GET /notifications/history`, `/unread-count`, `POST /{id}/read`)
+
+_Document Viewer + Conversation History (FE — Chat app `frontend/chat`)_
+- [ ] Click nguồn → mở **Document Viewer** (PDF.js): nhảy đúng trang + highlight đoạn citation (presigned URL từ `GET /documents/{id}/file`)
+- [ ] **Conversation history UI**: list / search / rename / delete hội thoại
 
 _Guardrails_
 - [ ] Prompt injection bị chặn — user không thể override system prompt bằng câu hỏi
@@ -77,7 +90,7 @@ _Feedback & Observability_
 - [ ] Langfuse trace hoạt động: xem được latency, token cost, retrieved chunks
 
 _Cloud Deployment_
-- [ ] Toàn bộ stack chạy ổn định trên AWS EC2 bằng Docker Compose (9 containers: nginx, next-frontend, user-service, chat-service, rag-service, Qdrant, Redis, Langfuse, PostgreSQL)
+- [ ] Toàn bộ stack chạy ổn định trên AWS EC2 bằng Docker Compose (12 containers: nginx, nuxt-chat, nuxt-admin, user-service, document-service, query-service, rag-worker, mcp-service, nats [JetStream], Qdrant, Redis, Langfuse :3100 — PostgreSQL = AWS RDS external; frontend/base là Nuxt layer build-time)
 - [ ] RDS PostgreSQL thay thế local DB — data không mất khi restart
 - [ ] File upload lưu vào S3, không lưu local
 - [ ] Qdrant self-hosted trên AWS, có persistent volume
@@ -165,10 +178,8 @@ Investigate nguyên nhân:
 
 > **Mục tiêu:** Nâng chất lượng sản phẩm, đưa bot vào workflow thực tế của nhân viên.
 
-**Admin Dashboard nâng cao:**
-- Tổng số câu hỏi theo ngày/tuần
-- Tỉ lệ feedback tốt / xấu (thumbs up/down)
-- Top 10 câu hỏi được hỏi nhiều nhất
+**Admin Dashboard nâng cao** _(analytics cơ bản: volume / feedback / top questions đã làm ở Phase 1):_
+- Mở rộng filter / drill-down theo phòng ban, theo tài liệu
 - Danh sách câu hỏi bot **không trả lời được** (không tìm thấy tài liệu liên quan)
 
 **Knowledge Gap Detection:**
@@ -180,10 +191,16 @@ Investigate nguyên nhân:
 - Hỗ trợ DM bot hoặc mention trong channel
 - Kỹ thuật: `botbuilder-python` (Microsoft Bot Framework) — cùng hệ sinh thái Azure AD đã dùng cho SSO
 
+**Realtime 2 chiều nâng cao** _(Phase 1 đã có notify "tài liệu mới"):_
+- Mở rộng loại notify: admin đăng chính sách mới, nhắc nhở cá nhân…
+- Khi scale nhiều instance: backplane (NATS/Redis pub-sub) route sự kiện tới đúng instance đang giữ socket của user
+- Tương tác 2 chiều: typing indicator, (xa hơn) chat nhiều người
+
 **Definition of Done:**
 - [ ] Dashboard hiển thị đủ 4 metrics: volume, feedback rate, top questions, knowledge gaps
 - [ ] Admin thấy được danh sách knowledge gaps từ câu hỏi không trả lời được
 - [ ] Hỏi bot ngay trong Microsoft Teams → nhận câu trả lời với nguồn tài liệu
+- [ ] Notify hoạt động khi scale nhiều instance (qua backplane) + có typing indicator
 
 ---
 

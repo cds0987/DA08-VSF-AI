@@ -34,7 +34,7 @@ infrastructure  →  application  →  domain
 Mỗi service là 1 folder riêng, dùng Clean Architecture độc lập bên trong.
 
 ```
-src/user-service/                   ← Container 1: Auth, User management
+src/user-service/                   ← Container 1: Auth / User management (:8000)
 ├── app/
 │   ├── domain/
 │   │   ├── entities/
@@ -62,7 +62,7 @@ src/user-service/                   ← Container 1: Auth, User management
 │           └── schemas/
 │               └── auth.py
 │
-src/chat-service/                   ← Container 2: LLM Orchestration, Conversation
+src/query-service/                  ← Container 2: LLM Orchestration, Conversation
 ├── app/
 │   ├── domain/
 │   │   ├── entities/
@@ -73,16 +73,17 @@ src/chat-service/                   ← Container 2: LLM Orchestration, Conversa
 │   ├── application/
 │   │   └── use_cases/
 │   │       └── query/
-│   │           └── orchestration.py       # Build prompt, call Azure OpenAI, stream
+│   │           └── orchestration.py       # FunctionCallingAgent (MCP client) → tool rag_search/hr_query ở mcp-service → stream OpenAI (SSE)
 │   │
 │   ├── infrastructure/
 │   │   ├── db/
 │   │   │   ├── models.py
 │   │   │   └── postgres_conversation_repo.py
 │   │   ├── external/
-│   │   │   ├── openai_client.py    # Chat Completion wrapper
-│   │   │   └── rag_service_client.py  # HTTP client gọi RAG Service
-│   │   └── memory/                # Phase 2: Redis short-term memory
+│   │   │   ├── openai_client.py    # OpenAI GPT-4o mini — streaming + tool_call
+│   │   │   └── mcp_client.py       # MCP client → mcp-service (tool rag_search, hr_query)
+│   │   ├── sse/                    # connection_manager + notify_subscriber (SSE /notifications)
+│   │   └── memory/                # Redis short-term memory
 │   │
 │   └── interfaces/
 │       └── api/
@@ -90,51 +91,73 @@ src/chat-service/                   ← Container 2: LLM Orchestration, Conversa
 │           ├── dependencies.py
 │           ├── routers/
 │           │   ├── query.py
-│           │   └── documents.py
+│           │   └── conversations.py
 │           └── schemas/
 │               ├── query.py        # QueryRequest, QueryResponse
-│               └── document.py
+│               └── conversation.py
 │
-src/rag-service/                    ← Container 3: OCR, Ingestion, Retrieval
+src/document-service/               ← Container 3: Document management (Admin)
+├── app/
+│   ├── domain/ ...
+│   ├── application/ ...
+│   ├── infrastructure/
+│   │   └── external/
+│   │       └── nats_client.py      # Publish doc.ingest, subscribe doc.status
+│   └── interfaces/
+│       └── api/
+│           └── routers/
+│               └── documents.py    # POST /documents/upload, GET /documents, DELETE
+│
+src/rag-worker/                     ← Container 4: Ingestion + Retrieval (NATS only, KHÔNG dùng DB)
 ├── app/
 │   ├── domain/
 │   │   ├── entities/
-│   │   │   └── document.py         # Document, Chunk
+│   │   │   └── document.py         # Document, Section (xử lý in-memory)
 │   │   └── repositories/
-│   │       ├── vector_repository.py       # Abstract VectorRepository + UserContext + SearchResult
-│   │       ├── document_repository.py     # Abstract DocumentRepository
-│   │       └── embedding_service.py       # Abstract EmbeddingService (BGE-M3 interface)
+│   │       ├── vector_repository.py       # Abstract VectorRepository + SearchResult
+│   │       └── embedding_service.py       # Abstract EmbeddingService (OpenAI interface)
 │   │
 │   ├── application/
 │   │   └── use_cases/
 │   │       ├── ingestion/
-│   │       │   └── ingest_document_use_case.py
+│   │       │   └── ingest_document_use_case.py  # Parse → Chunk (Parent-Child) → Embed → Upsert Qdrant
 │   │       └── query/
-│   │           └── retrieval.py    # Embed → Hybrid search (vector+BM25 RRF) → BGE-Reranker Top-3 → Classification filter
+│   │           └── retrieval.py    # Embed → Hybrid search (vector+BM25 RRF) → Top-K=5 → SearchResult
 │   │
 │   ├── infrastructure/
-│   │   ├── db/
-│   │   │   ├── models.py
-│   │   │   └── postgres_document_repository.py
 │   │   ├── vector/
 │   │   │   └── qdrant_vector_repository.py
 │   │   └── external/
-│   │       ├── bge_m3_client.py         # BGE-M3 Embedding Service client (self-hosted)
-│   │       ├── azure_doc_intel_client.py # OCR cho PDF scan (Azure Document Intelligence)
-│   │       ├── bge_reranker_client.py   # Reranker client gọi BGE-Reranker service
-│   │       └── langfuse_client.py       # Trace ingestion + retrieval
+│   │       ├── openai_embedding_client.py  # OpenAI text-embedding-3-small (1536 dims)
+│   │       ├── gemini_ocr_client.py        # Gemini Vision API — OCR PDF scan
+│   │       └── langfuse_client.py          # Trace ingestion + retrieval
 │   │
-│   └── interfaces/
-│       └── api/
-│           ├── main.py
-│           ├── routers/
-│           │   ├── ingest.py       # POST /ingest
-│           │   └── search.py       # POST /search
-│           └── schemas/
-│               ├── ingest.py
-│               └── search.py       # SearchResult response
+│   └── main.py                     # NATS subscriber — không có HTTP server, không có DB
 
-src/frontend/                       ← AWS EC2 deployment (Next.js container, Docker Compose)
+src/mcp-service/                    ← Container 5: MCP Tool Service (:8003)
+├── app/
+│   ├── domain/
+│   │   ├── entities/
+│   │   │   └── tool_io.py          # RagSearchInput/Result, HrQueryInput
+│   │   └── repositories/
+│   │       └── rerank_service.py           # Abstract RerankService (BGE-Reranker)
+│   ├── application/
+│   │   └── tools/
+│   │       ├── rag_search.py       # (rewrite) → NATS rag.search → rerank → Top-3
+│   │       └── hr_query.py         # query mcp_db.hr_mock filter user_id
+│   ├── infrastructure/
+│   │   ├── db/
+│   │   │   ├── models.py                   # hr_mock.* (mcp_db)
+│   │   │   └── postgres_hr_repository.py
+│   │   ├── nats_rag_client.py      # NATS request-reply rag.search → RAG Worker
+│   │   └── bge_reranker_client.py  # BGE-Reranker-v2-m3 (loaded inline, Top-5→Top-3)
+│   ├── interfaces/
+│   │   └── mcp_server.py           # Expose tool qua MCP (Streamable HTTP/SSE)
+│   └── main.py                     # MCP server :8003
+
+src/frontend/base/                  ← Nuxt Layer dùng chung (auth /auth + design system + useApi) — build-time, KHÔNG container
+src/frontend/chat/                  ← Container 6: Chat app End User (:3000) — extends frontend/base → Query Service
+src/frontend/admin/                 ← Container 7: Admin console (:3001) — extends frontend/base → Document + User /users + metrics
 ```
 
 ---
@@ -181,7 +204,7 @@ class QdrantVectorRepository(VectorRepository):  # implement interface từ doma
 
 FastAPI router nhận use case qua `Depends()` — use case nhận repository qua constructor.
 
-> **Lưu ý Microservices:** Chat Service không gọi Qdrant trực tiếp — nó gọi RAG Service qua HTTP. `RagServiceClient` là Infrastructure adapter đóng gói HTTP call đó. User Service không gọi RAG Service — chỉ xử lý auth/user data.
+> **Lưu ý Microservices:** Query Service không gọi Qdrant/RAG Worker trực tiếp — nó là **MCP client**, gọi tool ở mcp-service (`MCPClient`). Chính mcp-service mới giao tiếp với RAG Worker qua NATS request-reply (`rag.search`). User Service không gọi RAG Worker — chỉ xử lý auth/user data.
 
 ```python
 # src/user-service/app/interfaces/api/dependencies.py
@@ -189,26 +212,32 @@ def get_login_use_case() -> LoginUseCase:
     user_repo = PostgresUserRepository()
     return LoginUseCase(user_repo)
 
-# src/chat-service/app/interfaces/api/dependencies.py
+# src/query-service/app/interfaces/api/dependencies.py
 def get_orchestration_use_case() -> OrchestrationUseCase:
-    rag_client = RagServiceClient(base_url=settings.RAG_SERVICE_URL)  # HTTP client
+    mcp_client = MCPClient(url=settings.MCP_SERVICE_URL)   # gọi tool rag_search / hr_query
     conversation_repo = PostgresConversationRepo()
-    openai_client = OpenAIClient()
-    return OrchestrationUseCase(rag_client, conversation_repo, openai_client)
+    doc_access_repo = PostgresDocumentAccessRepo()        # projection ACL (query_db)
+    openai_client = OpenAIClient()                        # OpenAI GPT-4o mini — streaming + tool_call
+    return OrchestrationUseCase(mcp_client, conversation_repo, doc_access_repo, openai_client)
 
-# src/rag-service/app/interfaces/api/dependencies.py
+# src/mcp-service/app/interfaces/mcp_server.py  (tool dependencies)
+def get_rag_search_tool() -> RagSearchTool:
+    nats_client = NatsClient(url=settings.NATS_URL)   # NATS request-reply rag.search → RAG Worker
+    reranker = BGERerankerClient()                    # implement RerankService
+    return RagSearchTool(nats_client, reranker)
+
+# src/rag-worker/app/interfaces/api/dependencies.py
 def get_retrieval_use_case() -> RetrievalUseCase:
     vector_repo = QdrantVectorRepository()       # implement VectorRepository
-    embedding_svc = BgeM3EmbeddingService()      # implement EmbeddingService
+    embedding_svc = OpenAIEmbeddingService()      # implement EmbeddingService — text-embedding-3-small
     return RetrievalUseCase(vector_repo, embedding_svc)
 
 def get_ingest_use_case() -> IngestDocumentUseCase:
-    document_repo = PostgresDocumentRepository()
     vector_repo = QdrantVectorRepository()
-    embedding_svc = BgeM3EmbeddingService()      # dùng chung interface, cùng 1 instance
-    return IngestDocumentUseCase(document_repo, vector_repo, embedding_svc)
+    embedding_svc = OpenAIEmbeddingService()      # dùng chung interface, cùng 1 instance
+    return IngestDocumentUseCase(vector_repo, embedding_svc)   # RAG Worker không ghi DB — publish doc.status
 
-# src/chat-service/app/interfaces/api/routers/query.py
+# src/query-service/app/interfaces/api/routers/query.py
 @router.post("/query")
 async def query(request: QueryRequest, use_case = Depends(get_orchestration_use_case)):
     return await use_case.execute(request.question, request.user_id)
@@ -221,4 +250,4 @@ async def query(request: QueryRequest, use_case = Depends(get_orchestration_use_
 1. **Thêm field vào Entity** → báo SA trước, ảnh hưởng tất cả layer
 2. **Thêm method vào Repository interface** → SA viết, Dev Infra implement
 3. **Không import chéo** giữa `use_cases/query/` và `use_cases/ingestion/`
-4. **Mọi external call** (Azure OpenAI, Qdrant, BGE-M3, Azure Document Intelligence) chỉ được gọi từ `infrastructure/`
+4. **Mọi external call** (OpenAI GPT-4o mini, OpenAI Embeddings, Qdrant, Gemini Vision API) chỉ được gọi từ `infrastructure/`
