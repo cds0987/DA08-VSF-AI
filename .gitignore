@@ -6,8 +6,16 @@ src/rag-worker/haystack/
 __pycache__/
 *.py[cod]
 .venv/
+venv/
+.pytest_cache/
+.ruff_cache/
 
 # Secrets — KHÔNG commit (.env chứa API key thật)
 .env
 *.env
 !.env.example
+
+# Service scratch payloads
+query-body.json
+feedback-body.json
+notify-body.json
