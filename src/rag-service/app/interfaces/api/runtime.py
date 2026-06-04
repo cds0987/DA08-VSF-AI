@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import re
@@ -61,6 +62,40 @@ class RuntimeState:
     health: HealthReport
 
 
+@dataclass(frozen=True)
+class IngestLeaseSettings:
+    stale_timeout_seconds: int = 300
+    heartbeat_interval_seconds: float = 30.0
+    reaper_interval_seconds: float = 30.0
+
+
+def load_ingest_lease_settings() -> IngestLeaseSettings:
+    raw_timeout = os.getenv("CLAIM_STALE_TIMEOUT_SECONDS") or os.getenv(
+        "CLAIM_STALE_TIMEOUT", "300"
+    )
+    return IngestLeaseSettings(
+        stale_timeout_seconds=int(raw_timeout),
+        heartbeat_interval_seconds=float(
+            os.getenv("CLAIM_HEARTBEAT_INTERVAL_SECONDS", "30")
+        ),
+        reaper_interval_seconds=float(
+            os.getenv("CLAIM_REAPER_INTERVAL_SECONDS", "30")
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class ParserExecutionSettings:
+    max_workers: int = 2
+
+
+def load_parser_execution_settings() -> ParserExecutionSettings:
+    default_workers = max(1, min(4, os.cpu_count() or 1))
+    return ParserExecutionSettings(
+        max_workers=int(os.getenv("PARSER_MAX_WORKERS", str(default_workers)))
+    )
+
+
 def validate_runtime_settings() -> None:
     settings = load_settings()
     if settings.embed_dimension <= 0:
@@ -82,6 +117,8 @@ def validate_runtime_settings() -> None:
     if settings.child_overlap_words >= settings.child_max_words:
         raise ValueError("CHILD_OVERLAP_WORDS must be < CHILD_MAX_WORDS")
     validate_job_log_retention_settings()
+    validate_ingest_lease_settings()
+    validate_parser_execution_settings()
     if int(os.getenv("INGEST_WORKER_COUNT", "1")) <= 0:
         raise ValueError("INGEST_WORKER_COUNT must be > 0")
     if float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5")) <= 0:
@@ -177,6 +214,26 @@ def validate_job_log_retention_settings() -> None:
         raise ValueError("JOBLOG_PRUNE_INTERVAL_SECONDS must be > 0")
 
 
+def validate_ingest_lease_settings() -> None:
+    settings = load_ingest_lease_settings()
+    if settings.stale_timeout_seconds <= 0:
+        raise ValueError("CLAIM_STALE_TIMEOUT_SECONDS must be > 0")
+    if settings.heartbeat_interval_seconds <= 0:
+        raise ValueError("CLAIM_HEARTBEAT_INTERVAL_SECONDS must be > 0")
+    if settings.reaper_interval_seconds <= 0:
+        raise ValueError("CLAIM_REAPER_INTERVAL_SECONDS must be > 0")
+    if settings.heartbeat_interval_seconds >= settings.stale_timeout_seconds:
+        raise ValueError(
+            "CLAIM_HEARTBEAT_INTERVAL_SECONDS must be < CLAIM_STALE_TIMEOUT_SECONDS"
+        )
+
+
+def validate_parser_execution_settings() -> None:
+    settings = load_parser_execution_settings()
+    if settings.max_workers <= 0:
+        raise ValueError("PARSER_MAX_WORKERS must be > 0")
+
+
 async def prune_job_logs_once(
     document_repository: DocumentRepository,
     settings: JobLogRetentionSettings,
@@ -215,6 +272,44 @@ async def run_job_log_pruner(
         await asyncio.sleep(settings.prune_interval_seconds)
 
 
+async def mark_stale_jobs_once(
+    job_repository: IngestJobRepository,
+    settings: IngestLeaseSettings,
+    logger: logging.Logger,
+) -> int:
+    stale_before = datetime.now(UTC) - timedelta(seconds=settings.stale_timeout_seconds)
+    reclaimed = await job_repository.mark_stale_jobs(stale_before)
+    if reclaimed:
+        log_event(
+            logger,
+            logging.WARNING,
+            "ingest_jobs_marked_stale",
+            stage="worker",
+            reclaimed_count=reclaimed,
+            stale_before=stale_before.isoformat(),
+        )
+    return reclaimed
+
+
+async def run_stale_job_reaper(
+    job_repository: IngestJobRepository,
+    settings: IngestLeaseSettings,
+    logger: logging.Logger,
+) -> None:
+    while True:
+        try:
+            await mark_stale_jobs_once(job_repository, settings, logger)
+        except Exception as exc:  # noqa: BLE001 - recovery must keep running
+            log_event(
+                logger,
+                logging.WARNING,
+                "ingest_job_reaper_failed",
+                stage="worker",
+                error=str(exc),
+            )
+        await asyncio.sleep(settings.reaper_interval_seconds)
+
+
 async def run_ingest_worker(
     name: str,
     ingest_use_case: IngestDocumentUseCase,
@@ -250,7 +345,7 @@ async def run_ingest_worker(
 
 
 def build_parser() -> Parser:
-    return LocalFileParser()
+    return LocalFileParser(max_workers=load_parser_execution_settings().max_workers)
 
 
 def build_artifact_store() -> ArtifactStore:
@@ -297,6 +392,7 @@ def bootstrap_runtime() -> RuntimeState:
     app_env = os.getenv("APP_ENV", "development")
     validate_runtime_settings()
     settings = load_settings()
+    lease_settings = load_ingest_lease_settings()
     ai_settings = load_ai_settings()
     validate_ai_config(ai_settings, settings)
     vector_config = VectorStoreConfig.from_env(dimension=settings.embed_dimension)
@@ -344,6 +440,7 @@ def bootstrap_runtime() -> RuntimeState:
             document_repository,
             parser,
             artifact_store,
+            claim_heartbeat_interval_seconds=lease_settings.heartbeat_interval_seconds,
         )
         retrieval_use_case = RetrievalUseCase(engine)
     except Exception as exc:
@@ -401,8 +498,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     runtime = bootstrap_runtime()
     logger = logging.getLogger(__name__)
     retention_settings = load_job_log_retention_settings()
+    lease_settings = load_ingest_lease_settings()
     prune_task = asyncio.create_task(
         run_job_log_pruner(runtime.document_repository, retention_settings, logger)
+    )
+    stale_reaper_task = asyncio.create_task(
+        run_stale_job_reaper(runtime.job_repository, lease_settings, logger)
     )
     worker_count = int(os.getenv("INGEST_WORKER_COUNT", "1"))
     worker_poll_interval = float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5"))
@@ -424,11 +525,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.runtime = runtime
     app.state.health = runtime.health
     app.state.job_log_prune_task = prune_task
+    app.state.ingest_job_reaper_task = stale_reaper_task
     app.state.ingest_worker_tasks = worker_tasks
     try:
         yield
     finally:
         prune_task.cancel()
+        stale_reaper_task.cancel()
         for task in worker_tasks:
             task.cancel()
         try:
@@ -440,6 +543,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "job_log_prune_stopped",
                 stage="retention",
             )
+        try:
+            await stale_reaper_task
+        except asyncio.CancelledError:
+            log_event(
+                logger,
+                logging.INFO,
+                "ingest_job_reaper_stopped",
+                stage="worker",
+            )
         for task in worker_tasks:
             try:
                 await task
@@ -450,3 +562,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     "ingest_worker_stopped",
                     stage="worker",
                 )
+        close_parser = getattr(runtime.parser, "close", None)
+        if close_parser is not None:
+            with contextlib.suppress(Exception):
+                close_parser()

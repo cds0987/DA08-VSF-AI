@@ -6,11 +6,11 @@ Updated: 2026-06-04
 
 ## Summary
 
-The red Day-0 blockers from v2 are now addressed in code:
+The previously reopened Day-0 blockers from the 2026-06-04 second-pass review are now addressed in code:
 
 | Area | Day-0 target | Current state | Level |
 |---|---|---|---|
-| P1 | Durable ingest pipeline | `POST /api/ingest` enqueues durable `ingest_jobs`, returns `202`, worker loop claims jobs atomically, terminal writes respect `claim_id`, and job status is readable at `GET /api/ingest/jobs/{job_id}` | ✅ |
+| P1 | Durable ingest pipeline | `POST /api/ingest` enqueues durable `ingest_jobs`, returns `202`, worker loop claims jobs atomically, worker claims are renewed by heartbeat, timed-out `PROCESSING` jobs are reaped to `STALE`, and job status is readable at `GET /api/ingest/jobs/{job_id}` | ✅ |
 | P2 | Parse -> canonical artifact -> I/O guard | file-based ingest goes through `Parser`, writes canonical markdown artifact, enforces source allow-list/path traversal/size-before-read, and artifact reads are confined to `ARTIFACT_ROOT` | ✅ |
 | P3 | Live readiness, not bootstrap snapshot | `/livez` and `/readyz` are split, readiness recomputes runtime health on each request, and degraded dependencies return `503` | ✅ |
 | P4 | Edge guards + explicit auth boundary | request body size and fixed-window rate limit are enforced at the edge; auth boundary is ratified as caller/gateway-owned and service-local auth leftovers are removed | ✅ |
@@ -20,37 +20,25 @@ The red Day-0 blockers from v2 are now addressed in code:
 
 ### P1. Durable ingest
 
-- Added `ingest_jobs` domain model, repository contract, SQLAlchemy model, and migration.
-- Changed ingest API from inline indexing to `enqueue -> worker claim -> process`.
-- Added atomic claim semantics in both repository adapters.
-- Guarded terminal job transitions with `claim_id` so stale workers cannot mark a newer claim as completed or failed.
-- Added job status endpoint and updated router contract to return `job_id`.
+- Added `renew_claim()` and `mark_stale_jobs()` to the ingest job repository contract.
+- Added worker claim heartbeat renewal while a job is in flight.
+- Added a background stale-job reaper that moves timed-out `PROCESSING` jobs back to `STALE`.
+- Kept terminal job transitions guarded by `claim_id` so stale workers cannot complete or fail newer claims.
 
 ### P2. Parser and artifact flow
 
-- Added `Parser` and `ArtifactStore` contracts.
-- Added local implementations with shared source/artifact guards.
-- File-based ingest now parses first, writes one canonical markdown artifact, then indexes from that artifact.
-- Removed misleading unused parser/observability stubs from the runtime path.
+- File-based ingest still parses first, writes one canonical markdown artifact, then indexes from that artifact.
+- Parser work now runs on a dedicated bounded executor instead of the default shared threadpool.
+- Local parser now supports `html`, `docx`, image OCR, scanned PDF OCR, and optional `MarkItDown` conversion for additional Office formats.
 
-### P3. Live health
+### P3. Empty-ingest safety
 
-- Added `/livez` and `/readyz`.
-- Readiness re-probes vector and metadata dependencies at request time.
-- Health tests now verify recomputation rather than relying on bootstrap snapshot state.
+- `chunk_count == 0` now fails the ingest job instead of marking it `COMPLETED`.
+- Scanned PDFs and image files now attempt OCR instead of silently producing an empty ingest result.
 
-### P4. Resource guards and trust boundary
+### P4. Deploy/runtime support
 
-- Added request-body size guard and fixed-window rate limit middleware.
-- Removed uploader/auth leftovers from the document domain and metadata schema.
-- Ratified in docs that rag-service sits behind an authenticated caller boundary; it does not own JWT/authz policy.
-
-### P5. Deploy artifacts
-
-- Added `Dockerfile` for service image build.
-- Added Kubernetes config, secret template, migration job, deployment, and service manifests under `deploy/k8s/`.
-- Added rollout verification instructions under `deploy/README.md`.
-- Added GitHub Actions workflow at `.github/workflows/rag-service-ci.yml` to run tests, migration loop, compile check, and image build.
+- Service image now installs `tesseract-ocr` so OCR-backed parser paths are available in production containers.
 
 ## Remaining non-red work
 
@@ -59,3 +47,12 @@ The old red blockers are closed, but a few non-blocking items still remain:
 - Metrics/tracing and correlation middleware are still not complete enough for the Day-0 observability target.
 - Real-provider eval and remote-vector contract checks are still opt-in and not always-on in CI.
 - Hybrid retrieval naming/implementation is still behind the search design target.
+
+## Closed gaps from second-pass review
+
+| ID | Resolution |
+|---|---|
+| G1 | Added lease heartbeat renewal plus stale-job reaping so worker crashes no longer strand jobs in `PROCESSING`. |
+| G2 | Moved parser work to a dedicated bounded executor configured by `PARSER_MAX_WORKERS`. |
+| G3 | `chunk_count == 0` now fails ingest, and scanned PDFs/images go through OCR instead of silently succeeding empty. |
+| G4 | Local parser now handles `html`, `docx`, and OCR image sources directly, with optional `MarkItDown` support for more Office formats. |

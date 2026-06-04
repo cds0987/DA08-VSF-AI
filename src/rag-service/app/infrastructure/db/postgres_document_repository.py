@@ -285,6 +285,41 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
             claimed = session.get(IngestJobRecord, record.id)
             return self._to_job(claimed) if claimed is not None else None
 
+    async def renew_claim(self, job_id: str, claim_id: str) -> bool:
+        return await asyncio.to_thread(self._renew_claim_sync, job_id, claim_id)
+
+    def _renew_claim_sync(self, job_id: str, claim_id: str) -> bool:
+        with self._session() as session:
+            result = session.execute(
+                update(IngestJobRecord)
+                .where(
+                    IngestJobRecord.id == job_id,
+                    IngestJobRecord.claim_id == claim_id,
+                    IngestJobRecord.status == IngestJobStatus.PROCESSING.value,
+                )
+                .values(updated_at=datetime.now(UTC))
+            )
+            return (result.rowcount or 0) == 1
+
+    async def mark_stale_jobs(self, stale_before: datetime) -> int:
+        return await asyncio.to_thread(self._mark_stale_jobs_sync, stale_before)
+
+    def _mark_stale_jobs_sync(self, stale_before: datetime) -> int:
+        with self._session() as session:
+            result = session.execute(
+                update(IngestJobRecord)
+                .where(
+                    IngestJobRecord.status == IngestJobStatus.PROCESSING.value,
+                    IngestJobRecord.updated_at < stale_before,
+                )
+                .values(
+                    status=IngestJobStatus.STALE.value,
+                    claim_id=None,
+                    updated_at=datetime.now(UTC),
+                )
+            )
+            return int(result.rowcount or 0)
+
     async def complete_job(
         self,
         job_id: str,

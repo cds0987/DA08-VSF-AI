@@ -8,7 +8,10 @@ ENV APP_ENV=production
 
 WORKDIR /app
 
-RUN adduser --disabled-password --gecos "" appuser
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/* \
+    && adduser --disabled-password --gecos "" appuser
 
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt

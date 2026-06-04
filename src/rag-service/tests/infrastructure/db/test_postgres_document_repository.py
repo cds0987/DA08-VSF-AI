@@ -99,6 +99,37 @@ async def test_postgres_document_repository_claims_and_completes_ingest_jobs(tmp
 
 
 @pytest.mark.asyncio
+async def test_postgres_document_repository_renews_processing_claim(tmp_path) -> None:
+    database_path = tmp_path / "documents.db"
+    repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
+    now = datetime.now(UTC)
+
+    await repository.enqueue(
+        IngestJob(
+            id="job-1",
+            document_id="doc-1",
+            document_name="Policy",
+            file_type="md",
+            source_uri="local://doc-1.md",
+            markdown="# Policy",
+            artifact_uri=None,
+            correlation_id="cid-1",
+            status=IngestJobStatus.PROCESSING,
+            claim_id="claim-1",
+            attempt=1,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    assert await repository.renew_claim("job-1", "claim-1") is True
+    stored = await repository.get_job("job-1")
+    assert stored is not None
+    assert stored.updated_at >= now
+
+
+@pytest.mark.asyncio
 async def test_postgres_document_repository_terminal_claim_guard_rejects_stale_worker(tmp_path) -> None:
     database_path = tmp_path / "documents.db"
     repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
@@ -124,6 +155,40 @@ async def test_postgres_document_repository_terminal_claim_guard_rejects_stale_w
 
     assert await repository.complete_job("job-1", "claim-old", chunk_count=4) is False
     assert await repository.fail_job("job-1", "claim-old", error_message="boom") is False
+
+
+@pytest.mark.asyncio
+async def test_postgres_document_repository_marks_timed_out_jobs_stale(tmp_path) -> None:
+    database_path = tmp_path / "documents.db"
+    repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
+    old = datetime(2024, 1, 1, tzinfo=UTC)
+
+    await repository.enqueue(
+        IngestJob(
+            id="job-1",
+            document_id="doc-1",
+            document_name="Policy",
+            file_type="md",
+            source_uri="local://doc-1.md",
+            markdown="# Policy",
+            artifact_uri=None,
+            correlation_id="cid-1",
+            status=IngestJobStatus.PROCESSING,
+            claim_id="claim-old",
+            attempt=1,
+            created_at=old,
+            updated_at=old,
+        )
+    )
+
+    marked = await repository.mark_stale_jobs(datetime(2025, 1, 1, tzinfo=UTC))
+
+    assert marked == 1
+    stored = await repository.get_job("job-1")
+    assert stored is not None
+    assert stored.status is IngestJobStatus.STALE
+    assert stored.claim_id is None
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -15,6 +16,10 @@ from haystack_interface.engine import HaystackRagEngine, IngestInput
 from haystack_interface.logging_utils import log_event
 
 
+class EmptyIngestResultError(ValueError):
+    """Raised when parsing/indexing produces no retrievable content."""
+
+
 class IngestDocumentUseCase:
     def __init__(
         self,
@@ -23,6 +28,8 @@ class IngestDocumentUseCase:
         job_repository: IngestJobRepository,
         parser: Parser,
         artifact_store: ArtifactStore,
+        *,
+        claim_heartbeat_interval_seconds: float = 5.0,
     ):
         self._engine = engine
         self._documents = document_repository
@@ -30,6 +37,7 @@ class IngestDocumentUseCase:
         self._parser = parser
         self._artifact_store = artifact_store
         self._logger = logging.getLogger(__name__)
+        self._claim_heartbeat_interval_seconds = claim_heartbeat_interval_seconds
 
     async def enqueue(
         self,
@@ -86,6 +94,7 @@ class IngestDocumentUseCase:
         job = await self._jobs.claim_next_pending(claim_id)
         if job is None:
             return None
+        heartbeat_stop = asyncio.Event()
         await self._documents.update_status(job.document_id, DocumentStatus.PROCESSING)
         await self._append_job_log(
             JobLog(
@@ -95,6 +104,9 @@ class IngestDocumentUseCase:
                 status=DocumentStatus.PROCESSING.value,
                 created_at=datetime.now(UTC),
             )
+        )
+        heartbeat_task = asyncio.create_task(
+            self._maintain_claim_lease(job.id, claim_id, heartbeat_stop)
         )
         try:
             markdown, source_uri, artifact_uri = await self._prepare_markdown(job)
@@ -109,6 +121,10 @@ class IngestDocumentUseCase:
                     correlation_id=job.correlation_id,
                 )
             )
+            if chunk_count <= 0:
+                raise EmptyIngestResultError(
+                    "ingest produced 0 chunks; source is empty or OCR is required"
+                )
         except Exception as exc:
             failed = await self._jobs.fail_job(job.id, claim_id, error_message=str(exc))
             if failed:
@@ -129,6 +145,13 @@ class IngestDocumentUseCase:
                 )
             )
             raise
+        finally:
+            heartbeat_stop.set()
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
         completed = await self._jobs.complete_job(
             job.id,
             claim_id,
@@ -181,6 +204,35 @@ class IngestDocumentUseCase:
         )
         canonical_markdown = await self._artifact_store.read_markdown(artifact_uri)
         return canonical_markdown, source_uri, artifact_uri
+
+    async def _maintain_claim_lease(
+        self,
+        job_id: str,
+        claim_id: str,
+        stop_event: asyncio.Event,
+    ) -> None:
+        if self._claim_heartbeat_interval_seconds <= 0:
+            return
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=self._claim_heartbeat_interval_seconds,
+                )
+                return
+            except asyncio.TimeoutError:
+                renewed = await self._jobs.renew_claim(job_id, claim_id)
+                if renewed:
+                    continue
+                log_event(
+                    self._logger,
+                    logging.WARNING,
+                    "ingest_claim_heartbeat_lost",
+                    stage="ingest",
+                    job_id=job_id,
+                    claim_id=claim_id,
+                )
+                return
 
     async def _append_job_log(self, entry: JobLog) -> None:
         try:

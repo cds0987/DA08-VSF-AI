@@ -112,6 +112,33 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
             return updated
         return None
 
+    async def renew_claim(self, job_id: str, claim_id: str) -> bool:
+        job = self._jobs.get(job_id)
+        if (
+            job is None
+            or job.claim_id != claim_id
+            or job.status is not IngestJobStatus.PROCESSING
+        ):
+            return False
+        self._jobs[job_id] = replace(job, updated_at=datetime.now(UTC))
+        return True
+
+    async def mark_stale_jobs(self, stale_before: datetime) -> int:
+        marked = 0
+        for job_id, job in list(self._jobs.items()):
+            if (
+                job.status is IngestJobStatus.PROCESSING
+                and job.updated_at < stale_before
+            ):
+                self._jobs[job_id] = replace(
+                    job,
+                    status=IngestJobStatus.STALE,
+                    claim_id=None,
+                    updated_at=datetime.now(UTC),
+                )
+                marked += 1
+        return marked
+
     async def complete_job(
         self,
         job_id: str,

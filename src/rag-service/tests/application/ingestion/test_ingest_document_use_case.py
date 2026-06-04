@@ -34,6 +34,19 @@ class FailingEngine(StubEngine):
         raise RuntimeError("embed failed")
 
 
+class ZeroChunkEngine(StubEngine):
+    async def ingest(self, payload):
+        self.ingest_calls.append(payload)
+        return 0
+
+
+class SlowEngine(StubEngine):
+    async def ingest(self, payload):
+        self.ingest_calls.append(payload)
+        await asyncio.sleep(0.03)
+        return 1
+
+
 class StubParser:
     def __init__(self) -> None:
         self.calls = []
@@ -110,6 +123,16 @@ class StaleClaimDocuments(InMemoryDocumentRepository):
         chunk_count: int,
     ) -> bool:
         return False
+
+
+class HeartbeatTrackingDocuments(InMemoryDocumentRepository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.renew_calls = 0
+
+    async def renew_claim(self, job_id: str, claim_id: str) -> bool:
+        self.renew_calls += 1
+        return await super().renew_claim(job_id, claim_id)
 
 
 def test_ingest_use_case_enqueues_and_processes_markdown_job() -> None:
@@ -236,6 +259,33 @@ def test_ingest_use_case_logs_failed_runs() -> None:
     asyncio.run(scenario())
 
 
+def test_ingest_use_case_fails_when_ingest_produces_zero_chunks() -> None:
+    async def scenario() -> None:
+        engine = ZeroChunkEngine()
+        documents = InMemoryDocumentRepository()
+        parser = StubParser()
+        artifact_store = StubArtifactStore()
+        use_case = IngestDocumentUseCase(engine, documents, documents, parser, artifact_store)
+
+        await use_case.enqueue(
+            document_id="doc-empty",
+            document_name="Scanned",
+            file_type="pdf",
+            markdown="# Empty",
+        )
+        with pytest.raises(ValueError, match="0 chunks"):
+            await use_case.process_next_job()
+
+        stored = await use_case.get_document("doc-empty")
+        assert stored is not None
+        assert stored.status is DocumentStatus.FAILED
+        job = await use_case.get_job(next(iter(documents._jobs)))
+        assert job is not None
+        assert job.status is IngestJobStatus.FAILED
+
+    asyncio.run(scenario())
+
+
 def test_ingest_use_case_does_not_fail_when_job_log_append_fails() -> None:
     async def scenario() -> None:
         engine = StubEngine()
@@ -256,6 +306,37 @@ def test_ingest_use_case_does_not_fail_when_job_log_append_fails() -> None:
         stored = await use_case.get_document("doc-log-fail")
         assert stored is not None
         assert stored.status.value == "completed"
+
+    asyncio.run(scenario())
+
+
+def test_ingest_use_case_renews_claim_while_job_is_running() -> None:
+    async def scenario() -> None:
+        engine = SlowEngine()
+        documents = HeartbeatTrackingDocuments()
+        parser = StubParser()
+        artifact_store = StubArtifactStore()
+        use_case = IngestDocumentUseCase(
+            engine,
+            documents,
+            documents,
+            parser,
+            artifact_store,
+            claim_heartbeat_interval_seconds=0.01,
+        )
+
+        await use_case.enqueue(
+            document_id="doc-heartbeat",
+            document_name="Guide",
+            file_type="md",
+            markdown="# Title\nBody",
+        )
+
+        processed = await use_case.process_next_job()
+
+        assert processed is not None
+        assert processed.status is IngestJobStatus.COMPLETED
+        assert documents.renew_calls >= 1
 
     asyncio.run(scenario())
 
