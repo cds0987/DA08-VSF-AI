@@ -25,7 +25,11 @@ from app.infrastructure.external.local_artifact_store import LocalArtifactStore
 from app.infrastructure.external.local_parser import LocalFileParser
 from core_engine.ai import AISettings, get_ai_provider, load_ai_settings, reset_ai_provider
 from core_engine.config import HaystackSettings, load_settings
-from core_engine.factory import build_engine
+from core_engine.factory import (
+    build_engine,
+    caption_enabled_from_env,
+    rerank_provider_from_env,
+)
 from core_engine.logging_utils import configure_logging, log_event
 from core_engine.ocr import ProviderImageTextExtractor
 from core_engine.vectorstore import VectorStoreConfig, available_providers
@@ -121,6 +125,8 @@ def validate_runtime_settings() -> None:
     validate_job_log_retention_settings()
     validate_ingest_lease_settings()
     validate_parser_execution_settings()
+    caption_enabled_from_env()
+    rerank_provider_from_env()
     if int(os.getenv("INGEST_WORKER_COUNT", "1")) <= 0:
         raise ValueError("INGEST_WORKER_COUNT must be > 0")
     if float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5")) <= 0:

@@ -54,7 +54,12 @@ from core_engine.vectorstore import (
     available_providers,
 )
 from core_engine.caption import Captioner, ProviderCaptioner
-from core_engine.rerank import Reranker, LLMReranker, LexicalRerankerService
+from core_engine.rerank import (
+    Reranker,
+    LLMReranker,
+    LexicalRerankerService,
+    NoopRerankerService,
+)
 
 __all__ = [
     # composition
@@ -89,4 +94,5 @@ __all__ = [
     "Reranker",
     "LLMReranker",
     "LexicalRerankerService",
+    "NoopRerankerService",
 ]
