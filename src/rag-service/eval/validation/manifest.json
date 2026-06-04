@@ -1,0 +1,45 @@
+{
+  "description": "Validation corpus for the file-ingest e2e. Each entry is one source file parsed by the real LocalFileParser, then a golden query that must retrieve it as the top hit. Text-form only (no OCR) so the suite stays green offline. Extend by adding a file + entry; the e2e is data-driven from this manifest.",
+  "documents": [
+    {
+      "file": "account_reset.txt",
+      "file_type": "txt",
+      "document_id": "doc-account-reset",
+      "document_name": "Password Reset Guide",
+      "query": "how long until the password reset link expires",
+      "expect_keyword": "fifteen"
+    },
+    {
+      "file": "leave_policy.md",
+      "file_type": "md",
+      "document_id": "doc-leave-policy",
+      "document_name": "Annual Leave Policy",
+      "query": "how many annual leave days do full-time employees get",
+      "expect_keyword": "twelve"
+    },
+    {
+      "file": "expense_policy.html",
+      "file_type": "html",
+      "document_id": "doc-expense-policy",
+      "document_name": "Expense Reimbursement",
+      "query": "submit expense invoice for reimbursement within how many days",
+      "expect_keyword": "thirty"
+    },
+    {
+      "file": "onboarding.docx",
+      "file_type": "docx",
+      "document_id": "doc-onboarding",
+      "document_name": "Onboarding Checklist",
+      "query": "collect laptop and badge and attend orientation onboarding",
+      "expect_keyword": "orientation"
+    },
+    {
+      "file": "security_incident.pdf",
+      "file_type": "pdf",
+      "document_id": "doc-security-incident",
+      "document_name": "Security Incident Reporting",
+      "query": "how to report a security incident data breach",
+      "expect_keyword": "breach"
+    }
+  ]
+}
