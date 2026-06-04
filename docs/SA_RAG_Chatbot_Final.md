@@ -174,6 +174,7 @@ graph LR
         INGEST["Ingestion Module\nsubscribe doc.ingest"]
         PARSER["Document Parser\nPyMuPDF · docx · csv · pptx"]
         OCR["OCR Module"]
+        SEARCH["Query/Search Module\nsubscribe rag.search\nembed query + Qdrant hybrid search Top-5"]
     end
 
     subgraph AWS_STORAGE["AWS — Storage & Database"]
@@ -228,7 +229,10 @@ graph LR
     LFI --> LF
     LF --> LF_PG
     RETR --> EMB
-    RETR -->|"rag.search"| NATS
+    RETR -->|"rag.search (request)"| NATS
+    NATS -->|"rag.search"| SEARCH
+    SEARCH -->|"hybrid search Top-5"| QDRANT
+    SEARCH -->|"reply chunks"| NATS
     NATS -->|"reply chunks"| RETR
     S3 --> INGEST
     INGEST --> PARSER
@@ -242,6 +246,8 @@ graph LR
 ```
 
 > _Phase 1: Semantic Cache (Redis) đặt giữa Query Module và Qdrant. Phase 2 (Production Scale): SQS Queue thay thế BackgroundTasks cho Ingestion._
+>
+> **2 pattern NATS:** `rag.search` là **request-reply** (mcp-service ↔ RAG Worker — RAG Worker nhận request, search Qdrant rồi reply; **không persist**, fail thì timeout 10s). Các subject `doc.*` / `notify.*` là **pub/sub + JetStream** (persist trên disk — không mất message khi subscriber restart). NATS chỉ định tuyến message, **không tự xử lý hay tự trả lời**.
 
 ---
 
