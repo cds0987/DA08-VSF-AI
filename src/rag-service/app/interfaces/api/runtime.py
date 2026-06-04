@@ -382,8 +382,11 @@ async def compute_health(runtime: RuntimeState) -> HealthReport:
         reasons.append("AI provider is offline.")
     if runtime.vector_config.deployment != "remote":
         reasons.append("Vector backend is running in_process.")
-    if metadata_backend_name(os.getenv("DATABASE_URL", "").strip()) != "postgres":
-        reasons.append("Document metadata repository is in_memory.")
+    health_metadata_backend = metadata_backend_name(os.getenv("DATABASE_URL", "").strip())
+    if health_metadata_backend != "postgres":
+        reasons.append(
+            f"Document metadata repository is not durable (backend={health_metadata_backend})."
+        )
     if runtime.engine is None:
         reasons.append("Engine is not configured.")
     else:
@@ -434,7 +437,9 @@ def bootstrap_runtime() -> RuntimeState:
     if vector_config.deployment != "remote":
         reasons.append("Vector backend is running in_process.")
     if metadata_backend != "postgres":
-        reasons.append("Document metadata repository is in_memory.")
+        reasons.append(
+            f"Document metadata repository is not durable (backend={metadata_backend})."
+        )
 
     if _is_production(app_env) and reasons:
         log_event(

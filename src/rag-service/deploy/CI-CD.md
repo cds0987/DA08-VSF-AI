@@ -69,3 +69,27 @@ Kết quả: install toàn wheel → nhanh, không cần compiler; CI xanh; `44 
 3. **Đồng bộ `requirements.txt` với môi trường chạy thật** — không để venv local drift khỏi pin.
 4. **CI là nguồn sự thật**, không phải venv local: venv có thể đã có sẵn bản mới nên che lỗi.
 5. Cùng Python cho **cả ba**: CI (`setup-python`), Dockerfile (`FROM python:<ver>`), venv dev.
+
+---
+
+### 2026-06-04 (follow-up) — Đồng bộ driver DB + parser dep với code thật (commit `75dd288`)
+
+Sau post-mortem trên, review gap3 phát hiện `requirements.txt` lệch khỏi code/deploy thật:
+
+- **`asyncpg` → `psycopg[binary]==3.3.4`.** Repo metadata dùng **sync** SQLAlchemy (`create_engine`
+  + `asyncio.to_thread`), còn deploy cấu hình `postgresql+psycopg://`. `asyncpg` (driver async) **không
+  dùng được** với sync engine ⇒ là dead dependency. Bảng pin ở §"Cách sửa" phía trên giữ nguyên giá trị
+  **lịch sử**; trạng thái hiện tại của driver DB là `psycopg[binary]`. `runtime.validate_metadata_backend`
+  nay **fail-fast** nếu URL PostgreSQL không phải `postgresql+psycopg://`.
+- **`markitdown[all]` → `markitdown[pptx,xls,xlsx]`.** Extra `[all]` kéo `youtube-transcript-api~=1.0.0`
+  **không có bản thỏa mãn** (PyPI nhảy 0.6.x → 1.2.x) ⇒ resolution vỡ, chưa kể azure/speechrecognition/
+  pandas vô ích. Thu hẹp về đúng extras phục vụ `pptx/xls/xlsx`; đã xác minh
+  `pip install --dry-run "markitdown[pptx,xls,xlsx]==0.1.6" "openai==1.59.6"` resolve sạch, **giữ nguyên
+  `openai==1.59.6`** (không conflict).
+
+**Bổ sung quy tắc phòng ngừa:**
+
+6. **Pin phải khớp code path đang chạy**, không chỉ "package có tồn tại": driver async vs sync engine,
+   extras thực sự được `import`. Một dep không được code dùng tới = nợ, không phải an toàn.
+7. **Extras rộng (`[all]`) là bẫy resolution**: chỉ khai báo extra thật sự cần; verify bằng
+   `pip install --dry-run` cùng *toàn bộ* pin khác để bắt conflict transitive sớm.
