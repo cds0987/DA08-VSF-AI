@@ -31,7 +31,8 @@ RERANK_PROMPT = (
 class LLMReranker:
     def __init__(self, provider: AIProvider | None = None, *, passage_chars: int = 800):
         self._provider = provider or get_ai_provider()
-        self._passage_chars = passage_chars
+        # Config-driven params đến từ ${VAR} interpolation dưới dạng string -> coerce.
+        self._passage_chars = int(passage_chars)
         self._fallback = LexicalRerankerService()
         self._logger = logging.getLogger(__name__)
 
