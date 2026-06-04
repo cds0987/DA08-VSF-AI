@@ -10,10 +10,34 @@ from __future__ import annotations
 
 import json
 import logging
+from time import perf_counter
 
 # Thứ tự field chuẩn trong mỗi LogRecord do log_event tạo; formatter đọc list này
 # để biết field nghiệp vụ nào cần serialize (tách khỏi attr built-in của LogRecord).
 _EVENT_FIELDS_ATTR = "event_fields"
+
+
+class Stopwatch:
+    """Đồng hồ đo wall-clock đơn giản cho instrumentation per-stage.
+
+    Dùng `perf_counter` (monotonic, độ phân giải cao) — KHÔNG phụ thuộc lib ngoài.
+    Trả mili-giây vì đó là đơn vị các event log/benchmark dùng (đối chiếu eval p95).
+
+        sw = Stopwatch()
+        result = await do_stage()
+        log_event(logger, logging.INFO, "stage_done", duration_ms=sw.elapsed_ms())
+    """
+
+    __slots__ = ("_start",)
+
+    def __init__(self) -> None:
+        self._start = perf_counter()
+
+    def reset(self) -> None:
+        self._start = perf_counter()
+
+    def elapsed_ms(self) -> float:
+        return round((perf_counter() - self._start) * 1000.0, 3)
 
 
 def get_logger(name: str) -> logging.Logger:

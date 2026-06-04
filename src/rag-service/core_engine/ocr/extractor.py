@@ -16,7 +16,7 @@ import logging
 from typing import List, Protocol, runtime_checkable
 
 from core_engine.ai import AIProvider, OCR, VisionImage, get_ai_provider
-from core_engine.logging_utils import log_event
+from core_engine.logging_utils import Stopwatch, log_event
 
 # Prompt phỏng theo DEFAULT_PROMPT_TEMPLATE của haystack LLMDocumentContentExtractor.
 OCR_PROMPT = (
@@ -52,15 +52,22 @@ class ProviderImageTextExtractor:
     async def extract(self, images: List[VisionImage]) -> str:
         if not images:
             return ""
+        total_sw = Stopwatch()
         pages: List[str] = []
+        page_ms: List[float] = []
         for index, image in enumerate(images):
+            page_sw = Stopwatch()
             text = await self._provider.extract_text_from_images(
                 [image],
                 prompt=self._prompt,
                 capability=OCR,
             )
+            page_ms.append(page_sw.elapsed_ms())
             pages.append((text or "").strip())
         markdown = "\n\n".join(page for page in pages if page).strip()
+        total_ms = total_sw.elapsed_ms()
+        # Throughput: trang/giây để so cấu hình OCR (model/scale) khi benchmark.
+        pages_per_second = round(len(images) / (total_ms / 1000.0), 3) if total_ms else 0.0
         log_event(
             self._logger,
             logging.INFO,
@@ -68,5 +75,9 @@ class ProviderImageTextExtractor:
             stage="parse",
             page_count=len(images),
             char_count=len(markdown),
+            total_ms=total_ms,
+            avg_page_ms=round(sum(page_ms) / len(page_ms), 3) if page_ms else 0.0,
+            max_page_ms=round(max(page_ms), 3) if page_ms else 0.0,
+            pages_per_second=pages_per_second,
         )
         return markdown

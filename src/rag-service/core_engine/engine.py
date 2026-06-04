@@ -13,7 +13,7 @@ from app.domain.repositories.vector_repository import SearchResult, VectorReposi
 from core_engine.caption import Captioner
 from core_engine.chunking import split_sections
 from core_engine.config import HaystackSettings, load_settings
-from core_engine.logging_utils import log_event
+from core_engine.logging_utils import Stopwatch, log_event
 from core_engine.rerank import Reranker
 from core_engine.vectorstore.types import VectorRecord
 
@@ -47,6 +47,7 @@ class HaystackRagEngine:
 
     async def ingest(self, doc: IngestInput) -> int:
         request_correlation_id = doc.correlation_id or str(uuid4())
+        total_sw = Stopwatch()
         log_event(
             self._logger,
             logging.INFO,
@@ -59,12 +60,15 @@ class HaystackRagEngine:
         settings = self.settings
         source_uri = doc.source_uri or f"local://{doc.document_id}"
         artifact_uri = doc.artifact_uri or f"{source_uri}#artifact"
+        split_sw = Stopwatch()
         sections = split_sections(
             doc.markdown,
             parent_max_words=settings.parent_max_words,
             child_max_words=settings.child_max_words,
             child_overlap_words=settings.child_overlap_words,
         )
+        split_ms = split_sw.elapsed_ms()
+        caption_ms = 0.0
 
         chunk_ids: List[str] = []
         embed_texts: List[str] = []
@@ -74,7 +78,9 @@ class HaystackRagEngine:
             heading_path = [section.section_title] if section.section_title else []
 
             if self.captioner is not None:
+                caption_sw = Stopwatch()
                 caption = await self.captioner.caption(section.parent_text)
+                caption_ms += caption_sw.elapsed_ms()
                 units = [(f"{parent_id}::c0", caption, caption, section.parent_text)]
             else:
                 units = [
@@ -115,15 +121,19 @@ class HaystackRagEngine:
             return 0
 
         existing_chunk_ids = set(await self.vectors.list_chunk_ids_by_document(doc.document_id))
+        embed_sw = Stopwatch()
         vectors = await self.embedder.embed_batch(embed_texts)
+        embed_ms = embed_sw.elapsed_ms()
         records = [
             VectorRecord(chunk_id=chunk_id, vector=vector, payload=payload)
             for chunk_id, vector, payload in zip(chunk_ids, vectors, payloads)
         ]
+        write_sw = Stopwatch()
         await self.vectors.upsert_many(records)
         stale_chunk_ids = sorted(existing_chunk_ids - set(chunk_ids))
         if stale_chunk_ids:
             await self.vectors.delete_many(stale_chunk_ids)
+        write_ms = write_sw.elapsed_ms()
         log_event(
             self._logger,
             logging.INFO,
@@ -133,6 +143,11 @@ class HaystackRagEngine:
             document_id=doc.document_id,
             chunk_count=len(chunk_ids),
             pruned_chunk_count=len(stale_chunk_ids),
+            split_ms=split_ms,
+            caption_ms=round(caption_ms, 3),
+            embed_ms=embed_ms,
+            vector_write_ms=write_ms,
+            total_ms=total_sw.elapsed_ms(),
         )
         return len(chunk_ids)
 
@@ -149,6 +164,7 @@ class HaystackRagEngine:
             rerank_threshold if rerank_threshold is not None else settings.rerank_threshold
         )
         request_correlation_id = correlation_id or str(uuid4())
+        total_sw = Stopwatch()
         log_event(
             self._logger,
             logging.INFO,
@@ -159,18 +175,24 @@ class HaystackRagEngine:
             rerank_threshold=threshold,
         )
 
+        embed_sw = Stopwatch()
         query_vector = await self.embedder.embed(query_text)
+        embed_ms = embed_sw.elapsed_ms()
+        vector_sw = Stopwatch()
         candidates = await self.vectors.hybrid_search(
             query_vector,
             query_text,
             top_k=settings.top_k_candidates,
         )
+        vector_ms = vector_sw.elapsed_ms()
+        rerank_sw = Stopwatch()
         results = await self.reranker.rerank(
             query_text,
             candidates,
             top_k=effective_top_k,
             threshold=threshold,
         )
+        rerank_ms = rerank_sw.elapsed_ms()
         for result in results:
             result.correlation_id = request_correlation_id
         log_event(
@@ -181,5 +203,9 @@ class HaystackRagEngine:
             correlation_id=request_correlation_id,
             candidate_count=len(candidates),
             result_count=len(results),
+            embed_ms=embed_ms,
+            vector_search_ms=vector_ms,
+            rerank_ms=rerank_ms,
+            total_ms=total_sw.elapsed_ms(),
         )
         return results

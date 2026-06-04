@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import math
 import os
-from statistics import quantiles
+from statistics import mean, quantiles
 from time import perf_counter
 
 import pytest
@@ -81,6 +82,30 @@ GOLDEN_QUERIES = [
 ]
 
 
+def _ranked_relevance(retrieved_ids: list[str], relevant_id: str) -> list[int]:
+    """1 ở vị trí trùng tài liệu liên quan, 0 ở vị trí khác (giữ thứ tự rank)."""
+    return [1 if doc_id == relevant_id else 0 for doc_id in retrieved_ids]
+
+
+def recall_at_k(retrieved_ids: list[str], relevant_id: str, k: int) -> float:
+    """Mỗi golden query có đúng 1 tài liệu liên quan ⇒ recall@k ∈ {0.0, 1.0}."""
+    return 1.0 if relevant_id in retrieved_ids[:k] else 0.0
+
+
+def reciprocal_rank(retrieved_ids: list[str], relevant_id: str) -> float:
+    for rank, doc_id in enumerate(retrieved_ids, start=1):
+        if doc_id == relevant_id:
+            return 1.0 / rank
+    return 0.0
+
+
+def ndcg_at_k(retrieved_ids: list[str], relevant_id: str, k: int) -> float:
+    """nDCG nhị phân: 1 tài liệu liên quan ⇒ IDCG=1, DCG=1/log2(rank+1)."""
+    gains = _ranked_relevance(retrieved_ids[:k], relevant_id)
+    dcg = sum(gain / math.log2(idx + 2) for idx, gain in enumerate(gains))
+    return dcg  # IDCG = 1.0 vì chỉ một tài liệu liên quan ở vị trí lý tưởng (rank 1)
+
+
 def _build_eval_engine():
     if os.getenv("RAG_EVAL_REAL_PROVIDER", "").strip() == "1":
         try:
@@ -122,6 +147,44 @@ async def test_golden_queries_preserve_lineage_and_recall() -> None:
         assert p95_ms < max_p95_ms, (
             f"search p95 too high for golden set: {p95_ms:.1f}ms >= {max_p95_ms:.1f}ms"
         )
+
+
+@pytest.mark.asyncio
+async def test_golden_queries_quantitative_retrieval_metrics() -> None:
+    """Recall@k / MRR / nDCG định lượng trên golden set (V5-9).
+
+    Ngưỡng nới qua env cho provider thật; mặc định đòi hỏi top-hit hoàn hảo vì corpus
+    nhỏ + deterministic. Offline chứng minh plumbing; provider thật mới là gate chất lượng.
+    """
+    engine, _ = _build_eval_engine()
+    for document in GOLDEN_CORPUS:
+        await engine.ingest(document)
+
+    k = 3
+    recalls: list[float] = []
+    rrs: list[float] = []
+    ndcgs: list[float] = []
+    for case in GOLDEN_QUERIES:
+        results = await engine.search(
+            case["query"],
+            top_k=k,
+            rerank_threshold=0.0,
+            correlation_id=f"eval-metrics:{case['document_id']}",
+        )
+        retrieved_ids = [result.document_id for result in results]
+        recalls.append(recall_at_k(retrieved_ids, case["document_id"], k))
+        rrs.append(reciprocal_rank(retrieved_ids, case["document_id"]))
+        ndcgs.append(ndcg_at_k(retrieved_ids, case["document_id"], k))
+
+    recall = mean(recalls)
+    mrr = mean(rrs)
+    ndcg = mean(ndcgs)
+    min_recall = float(os.getenv("RAG_EVAL_MIN_RECALL", "1.0"))
+    min_mrr = float(os.getenv("RAG_EVAL_MIN_MRR", "0.99"))
+    min_ndcg = float(os.getenv("RAG_EVAL_MIN_NDCG", "0.99"))
+    assert recall >= min_recall, f"recall@{k}={recall:.3f} < {min_recall}"
+    assert mrr >= min_mrr, f"MRR={mrr:.3f} < {min_mrr}"
+    assert ndcg >= min_ndcg, f"nDCG@{k}={ndcg:.3f} < {min_ndcg}"
 
 
 @pytest.mark.asyncio
