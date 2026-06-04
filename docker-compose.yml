@@ -1,6 +1,7 @@
 # docker-compose.yml — DevOps (Trần Hữu Gia Huy)
-# TODO: định nghĩa 11 container theo docs/setup.md (Section 8) + docs/SA_RAG_Chatbot_Final.md:
-#   nginx, nuxt-frontend, user-service, document-service, query-service, rag-worker,
-#   mcp-service, nats (JetStream), qdrant, redis, langfuse
-#   (PostgreSQL = AWS RDS external — không có container)
+# TODO: định nghĩa 12 container theo docs/setup.md (Section 8) + docs/SA_RAG_Chatbot_Final.md:
+#   nginx, nuxt-chat (:3000), nuxt-admin (:3001), user-service, document-service, query-service,
+#   rag-worker, mcp-service, nats (JetStream), qdrant, redis, langfuse
+#   (PostgreSQL = AWS RDS external — không có container;
+#    frontend/base là Nuxt layer build-time, không deploy riêng)
 # Chi tiết phân công: docs/team-ownership.md (mục DevOps)

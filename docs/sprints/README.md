@@ -56,7 +56,7 @@ Dự án 5 tuần, chia thành **3 sprint**: `[Sprint 1: T1] · [Sprint 2: T2–
 | Role | Người | Service / Folder |
 |------|-------|------------------|
 | **SA** | Lê Hữu Hưng | `app/domain/` (cả 5 service), contracts, schemas, review |
-| **Frontend Dev** | Đặng Hồ Hải | `src/frontend/` (Nuxt 4) |
+| **Frontend Dev** | Đặng Hồ Hải | `src/frontend/chat/`, `src/frontend/admin/`, `src/frontend/base/` (Nuxt 4) |
 | **Backend Dev** | Vũ Quang Dũng | `src/user-service/`, `src/document-service/`, `infra/nats/` |
 | **RAG Engineer** | Trần Thanh Nguyên | `src/rag-worker/`, `src/mcp-service/` |
 | **AI/Agent Engineer** | Phạm Quốc Dũng | `src/query-service/` |

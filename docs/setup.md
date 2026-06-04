@@ -178,23 +178,32 @@ API docs tự động:
 
 ---
 
-## 6. Frontend setup
+## 6. Frontend setup — 2 micro-frontend (Nuxt 4)
+
+> Tách theo bounded context: **Chat app** (End User) + **Admin console** (Admin), dùng chung **Nuxt layer** `frontend/base` (auth + design system). `frontend/base` không chạy riêng — 2 app `extends` nó.
 
 ```bash
-cd src/frontend
-
-npm install
-
+# Chat app (End User) — port 3000
+cd src/frontend/chat
+npm install                 # tự kéo frontend/base qua extends
 cp .env.local.example .env.local
 # Điền:
-#   NUXT_PUBLIC_USER_SERVICE_URL=http://localhost:8000
-#   NUXT_PUBLIC_DOCUMENT_SERVICE_URL=http://localhost:8002
-#   NUXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8001
+#   NUXT_PUBLIC_USER_SERVICE_URL=http://localhost:8000   # auth /auth
+#   NUXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8001  # chat SSE + notifications
+npm run dev                 # http://localhost:3000
 
-npm run dev
+# Admin console (Admin) — port 3001
+cd ../frontend/admin
+npm install
+cp .env.local.example .env.local
+# Điền:
+#   NUXT_PUBLIC_USER_SERVICE_URL=http://localhost:8000      # auth /auth + /users
+#   NUXT_PUBLIC_DOCUMENT_SERVICE_URL=http://localhost:8002  # quản lý tài liệu
+#   NUXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8001     # /admin/metrics
+npm run dev -- --port 3001  # http://localhost:3001
 ```
 
-Frontend tại: http://localhost:3000
+Frontend: Chat (End User) http://localhost:3000 · Admin console http://localhost:3001
 
 ---
 
@@ -250,8 +259,9 @@ Services sau khi `docker compose up`:
 
 | Container | Port | Mô tả |
 |-----------|------|-------|
-| nginx | 80 / 443 | Reverse proxy, entry point — route `/` → frontend, `/api/*` → backend |
-| nuxt-frontend | 3000 | Nuxt UI (production build) |
+| nginx | 80 / 443 | Reverse proxy, entry point — route `/` → nuxt-chat, `/admin` → nuxt-admin, `/api/*` → backend |
+| nuxt-chat | 3000 | Chat app — End User (production build, extends frontend/base) |
+| nuxt-admin | 3001 | Admin console — Admin (production build, extends frontend/base) |
 | user-service | 8000 | Auth / User management |
 | document-service | 8002 | Document management (Admin only) |
 | query-service | 8001 | User chat / LLM Orchestration (MCP client) — SSE `/query` + `/notifications` |

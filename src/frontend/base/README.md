@@ -1,0 +1,1 @@
+# frontend/base — Frontend Dev (Đặng Hồ Hải) · Nuxt Layer dùng chung (auth qua User Service `/auth`, design system, useApi, layout) — KHÔNG deploy riêng; frontend/chat & frontend/admin `extends '../base'` · chi tiết: [docs/team-ownership.md](../../../docs/team-ownership.md)

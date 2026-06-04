@@ -211,27 +211,35 @@ MCP_PORT=8003
 
 ---
 
-## Frontend — `src/frontend/.env.local.example`
+## Frontend — 2 micro-frontend (`frontend/base` layer không cần env riêng)
 
+### Chat app — `src/frontend/chat/.env.local.example`
 ```env
-# Local development — trỏ trực tiếp tới từng service
-NUXT_PUBLIC_USER_SERVICE_URL=http://localhost:8000
-NUXT_PUBLIC_DOCUMENT_SERVICE_URL=http://localhost:8002
-NUXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8001
-```
-
-```env
+# Local development
+NUXT_PUBLIC_USER_SERVICE_URL=http://localhost:8000   # auth /auth
+NUXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8001  # chat SSE + notifications
 # Production (AWS) — cùng domain, Nginx route theo path prefix
-NUXT_PUBLIC_USER_SERVICE_URL=/api/user
-NUXT_PUBLIC_DOCUMENT_SERVICE_URL=/api/documents
-NUXT_PUBLIC_QUERY_SERVICE_URL=/api/query
+# NUXT_PUBLIC_USER_SERVICE_URL=/api/user
+# NUXT_PUBLIC_QUERY_SERVICE_URL=/api/query
 ```
 
-| Biến | Mô tả |
-|------|-------|
-| `NUXT_PUBLIC_USER_SERVICE_URL` | URL login / lấy user info |
-| `NUXT_PUBLIC_DOCUMENT_SERVICE_URL` | URL upload document / quản lý tài liệu (Admin only) |
-| `NUXT_PUBLIC_QUERY_SERVICE_URL` | URL query / conversations / feedback |
+### Admin console — `src/frontend/admin/.env.local.example`
+```env
+# Local development
+NUXT_PUBLIC_USER_SERVICE_URL=http://localhost:8000      # auth /auth + quản lý user /users
+NUXT_PUBLIC_DOCUMENT_SERVICE_URL=http://localhost:8002  # quản lý tài liệu
+NUXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8001     # /admin/metrics
+# Production (AWS)
+# NUXT_PUBLIC_USER_SERVICE_URL=/api/user
+# NUXT_PUBLIC_DOCUMENT_SERVICE_URL=/api/documents
+# NUXT_PUBLIC_QUERY_SERVICE_URL=/api/query
+```
+
+| Biến | Mô tả | App |
+|------|-------|-----|
+| `NUXT_PUBLIC_USER_SERVICE_URL` | Auth `/auth` (cả 2 app) + `/users` (Admin) | Chat + Admin |
+| `NUXT_PUBLIC_DOCUMENT_SERVICE_URL` | Upload / quản lý tài liệu (Admin only) | Admin |
+| `NUXT_PUBLIC_QUERY_SERVICE_URL` | Query / conversations / feedback (Chat); `/admin/metrics` (Admin) | Chat + Admin |
 
 > **Production note:** Frontend deploy cùng EC2 với backend. Nginx route `/api/user/*` → `user-service:8000`, `/api/documents/*` → `document-service:8002`, `/api/query/*` → `query-service:8001`, `/api/mcp/*` → `mcp-service:8003`. Không cần CORS config vì cùng domain. (MCP Service chủ yếu được Query Service gọi nội bộ.)
 
@@ -246,7 +254,7 @@ LANGFUSE_SALT=...                  # generate: openssl rand -hex 32
 DATABASE_URL=postgresql://user:password@<rds-endpoint>:5432/langfuse_db
 ```
 
-> Langfuse chạy trên port **:3100** (tránh conflict với Nuxt frontend :3000). Truy cập dashboard tại `http://<ec2-ip>:3100` — IT/DevOps only.
+> Langfuse chạy trên port **:3100** (tránh conflict với Nuxt: chat :3000, admin :3001). Truy cập dashboard tại `http://<ec2-ip>:3100` — IT/DevOps only.
 
 ---
 

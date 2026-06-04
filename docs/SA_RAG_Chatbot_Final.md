@@ -145,7 +145,7 @@ graph LR
     end
     OPS["IT/DevOps Operator"]
 
-    UI["Web UI — Nuxt :3000\nNginx · SSE streaming"]
+    UI["Web UI — 2 Nuxt app\nChat :3000 (End User) · Admin :3001\nNginx · SSE streaming"]
 
     subgraph USER_SVC["User Service :8000"]
         AUTH["Auth Module\nJWT · bcrypt · RBAC"]
@@ -283,7 +283,7 @@ graph LR
 
 ```mermaid
 graph LR
-    USER["End User"] -->|Question| UI["Web UI Nuxt :3000"]
+    USER["End User"] -->|Question| UI["Chat app — Nuxt :3000"]
     UI -->|POST /query SSE| API["Query Service :8001"]
 
     API --> JWT{"JWT + Redis Blacklist\n+ Rate Limit 20/min"}
@@ -324,7 +324,7 @@ graph LR
 
 | **STT** | **Tên Module** | **Mục đích** | **Phase** |
 |--------|--------------|-------------|---------|
-| 1 | Web UI (Nuxt 4 + Vue 3) | Giao diện chat streaming (SSE) cho nhân viên + Admin Dashboard (upload tài liệu, quản lý user, **analytics charts**) + **Notification Center** (badge/lịch sử) + **Document Viewer** (PDF.js highlight citation) + lịch sử hội thoại. | ✅ MVP |
+| 1 | Web UI — **2 micro-frontend** (Nuxt 4 + Vue 3) | **Chat app** (End User, :3000): chat streaming (SSE) + **Notification Center** (badge/lịch sử) + **Document Viewer** (PDF.js highlight citation) + lịch sử hội thoại. **Admin console** (Admin, :3001): upload tài liệu, quản lý user, **analytics charts**. Dùng chung **Nuxt base layer** (auth qua User Service `/auth`, design system). | ✅ MVP |
 | 2 | User Service (FastAPI) | Microservice 1: Auth/JWT, user management, login. Issue JWT token khi login. Chia sẻ `JWT_SECRET_KEY` với Document Service, Query Service và RAG Worker để verify locally — không cần gọi lại User Service mỗi request. | ✅ MVP |
 | 2b | Document Service (FastAPI) | Microservice 2: Admin document management — upload và xóa tài liệu. Lưu file lên S3, tạo record PostgreSQL (status=queued). Publish NATS subject `doc.ingest` ngay sau khi upload. Subscribe `doc.status` để cập nhật trạng thái ingestion từ RAG Worker. Chỉ Admin mới có quyền truy cập. | ✅ MVP |
 | 2c | RAG Worker (Python/NATS) | Worker thuần NATS — không expose HTTP. Subscribe `doc.ingest` → chạy pipeline ingestion (OCR→chunk→embed→store Qdrant). Subscribe `rag.search` từ Query Service → embed query → hybrid search → trả sections. | ✅ MVP |
@@ -450,7 +450,8 @@ graph LR
 
 ```mermaid
 flowchart TB
-    NEXTJS["Nuxt :3000 — AWS EC2 Docker Compose"]
+    CHAT["nuxt-chat :3000 — End User (AWS EC2)"]
+    ADMIN["nuxt-admin :3001 — Admin (AWS EC2)"]
 
     subgraph AWS["AWS ap-southeast-1 Singapore"]
         USVC["User Service :8000 — FastAPI"]
@@ -471,11 +472,14 @@ flowchart TB
     end
     GEMINI_EXT["Gemini Vision API"]
 
-    NEXTJS -- "9. HTTPS / Sync" --> USVC
-    NEXTJS -- "8. HTTPS + SSE" --> QUERY
+    CHAT -- "9. /auth (HTTPS)" --> USVC
+    ADMIN -- "9. /auth + /users (HTTPS)" --> USVC
+    CHAT -- "8b. HTTPS + SSE" --> QUERY
+    ADMIN -- "8. documents (HTTPS)" --> INGEST
+    ADMIN -- "metrics" --> QUERY
     USVC -- "TCP SSL" --> PG
     QUERY -- "TCP SSL" --> PG
-    RAG -- "TCP SSL" --> PG
+    INGEST -- "TCP SSL (doc_db)" --> PG
     QUERY -- "2. HTTPS / Sync + Streaming" --> AOAI
     QUERY -- "1. HTTPS / Sync" --> EMB_API
     RAG -- "1. HTTPS / Sync" --> EMB_API
@@ -505,9 +509,9 @@ flowchart TB
 | 5 | RDS PostgreSQL | User Service / Document Service / Query Service / MCP Service | AWS RDS PostgreSQL 15 | TCP/SSL | 5 databases: user_db (users/sessions/audit), doc_db (document metadata/audit), query_db (conversations/messages/document_access projection), mcp_db (hr_mock), langfuse_db (traces). RAG Worker không dùng RDS. SSL required. |
 | 6 | AWS S3 SDK | RAG Worker / Ingestion Module | AWS S3 (Private Bucket) | HTTPS / S3 SDK | PUT file gốc khi ingest. GET để xử lý. IAM Role-based access. |
 | 7 | Langfuse SDK | Query Service + RAG Worker | Langfuse :3100 (self-hosted on AWS) | HTTP nội bộ (VPC) | Query Service: LLM trace. RAG Worker: ingestion trace. Trace data không ra ngoài AWS. |
-| 8 | Frontend → Document Service | Nuxt :3000 (AWS EC2) | Document Service :8002 (EC2) | HTTPS | REST API cho document management (Admin only). Nginx route /api/documents → document-service:8002. |
-| 8b | Frontend → Query Service | Nuxt :3000 (AWS EC2) | Query Service :8001 (EC2) | HTTPS + SSE | `POST /query` (SSE) stream token trả lời; `GET /notifications` (SSE app-level) server đẩy thông báo. Các endpoint khác (/conversations, /feedback) là REST. Nginx route /api/query → query-service:8001 (tắt buffering cho SSE). |
-| 9 | Frontend → User Service | Nuxt :3000 (AWS EC2) | User Service :8000 (EC2) | HTTPS | REST API cho login, user management. Nginx route /api/user → user-service:8000. |
+| 8 | Admin app → Document Service | nuxt-admin :3001 (AWS EC2) | Document Service :8002 (EC2) | HTTPS | REST API cho document management (Admin only). Nginx route /api/documents → document-service:8002. |
+| 8b | Chat app → Query Service | nuxt-chat :3000 (AWS EC2) | Query Service :8001 (EC2) | HTTPS + SSE | `POST /query` (SSE) stream token trả lời; `GET /notifications` (SSE app-level) server đẩy thông báo. Các endpoint khác (/conversations, /feedback) là REST. Nginx route /api/query → query-service:8001 (tắt buffering cho SSE). Analytics (`GET /admin/metrics`) thì Admin app gọi. |
+| 9 | Chat app + Admin app → User Service | nuxt-chat :3000 + nuxt-admin :3001 | User Service :8000 (EC2) | HTTPS | **Auth `/auth/*` (login/refresh/me) — cả 2 app dùng chung** (qua Nuxt base layer). **`/users/*` (quản lý user) — chỉ Admin app**. Nginx route /api/user → user-service:8000. |
 | 9b | Query Service → MCP Service | Query Service (MCP client) | MCP Service :8003 | MCP (Streamable HTTP/SSE) | Liệt kê + gọi tool `rag_search`/`hr_query`. Query Service inject `document_ids`/`user_id`. Circuit Breaker (pybreaker, fail_max=5, reset_timeout=30s). |
 | 10 | MCP Service → RAG Worker (rag.search) | MCP Service (tool rag_search) | RAG Worker | NATS request-reply | query_text + document_ids → RAG Worker embed + hybrid search → Top-5 sections. mcp-service rerank bằng BGE-Reranker-v2-m3 (Top-5 → Top-3). |
 | 11 | Document Service → RAG Worker (doc.ingest) | Document Service | RAG Worker | NATS publish/subscribe (JetStream) | Admin upload → publish `{ doc_id, s3_key, file_type, classification }` → RAG Worker trigger ingestion pipeline. JetStream đảm bảo message không bị mất khi RAG Worker restart. |
@@ -552,8 +556,9 @@ flowchart LR
     RAG -->|"PDF scan"| OCR_EXT
     RAG -->|"section text (batch)"| EMB
     EMB -->|"vectors [1536d]"| QD
-    RAG -->|"doc metadata, status=indexed"| PG
     RAG -->|"publish doc.status"| NATS
+    NATS -->|"doc.status → update"| INGEST
+    INGEST -->|"doc metadata + status (doc_db)"| PG
 
     EU -->|"question"| QUERY
     QUERY -->|"ACL query"| PG
@@ -715,8 +720,9 @@ graph TB
         subgraph PUBLIC["Public Subnet — Security Group: 80/443/22"]
             subgraph EC2["EC2 t3.medium"]
                 NGINX["nginx :80/:443\nSSL termination + reverse proxy"]
-                subgraph COMPOSE["Docker Compose — 11 containers (gồm nginx)"]
-                    NEXT["nuxt-frontend :3000"]
+                subgraph COMPOSE["Docker Compose — 12 containers (gồm nginx)"]
+                    NEXT["nuxt-chat :3000 (End User)"]
+                    NADMIN["nuxt-admin :3001 (Admin)"]
                     USVC["user-service :8000"]
                     INGEST["document-service :8002"]
                     QUERY["query-service :8001"]
@@ -743,6 +749,7 @@ graph TB
 
     INTERNET -->|"HTTPS"| NGINX
     NGINX -->|"/"| NEXT
+    NGINX -->|"/admin"| NADMIN
     NGINX -->|"/api/user"| USVC
     NGINX -->|"/api/documents"| INGEST
     NGINX -->|"/api/query"| QUERY
@@ -772,8 +779,8 @@ graph TB
 **Hình vẽ kiến trúc triển khai cần có:**
 - Loại hạ tầng: **Cloud (AWS ap-southeast-1 Singapore)** — stack chính trên AWS, các API ngoài (OpenAI, Gemini) gọi qua HTTPS.
 - Network Topology: EC2 trong Public Subnet với Security Group chặt. RDS trong Private Subnet, chỉ EC2 truy cập được.
-- Entry từ Internet: HTTPS → Nginx (EC2) → route theo path: `/` → Nuxt frontend, `/api/*` → backend services.
-- Các server / container: 1 EC2 t3.medium chạy Docker Compose với **11 containers**: nginx, nuxt-frontend, user-service, query-service, document-service, rag-worker, mcp-service, nats, qdrant, redis, langfuse.
+- Entry từ Internet: HTTPS → Nginx (EC2) → route theo path: `/` → Chat app (nuxt-chat), `/admin` → Admin console (nuxt-admin), `/api/*` → backend services.
+- Các server / container: 1 EC2 t3.medium chạy Docker Compose với **12 containers**: nginx, nuxt-chat, nuxt-admin, user-service, query-service, document-service, rag-worker, mcp-service, nats, qdrant, redis, langfuse.
 - Mapping service/module → node: User Service (:8000) + Query Service (:8001) + Document Service (:8002) + MCP Tool Service (:8003) + RAG Worker (NATS only, no port) + NATS (:4222, JetStream) + Langfuse (:3100) trên EC2. RDS và S3 là managed AWS services. Phase 3 tách sang ECS Fargate.
 - Database: **RDS PostgreSQL 15 (db.t3.micro)** — 1 instance, 5 databases riêng: `user_db`, `doc_db`, `query_db`, `mcp_db`, `langfuse_db`. S3 với versioning.
 - External APIs: OpenAI GPT-4o mini (LLM), OpenAI text-embedding-3-small (Embedding), Gemini Vision API (OCR). API Keys quản lý qua Secrets Manager.
@@ -783,7 +790,7 @@ graph TB
 
 | **Thành phần** | **Service** | **Ghi chú** |
 |--------------|-----------|-----------|
-| Web UI (Nuxt) | AWS EC2 (Docker Compose) | Container trong cùng EC2 (:3000), Nginx route `/` → nuxt-frontend:3000. Toàn bộ traffic nằm trong AWS — không có CORS. |
+| Web UI (Nuxt) — 2 micro-frontend | AWS EC2 (Docker Compose) | 2 container trong cùng EC2: nuxt-chat (:3000, End User) + nuxt-admin (:3001, Admin); Nginx route `/` → nuxt-chat, `/admin` → nuxt-admin. Dùng chung Nuxt base layer (build-time). Toàn bộ traffic nằm trong AWS — không có CORS. |
 | Backend (FastAPI + NATS Worker) | AWS EC2 t3.medium (4GB RAM) | Docker Compose. User Service (:8000) + Query Service (:8001) + Document Service (:8002) + RAG Worker (NATS only, no port). NATS broker (:4222, JetStream enabled, internal only). Security Group: chỉ mở 80/443/22. |
 | Message Broker | NATS 2.10 (Docker Compose) | JetStream enabled — persist message, tránh mất khi RAG Worker restart. Subjects: `doc.ingest` (pub/sub), `doc.status` (pub/sub), `rag.search` (request-reply). Port 4222 — internal only. |
 | Cache / Rate Limit | Redis 7 (Docker Compose, :6379) | JWT blacklist (logout thật sự) + per-user rate limiting + Semantic Cache TTL 1h. |
@@ -800,7 +807,7 @@ graph TB
 
 | **Thành phần** | **MVP (Phase 1)** | **Phase 2 (Production Scale)** |
 |--------------|-----------------|------------------------|
-| Backend | 1 EC2 t3.medium, Docker Compose (11 containers) | ECS Fargate, min 2 tasks/service, auto-scale |
+| Backend | 1 EC2 t3.medium, Docker Compose (12 containers) | ECS Fargate, min 2 tasks/service, auto-scale |
 | Database | RDS Single-AZ db.t3.micro | RDS Multi-AZ + Read Replica |
 | Vector DB | Qdrant (self-hosted on AWS) — 1 container Docker Compose | Qdrant cluster riêng trên ECS (nhiều replica, persistent volume) |
 | Ingestion | NATS Worker (self-hosted, in-memory) | AWS SQS + Worker Service riêng (persistent, DLQ) |
@@ -962,7 +969,7 @@ graph TB
 > _Bổ sung chi tiết logic bảo mật đặc thù cho hệ thống:_
 > - **Prompt Injection Prevention:** Sanitize và escape user input. System prompt hardcode server-side, không lấy từ user input.
 > - **Hallucination Control:** Retrieval score < 0.7 → trả fallback, không gọi LLM. LLM chỉ được dùng thông tin từ context chunks đã retrieve.
-> - **CORS:** Frontend (Nuxt :3000) và backend (FastAPI :8000/:8001/:8002) cùng EC2, traffic qua Nginx — không cross-origin. FastAPI CORS middleware: `allow_origins=["http://localhost:3000"]` local dev, production dùng domain nội bộ (vd: `https://chatbot.vinsmartfuture.vn`). Không dùng wildcard `*`. Langfuse (:3100) chỉ truy cập nội bộ — không expose qua Nginx cho End User.
+> - **CORS:** Frontend (nuxt-chat :3000 + nuxt-admin :3001) và backend (FastAPI :8000/:8001/:8002) cùng EC2, traffic qua Nginx — không cross-origin. FastAPI CORS middleware: `allow_origins=["http://localhost:3000","http://localhost:3001"]` local dev, production dùng domain nội bộ (vd: `https://chatbot.vinsmartfuture.vn`). Không dùng wildcard `*`. Langfuse (:3100) chỉ truy cập nội bộ — không expose qua Nginx cho End User.
 > - **SQL Injection:** SQLAlchemy ORM với parameterized queries. Không dùng raw SQL string.
 
 ### 7.1.4 Governance & Compliance

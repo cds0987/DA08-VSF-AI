@@ -66,17 +66,17 @@ _MCP Tool Service_
 - [ ] Query Service agent là MCP client — liệt kê + gọi tool qua MCP; inject `document_ids`/`user_id` (không để LLM tự điền)
 - [ ] `rag_search` self-contained: NATS rag.search → rerank BGE-Reranker → Top-3; `hr_query` đọc `mcp_db.hr_mock`
 
-_Admin Dashboard + Analytics (FE)_
+_Admin Dashboard + Analytics (FE — Admin app `frontend/admin`)_
 - [ ] Xem danh sách tài liệu + trạng thái ingestion (queued / processing / indexed / failed)
 - [ ] Deactivate / Reactivate tài khoản user (xử lý nhân viên nghỉ việc)
 - [ ] **Analytics Dashboard** (kéo từ Phase 2 lên): charts volume theo ngày, feedback rate (up/down), top câu hỏi — gọi `GET /admin/metrics`
 
-_Realtime / Notification Center (SSE) (FE)_
+_Realtime / Notification Center (SSE) (FE — Chat app `frontend/chat`)_
 - [ ] Stream SSE `GET /notifications` mở sẵn ngay sau khi đăng nhập (app-level)
 - [ ] Tài liệu ingest xong (indexed) → Document Service phát `notify.doc_new` → Query Service đẩy "Có tài liệu mới: X" qua SSE `/notifications` tới **mọi user đang online có quyền xem** (lọc classification/ACL)
 - [ ] **Notification Center**: toast realtime + badge số chưa đọc + dropdown lịch sử + mark-as-read (`GET /notifications/history`, `/unread-count`, `POST /{id}/read`)
 
-_Document Viewer + Conversation History (FE)_
+_Document Viewer + Conversation History (FE — Chat app `frontend/chat`)_
 - [ ] Click nguồn → mở **Document Viewer** (PDF.js): nhảy đúng trang + highlight đoạn citation (presigned URL từ `GET /documents/{id}/file`)
 - [ ] **Conversation history UI**: list / search / rename / delete hội thoại
 
@@ -90,7 +90,7 @@ _Feedback & Observability_
 - [ ] Langfuse trace hoạt động: xem được latency, token cost, retrieved chunks
 
 _Cloud Deployment_
-- [ ] Toàn bộ stack chạy ổn định trên AWS EC2 bằng Docker Compose (11 containers: nginx, nuxt-frontend, user-service, document-service, query-service, rag-worker, mcp-service, nats [JetStream], Qdrant, Redis, Langfuse :3100 — PostgreSQL = AWS RDS external)
+- [ ] Toàn bộ stack chạy ổn định trên AWS EC2 bằng Docker Compose (12 containers: nginx, nuxt-chat, nuxt-admin, user-service, document-service, query-service, rag-worker, mcp-service, nats [JetStream], Qdrant, Redis, Langfuse :3100 — PostgreSQL = AWS RDS external; frontend/base là Nuxt layer build-time)
 - [ ] RDS PostgreSQL thay thế local DB — data không mất khi restart
 - [ ] File upload lưu vào S3, không lưu local
 - [ ] Qdrant self-hosted trên AWS, có persistent volume

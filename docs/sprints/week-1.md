@@ -18,7 +18,7 @@ SA **freeze** domain + contracts + API schemas để cả team có "bản hợp 
 | **Backend Dev** | Vũ Quang Dũng | (Ngày 3) **Chốt NATS subject contract** `infra/nats/subjects.md` (doc.ingest/doc.status/doc.access/notify.doc_new) — ưu tiên làm sớm vì RAG/AI Eng chờ. user-service: login JWT HS256, `verify_token`, `GET /auth/me`, `models.py` (users/refresh_tokens/audit_logs). | Chờ SA freeze |
 | **RAG Engineer** | Trần Thanh Nguyên | (Ngày 3) Scaffold rag-worker (`main.py` NATS subscriber + subscribe `doc.ingest`); khung `openai_embedding_client.py`, `qdrant_vector_repository.py`. Scaffold mcp-service (`mcp_server.py`). | Chờ SA freeze + NATS contract |
 | **AI/Agent Engineer** | Phạm Quốc Dũng | (Ngày 3) Scaffold query-service; khung `mcp_client.py`; SSE `POST /query` (khung, chưa gọi LLM); `conversation_repo` + `models.py`. | Chờ SA freeze + NATS contract |
-| **Frontend Dev** | Đặng Hồ Hải | (Ngày 3) Nuxt 4 setup (`nuxt.config.ts`, `app/app.vue`, `middleware/auth.ts`); `pages/login.vue`, `pages/chat.vue` (shell) — mock API bằng schemas SA, không chờ backend. | Chờ SA freeze (schemas) |
+| **Frontend Dev** | Đặng Hồ Hải | (Ngày 3) `frontend/base` layer trước (auth `/auth` + design system + `login.vue`); rồi scaffold `frontend/chat` (`chat.vue` shell) + `frontend/admin` (`documents.vue` shell) extends base — mock API bằng schemas SA, không chờ backend. | Chờ SA freeze (schemas) |
 
 ---
 

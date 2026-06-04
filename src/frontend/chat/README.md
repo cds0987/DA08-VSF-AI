@@ -1,0 +1,1 @@
+# frontend/chat — Frontend Dev (Đặng Hồ Hải) · Nuxt 4 — Chat End User (SSE, notifications, document viewer) · :3000 · `extends '../base'` · gọi Query Service · chi tiết: [docs/team-ownership.md](../../../docs/team-ownership.md)

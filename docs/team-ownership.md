@@ -5,7 +5,7 @@
 | Role | Người phụ trách | Phụ trách chính | Service / Folder | Bắt đầu sau |
 |------|----------------|----------------|-----------------|-------------|
 | **SA** | Lê Hữu Hưng | Domain design, contracts, API schemas, code review | `app/domain/` (cả 5 services) | Ngay — làm đầu tiên |
-| **Frontend Dev** | Đặng Hồ Hải | Web UI chat, admin dashboard + analytics, notification center, document viewer | `src/frontend/` (Nuxt 4) | Sau khi SA freeze schemas |
+| **Frontend Dev** | Đặng Hồ Hải | 2 micro-frontend: Chat (End User) + Admin console, dùng chung base layer (auth, design system) | `src/frontend/chat/`, `src/frontend/admin/`, `src/frontend/base/` (Nuxt 4) | Sau khi SA freeze schemas |
 | **Backend Dev** | Vũ Quang Dũng | User Service + Document Service: auth, JWT, document management + **chủ NATS subject contract & JetStream config** | `src/user-service/`, `src/document-service/`, `infra/nats/` | Sau khi SA freeze domain |
 | **RAG Engineer** | Trần Thanh Nguyên | RAG Worker (ingestion + retrieval, NATS) + **MCP Tool Service** (tool rag_search/hr_query + rerank) | `src/rag-worker/app/`, `src/mcp-service/app/` | Sau khi SA freeze domain |
 | **AI/Agent Engineer** | Phạm Quốc Dũng | Query Service: LLM orchestration, SSE streaming, notify, memory, MCP client | `src/query-service/app/` | Sau khi SA freeze domain |
@@ -94,56 +94,73 @@ src/document-service/app/interfaces/api/schemas/
 
 **Bắt đầu Ngày 3. Mock API bằng schemas SA đã viết — không chờ backend xong.**
 
-**Stack: Nuxt 4 + Vue 3 + TypeScript + TailwindCSS** (code gom trong `app/`).
+**Stack: Nuxt 4 + Vue 3 + TypeScript + TailwindCSS.** Tách **micro-frontend** theo bounded context: 2 app deploy riêng + 1 **Nuxt layer** dùng chung.
 
-**Files Frontend Dev tạo:**
+**3 folder Frontend Dev tạo:**
+
+#### `src/frontend/base/` — Nuxt Layer dùng chung (KHÔNG deploy riêng)
 ```
-src/frontend/
-├── nuxt.config.ts                  ← Cấu hình Nuxt 4: runtimeConfig (NUXT_PUBLIC_*), modules (tailwind)
+src/frontend/base/
+├── nuxt.config.ts                  ← Khai báo là layer (base config: runtimeConfig NUXT_PUBLIC_*, tailwind)
 ├── app/
-│   ├── app.vue                     ← Root component + layout
-│   ├── pages/
-│   │   ├── login.vue               ← Form đăng nhập (email/password + Microsoft SSO)
-│   │   ├── chat.vue                ← Chat chính, SSE consumer (End User only)
-│   │   └── admin/
-│   │       ├── documents.vue       ← Upload + danh sách tài liệu + ingestion status (Admin)
-│   │       ├── users.vue           ← Quản lý user: deactivate/reactivate (Admin)
-│   │       └── analytics.vue       ← [MỚI] Dashboard: charts volume / feedback rate / top questions
+│   ├── composables/
+│   │   ├── useApi.ts               ← `$fetch` base client, attach Bearer token
+│   │   └── useAuth.ts              ← Auth qua User Service /auth (login/refresh/me), JWT cookie, auto-refresh
 │   ├── middleware/
-│   │   └── auth.ts                 ← Route guard: chưa login → /login; route admin → check role
+│   │   └── auth.ts                 ← Route guard: chưa login → /login; check role
+│   ├── components/                 ← Design system dùng chung (Button, Input, Card, AppLayout…)
+│   └── pages/
+│       └── login.vue               ← Form đăng nhập (email/password + Microsoft SSO) — cả 2 app dùng
+```
+> **Auth (User Service `/auth/*`) là phần dùng chung** → đặt ở base layer. 2 app `extends: '../base'`.
+
+#### `src/frontend/chat/` — App End User (container `nuxt-chat` :3000)
+```
+src/frontend/chat/
+├── nuxt.config.ts                  ← extends '../base'; NUXT_PUBLIC_QUERY_SERVICE_URL
+├── app/
+│   ├── pages/
+│   │   └── chat.vue                ← Chat chính, SSE consumer (End User)
 │   ├── plugins/
-│   │   └── notifications.client.ts ← Mở EventSource(`GET /notifications`) app-level sau đăng nhập (provide qua useState)
+│   │   └── notifications.client.ts ← Mở EventSource(`GET /notifications`) app-level sau đăng nhập
 │   ├── components/
 │   │   ├── ChatMessage.vue         ← Render 1 tin nhắn (user/bot) + source citations
 │   │   ├── SourceCard.vue          ← Nguồn tài liệu; click → mở DocumentViewer
-│   │   ├── FileUpload.vue          ← Drag-drop upload, chọn classification
 │   │   ├── StreamingText.vue       ← Nhận SSE token (POST /query), render token từng cái
 │   │   ├── NotificationToast.vue   ← Toast realtime khi nhận event notify
-│   │   ├── NotificationCenter.vue  ← [MỚI] badge số chưa đọc + dropdown lịch sử + mark-as-read
-│   │   ├── DocumentViewer.vue      ← [MỚI] PDF.js: nhảy đúng trang + highlight đoạn citation
-│   │   ├── ConversationList.vue    ← [MỚI] lịch sử hội thoại: list / search / rename / delete
-│   │   └── AnalyticsCharts.vue     ← [MỚI] charts (Chart.js / ApexCharts)
-│   ├── composables/
-│   │   ├── useApi.ts               ← `$fetch` base client, attach Bearer token
-│   │   ├── useAuth.ts              ← JWT lưu cookie/localStorage, auto-refresh
-│   │   ├── useChat.ts              ← POST /query, đọc SSE bằng fetch + ReadableStream (token/done)
-│   │   ├── useNotifications.ts     ← Stream /notifications realtime + history (GET /notifications/history, unread-count, mark read)
-│   │   ├── useDocuments.ts         ← GET/POST /documents + GET /documents/{id}/file (presigned)
-│   │   ├── useConversations.ts     ← [MỚI] GET/DELETE /conversations, rename
-│   │   └── useAnalytics.ts         ← [MỚI] GET /admin/metrics
-│   └── utils/
-│       └── sse.ts                  ← Helper đọc SSE: EventSource cho GET, fetch-stream cho POST
-└── server/                         ← (tùy chọn) Nitro route nếu cần BFF — Phase 1 chưa cần
+│   │   ├── NotificationCenter.vue  ← badge số chưa đọc + dropdown lịch sử + mark-as-read
+│   │   ├── DocumentViewer.vue      ← PDF.js: nhảy đúng trang + highlight đoạn citation
+│   │   └── ConversationList.vue    ← lịch sử hội thoại: list / search / rename / delete
+│   └── composables/
+│       ├── useChat.ts              ← POST /query, đọc SSE bằng fetch + ReadableStream (token/done)
+│       ├── useNotifications.ts     ← Stream /notifications realtime + history
+│       └── useConversations.ts     ← GET/DELETE /conversations, rename
 ```
+→ Gọi **Query Service** (chat/SSE/notifications) + `GET /documents/{id}/file` (presigned, để xem citation).
 
-**Việc thêm cho FE (Phase 1):**
-- **Notification Center đầy đủ** (`NotificationCenter.vue` + `useNotifications`): badge số chưa đọc, dropdown lịch sử thông báo, mark-as-read. Realtime qua SSE `/notifications`; lịch sử/đếm chưa đọc qua API (`GET /notifications/history`, `/unread-count`, `POST /notifications/{id}/read`).
-- **Admin Analytics Dashboard** (`analytics.vue` + `AnalyticsCharts.vue`): charts volume / feedback rate / top questions (gọi `GET /admin/metrics`). Kéo từ Phase 2 lên Phase 1.
-- **Document Viewer + highlight** (`DocumentViewer.vue`): PDF.js — click nguồn (`SourceCard`) → mở file gốc (presigned URL từ `GET /documents/{id}/file`), nhảy đúng trang + highlight đoạn citation. Kèm **Conversation history UI** (`ConversationList.vue`).
+#### `src/frontend/admin/` — App Admin (container `nuxt-admin` :3001)
+```
+src/frontend/admin/
+├── nuxt.config.ts                  ← extends '../base'; NUXT_PUBLIC_DOCUMENT/USER/QUERY_SERVICE_URL
+├── app/
+│   ├── pages/
+│   │   ├── documents.vue           ← Upload + danh sách tài liệu + ingestion status
+│   │   ├── users.vue               ← Quản lý user: deactivate/reactivate
+│   │   └── analytics.vue           ← Dashboard: charts volume / feedback rate / top questions
+│   ├── components/
+│   │   ├── FileUpload.vue          ← Drag-drop upload, chọn classification
+│   │   └── AnalyticsCharts.vue     ← charts (Chart.js / ApexCharts)
+│   └── composables/
+│       ├── useDocuments.ts         ← GET/POST/DELETE /documents (Document Service)
+│       ├── useUsers.ts             ← GET /users, deactivate/reactivate (User Service /users)
+│       └── useAnalytics.ts         ← GET /admin/metrics (Query Service)
+```
+→ Gọi **Document Service** (tài liệu) + **User Service `/users`** (quản lý user) + **Query Service `/admin/metrics`**.
 
-> **2 stream SSE riêng:** `POST /query` (mở theo từng câu hỏi, đóng khi trả xong) và `GET /notifications`
-> (mở **app-level** ngay sau đăng nhập, giữ lâu) → user nhận thông báo kể cả khi đang ở Admin Dashboard.
-> EventSource chỉ hỗ trợ GET → `/query` (POST) đọc SSE bằng fetch-stream.
+**Phân chia theo persona (chuẩn microservice):**
+- **Chat app** (End User) ↔ Query Service · **Admin app** (Admin) ↔ Document + User `/users` + metrics.
+- **Auth (User Service `/auth`)** dùng chung → base layer. Identity là shared infra, cả 2 app verify JWT bằng cùng secret.
+- 2 stream SSE (`POST /query` request-scoped + `GET /notifications` app-level) **chỉ ở Chat app**.
 
 **Không được đụng:** bất kỳ file Python nào, docker-compose.yml.
 
@@ -422,7 +439,7 @@ src/query-service/app/
 
 **Files DevOps tạo:**
 ```
-docker-compose.yml               ← 11 containers: nginx, nuxt-frontend, user-service,
+docker-compose.yml               ← 12 containers: nginx, nuxt-chat, nuxt-admin, user-service,
                                     document-service, query-service, rag-worker, mcp-service,
                                     nats (JetStream), qdrant, redis, langfuse :3100
                                     (PostgreSQL = AWS RDS external, không có container)
@@ -432,7 +449,8 @@ src/document-service/Dockerfile
 src/query-service/Dockerfile
 src/rag-worker/Dockerfile
 src/mcp-service/Dockerfile
-src/frontend/Dockerfile
+src/frontend/chat/Dockerfile
+src/frontend/admin/Dockerfile     ← (frontend/base là Nuxt layer, không có Dockerfile riêng)
 
 nginx/
 ├── nginx.conf                   ← Route /api/user/*       → user-service:8000
@@ -441,7 +459,8 @@ nginx/
 │                                     • SSE /api/query/query + /api/query/notifications: tắt `proxy_buffering`,
 │                                       `proxy_read_timeout` dài (vd 3600s) để giữ stream SSE lâu
 │                                   Route /api/mcp/*        → mcp-service:8003
-│                                   Route /                → nuxt-frontend:3000
+│                                   Route /                → nuxt-chat:3000   (End User)
+│                                   Route /admin            → nuxt-admin:3001  (Admin console)
 └── ssl/                         ← Let's Encrypt cert (production)
 
 infra/
@@ -473,7 +492,7 @@ Ngày 1–2:
   DevOps    → Dockerfile + docker-compose.yml cơ bản + CI pipeline skeleton
 
 Ngày 3+ (song song):
-  Frontend  → mock API bằng schemas, build UI Nuxt 4 (chat SSE, admin, analytics, notification center, document viewer)
+  Frontend  → frontend/base (auth + design system) trước → frontend/chat (chat SSE, notifications, document viewer) + frontend/admin (documents, users, analytics)
   Backend Dev       → user-service (auth, DB, JWT, quản lý user) + document-service (upload, S3, NATS doc.ingest/doc.status)
   RAG Engineer      → rag-worker (ingestion Parent-Child + Gemini OCR + retrieval) + mcp-service (tool rag_search/hr_query + rerank)
   AI/Agent Engineer → query-service (FunctionCallingAgent + MCP client + SSE streaming + notify + history)
@@ -516,7 +535,7 @@ Câu hỏi user
 | Role | Phase 1 (3 tuần) | Phase 2+ |
 |------|-----------------|----------|
 | SA | Nặng tuần 1 → nhẹ dần (review PR) | Review, không code |
-| Frontend Dev | **Nặng** — Nuxt 4 (chat SSE + admin) + Notification Center + Analytics Dashboard + Document Viewer + conversation history | Trung bình — mở rộng dashboard, realtime 2 chiều |
+| Frontend Dev | **Nặng** — 2 micro-frontend Nuxt 4: base layer (auth + design system) + Chat app (SSE + Notification Center + Document Viewer + conversation history) + Admin app (documents + users + Analytics Dashboard) | Trung bình — mở rộng dashboard, realtime 2 chiều |
 | Backend Dev | **Nặng hơn trước** — user-service (auth + user CRUD) + document-service (upload, S3, NATS doc.ingest/doc.status, delete) + **chủ NATS subject contract** | Nhẹ — ít thay đổi |
 | RAG Engineer | **Rất nặng** — rag-worker (ingestion Parent-Child + Gemini OCR + retrieval Top-5) + mcp-service (tool rag_search/hr_query + rerank) | Tune chất lượng, chunk config |
 | AI/Agent Engineer | **Nặng** — query-service (FunctionCallingAgent + MCP client + SSE + notify + history) | Teams Bot (cũng là MCP client), dashboard analytics |
@@ -562,7 +581,9 @@ feature branches:
   feat/dung-pq/llm-orchestration
   feat/nguyen/mcp-service
   feat/huy/docker-setup
-  feat/hai/chat-ui
+  feat/hai/fe-base
+  feat/hai/fe-chat
+  feat/hai/fe-admin
   feat/dung-vq/user-service
   feat/dung-vq/document-service
 ```

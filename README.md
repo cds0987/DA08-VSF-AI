@@ -16,14 +16,15 @@ cp src/document-service/.env.example  src/document-service/.env
 cp src/query-service/.env.example     src/query-service/.env
 cp src/rag-worker/.env.example        src/rag-worker/.env
 cp src/mcp-service/.env.example       src/mcp-service/.env
-cp src/frontend/.env.local.example    src/frontend/.env.local
+cp src/frontend/chat/.env.local.example   src/frontend/chat/.env.local
+cp src/frontend/admin/.env.local.example  src/frontend/admin/.env.local
 # Xem hướng dẫn chi tiết: docs/env-setup.md
 
 # 3. Start toàn bộ stack
 docker compose up --build
 ```
 
-Sau khi start: mở http://localhost:3000
+Sau khi start: Chat (End User) http://localhost:3000 · Admin console http://localhost:3001
 
 ---
 
@@ -31,8 +32,10 @@ Sau khi start: mở http://localhost:3000
 
 ```
 Browser → Nginx :80
-               ├── /                → Nuxt Frontend      :3000
-               ├── /api/user/*      → User Service          :8000  (Auth, JWT)
+               ├── /                → Chat app (Nuxt)    :3000  (End User)
+               ├── /admin           → Admin console (Nuxt) :3001  (Admin)
+               │       (2 micro-frontend dùng chung Nuxt base layer: auth + design system)
+               ├── /api/user/*      → User Service          :8000  (Auth /auth dùng chung; /users chỉ Admin app)
                ├── /api/documents/* → Document Service      :8002  (Upload, Admin only)
                ├── /api/query/*     → Query Service         :8001  (LLM, Conversation; SSE /query + /notifications)
                │                          └── MCP → MCP Tool Service :8003 (tool: rag_search, hr_query)
@@ -55,8 +58,11 @@ PostgreSQL: AWS RDS db.t3.micro — 5 databases: user_db / doc_db / query_db / m
 | Document Service | 8002 | Document upload & management (Admin only) |
 | RAG Worker | — | NATS subscriber — Ingestion + Retrieval (no HTTP port, no DB) |
 | MCP Tool Service | 8003 | MCP server — tool `rag_search`, `hr_query` (dùng chung cho mọi agent) |
-| Frontend | 3000 | Nuxt UI |
+| Chat app (frontend/chat) | 3000 | Nuxt UI — End User: chat SSE, notifications, document viewer |
+| Admin console (frontend/admin) | 3001 | Nuxt UI — Admin: documents, users, analytics |
 | Langfuse | 3100 | LLM observability dashboard (IT/DevOps only) |
+
+> 2 micro-frontend dùng chung `frontend/base` (Nuxt layer: auth qua User Service `/auth`, design system) — build-time, không phải container.
 
 API docs (local): http://localhost:8000/docs | http://localhost:8001/docs | http://localhost:8002/docs | http://localhost:8003 (MCP endpoint)
 

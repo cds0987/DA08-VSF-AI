@@ -11,7 +11,7 @@
 
 | Role | Người | Task tuần này | Phụ thuộc |
 |------|-------|---------------|-----------|
-| **Frontend Dev** | Đặng Hồ Hải | **Notification Center** (badge/dropdown/mark-read), **Analytics Dashboard** (`analytics.vue` + charts), **Document Viewer** (PDF.js: nhảy trang + highlight citation), **Conversation history UI**. | endpoint từ AI Eng + Backend Dev |
+| **Frontend Dev** | Đặng Hồ Hải | **frontend/chat**: Notification Center (badge/dropdown/mark-read), Document Viewer (PDF.js highlight citation), Conversation history UI. **frontend/admin**: Analytics Dashboard (`analytics.vue` + charts). | endpoint từ AI Eng + Backend Dev |
 | **AI/Agent Engineer** | Phạm Quốc Dũng | `notify_subscriber` (sub `notify.doc_new` → SSE `/notifications`) + endpoint `/notifications/history`,`/unread-count`,`/{id}/read`; `GET /admin/metrics`; **Guardrails** (prompt injection, off-topic, PII redact); `POST /feedback`. | projection ACL (T2) |
 | **Backend Dev** | Vũ Quang Dũng | `GET /documents/{id}/file` (presigned S3 URL, check ACL); delete flow + publish `doc.access{deleted}`; ghi `audit_logs` (document events); publish `notify.doc_new` khi indexed. | — |
 | **RAG Engineer** | Trần Thanh Nguyên | Hoàn thiện failure handling (Langfuse fail-silently, OpenAI/Gemini fail → status `failed`); tune chunk size/overlap; chuẩn bị **bộ data eval** cùng AI Eng. | — |
@@ -34,7 +34,7 @@
 
 ## ✅ Definition of Done cuối tuần
 - [ ] **Toàn bộ DoD Phase 1** đóng (auth + SSO, upload/ingestion, Q&A streaming + nguồn, classification enforce, Notification Center, Analytics Dashboard, Document Viewer, conversation history, guardrails, feedback).
-- [ ] Stack chạy ổn định trên **AWS** (11 containers + RDS), HTTPS hoạt động, smoke test 10 câu pass.
+- [ ] Stack chạy ổn định trên **AWS** (12 containers + RDS), HTTPS hoạt động, smoke test 10 câu pass.
 - [ ] **RAGAS** có đủ số liệu 5 chỉ số + load test có số liệu → **đạt ngưỡng**.
 - [ ] Quyết định rõ: tiếp Phase 2 hay tune thêm (theo nhánh quyết định ở [roadmap.md](../roadmap.md)).
 
