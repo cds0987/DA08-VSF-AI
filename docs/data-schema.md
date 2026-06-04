@@ -1,6 +1,6 @@
 # Data Schema — RAG Chatbot
 
-Mỗi service kết nối đến **database riêng** trên cùng 1 AWS RDS db.t3.micro: `user_db`, `doc_db`, `query_db`, `mcp_db`, `langfuse_db`.
+Mỗi service kết nối đến **database riêng** trên cùng 1 GCP Cloud SQL db-g1-small: `user_db`, `doc_db`, `query_db`, `mcp_db`, `langfuse_db`.
 
 > **Convention chung:**
 > - `id`: `UUID PRIMARY KEY DEFAULT gen_random_uuid()`
@@ -132,14 +132,14 @@ CREATE INDEX idx_notifications_unread ON query_svc.notifications(user_id) WHERE 
 
 ## Document Service — Database `doc_db`
 
-> RAG Worker **không dùng PostgreSQL** — chỉ Qdrant + S3 + NATS, ingestion log đẩy qua Langfuse.
+> RAG Worker **không dùng PostgreSQL** — chỉ Qdrant + GCS + NATS, ingestion log đẩy qua Langfuse.
 
 ```sql
 CREATE TABLE doc_svc.documents (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name                VARCHAR(500) NOT NULL,
     file_type           VARCHAR(20) NOT NULL,                        -- pdf | docx | txt | xlsx | csv | pptx | md
-    s3_key              VARCHAR(1000) NOT NULL,
+    gcs_key             VARCHAR(1000) NOT NULL,
     status              VARCHAR(20) NOT NULL DEFAULT 'queued',       -- DocumentStatus: queued|processing|indexed|failed (Admin upload → queued thẳng, không có approve/reject)
     uploaded_by         UUID NOT NULL,                               -- user_id từ User Service
     classification      VARCHAR(20) NOT NULL DEFAULT 'internal',     -- public|internal|secret|top_secret

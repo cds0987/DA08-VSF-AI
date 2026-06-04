@@ -26,7 +26,7 @@ Hoàn thiện **realtime 2 chiều nâng cao**, đóng nốt dashboard 4 metrics
 
 ## ✅ Definition of Done cuối tuần
 - [ ] **Toàn bộ DoD Phase 2** đóng: dashboard đủ 4 metrics; knowledge gaps visible; hỏi được trong Microsoft Teams; notify hoạt động khi scale nhiều instance (qua backplane) + có typing indicator.
-- [ ] Smoke test cuối pass; hệ chạy ổn định trên AWS.
+- [ ] Smoke test cuối pass; hệ chạy ổn định trên GCP.
 - [ ] Demo cuối hoàn chỉnh.
 
 ## 🔄 Ceremonies

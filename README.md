@@ -44,7 +44,7 @@ Browser → Nginx :80
 
 Ingestion: Document Service → NATS doc.ingest → RAG Worker (OCR, chunk, embed → Qdrant)
 Infra: Qdrant :6333 | Redis :6379 | NATS :4222 (JetStream) | Langfuse :3100
-PostgreSQL: AWS RDS db.t3.micro — 5 databases: user_db / doc_db / query_db / mcp_db / langfuse_db
+PostgreSQL: GCP Cloud SQL db-g1-small — 5 databases: user_db / doc_db / query_db / mcp_db / langfuse_db
 ```
 
 ---
