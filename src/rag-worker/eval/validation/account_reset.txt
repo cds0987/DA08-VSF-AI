@@ -1,0 +1,6 @@
+# Password Reset Guide
+
+To reset your account password, open Settings then Security and choose Reset Password.
+A password reset link is sent to your registered email address.
+The password reset link expires fifteen minutes after it is issued.
+If the link expires, request a new password reset link from the same Security page.

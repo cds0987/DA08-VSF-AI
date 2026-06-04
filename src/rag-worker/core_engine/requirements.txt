@@ -1,0 +1,13 @@
+# Core working RAG dựa trên Haystack. Bản in-memory/offline chỉ cần haystack-ai.
+haystack-ai==2.29.0
+
+# AI gateway gọi OpenAI SDK trực tiếp (haystack-ai đã kéo sẵn, khai báo tường minh).
+openai>=1.40
+
+# Vector backend mặc định = qdrant (in_process :memory: hoặc remote server).
+qdrant-client              # async thuần (AsyncQdrantClient); local mode khong can server
+
+# Provider khác (chọn qua VECTOR_DB_PROVIDER=chromadb|milvus) — bỏ comment khi dùng:
+# chromadb                 # in_process (Ephemeral/Persistent) hoặc remote (HttpClient)
+# pymilvus>=2.4            # in_process (Milvus Lite) hoặc remote (server/cluster)
+# httpx                    # gọi BGE-M3 / BGE-Reranker self-hosted (đã có ở requirements gốc)

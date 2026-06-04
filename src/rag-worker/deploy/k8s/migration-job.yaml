@@ -1,0 +1,20 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rag-service-migrate
+spec:
+  backoffLimit: 4
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: ghcr.io/example/rag-service@sha256:REPLACE_ME
+          imagePullPolicy: IfNotPresent
+          workingDir: /app
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: rag-service-config
+            - secretRef:
+                name: rag-service-secrets

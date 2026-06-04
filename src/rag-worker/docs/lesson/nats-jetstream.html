@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NATS JetStream - Bài giảng trực quan</title>
+  <style>
+    :root {
+      --bg: #f3f0e8;
+      --paper: rgba(255, 255, 252, 0.88);
+      --paper-strong: #fffefb;
+      --text: #1e1f24;
+      --muted: #5d6270;
+      --line: rgba(59, 68, 91, 0.14);
+      --navy: #20458a;
+      --cyan: #1d8ea3;
+      --cyan-soft: #d9f2f4;
+      --gold: #c58b2a;
+      --coral: #b84f5a;
+      --shadow: 0 22px 54px rgba(33, 40, 52, 0.12);
+      --radius-lg: 24px;
+      --radius-md: 16px;
+      --max: 1220px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: Aptos, "Segoe UI Variable", "Segoe UI", sans-serif;
+      color: var(--text);
+      line-height: 1.65;
+      background:
+        radial-gradient(circle at top left, rgba(29, 142, 163, 0.18), transparent 28%),
+        radial-gradient(circle at top right, rgba(197, 139, 42, 0.14), transparent 22%),
+        linear-gradient(180deg, #f5f2ea 0%, #efe9dd 100%);
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(32, 69, 138, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(32, 69, 138, 0.035) 1px, transparent 1px);
+      background-size: 30px 30px;
+      mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.36), transparent 74%);
+    }
+
+    .page {
+      width: min(calc(100% - 32px), var(--max));
+      margin: 0 auto;
+      padding: 28px 0 64px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 38px;
+      border-radius: 34px;
+      background:
+        linear-gradient(135deg, rgba(255, 255, 253, 0.94), rgba(241, 251, 252, 0.88)),
+        linear-gradient(180deg, rgba(217, 242, 244, 0.4), rgba(255, 255, 255, 0.12));
+      border: 1px solid rgba(255, 255, 255, 0.45);
+      box-shadow: var(--shadow);
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -90px;
+      top: -120px;
+      width: 320px;
+      height: 320px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(32, 69, 138, 0.18), transparent 68%);
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: rgba(29, 142, 163, 0.1);
+      color: var(--navy);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .hero h1 {
+      max-width: 820px;
+      margin: 18px 0 16px;
+      font-size: clamp(2.8rem, 5vw, 4.9rem);
+      line-height: 0.98;
+      letter-spacing: -0.05em;
+    }
+
+    .hero p {
+      max-width: 760px;
+      margin: 0;
+      font-size: 1.08rem;
+      color: var(--muted);
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.6fr 1fr;
+      gap: 18px;
+      margin-top: 26px;
+    }
+
+    .card,
+    .section,
+    .toc,
+    .metric,
+    .panel,
+    .warning,
+    .timeline-item,
+    .pick {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      box-shadow: 0 10px 26px rgba(33, 40, 52, 0.06);
+      backdrop-filter: blur(10px);
+    }
+
+    .card { padding: 22px; }
+    .card h2,
+    .section h2 { margin: 0 0 12px; font-size: clamp(1.45rem, 2vw, 2rem); letter-spacing: -0.03em; }
+    .card ul { margin: 0; padding-left: 18px; color: var(--muted); }
+
+    .stats {
+      display: grid;
+      gap: 14px;
+    }
+
+    .metric {
+      padding: 18px 20px;
+    }
+
+    .metric strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 2rem;
+      color: var(--navy);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 28px;
+      margin-top: 28px;
+      align-items: start;
+    }
+
+    .toc {
+      position: sticky;
+      top: 18px;
+      padding: 22px;
+    }
+
+    .toc h2 {
+      margin: 0 0 12px;
+      font-size: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--navy);
+    }
+
+    .toc a {
+      display: block;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      border-radius: 12px;
+      color: var(--muted);
+      text-decoration: none;
+      transition: 0.2s ease;
+    }
+
+    .toc a:hover {
+      background: rgba(29, 142, 163, 0.08);
+      color: var(--navy);
+      transform: translateX(4px);
+    }
+
+    .content {
+      display: grid;
+      gap: 24px;
+    }
+
+    .section {
+      padding: 28px;
+    }
+
+    .section p,
+    .section li { color: var(--muted); }
+
+    .grid-2,
+    .grid-3,
+    .grid-4 {
+      display: grid;
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+    .panel { padding: 18px; }
+    .panel h3 { margin: 0 0 8px; color: var(--navy); font-size: 1.05rem; }
+    .panel p { margin: 0; }
+
+    .table-wrap {
+      overflow-x: auto;
+      margin-top: 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: var(--paper-strong);
+    }
+
+    table {
+      width: 100%;
+      min-width: 720px;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 14px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    th {
+      background: rgba(29, 142, 163, 0.08);
+      color: var(--navy);
+      font-size: 0.95rem;
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    .flow {
+      display: grid;
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .step {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      padding: 16px 18px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--line);
+      background: var(--paper-strong);
+    }
+
+    .step span {
+      width: 40px;
+      height: 40px;
+      flex: 0 0 40px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--cyan-soft);
+      color: var(--navy);
+      font-weight: 700;
+    }
+
+    .warning {
+      margin-top: 18px;
+      padding: 16px 18px;
+      border-left: 4px solid var(--gold);
+      border-radius: 0 var(--radius-md) var(--radius-md) 0;
+      background: rgba(197, 139, 42, 0.08);
+      color: #6a5125;
+    }
+
+    .code-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .code-card {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--paper);
+      box-shadow: 0 10px 26px rgba(33, 40, 52, 0.06);
+    }
+
+    .code-card header {
+      padding: 14px 16px;
+      background: rgba(29, 142, 163, 0.08);
+      color: var(--navy);
+      font-weight: 700;
+    }
+
+    pre {
+      margin: 0;
+      padding: 18px;
+      overflow-x: auto;
+      background: #18212d;
+      color: #ebf6ff;
+      font-size: 0.92rem;
+      line-height: 1.55;
+    }
+
+    code {
+      font-family: Consolas, "Cascadia Code", monospace;
+    }
+
+    .mistakes {
+      display: grid;
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .mistake {
+      padding: 18px;
+      border-radius: var(--radius-md);
+      border: 1px solid rgba(184, 79, 90, 0.18);
+      background: linear-gradient(180deg, rgba(255, 252, 252, 0.94), rgba(255, 244, 245, 0.9));
+    }
+
+    .mistake h3 {
+      margin: 0 0 8px;
+      font-size: 1.03rem;
+      color: var(--coral);
+    }
+
+    .timeline {
+      position: relative;
+      display: grid;
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .timeline::before {
+      content: "";
+      position: absolute;
+      left: 20px;
+      top: 8px;
+      bottom: 8px;
+      width: 2px;
+      background: linear-gradient(180deg, var(--cyan), rgba(29, 142, 163, 0.06));
+    }
+
+    .timeline-item {
+      position: relative;
+      margin-left: 42px;
+      padding: 18px 18px 18px 22px;
+    }
+
+    .timeline-item::before {
+      content: "";
+      position: absolute;
+      left: -31px;
+      top: 22px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 0 5px rgba(29, 142, 163, 0.14);
+    }
+
+    .principles {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .pick {
+      padding: 18px;
+    }
+
+    .pick h3 {
+      margin: 0 0 8px;
+      color: var(--navy);
+      font-size: 1rem;
+    }
+
+    .footer {
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 0.96rem;
+    }
+
+    @media (max-width: 1080px) {
+      .hero-grid,
+      .layout,
+      .grid-3,
+      .grid-4,
+      .code-grid,
+      .principles {
+        grid-template-columns: 1fr;
+      }
+
+      .grid-2 { grid-template-columns: 1fr; }
+      .toc { position: static; }
+    }
+
+    @media (max-width: 720px) {
+      .page { width: min(calc(100% - 20px), var(--max)); padding-top: 16px; }
+      .hero, .section { padding: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div class="tag">Bài giảng trực quan • NATS JetStream</div>
+      <h1>Học NATS JetStream từ nền tảng đến production</h1>
+      <p>
+        Một tài liệu để dạy lại người khác: giải thích đúng bản chất NATS Core, vì sao cần JetStream,
+        các khái niệm stream và consumer, pattern triển khai thực tế, lỗi vận hành hay gặp và kiến trúc cluster HA.
+      </p>
+
+      <div class="hero-grid">
+        <section class="card">
+          <h2>Mục tiêu buổi học</h2>
+          <ul>
+            <li>Phân biệt đúng NATS Core, JetStream và Kafka.</li>
+            <li>Hiểu stream, consumer, ack và các delivery semantics.</li>
+            <li>Biết cách dựng work queue, fan-out, replay và exactly-once.</li>
+            <li>Nắm các lỗi production như quên ack, ack sớm, consumer không idempotent và thiếu replica.</li>
+          </ul>
+        </section>
+
+        <div class="stats">
+          <article class="metric">
+            <strong>3</strong>
+            Hệ messaging cần phân biệt: NATS Core, JetStream, Kafka.
+          </article>
+          <article class="metric">
+            <strong>5+</strong>
+            Pattern triển khai quan trọng để đi từ demo đến production.
+          </article>
+          <article class="metric">
+            <strong>12</strong>
+            Lỗi thực chiến cần biết trước khi đưa hệ persistent messaging ra đời thật.
+          </article>
+        </div>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="toc">
+        <h2>Mục lục</h2>
+        <a href="#intro">1. NATS là gì</a>
+        <a href="#why">2. Vì sao cần JetStream</a>
+        <a href="#core">3. Khái niệm cốt lõi</a>
+        <a href="#code">4. JetStream trong code</a>
+        <a href="#patterns">5. Pattern thực tế</a>
+        <a href="#mistakes">6. Lỗi kinh điển</a>
+        <a href="#production">7. Kiến trúc production</a>
+        <a href="#decision">8. Khi nào nên dùng</a>
+      </aside>
+
+      <main class="content">
+        <section class="section" id="intro">
+          <h2>1. NATS là gì?</h2>
+          <p>
+            NATS là một messaging system hiệu năng cao, latency thấp, xây quanh mô hình publish/subscribe theo subject.
+            Nó tách rời producer và consumer: bên gửi chỉ cần biết subject, không cần biết ai đang lắng nghe.
+          </p>
+
+          <div class="grid-2">
+            <article class="panel">
+              <h3>Subject</h3>
+              <p>Chuỗi phân cấp ngăn bằng dấu chấm như `orders.us.created`, dùng `*` cho một token và `>` cho phần đuôi.</p>
+            </article>
+            <article class="panel">
+              <h3>NATS Core</h3>
+              <p>Pub/sub fire-and-forget: cực nhanh nhưng không lưu trữ, không replay, mất message nếu không có subscriber online.</p>
+            </article>
+          </div>
+
+          <div class="warning">
+            Quy tắc giảng dạy dễ nhớ: NATS Core là pub/sub ephemeral. Muốn lưu trữ, replay và đảm bảo delivery thì phải dùng JetStream.
+          </div>
+        </section>
+
+        <section class="section" id="why">
+          <h2>2. Vì sao JetStream tồn tại?</h2>
+          <p>
+            JetStream là lớp persistence và streaming tích hợp sẵn trong NATS server, bổ sung những gì NATS Core thiếu:
+            lưu trữ bền vững, replay, acknowledgement, redelivery và delivery guarantee.
+          </p>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tiêu chí</th>
+                  <th>NATS Core</th>
+                  <th>JetStream</th>
+                  <th>Kafka</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Lưu trữ</td>
+                  <td>Không</td>
+                  <td>Có</td>
+                  <td>Có</td>
+                </tr>
+                <tr>
+                  <td>Replay</td>
+                  <td>Không</td>
+                  <td>Có</td>
+                  <td>Có</td>
+                </tr>
+                <tr>
+                  <td>Delivery</td>
+                  <td>At-most-once</td>
+                  <td>At-least / exactly-once</td>
+                  <td>At-least / exactly-once</td>
+                </tr>
+                <tr>
+                  <td>Vận hành</td>
+                  <td>Rất nhẹ</td>
+                  <td>Nhẹ</td>
+                  <td>Nặng hơn</td>
+                </tr>
+                <tr>
+                  <td>Phù hợp</td>
+                  <td>Tín hiệu ephemeral</td>
+                  <td>Event nghiệp vụ vừa và nhỏ</td>
+                  <td>Pipeline dữ liệu lớn</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" id="core">
+          <h2>3. Các khái niệm cốt lõi cần nắm</h2>
+          <div class="grid-3">
+            <article class="panel">
+              <h3>Stream</h3>
+              <p>Nơi lưu trữ bền vững message theo thứ tự, gắn với một hoặc nhiều subject, có sequence number.</p>
+            </article>
+            <article class="panel">
+              <h3>Consumer</h3>
+              <p>View có trạng thái để đọc stream. Pull consumer được khuyến nghị vì kiểm soát flow control tốt.</p>
+            </article>
+            <article class="panel">
+              <h3>Acknowledgement</h3>
+              <p>`Ack`, `Nak`, `Term`, `InProgress` quyết định message có bị redeliver hay không.</p>
+            </article>
+          </div>
+
+          <div class="grid-2">
+            <article class="panel">
+              <h3>Delivery semantics</h3>
+              <p>At-most-once có thể mất, at-least-once có thể trùng (cần idempotent), exactly-once dùng dedup theo Msg-Id.</p>
+            </article>
+            <article class="panel">
+              <h3>Retention policy</h3>
+              <p>`Limits` giữ tới giới hạn, `WorkQueue` xóa sau khi ack, `Interest` giữ khi còn consumer quan tâm.</p>
+            </article>
+          </div>
+
+          <div class="warning">
+            Một demo chỉ cần `add_stream()` và `subscribe()`. Một hệ production cần chọn đúng retention, đặt ack đúng chỗ, làm consumer idempotent và cấu hình replica.
+          </div>
+        </section>
+
+        <section class="section" id="code">
+          <h2>4. JetStream trong code (nats-py)</h2>
+          <div class="flow">
+            <div class="step"><span>1</span> Kết nối NATS rồi lấy JetStream context bằng `nc.jetstream()`.</div>
+            <div class="step"><span>2</span> Tạo stream với subjects, storage và retention policy.</div>
+            <div class="step"><span>3</span> Publish bằng `js.publish()` và kiểm tra `PubAck`.</div>
+            <div class="step"><span>4</span> Tạo durable consumer rồi pull/fetch message theo batch.</div>
+            <div class="step"><span>5</span> Xử lý xong mới `ack()`, lỗi thì `nak()` để redeliver.</div>
+          </div>
+
+          <div class="code-grid">
+            <article class="code-card">
+              <header>Tạo stream</header>
+              <pre><code>await js.add_stream(
+  StreamConfig(
+    name="ORDERS",
+    subjects=["orders.>"],
+    storage=StorageType.FILE,
+    max_age=7*24*3600,
+  )
+)</code></pre>
+            </article>
+
+            <article class="code-card">
+              <header>Publish có dedup</header>
+              <pre><code>ack = await js.publish(
+  "orders.us.created",
+  data,
+  headers={
+    "Nats-Msg-Id": "order-A1",
+  },
+)
+print(ack.stream, ack.seq)</code></pre>
+            </article>
+
+            <article class="code-card">
+              <header>Pull consumer</header>
+              <pre><code>sub = await js.pull_subscribe(
+  "orders.us.>",
+  durable="order-workers",
+)
+msgs = await sub.fetch(10, timeout=5)
+for m in msgs:
+    handle(m.data)
+    await m.ack()</code></pre>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="patterns">
+          <h2>5. Các pattern triển khai thực tế</h2>
+          <div class="grid-4">
+            <article class="pick">
+              <h3>Work queue</h3>
+              <p>Retention `WorkQueue`: nhiều worker chia job, mỗi message chỉ xử lý một lần rồi xóa.</p>
+            </article>
+            <article class="pick">
+              <h3>Fan-out consumer</h3>
+              <p>Nhiều durable consumer đọc cùng stream với offset riêng, không ảnh hưởng nhau.</p>
+            </article>
+            <article class="pick">
+              <h3>Replay</h3>
+              <p>`DeliverPolicy` theo time hoặc sequence để rebuild state hoặc khắc phục sự cố.</p>
+            </article>
+            <article class="pick">
+              <h3>Exactly-once</h3>
+              <p>Dedup `Nats-Msg-Id` phía publish + consumer idempotent phía consume.</p>
+            </article>
+          </div>
+
+          <div class="code-grid">
+            <article class="code-card">
+              <header>Work queue stream</header>
+              <pre><code>StreamConfig(
+  name="JOBS",
+  subjects=["jobs.>"],
+  retention=RetentionPolicy.WORK_QUEUE,
+)</code></pre>
+            </article>
+
+            <article class="code-card">
+              <header>Replay theo thời gian</header>
+              <pre><code>ConsumerConfig(
+  deliver_policy=DeliverPolicy.BY_START_TIME,
+  opt_start_time="2026-06-01T00:00:00Z",
+)</code></pre>
+            </article>
+
+            <article class="code-card">
+              <header>DLQ advisory</header>
+              <pre><code>$JS.EVENT.ADVISORY.CONSUMER
+.MAX_DELIVERIES
+.&lt;stream&gt;.&lt;consumer&gt;</code></pre>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="mistakes">
+          <h2>6. Các lỗi thực chiến phải nhấn mạnh khi đi dạy</h2>
+          <div class="mistakes">
+            <article class="mistake">
+              <h3>Nhầm `nc.publish` với `js.publish`</h3>
+              <p>Publish bằng core thì message không vào stream, không có persistence dù đã tạo stream.</p>
+            </article>
+            <article class="mistake">
+              <h3>Quên ack message</h3>
+              <p>Không ack thì JetStream redeliver liên tục sau mỗi `AckWait`, gây xử lý lặp và tải tăng vọt.</p>
+            </article>
+            <article class="mistake">
+              <h3>Ack quá sớm</h3>
+              <p>Ack trước khi commit DB rồi process chết làm mất logic. Luôn ack sau khi side-effect xong.</p>
+            </article>
+            <article class="mistake">
+              <h3>Consumer không idempotent</h3>
+              <p>At-least-once có thể trùng. Handler không idempotent sẽ tạo bản ghi nhân đôi khi redeliver.</p>
+            </article>
+            <article class="mistake">
+              <h3>AckWait quá ngắn</h3>
+              <p>Ngắn hơn thời gian xử lý sẽ redeliver khi worker còn chạy. Dùng `InProgress` cho job dài.</p>
+            </article>
+            <article class="mistake">
+              <h3>Không giới hạn stream</h3>
+              <p>Thiếu `max_bytes`/`max_age` làm stream phình vô hạn và đầy đĩa server.</p>
+            </article>
+            <article class="mistake">
+              <h3>Dùng ephemeral consumer sai chỗ</h3>
+              <p>Ephemeral mất offset khi ngắt kết nối. Việc cần resume sau restart phải dùng durable.</p>
+            </article>
+            <article class="mistake">
+              <h3>Bỏ qua PubAck</h3>
+              <p>Không kiểm tra `PubAck` thì không biết message đã thực sự được lưu hay chưa.</p>
+            </article>
+            <article class="mistake">
+              <h3>Hiểu sai WorkQueue</h3>
+              <p>WorkQueue chỉ cho một consumer tiêu thụ. Cần fan-out thì dùng `Limits` hoặc `Interest`.</p>
+            </article>
+            <article class="mistake">
+              <h3>Không cấu hình replica</h3>
+              <p>Stream một replica mất dữ liệu nếu node chết. Production cần `num_replicas=3`.</p>
+            </article>
+            <article class="mistake">
+              <h3>Subject overlap giữa stream</h3>
+              <p>Hai stream cùng bắt một subject gây nhập nhằng message đi vào đâu.</p>
+            </article>
+            <article class="mistake">
+              <h3>Không theo dõi consumer lag</h3>
+              <p>Không giám sát pending messages thì consumer có thể tụt rất xa mà không ai biết.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="production">
+          <h2>7. Kiến trúc production: JetStream cluster</h2>
+          <div class="flow">
+            <div class="step"><span>1</span> Producers publish vào subject `orders.>` qua `js.publish()`.</div>
+            <div class="step"><span>2</span> Cluster 3 node replicate bằng RAFT với `num_replicas=3`.</div>
+            <div class="step"><span>3</span> Mỗi worker pool dùng một durable consumer riêng.</div>
+            <div class="step"><span>4</span> Worker pull/fetch theo batch và ack sau khi xử lý xong.</div>
+            <div class="step"><span>5</span> Giám sát pending, redelivery, disk và RAFT health.</div>
+          </div>
+
+          <div class="grid-3">
+            <article class="panel">
+              <h3>Server cần gì</h3>
+              <p>Bật block `jetstream` với `store_dir`, `max_file_store` và cấu hình `cluster` cho 3 node.</p>
+            </article>
+            <article class="panel">
+              <h3>Stream cần gì</h3>
+              <p>`num_replicas=3`, `max_bytes`, `max_age` và storage FILE cho dữ liệu nghiệp vụ quan trọng.</p>
+            </article>
+            <article class="panel">
+              <h3>Consumer cần gì</h3>
+              <p>Durable name, `AckWait` hợp lý, `max_deliver` giới hạn và chiến lược DLQ qua advisory.</p>
+            </article>
+          </div>
+
+          <div class="code-grid">
+            <article class="code-card">
+              <header>nats-server.conf</header>
+              <pre><code>jetstream {
+  store_dir: /data/jetstream
+  max_file_store: 50G
+}
+cluster {
+  name: prod-cluster
+  port: 6222
+  routes: [ ... ]
+}</code></pre>
+            </article>
+
+            <article class="code-card">
+              <header>Stream HA</header>
+              <pre><code>StreamConfig(
+  name="ORDERS",
+  subjects=["orders.>"],
+  storage=StorageType.FILE,
+  num_replicas=3,
+  max_age=14*24*3600,
+)</code></pre>
+            </article>
+
+            <article class="code-card">
+              <header>Consumer bền vững</header>
+              <pre><code>ConsumerConfig(
+  durable_name="billing",
+  ack_policy=AckPolicy.EXPLICIT,
+  ack_wait=30,
+  max_deliver=5,
+)</code></pre>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="decision">
+          <h2>8. Khi nào nên và chưa nên dùng JetStream?</h2>
+          <div class="grid-2">
+            <article class="panel">
+              <h3>Nên dùng</h3>
+              <p>Dữ liệu không được mất, cần replay, work queue chia job, fan-out nhiều consumer, at-least-once hoặc exactly-once mà không muốn vận hành nặng như Kafka.</p>
+            </article>
+            <article class="panel">
+              <h3>Chưa nên dùng</h3>
+              <p>Message ephemeral mất không sao, chỉ cần request/reply latency thấp, không cần replay hay delivery guarantee.</p>
+            </article>
+          </div>
+
+          <p class="footer">
+            Kết luận thực dụng: JetStream không khó ở phần publish/subscribe, mà khó ở phần thiết kế đúng semantics.
+            Khi dạy chủ đề này, hãy nhấn mạnh rằng NATS Core và JetStream là hai thứ khác nhau, và production bắt đầu từ
+            việc chọn đúng delivery semantics, đặt ack đúng chỗ và thiết kế consumer chịu được redeliver.
+          </p>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

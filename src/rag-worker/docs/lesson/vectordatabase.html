@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vector Database - Bài giảng trực quan</title>
+  <style>
+    :root {
+      --bg: #f5efe4;
+      --bg-soft: #fffaf2;
+      --surface: rgba(255, 250, 242, 0.9);
+      --surface-strong: #fffdf8;
+      --text: #1f1d1a;
+      --muted: #62594d;
+      --line: rgba(78, 65, 49, 0.16);
+      --accent: #0d6b5f;
+      --accent-strong: #0a4d44;
+      --accent-soft: #d8efe9;
+      --warm: #d8893d;
+      --rose: #b54d62;
+      --shadow: 0 24px 60px rgba(57, 42, 21, 0.12);
+      --radius-xl: 28px;
+      --radius-lg: 20px;
+      --radius-md: 14px;
+      --max-width: 1200px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      font-family: Aptos, "Segoe UI Variable", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(216, 239, 233, 0.95), transparent 32%),
+        radial-gradient(circle at top right, rgba(216, 193, 142, 0.28), transparent 24%),
+        linear-gradient(180deg, #f7f1e6 0%, #f3ecdf 46%, #efe4d2 100%);
+      line-height: 1.65;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(74, 56, 36, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(74, 56, 36, 0.03) 1px, transparent 1px);
+      background-size: 32px 32px;
+      mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.35), transparent 72%);
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .shell {
+      width: min(calc(100% - 32px), var(--max-width));
+      margin: 0 auto;
+      padding: 28px 0 64px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 40px;
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      border-radius: 34px;
+      background:
+        linear-gradient(135deg, rgba(255, 253, 248, 0.94), rgba(255, 245, 227, 0.88)),
+        linear-gradient(180deg, rgba(216, 239, 233, 0.35), rgba(255, 255, 255, 0.1));
+      box-shadow: var(--shadow);
+      isolation: isolate;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 380px;
+      height: 380px;
+      right: -120px;
+      top: -140px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(13, 107, 95, 0.18), transparent 68%);
+      z-index: -1;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: rgba(13, 107, 95, 0.08);
+      color: var(--accent-strong);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .hero h1 {
+      max-width: 780px;
+      margin: 18px 0 16px;
+      font-size: clamp(2.6rem, 5vw, 4.7rem);
+      line-height: 0.98;
+      letter-spacing: -0.05em;
+    }
+
+    .hero p {
+      max-width: 720px;
+      margin: 0 0 28px;
+      font-size: 1.08rem;
+      color: var(--muted);
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.7fr 1fr;
+      gap: 22px;
+      align-items: stretch;
+    }
+
+    .hero-panel,
+    .stat-card,
+    .panel,
+    .table-wrap,
+    .code-card,
+    .principles li,
+    .quick-card,
+    .timeline-item {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 10px 24px rgba(57, 42, 21, 0.06);
+    }
+
+    .hero-panel {
+      padding: 22px;
+    }
+
+    .hero-panel h2,
+    .section h2 {
+      margin: 0 0 12px;
+      font-size: clamp(1.5rem, 2vw, 2rem);
+      letter-spacing: -0.03em;
+    }
+
+    .bullet-list {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+    }
+
+    .hero-stats {
+      display: grid;
+      gap: 14px;
+    }
+
+    .stat-card {
+      padding: 18px 20px;
+    }
+
+    .stat-card strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 2rem;
+      line-height: 1;
+      color: var(--accent-strong);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 28px;
+      margin-top: 30px;
+      align-items: start;
+    }
+
+    .toc {
+      position: sticky;
+      top: 20px;
+      padding: 22px;
+      border-radius: 24px;
+      background: rgba(255, 250, 242, 0.82);
+      border: 1px solid rgba(86, 67, 48, 0.14);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(16px);
+    }
+
+    .toc h2 {
+      margin: 0 0 12px;
+      font-size: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--accent-strong);
+    }
+
+    .toc a {
+      display: block;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      border-radius: 12px;
+      color: var(--muted);
+      transition: 0.2s ease;
+    }
+
+    .toc a:hover {
+      background: rgba(13, 107, 95, 0.08);
+      color: var(--accent-strong);
+      transform: translateX(4px);
+    }
+
+    .content {
+      display: grid;
+      gap: 24px;
+    }
+
+    .section {
+      padding: 28px;
+      border-radius: 28px;
+      background: rgba(255, 252, 246, 0.88);
+      border: 1px solid rgba(86, 67, 48, 0.12);
+      box-shadow: var(--shadow);
+    }
+
+    .section > p,
+    .section li {
+      color: var(--muted);
+    }
+
+    .grid-2,
+    .grid-3 {
+      display: grid;
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .grid-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .grid-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .panel {
+      padding: 18px 18px 16px;
+    }
+
+    .panel h3 {
+      margin: 0 0 8px;
+      font-size: 1.08rem;
+      color: var(--text);
+    }
+
+    .panel p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .compare {
+      display: grid;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .compare-item {
+      display: grid;
+      grid-template-columns: 170px 1fr;
+      gap: 16px;
+      padding: 16px 18px;
+      border-radius: var(--radius-md);
+      background: var(--surface-strong);
+      border: 1px solid var(--line);
+    }
+
+    .compare-item strong {
+      color: var(--accent-strong);
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      margin-top: 16px;
+      background: var(--surface-strong);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 720px;
+    }
+
+    th,
+    td {
+      padding: 14px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    th {
+      background: rgba(13, 107, 95, 0.08);
+      color: var(--accent-strong);
+      font-size: 0.95rem;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    .callout {
+      margin-top: 18px;
+      padding: 16px 18px;
+      border-left: 4px solid var(--warm);
+      border-radius: 0 var(--radius-md) var(--radius-md) 0;
+      background: rgba(216, 137, 61, 0.09);
+      color: #694726;
+    }
+
+    .flow {
+      display: grid;
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .flow-step {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 16px 18px;
+      border-radius: var(--radius-md);
+      background: var(--surface-strong);
+      border: 1px solid var(--line);
+    }
+
+    .flow-step span {
+      flex: 0 0 42px;
+      width: 42px;
+      height: 42px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+      font-weight: 700;
+    }
+
+    .code-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .code-card {
+      overflow: hidden;
+    }
+
+    .code-card header {
+      padding: 14px 16px;
+      background: rgba(13, 107, 95, 0.08);
+      color: var(--accent-strong);
+      font-weight: 700;
+    }
+
+    pre {
+      margin: 0;
+      padding: 18px;
+      overflow-x: auto;
+      background: #1f2b29;
+      color: #e7f6f0;
+      font-size: 0.92rem;
+      line-height: 1.55;
+    }
+
+    code {
+      font-family: Consolas, "Cascadia Code", monospace;
+    }
+
+    .mistakes {
+      display: grid;
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .mistake {
+      padding: 18px;
+      border-radius: var(--radius-md);
+      background: linear-gradient(180deg, rgba(255, 252, 246, 0.92), rgba(255, 248, 237, 0.9));
+      border: 1px solid rgba(181, 77, 98, 0.18);
+    }
+
+    .mistake h3 {
+      margin: 0 0 8px;
+      color: var(--rose);
+      font-size: 1.05rem;
+    }
+
+    .timeline {
+      position: relative;
+      display: grid;
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .timeline::before {
+      content: "";
+      position: absolute;
+      left: 20px;
+      top: 12px;
+      bottom: 12px;
+      width: 2px;
+      background: linear-gradient(180deg, var(--accent), rgba(13, 107, 95, 0.06));
+    }
+
+    .timeline-item {
+      position: relative;
+      margin-left: 44px;
+      padding: 18px 18px 18px 22px;
+    }
+
+    .timeline-item::before {
+      content: "";
+      position: absolute;
+      left: -33px;
+      top: 22px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 5px rgba(13, 107, 95, 0.14);
+    }
+
+    .principles {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin: 18px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .principles li {
+      padding: 18px;
+    }
+
+    .principles strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--accent-strong);
+    }
+
+    .quick-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .quick-card {
+      padding: 18px;
+    }
+
+    .quick-card h3 {
+      margin: 0 0 8px;
+      font-size: 1rem;
+      color: var(--accent-strong);
+    }
+
+    .footer-note {
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 0.96rem;
+    }
+
+    @media (max-width: 1080px) {
+      .hero-grid,
+      .layout,
+      .grid-3,
+      .code-grid,
+      .quick-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .grid-2,
+      .principles {
+        grid-template-columns: 1fr;
+      }
+
+      .toc {
+        position: static;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .shell {
+        width: min(calc(100% - 20px), var(--max-width));
+        padding-top: 16px;
+      }
+
+      .hero,
+      .section {
+        padding: 22px;
+      }
+
+      .compare-item {
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="hero">
+      <div class="eyebrow">Bài giảng trực quan • Vector Database</div>
+      <h1>Học Vector Database từ nền tảng đến production</h1>
+      <p>
+        Tài liệu này được thiết kế như một bài giảng dễ trình bày và dễ tiếp thu:
+        có khung tư duy, so sánh công nghệ, quy trình triển khai, lỗi hay gặp và lộ trình học rõ ràng.
+      </p>
+
+      <div class="hero-grid">
+        <section class="hero-panel">
+          <h2>Mục tiêu buổi học</h2>
+          <ul class="bullet-list">
+            <li>Hiểu chính xác Vector Database khác gì với SQL, BM25 và thư viện ANN.</li>
+            <li>Biết khi nào nên dùng Chroma, Qdrant, pgvector, Milvus hoặc Pinecone.</li>
+            <li>Nắm workflow RAG hoàn chỉnh từ chunking đến retrieval và reranking.</li>
+            <li>Nhận diện sớm các lỗi production như model mismatch, tenant leakage, post-filter sai chỗ.</li>
+          </ul>
+        </section>
+
+        <div class="hero-stats">
+          <article class="stat-card">
+            <strong>3</strong>
+            Nhóm công cụ cần phân biệt rõ: DB, index library, extension.
+          </article>
+          <article class="stat-card">
+            <strong>9</strong>
+            Bước học từ nhập môn đến production-ready.
+          </article>
+          <article class="stat-card">
+            <strong>10</strong>
+            Nguyên tắc vàng để tránh sai lầm khi triển khai thực tế.
+          </article>
+        </div>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="toc">
+        <h2>Mục lục</h2>
+        <a href="#foundation">1. Nền tảng</a>
+        <a href="#compare">2. So sánh công nghệ</a>
+        <a href="#workflow">3. Workflow RAG</a>
+        <a href="#practice">4. Ví dụ thực hành</a>
+        <a href="#mistakes">5. Lỗi kinh điển</a>
+        <a href="#roadmap">6. Lộ trình học</a>
+        <a href="#principles">7. Nguyên tắc production</a>
+        <a href="#quick-pick">8. Gợi ý chọn nhanh</a>
+      </aside>
+
+      <main class="content">
+        <section class="section" id="foundation">
+          <h2>1. Nền tảng: Vector Database là gì?</h2>
+          <p>
+            Vector Database là hệ cơ sở dữ liệu tối ưu cho việc lưu trữ, lập chỉ mục và truy vấn embedding vector.
+            Mỗi vector là một biểu diễn số của ý nghĩa ngữ nghĩa, thường dùng cho văn bản, hình ảnh, âm thanh hoặc dữ liệu đa phương thức.
+          </p>
+
+          <div class="grid-2">
+            <article class="panel">
+              <h3>Ví dụ trực quan</h3>
+              <p>
+                “Cách reset mật khẩu?” và “Quên password thì làm sao?” có thể rất khác về từ ngữ,
+                nhưng embedding của chúng thường nằm gần nhau vì cùng biểu diễn một ý định.
+              </p>
+            </article>
+            <article class="panel">
+              <h3>Ứng dụng nổi bật</h3>
+              <p>
+                Semantic search, RAG chatbot, image similarity, recommendation, duplicate detection
+                và các hệ truy vấn theo ngữ nghĩa.
+              </p>
+            </article>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Nhu cầu</th>
+                  <th>SQL</th>
+                  <th>Elasticsearch/BM25</th>
+                  <th>Vector DB</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Tìm exact match</td>
+                  <td>Tốt</td>
+                  <td>Tốt</td>
+                  <td>Không phải mục tiêu chính</td>
+                </tr>
+                <tr>
+                  <td>Tìm theo keyword</td>
+                  <td>Kém</td>
+                  <td>Rất tốt</td>
+                  <td>Trung bình nếu không hybrid</td>
+                </tr>
+                <tr>
+                  <td>Tìm theo ngữ nghĩa</td>
+                  <td>Kém</td>
+                  <td>Giới hạn</td>
+                  <td>Rất tốt</td>
+                </tr>
+                <tr>
+                  <td>RAG chatbot</td>
+                  <td>Khó</td>
+                  <td>Dùng được nhưng thiếu semantic</td>
+                  <td>Rất phù hợp</td>
+                </tr>
+                <tr>
+                  <td>Image similarity</td>
+                  <td>Không phù hợp</td>
+                  <td>Không phù hợp</td>
+                  <td>Rất phù hợp</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="callout">
+            Điểm cốt lõi: Vector Database không thay thế hoàn toàn keyword search. Trong nhiều hệ production,
+            giải pháp mạnh nhất thường là hybrid search, tức kết hợp semantic và lexical retrieval.
+          </div>
+
+          <div class="compare">
+            <div class="compare-item">
+              <strong>Vector Database</strong>
+              <span>Pinecone, Qdrant, Weaviate, Milvus, Chroma. Có API, storage, metadata, replication và filtered search.</span>
+            </div>
+            <div class="compare-item">
+              <strong>Index Library</strong>
+              <span>FAISS, Annoy, ScaNN, USearch. Mạnh cho nghiên cứu hoặc engine tự xây, nhưng chưa đủ chức năng của một DB hoàn chỉnh.</span>
+            </div>
+            <div class="compare-item">
+              <strong>DB + Extension</strong>
+              <span>pgvector, Elasticsearch kNN, MongoDB Atlas Vector Search. Phù hợp khi muốn tận dụng hạ tầng hiện có.</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="compare">
+          <h2>2. So sánh công nghệ và cách chọn</h2>
+          <p>
+            Không có hệ nào tốt nhất cho mọi bối cảnh. Quyết định nên dựa trên quy mô dữ liệu, loại filter,
+            khả năng vận hành, ngân sách và mức độ gắn kết với hạ tầng sẵn có.
+          </p>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Option</th>
+                  <th>Điểm mạnh</th>
+                  <th>Điểm cần lưu ý</th>
+                  <th>Phù hợp nhất</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Pinecone</td>
+                  <td>Managed tốt, ít vận hành, scale nhanh</td>
+                  <td>Lock-in, chi phí usage</td>
+                  <td>Enterprise RAG</td>
+                </tr>
+                <tr>
+                  <td>Qdrant</td>
+                  <td>Payload filter mạnh, dễ làm multi-tenant</td>
+                  <td>Cần hiểu rõ cấu hình khi scale</td>
+                  <td>SaaS RAG, metadata-heavy</td>
+                </tr>
+                <tr>
+                  <td>Chroma</td>
+                  <td>Dễ khởi đầu, hợp local/prototype</td>
+                  <td>Production lớn cần cân nhắc</td>
+                  <td>MVP, thử nghiệm nhanh</td>
+                </tr>
+                <tr>
+                  <td>pgvector</td>
+                  <td>Tận dụng Postgres, ACID, JOIN mạnh</td>
+                  <td>ANN và scale có giới hạn</td>
+                  <td>App đã dùng PostgreSQL</td>
+                </tr>
+                <tr>
+                  <td>Milvus / Zilliz</td>
+                  <td>Scale lớn, nhiều chiến lược index</td>
+                  <td>Self-host phức tạp</td>
+                  <td>Hệ dữ liệu rất lớn</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="grid-3">
+            <article class="panel">
+              <h3>Managed cloud</h3>
+              <p>Vào production nhanh, có SLA và support, đổi lại dễ tăng chi phí và phụ thuộc vendor.</p>
+            </article>
+            <article class="panel">
+              <h3>Self-hosted</h3>
+              <p>Kiểm soát tốt hơn, có thể tối ưu chi phí dài hạn, nhưng cần năng lực vận hành rõ ràng.</p>
+            </article>
+            <article class="panel">
+              <h3>Vector extension</h3>
+              <p>Giảm độ phức tạp kiến trúc nếu đội đã dùng PostgreSQL hoặc search engine từ trước.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="workflow">
+          <h2>3. Workflow RAG đầy đủ</h2>
+          <p>
+            Muốn dạy người khác hiểu nhanh, hãy xem Vector Database như một mắt xích trong pipeline retrieval,
+            không phải toàn bộ hệ thống.
+          </p>
+
+          <div class="flow">
+            <div class="flow-step"><span>1</span> Documents được đưa vào hệ thống.</div>
+            <div class="flow-step"><span>2</span> Tài liệu được chia chunk theo ngữ cảnh phù hợp.</div>
+            <div class="flow-step"><span>3</span> Chunk được biến thành embedding vector.</div>
+            <div class="flow-step"><span>4</span> Vector và metadata được upsert vào Vector DB.</div>
+            <div class="flow-step"><span>5</span> Query của người dùng cũng được embedding.</div>
+            <div class="flow-step"><span>6</span> Engine chạy similarity search kèm metadata filter.</div>
+            <div class="flow-step"><span>7</span> Kết quả có thể qua bước reranking trước khi đưa vào prompt.</div>
+            <div class="flow-step"><span>8</span> LLM dùng context được truy hồi để sinh câu trả lời.</div>
+          </div>
+
+          <div class="callout">
+            Nếu retrieval yếu, LLM mạnh đến đâu cũng trả lời kém. Trong RAG, lỗi thường bắt đầu từ chunking, embedding hoặc filtering.
+          </div>
+        </section>
+
+        <section class="section" id="practice">
+          <h2>4. Ví dụ thực hành nhanh</h2>
+          <p>
+            Ba ví dụ dưới đây đủ để minh họa ba hướng phổ biến: embedded prototype, vector DB production-friendly và Postgres extension.
+          </p>
+
+          <div class="code-grid">
+            <article class="code-card">
+              <header>Chroma</header>
+              <pre><code>import chromadb
+from sentence_transformers import SentenceTransformer
+
+model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+client = chromadb.PersistentClient(path="./chroma_db")
+collection = client.get_or_create_collection(name="docs")
+
+collection.upsert(
+    ids=["doc1"],
+    documents=["Vector DB lưu embedding để semantic search."],
+    embeddings=model.encode(
+        ["Vector DB lưu embedding để semantic search."],
+        normalize_embeddings=True,
+    ).tolist(),
+    metadatas=[{"tenant_id": "acme"}],
+)</code></pre>
+            </article>
+
+            <article class="code-card">
+              <header>Qdrant</header>
+              <pre><code>from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams
+
+client = QdrantClient(path="./qdrant_local")
+client.recreate_collection(
+    collection_name="docs",
+    vectors_config=VectorParams(
+        size=384,
+        distance=Distance.COSINE,
+    ),
+)</code></pre>
+            </article>
+
+            <article class="code-card">
+              <header>pgvector</header>
+              <pre><code>CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE documents (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  content TEXT NOT NULL,
+  embedding vector(384)
+);
+
+CREATE INDEX documents_embedding_hnsw_idx
+ON documents
+USING hnsw (embedding vector_cosine_ops);</code></pre>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="mistakes">
+          <h2>5. Các lỗi kinh điển cần nhấn mạnh khi đi dạy</h2>
+          <div class="mistakes">
+            <article class="mistake">
+              <h3>Model mismatch</h3>
+              <p>Dùng model A để index và model B để query. Hệ thống không hỏng ngay nhưng kết quả retrieval sai âm thầm.</p>
+            </article>
+            <article class="mistake">
+              <h3>Dimension mismatch</h3>
+              <p>Collection cấu hình 1536 chiều nhưng embedding trả về 384 chiều. Đây là lỗi cấu hình rất thường gặp ở giai đoạn đầu.</p>
+            </article>
+            <article class="mistake">
+              <h3>Quên tenant filter</h3>
+              <p>Đặc biệt nguy hiểm trong SaaS multi-tenant vì có thể gây lộ dữ liệu giữa các khách hàng.</p>
+            </article>
+            <article class="mistake">
+              <h3>Post-filter sai chỗ</h3>
+              <p>Search top-k toàn bộ trước rồi mới lọc. Kết quả là có thể mất hết các tài liệu đúng của tenant mục tiêu.</p>
+            </article>
+            <article class="mistake">
+              <h3>Không đo recall</h3>
+              <p>Latency đẹp không có nghĩa là retrieval tốt. Cần đo recall@k, MRR, nDCG và tỉ lệ empty result.</p>
+            </article>
+            <article class="mistake">
+              <h3>Chunking thiếu chủ đích</h3>
+              <p>Chunk quá lớn làm loãng thông tin; chunk quá nhỏ làm mất ngữ cảnh. Đây là lỗi làm giảm chất lượng RAG rất nhanh.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="roadmap">
+          <h2>6. Lộ trình học từ zero đến production</h2>
+          <div class="timeline">
+            <article class="timeline-item">
+              <h3>Bước 1. Hiểu embedding qua trực quan hóa</h3>
+              <p>Encode vài trăm câu tiếng Việt và dùng PCA, t-SNE hoặc UMAP để nhìn ra các cụm nghĩa.</p>
+            </article>
+            <article class="timeline-item">
+              <h3>Bước 2. Thử FAISS trên local</h3>
+              <p>So sánh Flat, IVF, HNSW và học trade-off giữa recall, latency và memory.</p>
+            </article>
+            <article class="timeline-item">
+              <h3>Bước 3. Xây RAG nhỏ bằng Chroma</h3>
+              <p>Học chunking, metadata, persistent storage và truy hồi cơ bản.</p>
+            </article>
+            <article class="timeline-item">
+              <h3>Bước 4. Chuyển sang Qdrant hoặc Milvus</h3>
+              <p>Luyện filtered search, payload index, batch upsert và cấu hình collection theo hướng production.</p>
+            </article>
+            <article class="timeline-item">
+              <h3>Bước 5. Học pgvector nếu hệ đã có Postgres</h3>
+              <p>Kết hợp vector search với dữ liệu quan hệ và tối ưu truy vấn bằng EXPLAIN ANALYZE.</p>
+            </article>
+            <article class="timeline-item">
+              <h3>Bước 6. Thêm hybrid search và reranking</h3>
+              <p>Kết hợp BM25, dense vector, sparse vector và score fusion để tăng chất lượng retrieval.</p>
+            </article>
+            <article class="timeline-item">
+              <h3>Bước 7. Thiết kế multi-tenant RAG</h3>
+              <p>Rèn luyện tenant isolation, filter strategy và security tests.</p>
+            </article>
+            <article class="timeline-item">
+              <h3>Bước 8. Benchmark trên dữ liệu thật</h3>
+              <p>So sánh các hệ trên cùng workload: recall@5, p95 latency, RAM, disk, ingest throughput.</p>
+            </article>
+            <article class="timeline-item">
+              <h3>Bước 9. Production readiness</h3>
+              <p>Hoàn thiện backup, restore, reindex pipeline, model versioning, cost control và incident playbook.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="principles">
+          <h2>7. Mười nguyên tắc vàng cho production</h2>
+          <ul class="principles">
+            <li><strong>Version hóa embedding</strong> Lưu rõ model, dimension, metric và thời điểm tạo.</li>
+            <li><strong>Tenant isolation là bắt buộc</strong> Không bao giờ bỏ qua namespace hoặc tenant filter.</li>
+            <li><strong>Benchmark trên dữ liệu thật</strong> Dữ liệu synthetic dễ làm sai cảm nhận về hiệu năng.</li>
+            <li><strong>Đo recall song song với latency</strong> Retrieval fail thường âm thầm hơn lỗi hệ thống.</li>
+            <li><strong>Thiết kế reindex sớm</strong> Đổi model hoặc chunking là chuyện gần như chắc chắn sẽ xảy ra.</li>
+            <li><strong>Dùng batch ingest</strong> Insert từng vector vừa chậm vừa tốn chi phí.</li>
+            <li><strong>Index cho field filter</strong> Nếu filter nhiều theo tenant, lang, category thì phải lập index.</li>
+            <li><strong>Không chọn DB theo hype</strong> Chọn theo workload, không chọn theo benchmark công khai.</li>
+            <li><strong>Có abstraction layer</strong> Giảm phụ thuộc sâu vào SDK của một vendor.</li>
+            <li><strong>Tính tổng chi phí sở hữu</strong> Bao gồm storage, RAM, read/write, replica, backup và công vận hành.</li>
+          </ul>
+        </section>
+
+        <section class="section" id="quick-pick">
+          <h2>8. Gợi ý chọn nhanh theo bối cảnh</h2>
+          <div class="quick-grid">
+            <article class="quick-card">
+              <h3>Học từ đầu</h3>
+              <p>FAISS → Chroma → Qdrant → pgvector</p>
+            </article>
+            <article class="quick-card">
+              <h3>RAG MVP</h3>
+              <p>Chroma hoặc Qdrant</p>
+            </article>
+            <article class="quick-card">
+              <h3>Đã có Postgres</h3>
+              <p>pgvector thường là điểm vào hợp lý nhất</p>
+            </article>
+            <article class="quick-card">
+              <h3>Multi-tenant nặng filter</h3>
+              <p>Qdrant hoặc Pinecone</p>
+            </article>
+            <article class="quick-card">
+              <h3>Scale rất lớn</h3>
+              <p>Milvus hoặc Zilliz Cloud</p>
+            </article>
+            <article class="quick-card">
+              <h3>Enterprise managed</h3>
+              <p>Pinecone, Weaviate Cloud, Zilliz Cloud</p>
+            </article>
+            <article class="quick-card">
+              <h3>Search có keyword mạnh</h3>
+              <p>Weaviate, OpenSearch, Elasticsearch</p>
+            </article>
+            <article class="quick-card">
+              <h3>Multimodal</h3>
+              <p>LanceDB hoặc Milvus</p>
+            </article>
+          </div>
+
+          <p class="footer-note">
+            Kết luận thực dụng: để dạy tốt chủ đề này, hãy nhấn mạnh rằng Vector Database không chỉ là “nơi lưu embedding”.
+            Nó là phần hạ tầng quyết định chất lượng retrieval, độ an toàn dữ liệu và khả năng mở rộng của cả hệ RAG.
+          </p>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+</html>
