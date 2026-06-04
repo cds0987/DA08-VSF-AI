@@ -30,6 +30,8 @@ The previously reopened Day-0 blockers from the 2026-06-04 second-pass review ar
 - File-based ingest still parses first, writes one canonical markdown artifact, then indexes from that artifact.
 - Parser work now runs on a dedicated bounded executor instead of the default shared threadpool.
 - Local parser now supports `html`, `docx`, image OCR, scanned PDF OCR, and optional `MarkItDown` conversion for additional Office formats.
+- OCR/vision goes through the AI gateway (`core_engine/ocr` + `AIProvider.extract_text_from_images`, OpenAI vision SDK), not a local Tesseract subprocess. The adapter only renders pages to `VisionImage`; a source needing OCR with no extractor wired fails closed. See decision R10.
+- Mixed text+image documents use a per-page hybrid: each PDF page keeps its text layer (free), pages with no text are rasterized, and embedded images on text pages are sent to vision individually and merged. Embedded `docx` media (`word/media/*`) are OCR'd too. Vision calls are bounded by `MAX_OCR_PAGES` and small images skipped via `OCR_MIN_IMAGE_PIXELS`.
 
 ### P3. Empty-ingest safety
 
@@ -38,7 +40,7 @@ The previously reopened Day-0 blockers from the 2026-06-04 second-pass review ar
 
 ### P4. Deploy/runtime support
 
-- Service image now installs `tesseract-ocr` so OCR-backed parser paths are available in production containers.
+- OCR runs through the AI gateway (OpenAI vision SDK), so the service image no longer installs `tesseract-ocr`; `openai` is now a pinned dependency in `requirements.txt`.
 
 ## Remaining non-red work
 
@@ -54,5 +56,6 @@ The old red blockers are closed, but a few non-blocking items still remain:
 |---|---|
 | G1 | Added lease heartbeat renewal plus stale-job reaping so worker crashes no longer strand jobs in `PROCESSING`. |
 | G2 | Moved parser work to a dedicated bounded executor configured by `PARSER_MAX_WORKERS`. |
-| G3 | `chunk_count == 0` now fails ingest, and scanned PDFs/images go through OCR instead of silently succeeding empty. |
-| G4 | Local parser now handles `html`, `docx`, and OCR image sources directly, with optional `MarkItDown` support for more Office formats. |
+| G3 | `chunk_count == 0` now fails ingest, and scanned PDFs/images go through OCR (AI gateway) instead of silently succeeding empty. |
+| G4 | Local parser now handles `html`, `docx`, and image/scanned-PDF sources, with optional `MarkItDown` support for more Office formats. |
+| AI principle (R10) | OCR/vision moved out of the parser adapter into `core_engine/ocr` and is called only via the OpenAI SDK; no AI/ML model is invoked outside the gateway. |

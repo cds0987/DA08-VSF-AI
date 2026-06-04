@@ -6,8 +6,8 @@ from time import perf_counter
 
 import pytest
 
-from haystack_interface import IngestInput, OfflineProvider, build_engine
-from haystack_interface.ai import get_ai_provider, reset_ai_provider
+from core_engine import IngestInput, OfflineProvider, build_engine
+from core_engine.ai import get_ai_provider, reset_ai_provider
 
 """Structural eval gate by default, real-provider eval when explicitly enabled.
 

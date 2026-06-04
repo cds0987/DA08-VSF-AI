@@ -100,3 +100,14 @@ This file records architecture decisions that the current repo has already ratif
 **Trade-off:** deploy templates must be kept in sync with runtime changes.
 **When to revisit:** when platform tooling generates these artifacts from a higher-level source of truth.
 **New constraints:** rollout must verify image identity, migration state, and `readyz` after deploy.
+
+### R10. All AI capabilities — including OCR/vision — go through `core_engine` and use only the OpenAI SDK
+**Status:** RATIFIED 2026-06-04 (user direction)
+**Different from prototype:** the local parser no longer shells out to a separate OCR engine (Tesseract). Scanned-PDF/image text recognition is a vision-LLM capability and is routed through the AI gateway.
+**Problem:** "AI" leaking out of the gateway (a second model called a different way) breaks the single-entry invariant, escapes the uniform retry/backoff and provider config, and makes provider swaps inconsistent.
+**Options considered:**
+- A: keep local Tesseract OCR in the parser adapter - rejected because it is a second AI/ML model invoked outside the gateway and not via the OpenAI SDK.
+- B (chosen): add an `ocr` capability to `AIProvider` (`extract_text_from_images`) implemented with the OpenAI vision SDK; expose `core_engine/ocr` (`ProviderImageTextExtractor`) mirroring the upstream Haystack `LLMDocumentContentExtractor` pattern. The parser only renders pages to images (`VisionImage`); image→text goes through the gateway.
+**Trade-off:** OCR now requires a reachable vision model (cost/latency per page) and the `openai` package is a hard dependency; there is no offline OCR in production.
+**When to revisit:** if a deterministic local OCR is explicitly needed offline — it must then be ratified as an exception and still be wired as a capability, not ad-hoc in an adapter.
+**New constraints:** no module outside `core_engine` may call an AI/ML model; AI model access uses the OpenAI SDK only; adapters that need AI receive a capability wired by the composition root; a source that needs OCR with no extractor configured must fail closed (no silent empty result).

@@ -22,11 +22,12 @@ from app.domain.repositories.parser import Parser
 from app.infrastructure.db import InMemoryDocumentRepository
 from app.infrastructure.external.local_artifact_store import LocalArtifactStore
 from app.infrastructure.external.local_parser import LocalFileParser
-from haystack_interface.ai import AISettings, get_ai_provider, load_ai_settings, reset_ai_provider
-from haystack_interface.config import HaystackSettings, load_settings
-from haystack_interface.factory import build_engine
-from haystack_interface.logging_utils import configure_logging, log_event
-from haystack_interface.vectorstore import VectorStoreConfig, available_providers
+from core_engine.ai import AISettings, get_ai_provider, load_ai_settings, reset_ai_provider
+from core_engine.config import HaystackSettings, load_settings
+from core_engine.factory import build_engine
+from core_engine.logging_utils import configure_logging, log_event
+from core_engine.ocr import ProviderImageTextExtractor
+from core_engine.vectorstore import VectorStoreConfig, available_providers
 
 
 def _is_production(app_env: str) -> bool:
@@ -152,6 +153,7 @@ def validate_ai_config(ai_settings: AISettings, settings: HaystackSettings) -> N
         ("embed", ai_settings.embed),
         ("caption", ai_settings.caption),
         ("rerank", ai_settings.rerank),
+        ("ocr", ai_settings.ocr or ai_settings.caption),
     ):
         if not capability.model.strip():
             raise ValueError(f"AI config for {capability_name} must include a model")
@@ -344,8 +346,13 @@ async def run_ingest_worker(
             await asyncio.sleep(poll_interval_seconds)
 
 
-def build_parser() -> Parser:
-    return LocalFileParser(max_workers=load_parser_execution_settings().max_workers)
+def build_parser(provider: Any) -> Parser:
+    # OCR/vision đi qua AI gateway: parser nhận extractor wired từ provider, không
+    # tự ôm engine OCR. Composition root là nơi DUY NHẤT nối AI vào parser.
+    return LocalFileParser(
+        max_workers=load_parser_execution_settings().max_workers,
+        image_text_extractor=ProviderImageTextExtractor(provider),
+    )
 
 
 def build_artifact_store() -> ArtifactStore:
@@ -430,7 +437,7 @@ def bootstrap_runtime() -> RuntimeState:
     document_repository = build_document_repository()
     if not isinstance(document_repository, IngestJobRepository):
         raise TypeError("document repository must implement IngestJobRepository")
-    parser = build_parser()
+    parser = build_parser(provider)
     artifact_store = build_artifact_store()
     try:
         engine = build_engine(provider=provider, vector_config=vector_config)

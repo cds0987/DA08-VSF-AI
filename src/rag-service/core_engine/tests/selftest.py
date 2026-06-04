@@ -1,0 +1,83 @@
+"""Self-test offline bằng assert (không cần pytest / network):
+
+    python -m core_engine.tests.selftest
+
+Khóa các bất biến: embedder cùng dimension & tất định (ingest==query), ingest tạo
+chunk, retrieval đúng tài liệu, idempotent (re-ingest không nhân đôi), delete gỡ
+hết vector, no-answer khi threshold cao. KHÔNG còn access control trong retrieval.
+"""
+
+from __future__ import annotations
+
+import asyncio
+
+from core_engine import build_engine, IngestInput, OfflineProvider
+from core_engine.embedding import ProviderEmbeddingService
+from core_engine.text_utils import hash_embed
+
+DIM = 256
+
+
+async def _count_doc_chunks(engine, document_id: str) -> int:
+    """Đếm chunk của một document backend-agnostic: search top_k lớn."""
+    res = await engine.vectors.search(hash_embed(["count"], DIM)[0], "count", top_k=100000)
+    return sum(1 for r in res if r.document_id == document_id)
+
+
+async def run() -> None:
+    try:
+        import qdrant_client  # noqa: F401  (default provider qdrant in_process)
+    except ModuleNotFoundError:
+        print("SKIP - selftest can qdrant-client cho store mac dinh (pip install qdrant-client)")
+        return
+    provider = OfflineProvider(DIM)
+    # caption=False => baseline embed child trực tiếp (tất định, dễ assert).
+    engine = build_engine(provider=provider, caption=False)
+    settings = engine.settings
+
+    # 1. Embedder: đúng dimension, tất định (ingest==query).
+    emb = ProviderEmbeddingService(provider, dimension=DIM)
+    v1 = await emb.embed("reset mật khẩu")
+    v2 = await emb.embed("reset mật khẩu")
+    assert len(v1) == settings.embed_dimension == DIM, "sai dimension embed"
+    assert v1 == v2, "embedder phải tất định (ingest==query)"
+
+    # 2. Ingest tạo chunk.
+    pw = IngestInput(
+        document_id="d-pw", document_name="Account", file_type="md",
+        markdown="# Reset mật khẩu\nVào Cài đặt > Bảo mật để đặt lại mật khẩu, link hết hạn 15 phút.\n",
+    )
+    n = await engine.ingest(pw)
+    assert n >= 1, "ingest phải tạo >=1 chunk"
+
+    await engine.ingest(IngestInput(
+        document_id="d-sal", document_name="Salary", file_type="md",
+        markdown="# Lương quý 2\nNgân sách lương quý 2 tăng 8 phần trăm.\n",
+    ))
+
+    # 3. Retrieval đúng tài liệu + trả full content cho LLM.
+    res = await engine.search("reset mật khẩu", rerank_threshold=0.0)
+    assert res, "search phải có kết quả"
+    assert res[0].document_id == "d-pw", "kết quả top-1 sai tài liệu"
+    assert res[0].parent_text, "phải trả full content (parent_text) cho LLM"
+
+    # 4. Idempotent: re-ingest cùng doc KHÔNG nhân đôi (OVERWRITE + id deterministic).
+    before = await _count_doc_chunks(engine, "d-pw")
+    await engine.ingest(pw)
+    after = await _count_doc_chunks(engine, "d-pw")
+    assert before == after, f"re-ingest phải idempotent: {before} -> {after}"
+
+    # 5. No-answer: threshold cao -> rỗng (không bịa).
+    none = await engine.search("xyzzy không liên quan gì", rerank_threshold=0.99)
+    assert none == [], "threshold cao phải cho no-answer, không trả kết quả yếu"
+
+    # 6. delete_by_document gỡ hết vector.
+    await engine.vectors.delete_by_document("d-pw")
+    gone = await engine.search("reset mật khẩu", rerank_threshold=0.0)
+    assert all(r.document_id != "d-pw" for r in gone), "xóa document phải gỡ hết vector"
+
+    print("OK - all self-tests PASS")
+
+
+if __name__ == "__main__":
+    asyncio.run(run())

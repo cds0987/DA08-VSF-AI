@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import List
 
 from app.domain.repositories.vector_repository import SearchResult
-from haystack_interface.engine import HaystackRagEngine
+from core_engine.engine import HaystackRagEngine
 
 
 class RetrievalUseCase:

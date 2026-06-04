@@ -12,8 +12,8 @@ from app.domain.repositories.artifact_store import ArtifactStore
 from app.domain.repositories.document_repository import DocumentRepository
 from app.domain.repositories.ingest_job_repository import IngestJobRepository
 from app.domain.repositories.parser import Parser
-from haystack_interface.engine import HaystackRagEngine, IngestInput
-from haystack_interface.logging_utils import log_event
+from core_engine.engine import HaystackRagEngine, IngestInput
+from core_engine.logging_utils import log_event
 
 
 class EmptyIngestResultError(ValueError):
