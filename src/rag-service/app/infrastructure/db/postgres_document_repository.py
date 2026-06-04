@@ -16,6 +16,15 @@ from app.domain.repositories.ingest_job_repository import IngestJobRepository
 from app.infrastructure.db.models import Base, DocumentRecord, IngestJobRecord, JobLogRecord
 
 
+def _as_aware_utc(value: datetime | None) -> datetime | None:
+    """Domain dùng datetime aware-UTC. Một số driver (vd SQLite) trả naive khi đọc
+    lại — coi naive là UTC để so sánh ở Python nhất quán giữa các backend.
+    """
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=UTC)
+
+
 class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
     """SQLAlchemy-backed repository for document metadata.
 
@@ -140,7 +149,7 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
             file_type=record.file_type,
             s3_key=record.s3_key,
             status=DocumentStatus(record.status),
-            created_at=record.created_at,
+            created_at=_as_aware_utc(record.created_at),
             chunk_count=record.chunk_count,
             error_message=record.error_message,
         )
@@ -207,7 +216,7 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
             status=record.status,
             error_type=record.error_type,
             error_message=record.error_message,
-            created_at=record.created_at,
+            created_at=_as_aware_utc(record.created_at),
         )
 
     async def enqueue(self, job: IngestJob) -> IngestJob:
@@ -392,6 +401,6 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
             attempt=record.attempt,
             chunk_count=record.chunk_count,
             error_message=record.error_message,
-            created_at=record.created_at,
-            updated_at=record.updated_at,
+            created_at=_as_aware_utc(record.created_at),
+            updated_at=_as_aware_utc(record.updated_at),
         )
