@@ -8,6 +8,7 @@ import re
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, AsyncIterator
 from urllib.parse import urlparse
 
@@ -22,15 +23,24 @@ from app.domain.repositories.ingest_job_repository import IngestJobRepository
 from app.domain.repositories.parser import Parser
 from app.infrastructure.db import InMemoryDocumentRepository
 from app.infrastructure.external.local_artifact_store import LocalArtifactStore
-from app.infrastructure.external.local_parser import LocalFileParser
+from app.interfaces.api.composition import resolve_parser
 from core_engine.ai import AISettings, get_ai_provider, load_ai_settings, reset_ai_provider
 from core_engine.config import HaystackSettings, load_settings
+from core_engine.config_loader import load_config
+from core_engine.config_schema import PipelineConfig
 from core_engine.factory import (
     build_engine,
     caption_enabled_from_env,
     rerank_provider_from_env,
 )
 from core_engine.logging_utils import configure_logging, log_event
+from core_engine.mapping import (
+    build_ai_provider,
+    build_ai_settings,
+    build_engine_from_config,
+    to_settings,
+    to_vector_store_config,
+)
 from core_engine.ocr import ProviderImageTextExtractor
 from core_engine.vectorstore import VectorStoreConfig, available_providers
 
@@ -372,8 +382,9 @@ async def run_ingest_worker(
 def build_parser(provider: Any) -> Parser:
     # OCR/vision đi qua AI gateway: parser nhận extractor wired từ provider, không
     # tự ôm engine OCR. Composition root là nơi DUY NHẤT nối AI vào parser.
-    return LocalFileParser(
-        max_workers=load_parser_execution_settings().max_workers,
+    return resolve_parser(
+        "local",
+        params={"max_workers": load_parser_execution_settings().max_workers},
         image_text_extractor=ProviderImageTextExtractor(provider),
     )
 
@@ -423,19 +434,58 @@ def bootstrap_runtime() -> RuntimeState:
     configure_logging(logging.getLevelNamesMapping().get(os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO))
     logger = logging.getLogger(__name__)
     app_env = os.getenv("APP_ENV", "development")
-    validate_runtime_settings()
-    settings = load_settings()
     lease_settings = load_ingest_lease_settings()
-    ai_settings = load_ai_settings()
-    validate_ai_config(ai_settings, settings)
-    vector_config = VectorStoreConfig.from_env(dimension=settings.embed_dimension)
-    validate_vector_config(vector_config)
+    validate_job_log_retention_settings()
+    validate_ingest_lease_settings()
+    validate_parser_execution_settings()
+    caption_enabled_from_env()
+    rerank_provider_from_env()
+    if int(os.getenv("INGEST_WORKER_COUNT", "1")) <= 0:
+        raise ValueError("INGEST_WORKER_COUNT must be > 0")
+    if float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5")) <= 0:
+        raise ValueError("INGEST_WORKER_POLL_INTERVAL_SECONDS must be > 0")
     database_url = os.getenv("DATABASE_URL", "").strip()
     validate_metadata_backend(app_env, database_url)
     metadata_backend = metadata_backend_name(database_url)
+    pipeline_cfg: PipelineConfig | None = None
+    pipeline_config_path = Path(os.getenv("PIPELINE_CONFIG", "config.yaml"))
 
-    reset_ai_provider()
-    provider = get_ai_provider()
+    if pipeline_config_path.is_file():
+        pipeline_cfg = load_config(pipeline_config_path)
+        if os.getenv("CAPTION_ENABLED", "").strip():
+            pipeline_cfg = pipeline_cfg.model_copy(
+                update={
+                    "captioner": pipeline_cfg.captioner.model_copy(
+                        update={"impl": "provider" if caption_enabled_from_env() else "none"}
+                    )
+                }
+            )
+        if os.getenv("RERANK_PROVIDER", "").strip():
+            pipeline_cfg = pipeline_cfg.model_copy(
+                update={
+                    "reranker": pipeline_cfg.reranker.model_copy(
+                        update={"impl": rerank_provider_from_env()}
+                    )
+                }
+            )
+        settings = to_settings(pipeline_cfg, dim=pipeline_cfg.embedder.dimension)
+        ai_settings = build_ai_settings(pipeline_cfg)
+        validate_ai_config(ai_settings, settings)
+        provider = build_ai_provider(pipeline_cfg)
+        vector_config = to_vector_store_config(
+            pipeline_cfg,
+            dim=settings.embed_dimension,
+        )
+        validate_vector_config(vector_config)
+    else:
+        validate_runtime_settings()
+        settings = load_settings()
+        ai_settings = load_ai_settings()
+        validate_ai_config(ai_settings, settings)
+        vector_config = VectorStoreConfig.from_env(dimension=settings.embed_dimension)
+        validate_vector_config(vector_config)
+        reset_ai_provider()
+        provider = get_ai_provider()
 
     reasons: list[str] = []
     if provider.name == "offline":
@@ -468,7 +518,19 @@ def bootstrap_runtime() -> RuntimeState:
     parser = build_parser(provider)
     artifact_store = build_artifact_store()
     try:
-        engine = build_engine(provider=provider, vector_config=vector_config)
+        if pipeline_cfg is not None:
+            parser = resolve_parser(
+                pipeline_cfg.parser.impl,
+                params=pipeline_cfg.parser.params,
+                image_text_extractor=ProviderImageTextExtractor(provider),
+            )
+            engine = build_engine_from_config(
+                pipeline_cfg,
+                provider=provider,
+                vector_config_override=vector_config,
+            )
+        else:
+            engine = build_engine(provider=provider, vector_config=vector_config)
         ingest_use_case = IngestDocumentUseCase(
             engine,
             document_repository,

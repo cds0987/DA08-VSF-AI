@@ -10,5 +10,6 @@ pymupdf==1.27.2.3
 markitdown[pptx,xls,xlsx]==0.1.6
 openai==1.59.6
 httpx==0.28.1
+pyyaml==6.0.2
 pytest==8.3.5
 pytest-asyncio==0.24.0

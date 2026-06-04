@@ -1,0 +1,68 @@
+active: ${PIPELINE_PROFILE:-baseline}
+
+profiles:
+  baseline:
+    common:
+      ai_mode: ${AI_PROVIDER:-offline}
+      timeout: 60
+      max_retries: 5
+
+    embedder:
+      model: ${EMBED_MODEL:-text-embedding-3-small}
+      base_url: ${EMBED_BASE_URL:-}
+      api_key: ${OPENAI_API_KEY:-}
+      dimension: ${EMBED_DIMENSION:-1024}
+
+    captioner:
+      impl: ${CAPTIONER_IMPL:-provider}
+      model: ${CAPTION_MODEL:-gpt-4o-mini}
+      base_url: ${CAPTION_BASE_URL:-}
+      api_key: ${CAPTION_API_KEY:-}
+      params:
+        max_chars: ${CAPTION_MAX_CHARS:-6000}
+
+    reranker:
+      impl: ${RERANK_PROVIDER:-llm}
+      model: ${RERANK_MODEL:-gpt-4o-mini}
+      base_url: ${RERANK_BASE_URL:-}
+      api_key: ${RERANK_API_KEY:-}
+      params:
+        passage_chars: ${RERANK_PASSAGE_CHARS:-800}
+
+    parser:
+      impl: ${PARSER_IMPL:-local}
+      params:
+        max_workers: ${PARSER_MAX_WORKERS:-2}
+      ocr:
+        model: ${OCR_MODEL:-gpt-4o-mini}
+        base_url: ${OCR_BASE_URL:-}
+        api_key: ${OCR_API_KEY:-}
+
+    chunker:
+      impl: heading_sections
+      params:
+        parent_max_words: ${SECTION_MAX_WORDS:-220}
+        child_max_words: ${CHILD_MAX_WORDS:-90}
+        child_overlap_words: ${CHILD_OVERLAP_WORDS:-15}
+
+    vector_store:
+      impl: ${VECTOR_DB_PROVIDER:-qdrant}
+      params:
+        collection: ${VECTOR_COLLECTION:-rag_chatbot}
+        url: ${VECTOR_DB_URL:-}
+        api_key: ${VECTOR_DB_API_KEY:-}
+
+    retrieval:
+      top_k_candidates: ${SEARCH_TOP_K:-20}
+      rerank_top_k: ${RERANK_TOP_K:-3}
+      rerank_threshold: ${RERANK_THRESHOLD:-0.7}
+
+  exp_rerank_none:
+    extends: baseline
+    reranker:
+      impl: none
+      model: ${RERANK_MODEL:-gpt-4o-mini}
+      base_url: ${RERANK_BASE_URL:-}
+      api_key: ${RERANK_API_KEY:-}
+      params:
+        passage_chars: ${RERANK_PASSAGE_CHARS:-800}
