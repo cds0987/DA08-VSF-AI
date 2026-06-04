@@ -460,14 +460,6 @@ def bootstrap_runtime() -> RuntimeState:
                     )
                 }
             )
-        if os.getenv("RERANK_PROVIDER", "").strip():
-            pipeline_cfg = pipeline_cfg.model_copy(
-                update={
-                    "reranker": pipeline_cfg.reranker.model_copy(
-                        update={"impl": rerank_provider_from_env()}
-                    )
-                }
-            )
         settings = to_settings(pipeline_cfg, dim=pipeline_cfg.embedder.dimension)
         ai_settings = build_ai_settings(pipeline_cfg)
         validate_ai_config(ai_settings, settings)
@@ -515,7 +507,7 @@ def bootstrap_runtime() -> RuntimeState:
     document_repository = build_document_repository()
     if not isinstance(document_repository, IngestJobRepository):
         raise TypeError("document repository must implement IngestJobRepository")
-    parser = build_parser(provider)
+    parser: Parser
     artifact_store = build_artifact_store()
     try:
         if pipeline_cfg is not None:
@@ -530,6 +522,7 @@ def bootstrap_runtime() -> RuntimeState:
                 vector_config_override=vector_config,
             )
         else:
+            parser = build_parser(provider)
             engine = build_engine(provider=provider, vector_config=vector_config)
         ingest_use_case = IngestDocumentUseCase(
             engine,

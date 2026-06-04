@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import re
-import json
 from pathlib import Path
 from typing import Any
 
@@ -11,21 +10,6 @@ import yaml
 from core_engine.config_schema import PipelineConfig
 
 _ENV_PATTERN = re.compile(r"^\$\{([A-Z0-9_]+)(?::-(.*))?\}$")
-_ENV_INLINE_PATTERN = re.compile(r"\$\{([A-Z0-9_]+)(?::-(.*?))?\}")
-
-
-def _interpolate_text(text: str) -> str:
-    def replace(match: re.Match[str]) -> str:
-        name = match.group(1)
-        default = match.group(2)
-        raw = os.getenv(name)
-        if raw is None or raw == "":
-            if default is None:
-                raise ValueError(f"Missing required environment variable: {name}")
-            raw = default
-        return json.dumps(raw)
-
-    return _ENV_INLINE_PATTERN.sub(replace, text)
 
 
 def _interpolate_value(value: Any) -> Any:
@@ -76,8 +60,6 @@ def _resolve_profile(
 
 
 def _reject_nested_embed_keys(cfg: dict[str, Any]) -> None:
-    allowed_top_level = {"common", "embedder"}
-
     def walk(node: Any, *, path: tuple[str, ...]) -> None:
         if isinstance(node, dict):
             for key, value in node.items():
@@ -100,7 +82,7 @@ def _reject_nested_embed_keys(cfg: dict[str, Any]) -> None:
 
 
 def load_config(path: str | os.PathLike[str]) -> PipelineConfig:
-    payload = yaml.safe_load(_interpolate_text(Path(path).read_text(encoding="utf-8"))) or {}
+    payload = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     payload = _interpolate_value(payload)
     profiles = payload.get("profiles")
     if profiles:

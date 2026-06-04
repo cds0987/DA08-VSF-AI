@@ -5,8 +5,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from core_engine.ai import AIProvider, AISettings, CapabilityConfig
-from core_engine.ai import _build_provider
+from core_engine.ai import AIProvider, AISettings, CapabilityConfig, build_provider
 from core_engine.ai.offline_provider import OfflineProvider
 from core_engine.caption import ProviderCaptioner
 from core_engine.chunking import SectionChunker
@@ -96,7 +95,7 @@ def build_ai_settings(cfg: PipelineConfig) -> AISettings:
 
 
 def build_ai_provider(cfg: PipelineConfig) -> AIProvider:
-    return _build_provider(build_ai_settings(cfg))
+    return build_provider(build_ai_settings(cfg))
 
 
 def to_settings(cfg: PipelineConfig, *, dim: int) -> HaystackSettings:
@@ -157,22 +156,10 @@ def build_engine_from_config(
         if reranker_override is UNSET
         else reranker_override
     )
-    vector_stage = type(
-        "_VectorStage",
-        (),
-        {
-            "impl": vector_config.provider,
-            "params": {
-                "collection": vector_config.collection,
-                "url": vector_config.url,
-                "api_key": vector_config.api_key,
-            },
-        },
-    )()
     return HaystackRagEngine(
         settings=to_settings(cfg, dim=resolved_dim),
         embedder=ProviderEmbeddingService(provider, dimension=resolved_dim),
-        vectors=resolve("vector_store", vector_stage, ctx),
+        vectors=build_vector_repository(vector_config),
         reranker=reranker if reranker is not None else NoopRerankerService(),
         captioner=resolve("captioner", cfg.captioner, ctx),
         chunker=resolve("chunker", cfg.chunker, ctx),
@@ -193,42 +180,3 @@ register("captioner", "none", lambda params, ctx: None)
 register("reranker", "llm", lambda params, ctx: LLMReranker(ctx.provider, **params))
 register("reranker", "lexical", lambda params, ctx: LexicalRerankerService())
 register("reranker", "none", lambda params, ctx: NoopRerankerService())
-register(
-    "vector_store",
-    "qdrant",
-    lambda params, ctx: build_vector_repository(
-        VectorStoreConfig(
-            provider="qdrant",
-            collection=str(params.get("collection", "rag_chatbot")),
-            dimension=ctx.dim,
-            url=str(params.get("url", "")),
-            api_key=str(params.get("api_key", "")),
-        )
-    ),
-)
-register(
-    "vector_store",
-    "chromadb",
-    lambda params, ctx: build_vector_repository(
-        VectorStoreConfig(
-            provider="chromadb",
-            collection=str(params.get("collection", "rag_chatbot")),
-            dimension=ctx.dim,
-            url=str(params.get("url", "")),
-            api_key=str(params.get("api_key", "")),
-        )
-    ),
-)
-register(
-    "vector_store",
-    "milvus",
-    lambda params, ctx: build_vector_repository(
-        VectorStoreConfig(
-            provider="milvus",
-            collection=str(params.get("collection", "rag_chatbot")),
-            dimension=ctx.dim,
-            url=str(params.get("url", "")),
-            api_key=str(params.get("api_key", "")),
-        )
-    ),
-)

@@ -61,8 +61,3 @@ profiles:
     extends: baseline
     reranker:
       impl: none
-      model: ${RERANK_MODEL:-gpt-4o-mini}
-      base_url: ${RERANK_BASE_URL:-}
-      api_key: ${RERANK_API_KEY:-}
-      params:
-        passage_chars: ${RERANK_PASSAGE_CHARS:-800}

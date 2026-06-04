@@ -63,13 +63,6 @@ def rerank_provider_from_env() -> str:
 
 def _resolve_caption_enabled(caption: bool | None) -> bool:
     return caption if caption is not None else caption_enabled_from_env()
-
-
-def _resolve_reranker(provider: AIProvider, reranker: Optional[Reranker]) -> Reranker:
-    del provider
-    return reranker
-
-
 def _wire(
     settings: HaystackSettings,
     provider: AIProvider,
@@ -124,9 +117,7 @@ def _wire(
         cfg,
         provider=provider,
         dim=dim,
-        reranker_override=_resolve_reranker(provider, reranker)
-        if reranker is not None
-        else UNSET,
+        reranker_override=reranker if reranker is not None else UNSET,
         vector_config_override=resolved_vector_config,
     )
 

@@ -79,7 +79,7 @@ def test_load_config_rejects_missing_required_env(tmp_path: Path) -> None:
     path.write_text(
         """
 common: { ai_mode: offline }
-embedder: { model: text-embedding-3-small, dimension: ${MISSING_ENV} }
+embedder: { model: text-embedding-3-small, dimension: "${MISSING_ENV}" }
 captioner: { impl: none, model: gpt-4o-mini, params: {} }
 reranker: { impl: llm, model: gpt-4o-mini, params: {} }
 parser: { impl: local, params: { max_workers: 2 } }
@@ -124,3 +124,28 @@ retrieval: { top_k_candidates: 20, rerank_top_k: 3, rerank_threshold: 0.7 }
 
     with pytest.raises(ValueError, match="Embed config must live in top-level embedder block"):
         load_config(path)
+
+
+def test_load_config_keeps_inline_placeholders_literal(tmp_path: Path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        """
+common: { ai_mode: offline }
+embedder: { model: text-embedding-3-small, dimension: 256 }
+captioner: { impl: none, model: gpt-4o-mini, params: {} }
+reranker: { impl: llm, model: gpt-4o-mini, params: {} }
+parser: { impl: local, params: { max_workers: 2 } }
+chunker:
+  impl: heading_sections
+  params: { parent_max_words: 220, child_max_words: 90, child_overlap_words: 15 }
+vector_store:
+  impl: qdrant
+  params: { collection: rag_chatbot, url: "http://${HOST}:6333", api_key: "" }
+retrieval: { top_k_candidates: 20, rerank_top_k: 3, rerank_threshold: 0.7 }
+""",
+        encoding="utf-8",
+    )
+
+    cfg = load_config(path)
+
+    assert cfg.vector_store.params["url"] == "http://${HOST}:6333"
