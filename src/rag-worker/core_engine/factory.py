@@ -9,23 +9,27 @@ Factory forces store dimension = embedder dimension (ingest==query==store, searc
 
 from __future__ import annotations
 
-from dataclasses import replace
 import os
 from typing import Optional
 
 from core_engine.ai import AIProvider, get_ai_provider
 from core_engine.ai.offline_provider import OfflineProvider
-from core_engine.caption import ProviderCaptioner
 from core_engine.config import HaystackSettings, load_settings
-from core_engine.embedding import ProviderEmbeddingService
-from core_engine.engine import HaystackRagEngine
-from core_engine.rerank import (
-    LLMReranker,
-    LexicalRerankerService,
-    NoopRerankerService,
-    Reranker,
+from core_engine.config_schema import (
+    CaptionerConfig,
+    ChunkerConfig,
+    CommonConfig,
+    EmbedderConfig,
+    ParserConfig,
+    PipelineConfig,
+    RetrievalConfig,
+    RerankerConfig,
+    VectorStoreConfigModel,
 )
-from core_engine.vectorstore import VectorStoreConfig, build_vector_repository
+from core_engine.engine import HaystackRagEngine
+from core_engine.mapping import UNSET, build_engine_from_config
+from core_engine.rerank import Reranker
+from core_engine.vectorstore import VectorStoreConfig
 
 _TRUTHY_ENV = frozenset({"1", "true", "yes", "on"})
 _FALSY_ENV = frozenset({"0", "false", "no", "off"})
@@ -59,21 +63,6 @@ def rerank_provider_from_env() -> str:
 
 def _resolve_caption_enabled(caption: bool | None) -> bool:
     return caption if caption is not None else caption_enabled_from_env()
-
-
-def _resolve_reranker(provider: AIProvider, reranker: Optional[Reranker]) -> Reranker:
-    if reranker is not None:
-        return reranker
-    match rerank_provider_from_env():
-        case "llm":
-            return LLMReranker(provider)
-        case "lexical":
-            return LexicalRerankerService()
-        case "none":
-            return NoopRerankerService()
-    raise AssertionError("unreachable rerank provider")
-
-
 def _wire(
     settings: HaystackSettings,
     provider: AIProvider,
@@ -83,15 +72,53 @@ def _wire(
     caption: bool | None,
     reranker: Optional[Reranker],
 ) -> HaystackRagEngine:
-    settings = replace(settings, embed_dimension=dim)
-    vs_config = (vector_config or VectorStoreConfig.from_env()).with_dimension(dim)
     resolved_caption = _resolve_caption_enabled(caption)
-    return HaystackRagEngine(
-        settings=settings,
-        embedder=ProviderEmbeddingService(provider, dimension=dim),
-        vectors=build_vector_repository(vs_config),
-        reranker=_resolve_reranker(provider, reranker),
-        captioner=ProviderCaptioner(provider) if resolved_caption else None,
+    resolved_vector_config = vector_config or VectorStoreConfig.from_env()
+    cfg = PipelineConfig(
+        common=CommonConfig(
+            ai_mode="offline" if isinstance(provider, OfflineProvider) else provider.name,
+        ),
+        embedder=EmbedderConfig(
+            model="text-embedding-3-small",
+            dimension=dim,
+        ),
+        captioner=CaptionerConfig(
+            impl="provider" if resolved_caption else "none",
+            model="gpt-4o-mini",
+        ),
+        reranker=RerankerConfig(
+            impl=rerank_provider_from_env() if reranker is None else "none",
+            model="gpt-4o-mini",
+        ),
+        parser=ParserConfig(impl="local", params={"max_workers": 2}),
+        chunker=ChunkerConfig(
+            impl="heading_sections",
+            params={
+                "parent_max_words": settings.parent_max_words,
+                "child_max_words": settings.child_max_words,
+                "child_overlap_words": settings.child_overlap_words,
+            },
+        ),
+        vector_store=VectorStoreConfigModel(
+            impl=resolved_vector_config.provider,
+            params={
+                "collection": resolved_vector_config.collection,
+                "url": resolved_vector_config.url,
+                "api_key": resolved_vector_config.api_key,
+            },
+        ),
+        retrieval=RetrievalConfig(
+            top_k_candidates=settings.top_k_candidates,
+            rerank_top_k=settings.rerank_top_k,
+            rerank_threshold=settings.rerank_threshold,
+        ),
+    )
+    return build_engine_from_config(
+        cfg,
+        provider=provider,
+        dim=dim,
+        reranker_override=reranker if reranker is not None else UNSET,
+        vector_config_override=resolved_vector_config,
     )
 
 

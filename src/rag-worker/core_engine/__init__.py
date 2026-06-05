@@ -27,6 +27,7 @@ factory + ai/, KHÔNG sửa engine/use-case.
 from core_engine.config import HaystackSettings, load_settings
 from core_engine.engine import HaystackRagEngine, IngestInput
 from core_engine.factory import build_engine, build_engine_probe
+from core_engine.mapping import build_engine_from_config, register
 
 # AI gateway (điểm vào AI duy nhất).
 from core_engine.ai import (
@@ -54,6 +55,7 @@ from core_engine.vectorstore import (
     available_providers,
 )
 from core_engine.caption import Captioner, ProviderCaptioner
+from core_engine.chunking import Chunker, SectionChunker
 from core_engine.rerank import (
     Reranker,
     LLMReranker,
@@ -65,6 +67,8 @@ __all__ = [
     # composition
     "build_engine",
     "build_engine_probe",
+    "build_engine_from_config",
+    "register",
     "HaystackRagEngine",
     "IngestInput",
     "HaystackSettings",
@@ -91,6 +95,8 @@ __all__ = [
     "available_providers",
     "Captioner",
     "ProviderCaptioner",
+    "Chunker",
+    "SectionChunker",
     "Reranker",
     "LLMReranker",
     "LexicalRerankerService",
