@@ -148,7 +148,7 @@ Response 403:  { "detail": "Admin only" }
 
 ### `GET /documents/{document_id}/file`
 
-> Trả **presigned S3 URL** (TTL ngắn) để Frontend Document Viewer mở file gốc + highlight citation. Kiểm tra ACL theo user.
+> Trả **presigned GCS URL** (TTL ngắn) để Frontend Document Viewer mở file gốc + highlight citation. Kiểm tra ACL theo user.
 
 ```
 Response 200:  { "url": "https://<bucket>.s3.../...&X-Amz-Expires=300", "file_type": "pdf", "expires_in": 300 }
@@ -179,7 +179,7 @@ Request:
 Response 200 (SSE):
   data: {"token": "Theo "}
   data: {"token": "chính sách..."}
-  data: {"done": true, "sources": [{"document_name": "string", "caption": "string", "heading_path": ["string"], "score": 0.85, "source_s3_uri": "s3://..."}], "session_id": "uuid"}
+  data: {"done": true, "sources": [{"document_name": "string", "caption": "string", "heading_path": ["string"], "score": 0.85, "source_gcs_uri": "gs://..."}], "session_id": "uuid"}
 
 Response 429:  { "detail": "Rate limit exceeded. Max 20 requests/minute." }
 ```
@@ -282,9 +282,9 @@ Response 503:  { "status": "degraded", "degraded_reasons": ["rag_worker unreacha
 
 | Subject | Type | Payload | Mô tả |
 |---------|------|---------|-------|
-| `doc.ingest` | Subscribe | `{ doc_id, s3_key, file_type, classification, allowed_departments, allowed_user_ids }` | Document Service publish khi Admin upload. RAG Worker nhận → chạy pipeline ingestion. |
+| `doc.ingest` | Subscribe | `{ doc_id, gcs_key, file_type, classification, allowed_departments, allowed_user_ids }` | Document Service publish khi Admin upload. RAG Worker nhận → chạy pipeline ingestion. |
 | `doc.status` | Publish | `{ doc_id, status: "indexed"\|"failed", chunk_count?, error? }` | RAG Worker publish sau khi ingestion xong. Document Service subscribe để cập nhật PostgreSQL. |
-| `rag.search` | Request-Reply | Request: `{ query_text, document_ids, top_k }` → Reply: `{ results: [...] }` | Query Service gửi request, RAG Worker xử lý và reply. Timeout 10s. |
+| `rag.search` | Request-Reply | Request: `{ query_text, document_ids, top_k }` → Reply: `{ results: [...] }` | mcp-service gửi request (Query Service inject document_ids qua MCP call), RAG Worker xử lý và reply. Timeout 10s. |
 
 ---
 
@@ -308,7 +308,7 @@ class Source(BaseModel):
     caption: str
     heading_path: List[str]
     score: float
-    source_s3_uri: str
+    source_gcs_uri: str
 
 class QueryRequest(BaseModel):
     question: str

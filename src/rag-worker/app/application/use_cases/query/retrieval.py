@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from app.domain.repositories.vector_repository import SearchResult
 from core_engine.engine import HaystackRagEngine
+from core_engine.types import SearchResult
 
 
 class RetrievalUseCase:

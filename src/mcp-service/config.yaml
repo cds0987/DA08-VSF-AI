@@ -14,12 +14,11 @@ profiles:
       dimension: ${EMBED_DIMENSION:-}
 
     captioner:
-      impl: ${CAPTIONER_IMPL:-provider}
+      impl: none
       model: ${CAPTION_MODEL:-gpt-4o-mini}
       base_url: ${CAPTION_BASE_URL:-}
       api_key: ${CAPTION_API_KEY:-}
-      params:
-        max_chars: ${CAPTION_MAX_CHARS:-6000}
+      params: {}
 
     reranker:
       impl: ${RERANK_PROVIDER:-llm}
@@ -30,7 +29,7 @@ profiles:
         passage_chars: ${RERANK_PASSAGE_CHARS:-800}
 
     parser:
-      impl: ${PARSER_IMPL:-local}
+      impl: local
       params:
         max_workers: ${PARSER_MAX_WORKERS:-2}
       ocr:
@@ -61,8 +60,3 @@ profiles:
       top_k_candidates: ${SEARCH_TOP_K:-20}
       rerank_top_k: ${RERANK_TOP_K:-3}
       rerank_threshold: ${RERANK_THRESHOLD:-0.7}
-
-  exp_rerank_none:
-    extends: baseline
-    reranker:
-      impl: none

@@ -73,13 +73,17 @@ def _wire(
     reranker: Optional[Reranker],
 ) -> HaystackRagEngine:
     resolved_caption = _resolve_caption_enabled(caption)
-    resolved_vector_config = vector_config or VectorStoreConfig.from_env()
+    resolved_vector_config = vector_config or VectorStoreConfig.from_env(dimension=dim)
+    if isinstance(provider, OfflineProvider):
+        resolved_vector_config = (
+            resolved_vector_config.with_embed_model("offline").with_dimension(dim)
+        )
     cfg = PipelineConfig(
         common=CommonConfig(
             ai_mode="offline" if isinstance(provider, OfflineProvider) else provider.name,
         ),
         embedder=EmbedderConfig(
-            model="text-embedding-3-small",
+            model=resolved_vector_config.embed_model,
             dimension=dim,
         ),
         captioner=CaptionerConfig(

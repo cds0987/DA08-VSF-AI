@@ -12,8 +12,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from app.domain.repositories.vector_repository import SearchLineage, SearchResult
-
+from core_engine.types import SearchLineage, SearchResult
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.provider import VectorStoreProvider
 from core_engine.vectorstore.types import VectorRecord

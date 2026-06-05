@@ -3,8 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Sequence
 
-from app.domain.repositories.vector_repository import SearchResult
-
+from core_engine.types import SearchResult
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.types import VectorRecord
 

@@ -1,36 +1,32 @@
-"""HaystackSettings — cấu hình pipeline (split · retrieval). Ranh giới rõ:
-
-- Cấu hình AI (embed/caption/rerank) → AI gateway `core_engine.ai`.
-- Cấu hình STORAGE (backend DB, collection, url, dimension) → `VectorStoreConfig`
-  trong `core_engine.vectorstore` (config object quyết định database).
-
-Settings này chỉ còn lo SPLIT + RETRIEVAL. `embed_dimension` ở đây là dimension
-embedder yêu cầu; factory ép VectorStoreConfig.dimension bằng nó (ingest==query==store).
-"""
+"""Haystack settings for split and retrieval stages."""
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 
-# BGE-M3 / nhiều embed model phổ biến: 1024 dims. Index id encode dimension này.
-DEFAULT_EMBED_DIM = 1024
+from core_engine.contract import resolve_dimension
+
+DEFAULT_EMBED_MODEL = "text-embedding-3-small"
+
+
+def _env(*names: str) -> str:
+    for name in names:
+        value = os.getenv(name, "").strip()
+        if value:
+            return value
+    return ""
 
 
 @dataclass(frozen=True)
 class HaystackSettings:
-    # Dimension (phải khớp provider AI đang dùng — factory đảm bảo).
-    embed_dimension: int = DEFAULT_EMBED_DIM
-
-    # Section split (ingestion.md §5) + parent/child (entities.Chunk).
-    parent_max_words: int = 220      # ~512-1024 tokens
-    child_max_words: int = 90        # ~128-256 tokens
+    embed_dimension: int = resolve_dimension(DEFAULT_EMBED_MODEL)
+    parent_max_words: int = 220
+    child_max_words: int = 90
     child_overlap_words: int = 15
-
-    # Retrieval (search.md §3,4).
-    top_k_candidates: int = 20       # trước rerank
-    rerank_top_k: int = 3            # sau rerank (Top-3)
-    rerank_threshold: float = 0.7    # BGE-Reranker / LLM threshold
+    top_k_candidates: int = 20
+    rerank_top_k: int = 3
+    rerank_threshold: float = 0.7
 
 
 def _int(name: str, default: int) -> int:
@@ -44,9 +40,17 @@ def _float(name: str, default: float) -> float:
 
 
 def load_settings() -> HaystackSettings:
-    """Build settings từ env, fallback default chạy-được-ngay."""
+    provider_mode = os.getenv("AI_PROVIDER", "auto").strip().lower()
+    has_real_provider = bool(_env("EMBED_API_KEY", "OPENAI_API_KEY") or _env("EMBED_BASE_URL"))
+    embed_model = (
+        "offline"
+        if provider_mode == "offline" or (provider_mode == "auto" and not has_real_provider)
+        else os.getenv("EMBED_MODEL", DEFAULT_EMBED_MODEL)
+    )
+    raw_dim = os.getenv("EMBED_DIMENSION")
+    override = int(raw_dim) if raw_dim and raw_dim.strip() else None
     return HaystackSettings(
-        embed_dimension=_int("EMBED_DIMENSION", DEFAULT_EMBED_DIM),
+        embed_dimension=resolve_dimension(embed_model, override),
         parent_max_words=_int("SECTION_MAX_WORDS", 220),
         child_max_words=_int("CHILD_MAX_WORDS", 90),
         child_overlap_words=_int("CHILD_OVERLAP_WORDS", 15),

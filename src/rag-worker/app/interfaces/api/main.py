@@ -7,7 +7,7 @@ from collections import deque
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
-from app.interfaces.api.routers import ingest, search
+from app.interfaces.api.routers import ingest
 from app.interfaces.api.runtime import compute_health, lifespan
 
 _HEALTH_PATHS = frozenset({"/livez", "/readyz", "/health"})
@@ -36,10 +36,7 @@ def _request_can_include_body(request: Request) -> bool:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="RAG Service", lifespan=lifespan)
-    # Tạo ingest đi qua NATS (doc.ingest) — POST /ingest đã bỏ. Router giữ lại các
-    # endpoint đọc/quản lý tài liệu (GET status/list, GET job, DELETE). Search vẫn HTTP.
     app.include_router(ingest.router, prefix="/api", tags=["ingest"])
-    app.include_router(search.router, prefix="/api", tags=["search"])
     app.state.rate_limits = {}
 
     @app.middleware("http")
@@ -81,8 +78,6 @@ def create_app() -> FastAPI:
                 )
         if not _request_can_include_body(request):
             return await call_next(request)
-        # Bounded read: stop as soon as we exceed the cap so a client that omits
-        # content-length (or lies about it) cannot stream an unbounded body into RAM.
         body = bytearray()
         async for chunk in request.stream():
             body.extend(chunk)
@@ -91,7 +86,6 @@ def create_app() -> FastAPI:
                     status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                     content={"detail": "request body too large"},
                 )
-        # Re-inject the consumed body so downstream handlers can still read it.
         request._body = bytes(body)
         return await call_next(request)
 

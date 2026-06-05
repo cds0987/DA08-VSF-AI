@@ -10,6 +10,7 @@ from core_engine.caption import ProviderCaptioner
 from core_engine.chunking import SectionChunker
 from core_engine.config import HaystackSettings
 from core_engine.config_schema import PipelineConfig
+from core_engine.contract import resolve_dimension
 from core_engine.embedding import ProviderEmbeddingService
 from core_engine.engine import HaystackRagEngine
 from core_engine.ocr import ProviderImageTextExtractor
@@ -64,11 +65,21 @@ def resolve(component: str, stage_cfg: Any, ctx: WireContext) -> Any:
     return factory(dict(params or {}), ctx)
 
 
+def _effective_embed_model(cfg: PipelineConfig) -> str:
+    if cfg.common.ai_mode == "offline":
+        return "offline"
+    if cfg.common.ai_mode == "auto" and not (cfg.embedder.api_key or cfg.embedder.base_url):
+        return "offline"
+    return cfg.embedder.model
+
+
 def build_ai_settings(cfg: PipelineConfig) -> AISettings:
+    effective_model = _effective_embed_model(cfg)
+    resolved_dim = resolve_dimension(effective_model, cfg.embedder.dimension)
     embed = CapabilityConfig(
         base_url=cfg.embedder.base_url or None,
         api_key=cfg.embedder.api_key,
-        model=cfg.embedder.model,
+        model=effective_model,
     )
     caption = CapabilityConfig(
         base_url=(cfg.captioner.base_url or cfg.embedder.base_url) or None,
@@ -95,7 +106,7 @@ def build_ai_settings(cfg: PipelineConfig) -> AISettings:
         caption=caption,
         rerank=rerank,
         ocr=ocr,
-        embed_dimension=cfg.embedder.dimension,
+        embed_dimension=resolved_dim,
         max_retries=cfg.common.max_retries,
         timeout=cfg.common.timeout,
         provider=cfg.common.ai_mode,
@@ -129,6 +140,7 @@ def to_vector_store_config(
     return VectorStoreConfig(
         provider=cfg.vector_store.impl,
         collection=str(cfg.vector_store.params.get("collection", "rag_chatbot")),
+        embed_model=_effective_embed_model(cfg),
         dimension=dim,
         url=str(cfg.vector_store.params.get("url", "")),
         api_key=str(cfg.vector_store.params.get("api_key", "")),
@@ -147,7 +159,11 @@ def build_engine_from_config(
     resolved_dim = (
         dim
         if dim is not None
-        else provider.dimension if isinstance(provider, OfflineProvider) else cfg.embedder.dimension
+        else (
+            provider.dimension
+            if isinstance(provider, OfflineProvider)
+            else resolve_dimension(_effective_embed_model(cfg), cfg.embedder.dimension)
+        )
     )
     ctx = WireContext(
         provider=provider,

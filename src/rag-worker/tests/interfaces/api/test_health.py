@@ -113,7 +113,7 @@ def test_collection_name_must_not_preencode_dimension(
     monkeypatch.setenv("AI_PROVIDER", "offline")
     monkeypatch.setenv("VECTOR_COLLECTION", "rag_chatbot__d1024")
 
-    with pytest.raises(ValueError, match="VECTOR_COLLECTION must not encode dimension"):
+    with pytest.raises(ValueError, match="VECTOR_COLLECTION must not encode model/dimension"):
         with TestClient(create_app()):
             pass
 
@@ -195,7 +195,7 @@ def test_readiness_recomputes_live_health_on_each_request(
             ai_provider="offline",
             vector_provider="qdrant",
             vector_deployment="in_process",
-            vector_index="rag_chatbot__d1024",
+            vector_index="rag_chatbot__offline__d256",
             metadata_backend="in_memory",
             reasons=[] if calls["count"] == 1 else ["vector down"],
         )
@@ -258,3 +258,15 @@ def test_health_routes_bypass_rate_limit(
 
     assert first.status_code == 200
     assert second.status_code == 200
+
+
+def test_search_http_route_is_removed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AI_PROVIDER", "offline")
+
+    with TestClient(create_app()) as client:
+        response = client.post("/api/search", json={"query_text": "reset password"})
+
+    assert response.status_code == 404

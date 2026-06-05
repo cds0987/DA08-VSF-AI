@@ -16,7 +16,6 @@ from fastapi import FastAPI
 from sqlalchemy.engine import make_url
 
 from app.application.use_cases.ingestion import IngestDocumentUseCase
-from app.application.use_cases.query import RetrievalUseCase
 from app.domain.repositories.artifact_store import ArtifactStore
 from app.domain.repositories.document_repository import DocumentRepository
 from app.domain.repositories.ingest_job_repository import IngestJobRepository
@@ -43,6 +42,7 @@ from core_engine.mapping import (
 )
 from core_engine.ocr import ProviderImageTextExtractor
 from core_engine.vectorstore import VectorStoreConfig, available_providers
+from core_engine.vectorstore.qdrant_contract import write_contract_stamp
 
 
 def _is_production(app_env: str) -> bool:
@@ -67,7 +67,6 @@ class HealthReport:
 @dataclass
 class RuntimeState:
     ingest_use_case: IngestDocumentUseCase | None
-    retrieval_use_case: RetrievalUseCase | None
     document_repository: DocumentRepository
     job_repository: IngestJobRepository
     parser: Parser
@@ -148,9 +147,9 @@ def validate_vector_config(
 ) -> None:
     if not vector_config.collection.strip():
         raise ValueError("VECTOR_COLLECTION must not be empty")
-    if re.search(r"__d\d+$", vector_config.collection):
+    if re.search(r"__(?:[a-z0-9-]+__)?d\d+$", vector_config.collection):
         raise ValueError(
-            "VECTOR_COLLECTION must not encode dimension; index_id() appends __d{EMBED_DIMENSION}"
+            "VECTOR_COLLECTION must not encode model/dimension; index_id() appends __{model_tag}__d{dimension}"
         )
     if vector_config.provider.lower() not in available_providers():
         raise ValueError(
@@ -464,10 +463,10 @@ def bootstrap_runtime() -> RuntimeState:
                     )
                 }
             )
-        settings = to_settings(pipeline_cfg, dim=pipeline_cfg.embedder.dimension)
-        ai_settings = build_ai_settings(pipeline_cfg)
-        validate_ai_config(ai_settings, settings)
         provider = build_ai_provider(pipeline_cfg)
+        ai_settings = build_ai_settings(pipeline_cfg)
+        settings = to_settings(pipeline_cfg, dim=ai_settings.embed_dimension or provider.dimension)
+        validate_ai_config(ai_settings, settings)
         vector_config = to_vector_store_config(
             pipeline_cfg,
             dim=settings.embed_dimension,
@@ -477,11 +476,23 @@ def bootstrap_runtime() -> RuntimeState:
         validate_runtime_settings()
         settings = load_settings()
         ai_settings = load_ai_settings()
-        validate_ai_config(ai_settings, settings)
-        vector_config = VectorStoreConfig.from_env(dimension=settings.embed_dimension)
-        validate_vector_config(vector_config)
         reset_ai_provider()
         provider = get_ai_provider()
+        vector_config = VectorStoreConfig.from_env(
+            model="offline" if provider.name == "offline" else None,
+            dimension=provider.dimension if provider.name == "offline" else settings.embed_dimension,
+        )
+        settings = HaystackSettings(
+            embed_dimension=vector_config.dimension,
+            parent_max_words=settings.parent_max_words,
+            child_max_words=settings.child_max_words,
+            child_overlap_words=settings.child_overlap_words,
+            top_k_candidates=settings.top_k_candidates,
+            rerank_top_k=settings.rerank_top_k,
+            rerank_threshold=settings.rerank_threshold,
+        )
+        validate_ai_config(ai_settings, settings)
+        validate_vector_config(vector_config)
 
     reasons: list[str] = []
     if provider.name == "offline":
@@ -506,12 +517,11 @@ def bootstrap_runtime() -> RuntimeState:
         raise RuntimeError("Production fail-closed: " + " ".join(reasons))
 
     ingest_use_case = None
-    retrieval_use_case = None
     engine = None
     document_repository = build_document_repository()
     if not isinstance(document_repository, IngestJobRepository):
         raise TypeError("document repository must implement IngestJobRepository")
-    parser: Parser
+    parser: Parser = build_parser(provider)
     artifact_store = build_artifact_store()
     try:
         if pipeline_cfg is not None:
@@ -528,6 +538,7 @@ def bootstrap_runtime() -> RuntimeState:
         else:
             parser = build_parser(provider)
             engine = build_engine(provider=provider, vector_config=vector_config)
+        vector_config = engine.vectors.config
         ingest_use_case = IngestDocumentUseCase(
             engine,
             document_repository,
@@ -536,7 +547,6 @@ def bootstrap_runtime() -> RuntimeState:
             artifact_store,
             claim_heartbeat_interval_seconds=lease_settings.heartbeat_interval_seconds,
         )
-        retrieval_use_case = RetrievalUseCase(engine)
     except Exception as exc:
         reasons.append(f"Engine bootstrap failed: {exc}")
         if _is_production(app_env):
@@ -562,11 +572,12 @@ def bootstrap_runtime() -> RuntimeState:
         ai_provider=provider.name,
         vector_provider=vector_config.provider,
         vector_deployment=vector_config.deployment,
+        vector_index=vector_config.index_id(),
+        vector_fingerprint=vector_config.contract().fingerprint,
         metadata_backend=metadata_backend,
     )
     return RuntimeState(
         ingest_use_case=ingest_use_case,
-        retrieval_use_case=retrieval_use_case,
         document_repository=document_repository,
         job_repository=document_repository,
         parser=parser,
@@ -711,6 +722,15 @@ async def start_nats_ingest(
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     runtime = bootstrap_runtime()
     logger = logging.getLogger(__name__)
+    await write_contract_stamp(runtime.vector_config, written_by="rag-worker")
+    log_event(
+        logger,
+        logging.INFO,
+        "vectorstore_contract_stamp_written",
+        stage="startup",
+        vector_index=runtime.vector_config.index_id(),
+        vector_fingerprint=runtime.vector_config.contract().fingerprint,
+    )
     retention_settings = load_job_log_retention_settings()
     lease_settings = load_ingest_lease_settings()
     prune_task = asyncio.create_task(
@@ -761,7 +781,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.nats_delete_subscription = nats_delete_subscription
     app.state.nats_access_subscription = nats_access_subscription
     app.state.ingest_use_case = runtime.ingest_use_case
-    app.state.retrieval_use_case = runtime.retrieval_use_case
     app.state.runtime = runtime
     app.state.health = runtime.health
     app.state.job_log_prune_task = prune_task

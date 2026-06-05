@@ -12,9 +12,8 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from app.domain.repositories.embedding_service import EmbeddingService
-
 from core_engine.ai import AIProvider, get_ai_provider
+from core_engine.types import EmbeddingService
 
 
 class ProviderEmbeddingService(EmbeddingService):

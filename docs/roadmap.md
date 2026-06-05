@@ -22,7 +22,7 @@ Không chỉ là một chatbot — mà là **hệ thống quản lý tri thức 
 
 ### Phase 1 — Core MVP + Cloud Deploy _(Tuần 1–3)_
 
-> **Mục tiêu:** Chatbot hoàn chỉnh, chạy thật trên AWS, nhân viên truy cập được qua domain thực.
+> **Mục tiêu:** Chatbot hoàn chỉnh, chạy thật trên GCP, nhân viên truy cập được qua domain thực.
 
 **Sẽ làm:**
 - Auth: đăng nhập bằng email/password **hoặc Microsoft Account (SSO)**, phân quyền Admin / End User
@@ -31,7 +31,7 @@ Không chỉ là một chatbot — mà là **hệ thống quản lý tri thức 
 - Admin duyệt/từ chối tài liệu trước khi đưa vào knowledge base
 - Guardrails: chặn prompt injection, lọc off-topic, redact PII trong output
 - Semantic Cache: cache câu hỏi tương tự (Redis TTL 1h), tiết kiệm ~60% OpenAI API cost
-- Deploy lên AWS: EC2 + Docker Compose, RDS, S3, HTTPS qua Nginx
+- Deploy lên GCP: GCE + Docker Compose, Cloud SQL, Cloud Storage, HTTPS qua Nginx
 
 **Definition of Done:**
 
@@ -90,13 +90,13 @@ _Feedback & Observability_
 - [ ] Langfuse trace hoạt động: xem được latency, token cost, retrieved chunks
 
 _Cloud Deployment_
-- [ ] Toàn bộ stack chạy ổn định trên AWS EC2 bằng Docker Compose (12 containers: nginx, nuxt-chat, nuxt-admin, user-service, document-service, query-service, rag-worker, mcp-service, nats [JetStream], Qdrant, Redis, Langfuse :3100 — PostgreSQL = AWS RDS external; frontend/base là Nuxt layer build-time)
-- [ ] RDS PostgreSQL thay thế local DB — data không mất khi restart
-- [ ] File upload lưu vào S3, không lưu local
-- [ ] Qdrant self-hosted trên AWS, có persistent volume
+- [ ] Toàn bộ stack chạy ổn định trên GCP GCE bằng Docker Compose (12 containers: nginx, nuxt-chat, nuxt-admin, user-service, document-service, query-service, rag-worker, mcp-service, nats [JetStream], Qdrant, Redis, Langfuse :3100 — PostgreSQL = GCP Cloud SQL external; frontend/base là Nuxt layer build-time)
+- [ ] Cloud SQL PostgreSQL thay thế local DB — data không mất khi restart
+- [ ] File upload lưu vào Cloud Storage (GCS), không lưu local
+- [ ] Qdrant self-hosted trên GCP, có persistent volume
 - [ ] HTTPS hoạt động qua Nginx + Let's Encrypt (hoặc domain nội bộ)
-- [ ] Langfuse self-hosted trên AWS, IT/DevOps truy cập được
-- [ ] CloudWatch alarm hoạt động — cảnh báo IT/DevOps khi EC2 CPU > 80% hoặc service không phản hồi
+- [ ] Langfuse self-hosted trên GCP, IT/DevOps truy cập được
+- [ ] Cloud Monitoring alarm hoạt động — cảnh báo IT/DevOps khi GCE CPU > 80% hoặc service không phản hồi
 - [ ] Smoke test sau mỗi deploy: 10 câu hỏi mẫu pass toàn bộ trước khi tuyên bố production-ready
 
 ---
@@ -222,7 +222,7 @@ Các phase này không nằm trong scope hiện tại nhưng cho thấy sản ph
 
 | Milestone | Đo bằng |
 |-----------|---------|
-| Phase 1 Done | Upload 1 doc → hỏi → trả lời đúng với nguồn; truy cập được qua HTTPS trên AWS |
+| Phase 1 Done | Upload 1 doc → hỏi → trả lời đúng với nguồn; truy cập được qua HTTPS trên GCP |
 | Phase 1.5 Done | RAGAS score: Faithfulness ≥ 0.90, Answer Relevance ≥ 0.85, Context Precision ≥ 0.80, Context Recall ≥ 0.80 |
 | Phase 2 Done | Dashboard hiển thị đủ 4 metrics, knowledge gaps visible, hỏi được trong Microsoft Teams |
 
