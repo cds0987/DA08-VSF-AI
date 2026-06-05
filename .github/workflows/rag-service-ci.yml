@@ -87,7 +87,7 @@ jobs:
         run: pytest tests -q -ra --ignore=tests/e2e
 
       # E2e THẬT: rag-worker chạy trên NATS + MinIO + Qdrant thật; chỉ message
-      # document-service được giả lập (upload MinIO + publish doc.ingest/doc.delete).
+      # document-service được giả lập (upload MinIO + publish doc.ingest/doc.access).
       - name: Run e2e protocol tests (real infra on)
         env:
           APP_ENV: development

@@ -39,7 +39,7 @@ class NatsBroker:
     async def ensure_stream(self, stream: str, subjects: list[str]) -> None:
         """Tạo stream nếu chưa có; nếu đã có mà THIẾU subject thì cập nhật (idempotent).
 
-        add_stream chỉ chạy lần đầu. Khi thêm subject mới (vd doc.access, doc.delete)
+        add_stream chỉ chạy lần đầu. Khi thêm subject mới (vd doc.access)
         vào một stream đã tồn tại, phải update_stream — nếu không subject mới KHÔNG
         được stream bắt và durable subscribe sẽ lỗi. Lỗi connection/permission ở
         stream_info được propagate (không nuốt thành 'tạo mới')."""
@@ -57,6 +57,36 @@ class NatsBroker:
         if missing:
             info.config.subjects = existing + missing
             await self._js.update_stream(info.config)
+
+    async def verify_stream(self, stream: str, subjects: list[str]) -> None:
+        """Verify-only (fail-closed): KHÔNG tạo/sửa stream.
+
+        Stream là hợp đồng hạ tầng do DevOps provision trước khi service lên
+        (xem infra/nats/jetstream.conf). rag-worker chỉ là consumer/publisher —
+        nó kiểm tra stream đã tồn tại + phủ đủ subject rồi mới subscribe. Thiếu ->
+        raise để caller degrade gracefully + log ERROR, thay vì tự `add_stream` ra
+        một stream lệch tên/lệch retention so với contract.
+
+        Dev/CI muốn rag-worker tự dựng stream: đặt NATS_STREAM_AUTO_CREATE=1
+        (runtime sẽ gọi ensure_stream thay vì verify_stream)."""
+        from nats.js.errors import NotFoundError
+
+        try:
+            info = await self._js.stream_info(stream)
+        except NotFoundError as exc:
+            raise RuntimeError(
+                f"JetStream stream {stream!r} chưa tồn tại. DevOps phải tạo trước khi "
+                "rag-worker start (xem infra/nats/jetstream.conf). Dev/CI: đặt "
+                "NATS_STREAM_AUTO_CREATE=1 để rag-worker tự dựng."
+            ) from exc
+
+        existing = list(getattr(info.config, "subjects", None) or [])
+        missing = [s for s in subjects if s not in existing]
+        if missing:
+            raise RuntimeError(
+                f"JetStream stream {stream!r} thiếu subject {missing} (hiện có "
+                f"{existing}). DevOps cập nhật stream theo infra/nats/jetstream.conf."
+            )
 
     async def subscribe(
         self,

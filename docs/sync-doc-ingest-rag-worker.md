@@ -248,22 +248,27 @@ Cài lib ở **cả hai**: `pip install nats-py` (import lazy, thiếu thì NATS
 > thì `js.publish` lỗi → upload FAILED. Thêm: `doc.access`/`notify.doc_new` document-service publish
 > **chưa có stream nào phủ** → cũng lỗi khi JetStream bật.
 
-Hiện chỉ rag-worker `ensure_stream("DOCS", ["doc.ingest","doc.status"])`
-([runtime.py:626](../src/rag-worker/app/interfaces/api/runtime.py#L626)).
+> **Cập nhật (rag-worker đã đổi):** rag-worker **mặc định KHÔNG còn tự tạo stream** — nó
+> `verify_stream` (chỉ kiểm tra stream tồn tại + phủ đủ `doc.ingest,doc.status,doc.access`,
+> thiếu → degrade + log ERROR). Dev/CI muốn tự dựng: đặt `NATS_STREAM_AUTO_CREATE=1`.
+> → Việc tạo stream giờ thuộc **Infra/SA** (init script bên dưới); document-service vẫn chỉ publish.
 
 **Cách chốt**: tạo stream bằng init script độc lập, chạy trước cả 2 service:
 
 ```bash
-# infra/nats/init-streams.sh — chạy 1 lần khi dựng hạ tầng
-nats --server "$NATS_URL" stream add DOCS \
-  --subjects "doc.ingest,doc.status,doc.delete" \
-  --storage file --retention limits --max-age 168h --defaults
+# infra/nats/init-streams.sh — chạy 1 lần khi dựng hạ tầng.
+# Layout chuẩn (tên + retention) là infra/nats/jetstream.conf — dùng đó làm nguồn sự thật.
+nats --server "$NATS_URL" stream add DOC_EVENTS \
+  --subjects "doc.ingest,doc.status,doc.access" \
+  --storage file --retention limits --max-age 7d --dupe-window 2m --defaults
 
-# doc.access / notify.doc_new do document-service cũng publish (cho query-service)
-nats --server "$NATS_URL" stream add ACCESS \
-  --subjects "doc.access,notify.doc_new" \
-  --storage file --retention limits --defaults
+# notify.doc_new do document-service publish (cho query-service)
+nats --server "$NATS_URL" stream add NOTIFY_EVENTS \
+  --subjects "notify.doc_new" \
+  --storage file --retention limits --max-age 3d --dupe-window 2m --defaults
 ```
+
+> Không có `doc.delete`: xóa vector đi qua `doc.access{deleted:true}` (xem §4b).
 
 ### 4.2 Trạng thái `processing` (dọn sau MVP)
 
@@ -278,55 +283,43 @@ Chốt 1 trong 2:
 
 ---
 
-## 4b. Luồng DELETE — vector orphan (BLOCKER bảo mật)
+## 4b. Luồng DELETE — vector orphan ✅ ĐÃ GIẢI QUYẾT (qua `doc.access`)
 
-> **🔴 CONFLICT (#8)** — Admin xóa tài liệu nhưng **vector trong Qdrant không bị xóa** → search vẫn
-> trả về chunk của tài liệu đã xóa (kết quả cũ + **rò rỉ nội dung secret/top_secret đã xóa**).
+> **Bối cảnh (#8)** — Admin xóa tài liệu nhưng vector trong Qdrant không bị xóa → search vẫn
+> trả chunk đã xóa (kết quả cũ + **rò rỉ nội dung secret/top_secret**). Đã đóng bằng cách
+> **tái dùng `doc.access{deleted:true}`** làm tín hiệu xóa — KHÔNG thêm subject mới `doc.delete`.
 
-### Hiện trạng
+### Quyết định: xóa đi qua `doc.access{deleted:true}` — `doc.delete` đã LOẠI BỎ
+
+Contract chính thức ([infra/nats/subjects.md](../infra/nats/subjects.md)) **không có** `doc.delete`. document-service
+lúc xóa đã publish `doc.access{deleted:true}` (vốn để query-service cập nhật ACL projection). rag-worker
+**dùng chính event này** làm tín hiệu xóa vector → không cần document-service thêm publisher mới, không cần
+ratify subject mới.
+
+```jsonc
+// document-service publish (đã có sẵn) → rag-worker subscribe
+{ "doc_id": "1f3c...uuid", "classification": "...", "allowed_departments": [], "allowed_user_ids": [], "deleted": true }
+```
+
+### Hiện trạng (đã thông 2 đầu)
 
 | | document-service | rag-worker |
 |---|---|---|
-| Khi delete | xóa S3 + DB record + publish `doc.access {deleted:true}` (cho query-service) | — |
-| Báo rag-worker xóa vector | ❌ **không** (chỉ có `# TODO: publish vector-delete event`) | — |
-| Capability xóa vector | — | ✅ `IngestDocumentUseCase.delete()` → `vectors.delete_by_document()` |
-| Đường kích hoạt | — | ✅ HTTP `DELETE /ingest/{id}` · ❌ **không có NATS consumer** |
+| Khi delete | xóa S3 + DB record + publish `doc.access {deleted:true}` | — |
+| Capability xóa vector | — | ✅ `IngestDocumentUseCase.delete()` → `vectors.delete_by_document` + `documents.delete` (idempotent) |
+| Đường kích hoạt | ✅ event `doc.access{deleted:true}` | ✅ `DocAccessDeleteConsumer` + `start_doc_access_subscription` (durable `rag-worker-access`) |
 
-→ document-service dùng NATS (không gọi HTTP rag-worker); rag-worker chỉ subscribe `doc.ingest`.
-Cầu nối delete **đứt ở cả hai đầu**: BE không publish event xóa, rag-worker không nghe event xóa.
-Logic xóa vector của rag-worker **đã có sẵn**, chỉ thiếu wiring NATS.
+**rag-worker** ✅ **ĐÃ LÀM**:
+- [ingest_consumer.py](../src/rag-worker/app/interfaces/nats/ingest_consumer.py): `DocAccessDeleteConsumer`
+  (chỉ xử lý khi `deleted=true`, bỏ qua upload; tái dùng `use_case.delete()`) + `start_doc_access_subscription`
+  (ack cả khi bỏ qua lẫn khi xóa xong; term payload hỏng; nak lỗi tạm).
+- [runtime.py](../src/rag-worker/app/interfaces/api/runtime.py): subscribe `doc.access` (durable `rag-worker-access`),
+  verify/ensure stream phủ `doc.access`, teardown khi shutdown.
+- ENV: `NATS_DOC_ACCESS_SUBJECT=doc.access`, `NATS_ACCESS_DURABLE=rag-worker-access`.
 
-### Contract đề xuất: `doc.delete`
-
-```jsonc
-// document-service publish → rag-worker subscribe
-{ "doc_id": "1f3c...uuid" }
-```
-
-### Việc cần làm
-
-**document-service** — `DeleteDocumentUseCase.execute()`
-([delete_document_use_case.py](../src/document-service/app/application/use_cases/documents/delete_document_use_case.py)),
-thay dòng `# TODO: publish vector-delete event ...`:
-
-```python
-        # publisher cần thêm method publish_doc_delete -> subject "doc.delete"
-        await self.publisher.publish_doc_delete({"doc_id": document.id})
-```
-+ thêm vào `NatsPublisher`: `async def publish_doc_delete(self, payload): await self._publish("doc.delete", payload)`
-+ khai báo `publish_doc_delete` trong Protocol `DeleteEventPublisher`.
-
-**rag-worker** ✅ **ĐÃ LÀM** (branch `nguyendev`):
-- [ingest_consumer.py](../src/rag-worker/app/interfaces/nats/ingest_consumer.py): thêm `DocDeleteConsumer`
-  (tái dùng `use_case.delete()` = `vectors.delete_by_document` + `documents.delete`) + `start_doc_delete_subscription`
-  (ack/term/nak giống ingest).
-- [runtime.py](../src/rag-worker/app/interfaces/api/runtime.py): subscribe `doc.delete` (durable `rag-worker-delete`),
-  `ensure_stream` phủ thêm `doc.delete`, teardown subscription khi shutdown.
-- ENV: `NATS_DOC_DELETE_SUBJECT=doc.delete`, `NATS_DELETE_DURABLE=rag-worker-delete`.
-- Test: `test_delete_handle_calls_delete`, `*_rejects_missing_doc_id`, `*_acks/terms/naks`. Pass.
-
-> **Còn lại (document-service)**: publish `doc.delete {doc_id}` khi xóa (thay TODO) — xem code phía trên.
-> Stream `DOCS` đã phủ `doc.delete` (xem §4.1 init-streams.sh: `--subjects "doc.ingest,doc.status,doc.delete"`).
+> **`doc.delete` đã được GỠ HẲN khỏi rag-worker** (class `DocDeleteConsumer`, `start_doc_delete_subscription`,
+> cfg `doc_delete_subject`/`delete_durable`, test liên quan) — vì nó không có trong contract và không ai publish.
+> Nếu sau này cần subject xóa riêng, phải ratify vào `subjects.md` trước (SA), rồi mới khôi phục consumer.
 
 ---
 
@@ -385,8 +378,8 @@ curl -s localhost:8002/documents/<id> -H "Authorization: Bearer $TOKEN" | jq
 | 1 | `s3_key`→`gcs_key` + URI đầy đủ + `document_name` | document-service | 🔴 Blocker | §1 |
 | 2 | Nhận `gcs_key` lẫn `s3_key` | rag-worker | 🔴 Blocker | §2.1 |
 | 3 | ENV `AWS_*`/`S3_*` cùng bucket/endpoint | cả hai (DevOps) | 🔴 Blocker | §3 |
-| 4 | Tạo stream `DOCS` + `ACCESS` bằng init script | Infra/SA | 🔴 Blocker | §4.1 |
-| 5 | Luồng DELETE: `doc.delete` publish + consumer (vector orphan) | cả hai | 🔴 Blocker bảo mật | §4b |
+| 4 | Tạo stream `DOC_EVENTS` + `NOTIFY_EVENTS` bằng init script | Infra/SA | 🔴 Blocker | §4.1 |
+| 5 | ✅ Luồng DELETE qua `doc.access{deleted:true}` (vector orphan đã đóng; `doc.delete` đã gỡ) | rag-worker | ✅ Done | §4b |
 | 6 | Ép `NATS_JETSTREAM_ENABLED=true` | document-service | 🟡 | §4 |
 | 7 | Chốt/bỏ `processing` | cả hai + SA | 🟡 Sau MVP | §4.2 |
 | 8 | Cập nhật unit/api test | cả hai | 🟡 | §1.4, §2 |
