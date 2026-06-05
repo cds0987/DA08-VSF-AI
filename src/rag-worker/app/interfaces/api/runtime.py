@@ -614,14 +614,16 @@ def _nats_config() -> dict | None:
     return {
         "url": url,
         "stream": os.getenv("NATS_STREAM", "DOCS"),
+        # Mặc định verify-only (fail-closed): stream do DevOps provision trước
+        # (infra/nats/jetstream.conf). Dev/CI bật =1 để rag-worker tự dựng stream.
+        "auto_create_stream": os.getenv("NATS_STREAM_AUTO_CREATE", "").strip().lower()
+        in {"1", "true", "yes", "on"},
         "doc_ingest_subject": os.getenv("NATS_DOC_INGEST_SUBJECT", "doc.ingest"),
         "doc_status_subject": os.getenv("NATS_DOC_STATUS_SUBJECT", "doc.status"),
-        "doc_delete_subject": os.getenv("NATS_DOC_DELETE_SUBJECT", "doc.delete"),
-        # document-service không gửi doc.delete; lúc xóa nó publish doc.access(deleted=true).
-        # Subscribe doc.access là đường xóa thực tế giữa 2 service.
+        # Xóa vector đi qua doc.access{deleted:true} (document-service không gửi
+        # doc.delete — không có trong contract infra/nats/subjects.md).
         "doc_access_subject": os.getenv("NATS_DOC_ACCESS_SUBJECT", "doc.access"),
         "durable": os.getenv("NATS_DURABLE", "rag-worker-ingest"),
-        "delete_durable": os.getenv("NATS_DELETE_DURABLE", "rag-worker-delete"),
         "access_durable": os.getenv("NATS_ACCESS_DURABLE", "rag-worker-access"),
         # Bucket ghép vào key trần (raw/<id>/<file>) document-service publish -> s3://bucket/key.
         # Trống -> không ghép (giữ hành vi cũ). Fallback R2_BUCKET cho cấu hình R2.
@@ -634,41 +636,45 @@ def _nats_config() -> dict | None:
 
 async def start_nats_ingest(
     runtime: "RuntimeState", logger: logging.Logger
-) -> tuple[Any, Any, Any, Any, Any]:
+) -> tuple[Any, Any, Any, Any]:
     """Bật cửa ingest NATS nếu có NATS_URL.
 
-    Trả (broker, ingest_subscription, delete_subscription, access_subscription,
-    status_publisher). Lỗi khi bật NATS -> đóng broker + degrade gracefully (trả
-    None): search/HTTP độc lập vẫn chạy, không để NATS hỏng kéo sập cả service. Ops
-    theo dõi log ERROR.
+    Trả (broker, ingest_subscription, access_subscription, status_publisher). Xóa
+    vector đi qua doc.access{deleted:true}. Lỗi khi bật NATS -> đóng broker + degrade
+    gracefully (trả None): search/HTTP độc lập vẫn chạy, không để NATS hỏng kéo sập
+    cả service. Ops theo dõi log ERROR.
     """
     cfg = _nats_config()
     if cfg is None or runtime.ingest_use_case is None:
-        return None, None, None, None, None
+        return None, None, None, None
     # Lazy import: chưa cài nats-py / không bật NATS thì không kéo dependency.
     from app.infrastructure.external.nats_client import NatsBroker
     from app.interfaces.nats import (
         DocAccessDeleteConsumer,
-        DocDeleteConsumer,
         DocIngestConsumer,
         DocStatusPublisher,
         start_doc_access_subscription,
-        start_doc_delete_subscription,
         start_doc_ingest_subscription,
     )
 
     broker = NatsBroker(cfg["url"])
     try:
         await broker.connect()
-        await broker.ensure_stream(
-            cfg["stream"],
-            [
-                cfg["doc_ingest_subject"],
-                cfg["doc_status_subject"],
-                cfg["doc_delete_subject"],
-                cfg["doc_access_subject"],
-            ],
-        )
+        # doc.delete KHÔNG nằm trong contract chính thức (infra/nats/subjects.md):
+        # xóa vector đi qua doc.access{deleted:true}. Không verify/subscribe doc.delete.
+        stream_subjects = [
+            cfg["doc_ingest_subject"],
+            cfg["doc_status_subject"],
+            cfg["doc_access_subject"],
+        ]
+        if cfg["auto_create_stream"]:
+            # Dev/CI: tự dựng stream cho tiện chạy đứng-một-mình.
+            await broker.ensure_stream(cfg["stream"], stream_subjects)
+        else:
+            # Prod mặc định: verify-only fail-closed. Stream phải có sẵn (DevOps
+            # provision theo infra/nats/jetstream.conf); thiếu -> raise -> degrade
+            # (search/HTTP vẫn chạy) + log ERROR, KHÔNG tự tạo stream lệch chuẩn.
+            await broker.verify_stream(cfg["stream"], stream_subjects)
         consumer = DocIngestConsumer(
             runtime.ingest_use_case,
             default_bucket=cfg["source_bucket"] or None,
@@ -679,14 +685,6 @@ async def start_nats_ingest(
             consumer,
             subject=cfg["doc_ingest_subject"],
             durable=cfg["durable"],
-            logger=logger,
-        )
-        delete_consumer = DocDeleteConsumer(runtime.ingest_use_case, logger=logger)
-        delete_subscription = await start_doc_delete_subscription(
-            broker,
-            delete_consumer,
-            subject=cfg["doc_delete_subject"],
-            durable=cfg["delete_durable"],
             logger=logger,
         )
         access_consumer = DocAccessDeleteConsumer(runtime.ingest_use_case, logger=logger)
@@ -707,7 +705,7 @@ async def start_nats_ingest(
             stage="startup",
             error=str(exc),
         )
-        return None, None, None, None, None
+        return None, None, None, None
     publisher = DocStatusPublisher(
         broker, subject=cfg["doc_status_subject"], logger=logger
     )
@@ -719,11 +717,10 @@ async def start_nats_ingest(
         stream=cfg["stream"],
         ingest_subject=cfg["doc_ingest_subject"],
         status_subject=cfg["doc_status_subject"],
-        delete_subject=cfg["doc_delete_subject"],
         access_subject=cfg["doc_access_subject"],
         source_bucket=cfg["source_bucket"] or "(none)",
     )
-    return broker, subscription, delete_subscription, access_subscription, publisher
+    return broker, subscription, access_subscription, publisher
 
 
 @asynccontextmanager
@@ -751,7 +748,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     (
         nats_broker,
         nats_subscription,
-        nats_delete_subscription,
         nats_access_subscription,
         status_publisher,
     ) = await start_nats_ingest(runtime, logger)
@@ -786,7 +782,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ]
     app.state.nats_broker = nats_broker
     app.state.nats_subscription = nats_subscription
-    app.state.nats_delete_subscription = nats_delete_subscription
     app.state.nats_access_subscription = nats_access_subscription
     app.state.ingest_use_case = runtime.ingest_use_case
     app.state.runtime = runtime
@@ -832,9 +827,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if nats_subscription is not None:
             with contextlib.suppress(Exception):
                 await nats_subscription.unsubscribe()
-        if nats_delete_subscription is not None:
-            with contextlib.suppress(Exception):
-                await nats_delete_subscription.unsubscribe()
         if nats_access_subscription is not None:
             with contextlib.suppress(Exception):
                 await nats_access_subscription.unsubscribe()

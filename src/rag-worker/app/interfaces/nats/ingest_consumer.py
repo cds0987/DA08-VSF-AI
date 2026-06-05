@@ -97,38 +97,6 @@ class DocIngestConsumer:
         return doc_id
 
 
-class DocDeleteConsumer:
-    """Map payload `doc.delete` -> xóa vector + metadata của document. Trả document_id.
-
-    Tái dùng `IngestDocumentUseCase.delete()` (vectors.delete_by_document + documents.delete)
-    nên idempotent: xóa lại document đã xóa không phát sinh lỗi (vector store no-op).
-    """
-
-    def __init__(
-        self,
-        ingest_use_case: IngestDocumentUseCase,
-        *,
-        logger: logging.Logger | None = None,
-    ) -> None:
-        self._ingest = ingest_use_case
-        self._logger = logger or logging.getLogger(__name__)
-
-    async def handle(self, raw: bytes) -> str:
-        try:
-            payload = json.loads(raw)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise BadPayloadError(f"doc.delete payload không phải JSON hợp lệ: {exc}") from exc
-        if not isinstance(payload, dict):
-            raise BadPayloadError("doc.delete payload phải là object JSON")
-
-        doc_id = str(payload.get("doc_id") or "").strip()
-        if not doc_id:
-            raise BadPayloadError("doc.delete thiếu trường bắt buộc: cần doc_id")
-
-        await self._ingest.delete(doc_id)
-        return doc_id
-
-
 class DocAccessDeleteConsumer:
     """Map payload `doc.access` (deleted=true) -> xóa vector + metadata. Trả doc_id.
 
@@ -240,37 +208,6 @@ async def start_doc_ingest_subscription(
                 await msg.ack()
         except Exception as exc:  # noqa: BLE001 - lỗi tạm (DB...) -> nak để retry
             log.warning("doc_ingest_enqueue_failed error=%s", exc)
-            await msg.nak()
-
-    return await broker.subscribe(subject, durable=durable, cb=_cb)
-
-
-async def start_doc_delete_subscription(
-    broker: Any,
-    consumer: DocDeleteConsumer,
-    *,
-    subject: str,
-    durable: str,
-    logger: logging.Logger | None = None,
-) -> Any:
-    """Subscribe doc.delete; ack khi xóa xong, term payload hỏng, nak lỗi tạm để retry."""
-    log = logger or logging.getLogger(__name__)
-
-    async def _cb(msg: Any) -> None:
-        try:
-            doc_id = await consumer.handle(msg.data)
-            await msg.ack()
-            log.info("doc_delete_done doc_id=%s", doc_id)
-        except BadPayloadError as exc:
-            # Payload hỏng (poison): term để KHÔNG gửi lại vô hạn.
-            log.warning("doc_delete_bad_payload error=%s", exc)
-            term = getattr(msg, "term", None)
-            if callable(term):
-                await term()
-            else:  # pragma: no cover - fallback nếu client ko có term()
-                await msg.ack()
-        except Exception as exc:  # noqa: BLE001 - lỗi tạm (vector store/DB...) -> nak retry
-            log.warning("doc_delete_failed error=%s", exc)
             await msg.nak()
 
     return await broker.subscribe(subject, durable=durable, cb=_cb)
