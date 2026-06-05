@@ -4,31 +4,35 @@ from app.interfaces.api.dependencies import get_ingest_use_case
 from app.interfaces.api.main import app
 
 
+# Tạo ingest đã chuyển sang NATS (doc.ingest) — không còn POST /ingest.
+# Router chỉ còn ĐỌC/quản lý: GET document, GET job, list, DELETE. Test seed stub trực tiếp.
+
+
 class StubIngestUseCase:
     def __init__(self) -> None:
-        self.enqueue_calls = []
         self.delete_calls = []
         self.documents = {}
         self.jobs = {}
 
-    async def enqueue(self, **kwargs):
-        self.enqueue_calls.append(kwargs)
-        self.documents[kwargs["document_id"]] = {
-            "document_id": kwargs["document_id"],
-            "document_name": kwargs["document_name"],
-            "file_type": kwargs["file_type"],
-            "source_uri": kwargs.get("source_uri") or f"local://{kwargs['document_id']}",
+    def seed_document(self, document_id: str = "doc-1") -> None:
+        self.documents[document_id] = {
+            "document_id": document_id,
+            "document_name": "Guide",
+            "file_type": "md",
+            "source_uri": f"local://{document_id}",
             "status": "queued",
             "chunk_count": 0,
             "created_at": "2026-06-03T00:00:00Z",
             "error_message": None,
         }
+
+    def seed_job(self, job_id: str = "job-1", document_id: str = "doc-1"):
         job = type(
             "Job",
             (),
             {
-                "id": "job-1",
-                "document_id": kwargs["document_id"],
+                "id": job_id,
+                "document_id": document_id,
                 "status": "pending",
                 "claim_id": None,
                 "attempt": 0,
@@ -38,7 +42,7 @@ class StubIngestUseCase:
                 "updated_at": "2026-06-03T00:00:00Z",
             },
         )()
-        self.jobs[job.id] = job
+        self.jobs[job_id] = job
         return job
 
     async def delete(self, document_id: str) -> None:
@@ -69,32 +73,6 @@ class StubIngestUseCase:
         return [await self.get_document(document_id) for document_id in self.documents]
 
 
-def test_ingest_router_accepts_markdown_payload() -> None:
-    stub = StubIngestUseCase()
-    app.dependency_overrides[get_ingest_use_case] = lambda: stub
-
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/ingest",
-            json={
-                "document_id": "doc-1",
-                "document_name": "Guide",
-                "file_type": "md",
-                "markdown": "# Title\nBody",
-                "source_uri": "local://doc-1",
-                "correlation_id": "cid-ingest-1",
-            },
-        )
-
-    app.dependency_overrides.clear()
-
-    assert response.status_code == 202
-    assert stub.enqueue_calls[0]["document_id"] == "doc-1"
-    assert stub.enqueue_calls[0]["correlation_id"] == "cid-ingest-1"
-    assert response.json()["chunk_count"] == 0
-    assert response.json()["job_id"] == "job-1"
-
-
 def test_delete_ingest_router_deletes_document() -> None:
     stub = StubIngestUseCase()
     app.dependency_overrides[get_ingest_use_case] = lambda: stub
@@ -110,18 +88,10 @@ def test_delete_ingest_router_deletes_document() -> None:
 
 def test_get_ingest_router_returns_document_status() -> None:
     stub = StubIngestUseCase()
+    stub.seed_document("doc-1")
     app.dependency_overrides[get_ingest_use_case] = lambda: stub
 
     with TestClient(app) as client:
-        client.post(
-            "/api/ingest",
-            json={
-                "document_id": "doc-1",
-                "document_name": "Guide",
-                "file_type": "md",
-                "markdown": "# Title\nBody",
-            },
-        )
         response = client.get("/api/ingest/doc-1")
 
     app.dependency_overrides.clear()
@@ -132,18 +102,10 @@ def test_get_ingest_router_returns_document_status() -> None:
 
 def test_list_ingest_router_returns_documents() -> None:
     stub = StubIngestUseCase()
+    stub.seed_document("doc-1")
     app.dependency_overrides[get_ingest_use_case] = lambda: stub
 
     with TestClient(app) as client:
-        client.post(
-            "/api/ingest",
-            json={
-                "document_id": "doc-1",
-                "document_name": "Guide",
-                "file_type": "md",
-                "markdown": "# Title\nBody",
-            },
-        )
         response = client.get("/api/ingest")
 
     app.dependency_overrides.clear()
@@ -154,18 +116,10 @@ def test_list_ingest_router_returns_documents() -> None:
 
 def test_get_ingest_job_router_returns_job_status() -> None:
     stub = StubIngestUseCase()
+    stub.seed_job("job-1", "doc-1")
     app.dependency_overrides[get_ingest_use_case] = lambda: stub
 
     with TestClient(app) as client:
-        client.post(
-            "/api/ingest",
-            json={
-                "document_id": "doc-1",
-                "document_name": "Guide",
-                "file_type": "md",
-                "markdown": "# Title\nBody",
-            },
-        )
         response = client.get("/api/ingest/jobs/job-1")
 
     app.dependency_overrides.clear()

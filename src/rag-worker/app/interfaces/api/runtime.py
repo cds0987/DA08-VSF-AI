@@ -350,6 +350,7 @@ async def run_ingest_worker(
     ingest_use_case: IngestDocumentUseCase,
     poll_interval_seconds: float,
     logger: logging.Logger,
+    on_job_finished: Any | None = None,
 ) -> None:
     while True:
         try:
@@ -367,6 +368,9 @@ async def run_ingest_worker(
                     document_id=job.document_id,
                     status=job.status.value,
                 )
+                # Publish doc.status qua NATS (no-op nếu không bật NATS).
+                if on_job_finished is not None:
+                    await on_job_finished(job)
         except Exception as exc:  # noqa: BLE001 - worker must stay alive and keep polling
             log_event(
                 logger,
@@ -583,6 +587,63 @@ def build_document_repository() -> DocumentRepository:
     return PostgresDocumentRepository(database_url)
 
 
+def _nats_config() -> dict | None:
+    """Cấu hình NATS ingest. Không set NATS_URL -> None (không bật NATS)."""
+    url = os.getenv("NATS_URL", "").strip()
+    if not url:
+        return None
+    return {
+        "url": url,
+        "stream": os.getenv("NATS_STREAM", "DOCS"),
+        "doc_ingest_subject": os.getenv("NATS_DOC_INGEST_SUBJECT", "doc.ingest"),
+        "doc_status_subject": os.getenv("NATS_DOC_STATUS_SUBJECT", "doc.status"),
+        "durable": os.getenv("NATS_DURABLE", "rag-worker-ingest"),
+        "queue": os.getenv("NATS_QUEUE", "rag-worker"),
+    }
+
+
+async def start_nats_ingest(runtime: "RuntimeState", logger: logging.Logger):
+    """Bật cửa ingest NATS nếu có NATS_URL. Trả (broker, subscription, status_publisher)."""
+    cfg = _nats_config()
+    if cfg is None or runtime.ingest_use_case is None:
+        return None, None, None
+    # Lazy import: chưa cài nats-py / không bật NATS thì không kéo dependency.
+    from app.infrastructure.external.nats_client import NatsBroker
+    from app.interfaces.nats import (
+        DocIngestConsumer,
+        DocStatusPublisher,
+        start_doc_ingest_subscription,
+    )
+
+    broker = NatsBroker(cfg["url"])
+    await broker.connect()
+    await broker.ensure_stream(
+        cfg["stream"], [cfg["doc_ingest_subject"], cfg["doc_status_subject"]]
+    )
+    consumer = DocIngestConsumer(runtime.ingest_use_case, logger=logger)
+    subscription = await start_doc_ingest_subscription(
+        broker,
+        consumer,
+        subject=cfg["doc_ingest_subject"],
+        durable=cfg["durable"],
+        queue=cfg["queue"],
+        logger=logger,
+    )
+    publisher = DocStatusPublisher(
+        broker, subject=cfg["doc_status_subject"], logger=logger
+    )
+    log_event(
+        logger,
+        logging.INFO,
+        "nats_ingest_started",
+        stage="startup",
+        stream=cfg["stream"],
+        ingest_subject=cfg["doc_ingest_subject"],
+        status_subject=cfg["doc_status_subject"],
+    )
+    return broker, subscription, publisher
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     runtime = bootstrap_runtime()
@@ -595,6 +656,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     stale_reaper_task = asyncio.create_task(
         run_stale_job_reaper(runtime.job_repository, lease_settings, logger)
     )
+    # Bật cửa ingest NATS (nếu có NATS_URL); status_publisher đẩy doc.status sau xử lý.
+    nats_broker, nats_subscription, status_publisher = await start_nats_ingest(
+        runtime, logger
+    )
+    on_job_finished = (
+        status_publisher.publish_for_job if status_publisher is not None else None
+    )
     worker_count = int(os.getenv("INGEST_WORKER_COUNT", "1"))
     worker_poll_interval = float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5"))
     worker_tasks = []
@@ -606,10 +674,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     runtime.ingest_use_case,
                     worker_poll_interval,
                     logger,
+                    on_job_finished,
                 )
             )
             for index in range(worker_count)
         ]
+    app.state.nats_broker = nats_broker
+    app.state.nats_subscription = nats_subscription
     app.state.ingest_use_case = runtime.ingest_use_case
     app.state.retrieval_use_case = runtime.retrieval_use_case
     app.state.runtime = runtime
@@ -652,6 +723,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     "ingest_worker_stopped",
                     stage="worker",
                 )
+        if nats_subscription is not None:
+            with contextlib.suppress(Exception):
+                await nats_subscription.unsubscribe()
+        if nats_broker is not None:
+            with contextlib.suppress(Exception):
+                await nats_broker.close()
         close_parser = getattr(runtime.parser, "close", None)
         if close_parser is not None:
             with contextlib.suppress(Exception):

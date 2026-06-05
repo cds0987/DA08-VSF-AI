@@ -1,0 +1,181 @@
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+
+import pytest
+
+from app.domain.entities.ingest_job import IngestJob, IngestJobStatus
+from app.interfaces.nats.ingest_consumer import (
+    DocIngestConsumer,
+    DocStatusPublisher,
+    build_doc_status,
+    start_doc_ingest_subscription,
+)
+
+
+class FakeIngestUseCase:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.calls: list[dict] = []
+        self._fail = fail
+
+    async def enqueue(self, **kwargs):
+        if self._fail:
+            raise RuntimeError("db down")
+        self.calls.append(kwargs)
+        return object()
+
+
+class FakeBroker:
+    def __init__(self) -> None:
+        self.published: list[tuple[str, dict]] = []
+        self.subscribed: dict = {}
+
+    async def publish_json(self, subject: str, payload: dict) -> None:
+        self.published.append((subject, payload))
+
+    async def subscribe(self, subject, *, durable, queue, cb):
+        self.subscribed = {"subject": subject, "durable": durable, "queue": queue, "cb": cb}
+        return "subscription"
+
+
+class FakeMsg:
+    def __init__(self, data: bytes) -> None:
+        self.data = data
+        self.acked = False
+        self.naked = False
+        self.termed = False
+
+    async def ack(self):
+        self.acked = True
+
+    async def nak(self):
+        self.naked = True
+
+    async def term(self):
+        self.termed = True
+
+
+def _job(status: IngestJobStatus, *, chunk_count: int = 0, error: str | None = None) -> IngestJob:
+    now = datetime.now(UTC)
+    return IngestJob(
+        id="job-1",
+        document_id="doc-1",
+        document_name="Doc",
+        file_type="pdf",
+        source_uri="s3://b/k.pdf",
+        markdown=None,
+        artifact_uri=None,
+        correlation_id="cid",
+        status=status,
+        created_at=now,
+        updated_at=now,
+        chunk_count=chunk_count,
+        error_message=error,
+    )
+
+
+# --- consumer.handle: map payload -> enqueue ------------------------------- #
+@pytest.mark.asyncio
+async def test_handle_maps_payload_to_enqueue() -> None:
+    use_case = FakeIngestUseCase()
+    consumer = DocIngestConsumer(use_case)
+    raw = json.dumps(
+        {"doc_id": "d1", "gcs_key": "s3://bucket/x.pdf", "file_type": "pdf"}
+    ).encode()
+
+    doc_id = await consumer.handle(raw)
+
+    assert doc_id == "d1"
+    call = use_case.calls[0]
+    assert call["document_id"] == "d1"
+    assert call["source_uri"] == "s3://bucket/x.pdf"  # gcs_key -> source_uri
+    assert call["file_type"] == "pdf"
+    assert call["markdown"] is None
+    assert call["correlation_id"] == "nats:doc.ingest:d1"
+
+
+@pytest.mark.asyncio
+async def test_handle_rejects_missing_fields() -> None:
+    consumer = DocIngestConsumer(FakeIngestUseCase())
+    with pytest.raises(ValueError):
+        await consumer.handle(json.dumps({"doc_id": "d1"}).encode())  # thiếu gcs_key/file_type
+
+
+@pytest.mark.asyncio
+async def test_handle_rejects_bad_json() -> None:
+    consumer = DocIngestConsumer(FakeIngestUseCase())
+    with pytest.raises(ValueError):
+        await consumer.handle(b"{not json")
+
+
+# --- build_doc_status mapping ---------------------------------------------- #
+def test_build_doc_status_terminal_and_non_terminal() -> None:
+    assert build_doc_status(_job(IngestJobStatus.COMPLETED, chunk_count=5)) == {
+        "doc_id": "doc-1",
+        "status": "indexed",
+        "chunk_count": 5,
+    }
+    assert build_doc_status(_job(IngestJobStatus.FAILED, error="boom")) == {
+        "doc_id": "doc-1",
+        "status": "failed",
+        "error": "boom",
+    }
+    assert build_doc_status(_job(IngestJobStatus.PROCESSING)) is None  # chưa terminal
+
+
+@pytest.mark.asyncio
+async def test_status_publisher_publishes_only_terminal() -> None:
+    broker = FakeBroker()
+    publisher = DocStatusPublisher(broker, subject="doc.status")
+
+    await publisher.publish_for_job(_job(IngestJobStatus.COMPLETED, chunk_count=3))
+    await publisher.publish_for_job(_job(IngestJobStatus.PROCESSING))  # bị bỏ qua
+
+    assert broker.published == [("doc.status", {"doc_id": "doc-1", "status": "indexed", "chunk_count": 3})]
+
+
+# --- subscription cb: ack / nak / term ------------------------------------- #
+@pytest.mark.asyncio
+async def test_subscription_acks_on_success() -> None:
+    broker = FakeBroker()
+    consumer = DocIngestConsumer(FakeIngestUseCase())
+    await start_doc_ingest_subscription(
+        broker, consumer, subject="doc.ingest", durable="d", queue="q"
+    )
+    cb = broker.subscribed["cb"]
+    msg = FakeMsg(json.dumps({"doc_id": "d1", "gcs_key": "s3://b/k", "file_type": "pdf"}).encode())
+
+    await cb(msg)
+
+    assert msg.acked and not msg.naked and not msg.termed
+
+
+@pytest.mark.asyncio
+async def test_subscription_terms_poison_payload() -> None:
+    broker = FakeBroker()
+    consumer = DocIngestConsumer(FakeIngestUseCase())
+    await start_doc_ingest_subscription(
+        broker, consumer, subject="doc.ingest", durable="d", queue="q"
+    )
+    cb = broker.subscribed["cb"]
+    msg = FakeMsg(b"{bad json")  # payload hỏng -> term (không gửi lại vô hạn)
+
+    await cb(msg)
+
+    assert msg.termed and not msg.acked and not msg.naked
+
+
+@pytest.mark.asyncio
+async def test_subscription_naks_on_transient_error() -> None:
+    broker = FakeBroker()
+    consumer = DocIngestConsumer(FakeIngestUseCase(fail=True))  # enqueue lỗi (DB down)
+    await start_doc_ingest_subscription(
+        broker, consumer, subject="doc.ingest", durable="d", queue="q"
+    )
+    cb = broker.subscribed["cb"]
+    msg = FakeMsg(json.dumps({"doc_id": "d1", "gcs_key": "s3://b/k", "file_type": "pdf"}).encode())
+
+    await cb(msg)
+
+    assert msg.naked and not msg.acked and not msg.termed

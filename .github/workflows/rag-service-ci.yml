@@ -1,32 +1,50 @@
-name: rag-service-ci
+name: rag-worker-ci
 
 on:
   push:
+    branches:
+      - nguyendev
     paths:
       - ".github/workflows/rag-service-ci.yml"
-      - "src/rag-service/**"
-  pull_request:
-    paths:
-      - ".github/workflows/rag-service-ci.yml"
-      - "src/rag-service/**"
+      - "src/rag-worker/**"
 
 jobs:
   test:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: src/rag-service
+        working-directory: src/rag-worker
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: src/rag-service/requirements.txt
+          cache-dependency-path: src/rag-worker/requirements.txt
       - name: Install dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
-      - name: Run rag-service tests
+
+      # NATS server với JetStream — service container không override được command,
+      # nên chạy bằng docker run + chờ port mở. CI runner luôn có docker.
+      - name: Start NATS (JetStream)
+        run: |
+          docker run -d --name nats -p 4222:4222 nats:2.10 -js
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/4222) 2>/dev/null; then echo "nats up"; exit 0; fi
+            sleep 1
+          done
+          echo "NATS did not become ready" >&2
+          docker logs nats || true
+          exit 1
+
+      - name: Run rag-worker tests
         env:
           APP_ENV: development
           AI_PROVIDER: offline
-        run: pytest tests -q
+          # Bật test NATS opt-in (tests/e2e/test_nats_ingest.py chạy thật với broker này).
+          NATS_URL: nats://127.0.0.1:4222
+        run: pytest tests -q -ra
+
+      - name: NATS logs on failure
+        if: failure()
+        run: docker logs nats || true

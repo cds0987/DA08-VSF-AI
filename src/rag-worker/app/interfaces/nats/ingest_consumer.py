@@ -1,0 +1,138 @@
+"""interfaces/nats — cửa vào ingest qua NATS JetStream (thay HTTP /ingest).
+
+Luồng (Cách A — tái dùng job-queue DB sẵn có):
+    BE publish doc.ingest  ->  DocIngestConsumer.handle: map payload -> enqueue job
+                           ->  ack (message đã an toàn trong DB queue + lease/retry)
+    worker DB xử lý xong   ->  DocStatusPublisher.publish_for_job -> publish doc.status
+
+Consumer/publisher KHÔNG biết NATS SDK — chỉ nhận bytes / dict + một broker có
+`publish_json`. Vì vậy unit-test được bằng broker giả, không cần NATS server.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any
+
+from app.application.use_cases.ingestion import IngestDocumentUseCase
+from app.domain.entities.ingest_job import IngestJob, IngestJobStatus
+
+
+class DocIngestConsumer:
+    """Map payload `doc.ingest` -> enqueue ingest job. Trả document_id đã nhận."""
+
+    def __init__(
+        self,
+        ingest_use_case: IngestDocumentUseCase,
+        *,
+        logger: logging.Logger | None = None,
+    ) -> None:
+        self._ingest = ingest_use_case
+        self._logger = logger or logging.getLogger(__name__)
+
+    async def handle(self, raw: bytes) -> str:
+        try:
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ValueError(f"doc.ingest payload không phải JSON hợp lệ: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("doc.ingest payload phải là object JSON")
+
+        doc_id = str(payload.get("doc_id") or "").strip()
+        gcs_key = str(payload.get("gcs_key") or "").strip()
+        file_type = str(payload.get("file_type") or "").strip()
+        if not doc_id or not gcs_key or not file_type:
+            raise ValueError(
+                "doc.ingest thiếu trường bắt buộc: cần doc_id, gcs_key, file_type"
+            )
+
+        # gcs_key = địa chỉ object (vd s3://bucket/key hoặc gs://bucket/key) -> source_uri.
+        # PARSER_IMPL=s3 sẽ tự tải an toàn. classification/ACL là metadata thụ động,
+        # rag-worker KHÔNG enforce (caller tầng trên tự lọc) -> hiện bỏ qua.
+        await self._ingest.enqueue(
+            document_id=doc_id,
+            document_name=str(payload.get("document_name") or doc_id),
+            file_type=file_type,
+            markdown=None,
+            source_uri=gcs_key,
+            correlation_id=f"nats:doc.ingest:{doc_id}",
+        )
+        return doc_id
+
+
+def build_doc_status(job: IngestJob) -> dict | None:
+    """Map job (terminal) -> payload doc.status. Job chưa terminal -> None (ko publish)."""
+    if job.status == IngestJobStatus.COMPLETED:
+        return {
+            "doc_id": job.document_id,
+            "status": "indexed",
+            "chunk_count": job.chunk_count,
+        }
+    if job.status == IngestJobStatus.FAILED:
+        return {
+            "doc_id": job.document_id,
+            "status": "failed",
+            "error": job.error_message or "",
+        }
+    return None
+
+
+class DocStatusPublisher:
+    """Publish doc.status sau khi worker DB xử lý xong một job."""
+
+    def __init__(
+        self,
+        broker: Any,
+        *,
+        subject: str,
+        logger: logging.Logger | None = None,
+    ) -> None:
+        self._broker = broker
+        self._subject = subject
+        self._logger = logger or logging.getLogger(__name__)
+
+    async def publish_for_job(self, job: IngestJob) -> None:
+        message = build_doc_status(job)
+        if message is None:
+            return
+        try:
+            await self._broker.publish_json(self._subject, message)
+        except Exception as exc:  # noqa: BLE001 - publish status ko được làm sập worker
+            self._logger.warning(
+                "doc_status_publish_failed doc_id=%s error=%s",
+                job.document_id,
+                exc,
+            )
+
+
+async def start_doc_ingest_subscription(
+    broker: Any,
+    consumer: DocIngestConsumer,
+    *,
+    subject: str,
+    durable: str,
+    queue: str,
+    logger: logging.Logger | None = None,
+) -> Any:
+    """Subscribe doc.ingest; ack khi enqueue thành công, nak để JetStream gửi lại khi lỗi."""
+    log = logger or logging.getLogger(__name__)
+
+    async def _cb(msg: Any) -> None:
+        try:
+            doc_id = await consumer.handle(msg.data)
+            await msg.ack()
+            log.info("doc_ingest_enqueued doc_id=%s", doc_id)
+        except ValueError as exc:
+            # Payload hỏng (poison): term để KHÔNG gửi lại vô hạn.
+            log.warning("doc_ingest_bad_payload error=%s", exc)
+            term = getattr(msg, "term", None)
+            if callable(term):
+                await term()
+            else:  # pragma: no cover - fallback nếu client ko có term()
+                await msg.ack()
+        except Exception as exc:  # noqa: BLE001 - lỗi tạm (DB...) -> nak để retry
+            log.warning("doc_ingest_enqueue_failed error=%s", exc)
+            await msg.nak()
+
+    return await broker.subscribe(subject, durable=durable, queue=queue, cb=_cb)

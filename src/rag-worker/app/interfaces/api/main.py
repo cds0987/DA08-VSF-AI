@@ -36,6 +36,8 @@ def _request_can_include_body(request: Request) -> bool:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="RAG Service", lifespan=lifespan)
+    # Tạo ingest đi qua NATS (doc.ingest) — POST /ingest đã bỏ. Router giữ lại các
+    # endpoint đọc/quản lý tài liệu (GET status/list, GET job, DELETE). Search vẫn HTTP.
     app.include_router(ingest.router, prefix="/api", tags=["ingest"])
     app.include_router(search.router, prefix="/api", tags=["search"])
     app.state.rate_limits = {}

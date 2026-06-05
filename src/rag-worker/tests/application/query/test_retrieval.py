@@ -6,10 +6,16 @@ from app.domain.repositories.vector_repository import SearchLineage, SearchResul
 
 class StubEngine:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str | None]] = []
+        self.calls: list[tuple[str, list[str] | None, int, str | None]] = []
 
-    async def search(self, question: str, correlation_id: str | None = None):
-        self.calls.append((question, correlation_id))
+    async def search(
+        self,
+        query_text: str,
+        top_k=None,
+        document_ids=None,
+        correlation_id: str | None = None,
+    ):
+        self.calls.append((query_text, document_ids, top_k, correlation_id))
         return [
             SearchResult(
                 correlation_id=correlation_id or "generated",
@@ -30,11 +36,16 @@ class StubEngine:
 
 
 @pytest.mark.asyncio
-async def test_retrieval_use_case_passes_question_and_correlation_id() -> None:
+async def test_retrieval_use_case_passes_query_and_filters() -> None:
     engine = StubEngine()
     use_case = RetrievalUseCase(engine)
 
-    results = await use_case.execute("reset mật khẩu", correlation_id="cid-123")
+    results = await use_case.execute(
+        "reset mật khẩu",
+        document_ids=["doc-1"],
+        top_k=3,
+        correlation_id="cid-123",
+    )
 
-    assert engine.calls == [("reset mật khẩu", "cid-123")]
+    assert engine.calls == [("reset mật khẩu", ["doc-1"], 3, "cid-123")]
     assert results[0].correlation_id == "cid-123"

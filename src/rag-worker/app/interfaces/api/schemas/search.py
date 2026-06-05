@@ -1,30 +1,29 @@
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
 
 class SearchRequest(BaseModel):
-    question: str
-    correlation_id: str | None = None
-
-
-class SearchLineageResponse(BaseModel):
-    source_uri: str
-    artifact_uri: str
+    # Shape theo contract NATS `rag.search` (docs/contracts.md, api-spec.md):
+    #   { query_text, document_ids, top_k }
+    query_text: str
+    document_ids: Optional[List[str]] = None  # ACL filter (Query Service inject); None = fail-secure
+    top_k: int = 5
+    correlation_id: str | None = None  # tracing — ngoài contract docs, optional
 
 
 class SearchResultResponse(BaseModel):
-    correlation_id: str
-    unit_id: str
+    # = contract SearchResult (docs/contracts.md §rag-worker — Domain)
+    chunk_id: str
     document_id: str
-    display_name: str
+    document_name: str
     caption: str
-    content: str
+    parent_text: str
     heading_path: List[str] = Field(default_factory=list)
-    lineage: SearchLineageResponse
-    page_number: int
     score: float
-    rerank_score: float
+    page_number: Optional[int] = None
+    source_s3_uri: str = ""
+    markdown_s3_uri: str = ""
 
 
 class SearchResponse(BaseModel):

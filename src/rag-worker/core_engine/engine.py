@@ -158,6 +158,7 @@ class HaystackRagEngine:
         top_k: Optional[int] = None,
         rerank_threshold: Optional[float] = None,
         correlation_id: Optional[str] = None,
+        document_ids: Optional[List[str]] = None,
     ) -> List[SearchResult]:
         settings = self.settings
         effective_top_k = top_k if top_k is not None else settings.rerank_top_k
@@ -174,12 +175,16 @@ class HaystackRagEngine:
             correlation_id=request_correlation_id,
             top_k=effective_top_k,
             rerank_threshold=threshold,
+            document_id_count=len(document_ids) if document_ids is not None else None,
         )
 
         embed_sw = Stopwatch()
         query_vector = await self.embedder.embed(query_text)
         embed_ms = embed_sw.elapsed_ms()
         vector_sw = Stopwatch()
+        # TODO(ACL): thread `document_ids` xuong hybrid_search de filter theo quyen
+        # (fail-secure: None => chi public / rong). Hien moi nhan o boundary; provider
+        # filter se lam o buoc ACL tiep theo.
         candidates = await self.vectors.hybrid_search(
             query_vector,
             query_text,
