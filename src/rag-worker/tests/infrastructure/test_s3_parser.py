@@ -154,3 +154,18 @@ def test_storage_startup_diagnostics_reports_bucket_probe_failure(monkeypatch) -
     assert reasons == [
         "Object storage preflight failed for bucket docs-bucket: 403 Forbidden"
     ]
+
+
+def test_s3_parser_exposes_startup_diagnostics(monkeypatch) -> None:
+    monkeypatch.setenv("S3_ENDPOINT_URL", "https://storage.googleapis.com")
+
+    class _BoomClient:
+        def head_bucket(self, *, Bucket: str) -> dict:
+            raise RuntimeError("boom")
+
+    parser = S3SourceParser(_inner(), client_factory=lambda: _BoomClient())
+
+    reasons, warnings = parser.startup_diagnostics(source_bucket="docs-bucket")
+
+    assert warnings == []
+    assert reasons == ["Object storage preflight failed for bucket docs-bucket: boom"]

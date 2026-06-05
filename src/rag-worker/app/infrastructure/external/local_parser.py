@@ -264,6 +264,19 @@ def _convert_with_markitdown(path: Path) -> _ParseStep:
     return _text_step(MarkItDown().convert(str(path)).text_content)
 
 
+_SUFFIX_READERS = {
+    "md": _read_text_file,
+    "txt": _read_text_file,
+    "html": _read_html_file,
+    "htm": _read_html_file,
+    "docx": _read_docx_file,
+    "pdf": _read_pdf_file,
+    "pptx": _convert_with_markitdown,
+    "xls": _convert_with_markitdown,
+    "xlsx": _convert_with_markitdown,
+}
+
+
 class LocalFileParser(Parser):
     """Đọc nguồn cục bộ → markdown qua I/O có guard.
 
@@ -326,16 +339,9 @@ class LocalFileParser(Parser):
         self._executor.shutdown(wait=False, cancel_futures=True)
 
     def _reader_for_suffix(self, suffix: str):
-        if suffix in {"md", "txt"}:
-            return _read_text_file
-        if suffix in {"html", "htm"}:
-            return _read_html_file
-        if suffix == "docx":
-            return _read_docx_file
-        if suffix == "pdf":
-            return _read_pdf_file
+        reader = _SUFFIX_READERS.get(suffix)
+        if reader is not None:
+            return reader
         if suffix in _IMAGE_MIME_BY_SUFFIX:
             return _read_image_file(suffix)
-        if suffix in {"pptx", "xls", "xlsx"}:
-            return _convert_with_markitdown
         raise ValueError(f"unsupported file_type for local parser: {suffix}")

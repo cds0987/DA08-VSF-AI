@@ -34,7 +34,8 @@ from typing import Any, Callable
 
 from app.domain.repositories.parser import ParsedArtifact, Parser
 
-_S3_SCHEMES = ("s3://", "gs://")
+S3_SOURCE_URI_SCHEMES = ("s3://", "gs://")
+_S3_SCHEMES = S3_SOURCE_URI_SCHEMES
 DOCUMENT_SERVICE_UPLOAD_LIMIT_BYTES = 50 * 1024 * 1024
 
 
@@ -258,3 +259,13 @@ class S3SourceParser(Parser):
         inner_close = getattr(self._inner, "close", None)
         if callable(inner_close):
             inner_close()
+
+    def startup_diagnostics(
+        self,
+        *,
+        source_bucket: str | None = None,
+    ) -> tuple[list[str], list[str]]:
+        return collect_storage_startup_diagnostics(
+            client_factory=self._client_factory,
+            source_bucket=source_bucket,
+        )

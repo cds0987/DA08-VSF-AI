@@ -43,9 +43,20 @@ class _FakeEngine:
 def _configure_s3_pipeline_test(
     monkeypatch: pytest.MonkeyPatch,
     runtime_module,
+    *,
+    startup_reasons: list[str] | None = None,
+    startup_warnings: list[str] | None = None,
 ) -> None:
     async def _noop_write_contract_stamp(*args, **kwargs) -> None:
         return None
+
+    class _TestS3SourceParser(S3SourceParser):
+        def startup_diagnostics(
+            self,
+            *,
+            source_bucket: str | None = None,
+        ) -> tuple[list[str], list[str]]:
+            return list(startup_reasons or []), list(startup_warnings or [])
 
     monkeypatch.setenv("PIPELINE_CONFIG", str(RAG_WORKER_CONFIG))
     monkeypatch.setenv("PARSER_IMPL", "s3")
@@ -53,7 +64,7 @@ def _configure_s3_pipeline_test(
     monkeypatch.setattr(
         runtime_module,
         "resolve_parser",
-        lambda name, **kwargs: S3SourceParser(LocalFileParser(max_workers=1)),
+        lambda name, **kwargs: _TestS3SourceParser(LocalFileParser(max_workers=1)),
     )
     monkeypatch.setattr(
         runtime_module,
@@ -109,11 +120,10 @@ def test_health_reports_storage_preflight_failure(
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("AI_PROVIDER", "offline")
     monkeypatch.setenv("S3_SOURCE_BUCKET", "docs-bucket")
-    _configure_s3_pipeline_test(monkeypatch, runtime_module)
-    monkeypatch.setattr(
+    _configure_s3_pipeline_test(
+        monkeypatch,
         runtime_module,
-        "collect_storage_startup_diagnostics",
-        lambda **kwargs: (["Object storage preflight failed for bucket docs-bucket: 403"], []),
+        startup_reasons=["Object storage preflight failed for bucket docs-bucket: 403"],
     )
 
     with TestClient(create_app()) as client:
@@ -133,11 +143,10 @@ def test_production_startup_fails_closed_on_storage_preflight_failure(
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://user:pass@localhost:5432/rag")
     monkeypatch.setenv("S3_SOURCE_BUCKET", "docs-bucket")
-    _configure_s3_pipeline_test(monkeypatch, runtime_module)
-    monkeypatch.setattr(
+    _configure_s3_pipeline_test(
+        monkeypatch,
         runtime_module,
-        "collect_storage_startup_diagnostics",
-        lambda **kwargs: (["Object storage preflight failed for bucket docs-bucket: 403"], []),
+        startup_reasons=["Object storage preflight failed for bucket docs-bucket: 403"],
     )
 
     with pytest.raises(RuntimeError, match="Object storage preflight failed"):

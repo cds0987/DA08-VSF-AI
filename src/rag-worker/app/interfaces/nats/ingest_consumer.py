@@ -17,9 +17,7 @@ from typing import Any
 
 from app.application.use_cases.ingestion import IngestDocumentUseCase
 from app.domain.entities.ingest_job import IngestJob, IngestJobStatus
-
-
-_S3_SCHEMES = ("s3://", "gs://")
+from app.infrastructure.external.s3_parser import S3_SOURCE_URI_SCHEMES
 
 
 class BadPayloadError(ValueError):
@@ -40,7 +38,7 @@ def normalize_source_uri(key: str, *, default_bucket: str | None) -> str:
     Key đã có scheme (BE đã đổi contract) -> giữ nguyên. Không có bucket -> trả nguyên
     (giữ hành vi cũ: uỷ quyền parser local).
     """
-    if key.startswith(_S3_SCHEMES):
+    if key.startswith(S3_SOURCE_URI_SCHEMES):
         return key
     if default_bucket:
         return f"s3://{default_bucket.strip('/')}/{key.lstrip('/')}"

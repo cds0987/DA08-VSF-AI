@@ -303,3 +303,19 @@ def test_local_artifact_store_rejects_reads_outside_artifact_root(
             await LocalArtifactStore().read_markdown(f"artifact://{outside.resolve()}")
 
     asyncio.run(scenario())
+
+
+def test_local_artifact_store_default_root_uses_rag_worker_service_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        monkeypatch.delenv("ARTIFACT_ROOT", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        artifact_uri = await LocalArtifactStore().write_markdown("doc-1", "# Hello")
+
+        assert "src/rag-worker/.artifacts" in artifact_uri.replace("\\", "/")
+        assert Path(artifact_uri[len("artifact://") :]).is_file()
+
+    asyncio.run(scenario())

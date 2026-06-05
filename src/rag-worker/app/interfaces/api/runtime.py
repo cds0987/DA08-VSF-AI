@@ -22,10 +22,6 @@ from app.domain.repositories.ingest_job_repository import IngestJobRepository
 from app.domain.repositories.parser import Parser
 from app.infrastructure.db import InMemoryDocumentRepository
 from app.infrastructure.external.local_artifact_store import LocalArtifactStore
-from app.infrastructure.external.s3_parser import (
-    S3SourceParser,
-    collect_storage_startup_diagnostics,
-)
 from app.interfaces.api.composition import resolve_parser
 from core_engine.ai import AISettings, get_ai_provider, load_ai_settings, reset_ai_provider
 from core_engine.config import HaystackSettings, load_settings
@@ -82,6 +78,10 @@ class RuntimeState:
     health: HealthReport
     startup_reasons: list[str] = field(default_factory=list)
     source_bucket: str | None = None
+
+
+class DocumentJobRepository(DocumentRepository, IngestJobRepository):
+    """Combined repository contract used by the ingest runtime."""
 
 
 @dataclass(frozen=True)
@@ -186,6 +186,12 @@ def _is_truthy(raw: str) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+_REMOTE_VECTOR_CLOUD_HOSTS = {
+    "qdrant": "qdrant.io",
+    "milvus": "zillizcloud.com",
+}
+
+
 def _remote_vector_api_key_required(vector_config: VectorStoreConfig) -> bool:
     explicit = os.getenv("VECTOR_DB_REQUIRE_API_KEY", "")
     if explicit.strip():
@@ -193,11 +199,8 @@ def _remote_vector_api_key_required(vector_config: VectorStoreConfig) -> bool:
     if vector_config.deployment != "remote":
         return False
     host = (urlparse(vector_config.url).hostname or "").lower()
-    if vector_config.provider.lower() == "qdrant" and "qdrant.io" in host:
-        return True
-    if vector_config.provider.lower() == "milvus" and "zillizcloud.com" in host:
-        return True
-    return False
+    cloud_host = _REMOTE_VECTOR_CLOUD_HOSTS.get(vector_config.provider.lower())
+    return bool(cloud_host and cloud_host in host)
 
 
 def validate_vector_backend_credentials(vector_config: VectorStoreConfig) -> None:
@@ -534,8 +537,6 @@ def bootstrap_runtime() -> RuntimeState:
     ingest_use_case = None
     engine = None
     document_repository = build_document_repository()
-    if not isinstance(document_repository, IngestJobRepository):
-        raise TypeError("document repository must implement IngestJobRepository")
     parser: Parser = build_parser(provider)
     artifact_store = build_artifact_store()
     source_bucket = _source_bucket() or None
@@ -570,20 +571,19 @@ def bootstrap_runtime() -> RuntimeState:
             artifact_store,
             claim_heartbeat_interval_seconds=lease_settings.heartbeat_interval_seconds,
         )
-        if isinstance(parser, S3SourceParser):
-            storage_reasons, storage_warnings = collect_storage_startup_diagnostics(
-                source_bucket=source_bucket
+        storage_reasons, storage_warnings = parser.startup_diagnostics(
+            source_bucket=source_bucket
+        )
+        startup_reasons.extend(storage_reasons)
+        for warning in storage_warnings:
+            log_event(
+                logger,
+                logging.WARNING,
+                "storage_startup_warning",
+                stage="startup",
+                warning=warning,
+                source_bucket=source_bucket or "(none)",
             )
-            startup_reasons.extend(storage_reasons)
-            for warning in storage_warnings:
-                log_event(
-                    logger,
-                    logging.WARNING,
-                    "storage_startup_warning",
-                    stage="startup",
-                    warning=warning,
-                    source_bucket=source_bucket or "(none)",
-                )
     except Exception as exc:
         startup_reasons.append(f"Engine bootstrap failed: {exc}")
         if _is_production(app_env):
@@ -641,7 +641,7 @@ def bootstrap_runtime() -> RuntimeState:
     )
 
 
-def build_document_repository() -> DocumentRepository:
+def build_document_repository() -> DocumentJobRepository:
     database_url = os.getenv("DATABASE_URL", "").strip()
     if not database_url:
         return InMemoryDocumentRepository()
@@ -874,7 +874,5 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if nats_broker is not None:
             with contextlib.suppress(Exception):
                 await nats_broker.close()
-        close_parser = getattr(runtime.parser, "close", None)
-        if close_parser is not None:
-            with contextlib.suppress(Exception):
-                close_parser()
+        with contextlib.suppress(Exception):
+            runtime.parser.close()
