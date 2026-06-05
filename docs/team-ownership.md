@@ -108,11 +108,10 @@ src/frontend/base/
 │   │   └── useAuth.ts              ← Auth qua User Service /auth (login/refresh/me), JWT cookie, auto-refresh
 │   ├── middleware/
 │   │   └── auth.ts                 ← Route guard: chưa login → /login; check role
-│   ├── components/                 ← Design system dùng chung (Button, Input, Card, AppLayout…)
-│   └── pages/
-│       └── login.vue               ← Form đăng nhập (email/password + Microsoft SSO) — cả 2 app dùng
+│   └── components/                 ← Design system dùng chung (Button, Input, Card, AppLayout…)
 ```
-> **Auth (User Service `/auth/*`) là phần dùng chung** → đặt ở base layer. 2 app `extends: '../base'`.
+> **Logic auth** (`useAuth.ts`, `useApi.ts`, middleware) dùng chung → đặt ở base layer.
+> **Trang `/login`** tách riêng vào từng app — chat và admin có UI/branding khác nhau (xem bên dưới).
 
 #### `src/frontend/chat/` — App End User (container `nuxt-chat` :3000)
 ```
@@ -120,6 +119,8 @@ src/frontend/chat/
 ├── nuxt.config.ts                  ← extends '../base'; NUXT_PUBLIC_QUERY_SERVICE_URL
 ├── app/
 │   ├── pages/
+│   │   ├── login.vue               ← Trang đăng nhập (email/password + Microsoft SSO)
+│   │   │                              Gọi POST /auth/login — nhận cả user lẫn admin, sau login vào /chat
 │   │   └── chat.vue                ← Chat chính, SSE consumer (End User)
 │   ├── plugins/
 │   │   └── notifications.client.ts ← Mở EventSource(`GET /notifications`) app-level sau đăng nhập
@@ -144,6 +145,8 @@ src/frontend/admin/
 ├── nuxt.config.ts                  ← extends '../base'; NUXT_PUBLIC_DOCUMENT/USER/QUERY_SERVICE_URL
 ├── app/
 │   ├── pages/
+│   │   ├── login.vue               ← Trang đăng nhập Admin (email/password, không có Microsoft SSO)
+│   │   │                              Gọi POST /auth/admin/login — chỉ nhận admin; user bị 401 generic
 │   │   ├── documents.vue           ← Upload + danh sách tài liệu + ingestion status
 │   │   ├── users.vue               ← Quản lý user: deactivate/reactivate
 │   │   └── analytics.vue           ← Dashboard: charts volume / feedback rate / top questions
@@ -159,7 +162,7 @@ src/frontend/admin/
 
 **Phân chia theo persona (chuẩn microservice):**
 - **Chat app** (End User) ↔ Query Service · **Admin app** (Admin) ↔ Document + User `/users` + metrics.
-- **Auth (User Service `/auth`)** dùng chung → base layer. Identity là shared infra, cả 2 app verify JWT bằng cùng secret.
+- **Auth logic** (`useAuth`, `useApi`, middleware) dùng chung ở base layer — cùng JWT secret. Nhưng **endpoint login tách riêng**: Chat → `POST /auth/login`; Admin → `POST /auth/admin/login` (user bị reject).
 - 2 stream SSE (`POST /query` request-scoped + `GET /notifications` app-level) **chỉ ở Chat app**.
 
 **Không được đụng:** bất kỳ file Python nào, docker-compose.yml.
@@ -194,12 +197,14 @@ src/user-service/app/
         ├── main.py                        ← FastAPI app init, include router
         ├── dependencies.py                ← get_login_use_case(), get_current_user(), require_admin()
         └── routers/
-            ├── auth.py                    ← POST /auth/login, GET /auth/me
+            ├── auth.py                    ← POST /auth/login (user + admin → chat app)
+            │                                 POST /auth/admin/login (admin only → admin app; user trả 401 generic)
+            │                                 GET /auth/me, POST /auth/refresh
             └── users.py                   ← GET /users, PATCH /users/{id}/deactivate, /reactivate (admin only)
 ```
 
 **Key logic — user-service:**
-- `login_use_case.py`: bcrypt verify password → tạo JWT payload `{sub, role, department, jti}` → sign HS256
+- `login_use_case.py`: nhận thêm param `required_role` (None = mọi role, "admin" = chỉ admin) → bcrypt verify → nếu `required_role` không khớp trả cùng `InvalidCredentialsError` (không lộ lý do) → sign JWT HS256 `{sub, role, department, jti}`
 - `postgres_user_repository.py`: implement `get_by_email`, `get_by_id`, `create`, `list_all`, `set_active` từ `UserRepository` ABC
 - `dependencies.py`: `get_current_user()` — decode JWT bằng shared secret, trả về `User`; `require_admin()` — chặn non-admin khỏi `/users`
 - `users.py`: backing trang `admin/users` của Frontend (deactivate/reactivate). Chỉ Admin truy cập.

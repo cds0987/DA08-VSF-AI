@@ -539,6 +539,9 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
 
+# POST /auth/login       → Chat app (:3000) — nhận cả user lẫn admin
+# POST /auth/admin/login → Admin app (:3001) — chỉ nhận admin; user trả 401 generic
+
 # src/user-service/app/interfaces/api/schemas/user.py  (Quản lý user — Admin)
 class UserItem(BaseModel):
     id: str

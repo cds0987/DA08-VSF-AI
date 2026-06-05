@@ -35,7 +35,7 @@ Browser → Nginx :80
                ├── /                → Chat app (Nuxt)    :3000  (End User)
                ├── /admin           → Admin console (Nuxt) :3001  (Admin)
                │       (2 micro-frontend dùng chung Nuxt base layer: auth + design system)
-               ├── /api/user/*      → User Service          :8000  (Auth /auth dùng chung; /users chỉ Admin app)
+               ├── /api/user/*      → User Service          :8000  (/auth/login → Chat; /auth/admin/login → Admin only; /users → Admin only)
                ├── /api/documents/* → Document Service      :8002  (Upload, Admin only)
                ├── /api/query/*     → Query Service         :8001  (LLM, Conversation; SSE /query + /notifications)
                │                          └── MCP → MCP Tool Service :8003 (tool: rag_search, hr_query)
@@ -62,7 +62,7 @@ PostgreSQL: AWS RDS db.t3.micro — 5 databases: user_db / doc_db / query_db / m
 | Admin console (frontend/admin) | 3001 | Nuxt UI — Admin: documents, users, analytics |
 | Langfuse | 3100 | LLM observability dashboard (IT/DevOps only) |
 
-> 2 micro-frontend dùng chung `frontend/base` (Nuxt layer: auth qua User Service `/auth`, design system) — build-time, không phải container.
+> 2 micro-frontend dùng chung `frontend/base` (Nuxt layer: `useAuth` + `useApi` + middleware + design system) — build-time, không phải container. Trang `/login` tách riêng: Chat dùng `POST /auth/login`, Admin dùng `POST /auth/admin/login` (admin only).
 
 API docs (local): http://localhost:8000/docs | http://localhost:8001/docs | http://localhost:8002/docs | http://localhost:8003 (MCP endpoint)
 
