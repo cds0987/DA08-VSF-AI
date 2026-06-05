@@ -226,7 +226,7 @@ Nếu cái đơn giản này render được thì lỗi nằm ở syntax phức 
 
 Bạn thử và cho tôi biết kết quả nhé.
 
-**→ Giải pháp: Phase 3 self-hosted toàn bộ trên AWS Singapore (ap-southeast-1), Langfuse self-hosted.**
+**→ Giải pháp: Phase 3 self-hosted toàn bộ trên GCP Singapore (asia-southeast1), Langfuse self-hosted.**
 
 ---
 
