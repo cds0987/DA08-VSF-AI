@@ -597,26 +597,31 @@ def _nats_config() -> dict | None:
         "stream": os.getenv("NATS_STREAM", "DOCS"),
         "doc_ingest_subject": os.getenv("NATS_DOC_INGEST_SUBJECT", "doc.ingest"),
         "doc_status_subject": os.getenv("NATS_DOC_STATUS_SUBJECT", "doc.status"),
+        "doc_delete_subject": os.getenv("NATS_DOC_DELETE_SUBJECT", "doc.delete"),
         "durable": os.getenv("NATS_DURABLE", "rag-worker-ingest"),
+        "delete_durable": os.getenv("NATS_DELETE_DURABLE", "rag-worker-delete"),
     }
 
 
 async def start_nats_ingest(
     runtime: "RuntimeState", logger: logging.Logger
-) -> tuple[Any, Any, Any]:
-    """Bật cửa ingest NATS nếu có NATS_URL. Trả (broker, subscription, status_publisher).
+) -> tuple[Any, Any, Any, Any]:
+    """Bật cửa ingest NATS nếu có NATS_URL.
 
+    Trả (broker, ingest_subscription, delete_subscription, status_publisher).
     Lỗi khi bật NATS -> đóng broker + degrade gracefully (trả None): search/HTTP độc
     lập vẫn chạy, không để NATS hỏng kéo sập cả service. Ops theo dõi log ERROR.
     """
     cfg = _nats_config()
     if cfg is None or runtime.ingest_use_case is None:
-        return None, None, None
+        return None, None, None, None
     # Lazy import: chưa cài nats-py / không bật NATS thì không kéo dependency.
     from app.infrastructure.external.nats_client import NatsBroker
     from app.interfaces.nats import (
+        DocDeleteConsumer,
         DocIngestConsumer,
         DocStatusPublisher,
+        start_doc_delete_subscription,
         start_doc_ingest_subscription,
     )
 
@@ -624,7 +629,12 @@ async def start_nats_ingest(
     try:
         await broker.connect()
         await broker.ensure_stream(
-            cfg["stream"], [cfg["doc_ingest_subject"], cfg["doc_status_subject"]]
+            cfg["stream"],
+            [
+                cfg["doc_ingest_subject"],
+                cfg["doc_status_subject"],
+                cfg["doc_delete_subject"],
+            ],
         )
         consumer = DocIngestConsumer(runtime.ingest_use_case, logger=logger)
         subscription = await start_doc_ingest_subscription(
@@ -632,6 +642,14 @@ async def start_nats_ingest(
             consumer,
             subject=cfg["doc_ingest_subject"],
             durable=cfg["durable"],
+            logger=logger,
+        )
+        delete_consumer = DocDeleteConsumer(runtime.ingest_use_case, logger=logger)
+        delete_subscription = await start_doc_delete_subscription(
+            broker,
+            delete_consumer,
+            subject=cfg["doc_delete_subject"],
+            durable=cfg["delete_durable"],
             logger=logger,
         )
     except Exception as exc:  # noqa: BLE001 - NATS hỏng không được giết search/HTTP
@@ -644,7 +662,7 @@ async def start_nats_ingest(
             stage="startup",
             error=str(exc),
         )
-        return None, None, None
+        return None, None, None, None
     publisher = DocStatusPublisher(
         broker, subject=cfg["doc_status_subject"], logger=logger
     )
@@ -656,8 +674,9 @@ async def start_nats_ingest(
         stream=cfg["stream"],
         ingest_subject=cfg["doc_ingest_subject"],
         status_subject=cfg["doc_status_subject"],
+        delete_subject=cfg["doc_delete_subject"],
     )
-    return broker, subscription, publisher
+    return broker, subscription, delete_subscription, publisher
 
 
 @asynccontextmanager
@@ -673,9 +692,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         run_stale_job_reaper(runtime.job_repository, lease_settings, logger)
     )
     # Bật cửa ingest NATS (nếu có NATS_URL); status_publisher đẩy doc.status sau xử lý.
-    nats_broker, nats_subscription, status_publisher = await start_nats_ingest(
-        runtime, logger
-    )
+    (
+        nats_broker,
+        nats_subscription,
+        nats_delete_subscription,
+        status_publisher,
+    ) = await start_nats_ingest(runtime, logger)
     on_job_finished = (
         status_publisher.publish_for_job if status_publisher is not None else None
     )
@@ -707,6 +729,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ]
     app.state.nats_broker = nats_broker
     app.state.nats_subscription = nats_subscription
+    app.state.nats_delete_subscription = nats_delete_subscription
     app.state.ingest_use_case = runtime.ingest_use_case
     app.state.retrieval_use_case = runtime.retrieval_use_case
     app.state.runtime = runtime
@@ -752,6 +775,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if nats_subscription is not None:
             with contextlib.suppress(Exception):
                 await nats_subscription.unsubscribe()
+        if nats_delete_subscription is not None:
+            with contextlib.suppress(Exception):
+                await nats_delete_subscription.unsubscribe()
         if nats_broker is not None:
             with contextlib.suppress(Exception):
                 await nats_broker.close()
