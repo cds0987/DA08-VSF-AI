@@ -28,6 +28,7 @@ from core_engine.config import HaystackSettings, load_settings
 from core_engine.engine import HaystackRagEngine, IngestInput
 from core_engine.factory import build_engine, build_engine_probe
 from core_engine.mapping import build_engine_from_config, register
+from core_engine.registry import Registry
 
 # AI gateway (điểm vào AI duy nhất).
 from core_engine.ai import (
@@ -69,6 +70,7 @@ __all__ = [
     "build_engine_probe",
     "build_engine_from_config",
     "register",
+    "Registry",
     "HaystackRagEngine",
     "IngestInput",
     "HaystackSettings",

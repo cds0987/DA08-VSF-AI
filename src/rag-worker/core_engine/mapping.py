@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -14,6 +13,7 @@ from core_engine.config_schema import PipelineConfig
 from core_engine.embedding import ProviderEmbeddingService
 from core_engine.engine import HaystackRagEngine
 from core_engine.ocr import ProviderImageTextExtractor
+from core_engine.registry import Registry
 from core_engine.rerank import (
     LLMReranker,
     LexicalRerankerService,
@@ -23,8 +23,21 @@ from core_engine.rerank import (
 from core_engine.vectorstore import VectorStoreConfig, build_vector_repository
 
 Factory = Callable[[Mapping[str, Any], "WireContext"], Any]
-_REGISTRY: dict[str, dict[str, Factory]] = defaultdict(dict)
 UNSET = object()
+
+# Một Registry chung (core_engine.registry) cho mỗi component. Public API
+# register/resolve giữ nguyên chữ ký (component, name) cho caller cũ + test, nhưng
+# bookkeeping (guard trùng tên · liệt kê · entry-point discovery) dùng primitive
+# dùng chung — đồng nhất với vectorstore + parser registry.
+_REGISTRIES: dict[str, Registry[Factory]] = {}
+
+
+def _registry_for(component: str) -> Registry[Factory]:
+    reg = _REGISTRIES.get(component)
+    if reg is None:
+        reg = Registry(component, entry_point_group=f"rag_worker.{component}")
+        _REGISTRIES[component] = reg
+    return reg
 
 
 @dataclass(frozen=True)
@@ -41,18 +54,13 @@ def register(
     *,
     override: bool = False,
 ) -> None:
-    bucket = _REGISTRY[component]
-    if name in bucket and not override:
-        raise ValueError(f"{component}:{name} da dang ky")
-    bucket[name] = factory
+    _registry_for(component).register(name, factory, override=override)
 
 
 def resolve(component: str, stage_cfg: Any, ctx: WireContext) -> Any:
     impl = getattr(stage_cfg, "impl", None)
     params = getattr(stage_cfg, "params", {})
-    factory = _REGISTRY.get(component, {}).get(impl)
-    if factory is None:
-        raise ValueError(f"Unknown {component} implementation {impl!r}")
+    factory = _registry_for(component).get(impl)
     return factory(dict(params or {}), ctx)
 
 

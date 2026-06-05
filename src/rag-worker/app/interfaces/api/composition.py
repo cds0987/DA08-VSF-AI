@@ -5,11 +5,18 @@ from typing import Any
 
 from app.domain.repositories.parser import Parser
 from app.infrastructure.external.local_parser import LocalFileParser
+from app.infrastructure.external.s3_parser import S3SourceParser
 from core_engine.ocr import ProviderImageTextExtractor
+from core_engine.registry import Registry
 
 ParserFactory = Callable[[Mapping[str, Any], ProviderImageTextExtractor], Parser]
 
-_PARSER_REGISTRY: dict[str, ParserFactory] = {}
+# Cùng primitive với core_engine registry (chunker/vectorstore/...). Parser sống ở
+# tầng app vì layering (Parser là port của app.domain), nhưng dùng CHUNG cơ chế
+# đăng ký + entry-point discovery → một pattern cho toàn pipeline.
+_PARSER_REGISTRY: Registry[ParserFactory] = Registry(
+    "parser", entry_point_group="rag_worker.parser"
+)
 
 
 def register_parser(
@@ -18,10 +25,7 @@ def register_parser(
     *,
     override: bool = False,
 ) -> None:
-    key = name.lower()
-    if key in _PARSER_REGISTRY and not override:
-        raise ValueError(f"Parser {key!r} da dang ky")
-    _PARSER_REGISTRY[key] = factory
+    _PARSER_REGISTRY.register(name, factory, override=override)
 
 
 def resolve_parser(
@@ -30,10 +34,7 @@ def resolve_parser(
     params: Mapping[str, Any] | None = None,
     image_text_extractor: ProviderImageTextExtractor,
 ) -> Parser:
-    key = name.lower()
-    factory = _PARSER_REGISTRY.get(key)
-    if factory is None:
-        raise ValueError(f"Parser {key!r} chua dang ky")
+    factory = _PARSER_REGISTRY.get(name)
     return factory(dict(params or {}), image_text_extractor)
 
 
@@ -42,5 +43,17 @@ register_parser(
     lambda params, image_text_extractor: LocalFileParser(
         max_workers=int(params.get("max_workers", 2)),
         image_text_extractor=image_text_extractor,
+    ),
+)
+
+# `s3`: BE chỉ gửi source_uri=s3://... ; parser tự tải an toàn (HEAD size-guard +
+# stream-to-disk + cap + semaphore) rồi giao bản local cho LocalFileParser parse.
+register_parser(
+    "s3",
+    lambda params, image_text_extractor: S3SourceParser(
+        LocalFileParser(
+            max_workers=int(params.get("max_workers", 2)),
+            image_text_extractor=image_text_extractor,
+        ),
     ),
 )
