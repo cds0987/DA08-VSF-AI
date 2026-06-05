@@ -14,5 +14,6 @@ MCP tool server search-only cho `rag_search`. Service nay doc Qdrant, embed quer
 
 - `document_ids` duoc nhan de tuong thich chu ky MCP; search tool khong tu filter ACL.
 - Reranker ho tro `none`, `lexical`, `llm`. Neu `llm` loi hoac timeout, service fallback ve vector-order (`NoopReranker`) va khong lam vo `rag_search`.
+- Fallback la best-effort: co the van tra ve hit duoi threshold rerank vi `NoopReranker` giu thu tu vector score thay vi ap nguong LLM.
 - Startup fail-closed: `verify_contract()` chay truoc khi serve. Neu collection/dimension/fingerprint lech voi rag-worker, process se thoat som.
 - `hr_query` chua duoc implement trong service nay.

@@ -65,3 +65,12 @@ async def test_llm_reranker_falls_back_to_noop_when_provider_fails(caplog: pytes
 
     assert [hit.chunk_id for hit in reranked] == ["fast", "slow"]
     assert "rerank_fallback" in caplog.text
+
+
+def test_parse_scores_ignores_noise_and_clamps_values() -> None:
+    parsed = LlmReranker._parse_scores(
+        'prefix {"0": 1.2, "1": -0.3, "x": 0.9, "2": "0.7", "8": 0.5} suffix',
+        count=3,
+    )
+
+    assert parsed == {0: 1.0, 1: 0.0, 2: 0.7}

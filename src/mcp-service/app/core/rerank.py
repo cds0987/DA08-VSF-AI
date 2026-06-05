@@ -171,7 +171,7 @@ def build_reranker(settings: McpSettings | str) -> Reranker:
             raise ValueError("build_reranker('llm') needs settings for model and gateway config.")
         return LlmReranker(
             model=settings.rerank_model,
-            api_key=settings.rerank_api_key or settings.embed_api_key or settings.api_key,
+            api_key=settings.rerank_api_key or settings.embed_api_key,
             base_url=settings.rerank_base_url or settings.embed_base_url,
             timeout_seconds=settings.rerank_timeout_seconds,
             batch_size=settings.rerank_batch_size,
