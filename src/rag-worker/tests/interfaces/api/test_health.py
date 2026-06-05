@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 import pytest
 
@@ -6,6 +8,63 @@ from app.interfaces.api.main import create_app
 from app.interfaces.api.runtime import HealthReport
 from app.infrastructure.external.local_parser import LocalFileParser
 from app.infrastructure.external.s3_parser import S3SourceParser
+
+
+RAG_WORKER_CONFIG = Path(__file__).resolve().parents[2] / "config.yaml"
+
+
+class _FakeVectorConfig:
+    provider = "qdrant"
+    deployment = "remote"
+
+    def index_id(self) -> str:
+        return "rag_chatbot__test__d256"
+
+    def contract(self):
+        class _Contract:
+            fingerprint = "test-fingerprint"
+
+        return _Contract()
+
+
+class _FakeVectors:
+    def __init__(self) -> None:
+        self.config = _FakeVectorConfig()
+
+    async def list_chunk_ids_by_document(self, document_id: str) -> list[str]:
+        return []
+
+
+class _FakeEngine:
+    def __init__(self) -> None:
+        self.vectors = _FakeVectors()
+
+
+def _configure_s3_pipeline_test(
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_module,
+) -> None:
+    async def _noop_write_contract_stamp(*args, **kwargs) -> None:
+        return None
+
+    monkeypatch.setenv("PIPELINE_CONFIG", str(RAG_WORKER_CONFIG))
+    monkeypatch.setenv("PARSER_IMPL", "s3")
+    monkeypatch.setenv("VECTOR_DB_URL", "http://vector.test:6333")
+    monkeypatch.setattr(
+        runtime_module,
+        "resolve_parser",
+        lambda name, **kwargs: S3SourceParser(LocalFileParser(max_workers=1)),
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "build_engine_from_config",
+        lambda *args, **kwargs: _FakeEngine(),
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "write_contract_stamp",
+        _noop_write_contract_stamp,
+    )
 
 
 def test_health_reports_unhealthy_when_running_degraded(
@@ -50,11 +109,7 @@ def test_health_reports_storage_preflight_failure(
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("AI_PROVIDER", "offline")
     monkeypatch.setenv("S3_SOURCE_BUCKET", "docs-bucket")
-    monkeypatch.setattr(
-        runtime_module,
-        "build_parser",
-        lambda provider: S3SourceParser(LocalFileParser(max_workers=1)),
-    )
+    _configure_s3_pipeline_test(monkeypatch, runtime_module)
     monkeypatch.setattr(
         runtime_module,
         "collect_storage_startup_diagnostics",
@@ -76,14 +131,9 @@ def test_production_startup_fails_closed_on_storage_preflight_failure(
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("AI_PROVIDER", "openai")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setenv("VECTOR_DB_URL", "http://localhost:6333")
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://user:pass@localhost:5432/rag")
     monkeypatch.setenv("S3_SOURCE_BUCKET", "docs-bucket")
-    monkeypatch.setattr(
-        runtime_module,
-        "build_parser",
-        lambda provider: S3SourceParser(LocalFileParser(max_workers=1)),
-    )
+    _configure_s3_pipeline_test(monkeypatch, runtime_module)
     monkeypatch.setattr(
         runtime_module,
         "collect_storage_startup_diagnostics",
