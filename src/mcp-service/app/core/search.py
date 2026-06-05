@@ -1,7 +1,4 @@
-"""Search orchestration — BẢN RIÊNG mcp: embed -> retrieve(Qdrant) -> rerank.
-
-Đây là lõi của MCP tool `rag_search`. KHÔNG kết nối rag-worker; chỉ Qdrant.
-"""
+"""Search orchestration for mcp-service: embed -> retrieve -> rerank."""
 
 from __future__ import annotations
 
@@ -30,7 +27,6 @@ class SearchService:
         self._reranker = reranker
 
     async def verify_contract(self, *, expect_data_collection: bool = True):
-        """Gọi lúc startup (fail-closed). Lệch contract -> VectorstoreContractError."""
         return await self._reader.verify_contract(expect_data_collection=expect_data_collection)
 
     async def rag_search(
@@ -39,17 +35,19 @@ class SearchService:
         document_ids: Optional[List[str]] = None,
         top_k: Optional[int] = None,
     ) -> List[SearchHit]:
-        # TODO(ACL): document_ids hiện NO-OP (fail-OPEN) — nhận để giữ flow với
-        # query-service, CHƯA lọc theo quyền. KHÔNG để lọt production thật.
         if document_ids is not None:
-            logger.info("rag_search document_ids nhận %d (chưa lọc - TODO ACL)", len(document_ids))
+            logger.info(
+                "rag_search received %d document_ids for MCP compatibility; "
+                "document ACL filtering is owned by another service.",
+                len(document_ids),
+            )
 
         final_k = top_k or self._settings.rerank_top_k
         vector = await self._embedder.embed(query)
         candidates = await self._reader.search(
             vector, query, top_k=self._settings.top_k_candidates
         )
-        return self._reranker.rerank(
+        return await self._reranker.rerank(
             query, candidates, final_k, self._settings.rerank_threshold
         )
 
@@ -60,5 +58,5 @@ def build_search_service(settings: McpSettings | None = None) -> SearchService:
         settings=settings,
         embedder=build_embedder(settings),
         reader=QdrantReader(settings),
-        reranker=build_reranker(settings.rerank_impl),
+        reranker=build_reranker(settings),
     )

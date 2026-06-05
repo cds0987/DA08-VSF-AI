@@ -12,7 +12,7 @@ import sys
 
 from app.core.config import load_settings
 from app.core.contract import VectorstoreContractError
-from app.interfaces.mcp_server import build_mcp
+from app.interfaces.mcp_server import MCP_DEFAULT_HOST, MCP_DEFAULT_PORT, build_mcp, mcp_endpoint_url
 
 logger = logging.getLogger("mcp-service")
 
@@ -29,6 +29,13 @@ def main() -> int:
         contract.index_id,
         contract.fingerprint,
         settings.deployment,
+    )
+    logger.info(
+        "mcp_transport transport=streamable-http endpoint=%s",
+        mcp_endpoint_url(
+            os.getenv("MCP_HOST", MCP_DEFAULT_HOST),
+            int(os.getenv("MCP_PORT", str(MCP_DEFAULT_PORT))),
+        ),
     )
 
     mcp, service = build_mcp(settings)

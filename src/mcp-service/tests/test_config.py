@@ -16,5 +16,9 @@ def test_load_settings_offline_defaults(monkeypatch) -> None:
     assert settings.collection == "rag_chatbot"
     assert settings.embed_model == "offline"
     assert settings.dimension == 256
+    assert settings.rerank_model == "gpt-4o-mini"
+    assert settings.rerank_timeout_seconds == 30.0
+    assert settings.rerank_batch_size == 8
+    assert settings.rerank_passage_chars == 800
     assert settings.contract().index_id == "rag_chatbot__offline__d256"
     assert settings.contract().fingerprint == "88048119fce054e3"

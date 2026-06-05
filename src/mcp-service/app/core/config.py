@@ -73,6 +73,12 @@ class McpSettings:
     embed_base_url: str
     embed_api_key: str
     rerank_impl: str
+    rerank_model: str
+    rerank_base_url: str
+    rerank_api_key: str
+    rerank_timeout_seconds: float
+    rerank_batch_size: int
+    rerank_passage_chars: int
     top_k_candidates: int
     rerank_top_k: int
     rerank_threshold: float
@@ -138,6 +144,12 @@ def load_settings(path: str | os.PathLike[str] | None = None) -> McpSettings:
         embed_base_url=str(embedder.get("base_url") or "").strip(),
         embed_api_key=str(embedder.get("api_key") or "").strip(),
         rerank_impl=str(reranker.get("impl") or "none").strip().lower(),
+        rerank_model=str(reranker.get("model") or "").strip(),
+        rerank_base_url=str(reranker.get("base_url") or "").strip(),
+        rerank_api_key=str(reranker.get("api_key") or "").strip(),
+        rerank_timeout_seconds=_float(reranker.get("timeout_seconds"), 30.0),
+        rerank_batch_size=_int((reranker.get("params") or {}).get("batch_size"), 8),
+        rerank_passage_chars=_int((reranker.get("params") or {}).get("passage_chars"), 800),
         top_k_candidates=_int(retrieval.get("top_k_candidates"), 20),
         rerank_top_k=_int(retrieval.get("rerank_top_k"), 3),
         rerank_threshold=_float(retrieval.get("rerank_threshold"), 0.7),

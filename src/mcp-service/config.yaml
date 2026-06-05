@@ -16,11 +16,13 @@ profiles:
     # NOTE: mcp-service = SEARCH-ONLY. KHÔNG có captioner/parser/chunker (việc ingest
     # của rag-worker). Chỉ giữ embedder (embed query) + reranker + retrieval.
     reranker:
-      impl: ${RERANK_PROVIDER:-none}   # mcp v1: none|lexical (llm chưa port)
+      impl: ${RERANK_PROVIDER:-none}
       model: ${RERANK_MODEL:-gpt-4o-mini}
       base_url: ${RERANK_BASE_URL:-}
       api_key: ${RERANK_API_KEY:-}
+      timeout_seconds: ${RERANK_TIMEOUT_SECONDS:-30}
       params:
+        batch_size: ${RERANK_BATCH_SIZE:-8}
         passage_chars: ${RERANK_PASSAGE_CHARS:-800}
 
     vector_store:

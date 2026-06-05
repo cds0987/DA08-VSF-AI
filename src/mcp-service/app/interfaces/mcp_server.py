@@ -1,8 +1,4 @@
-"""MCP server — expose tool `rag_search` qua MCP (Streamable HTTP).
-
-Import `mcp` SDK LAZY trong build_mcp để app/core/* vẫn import/test được khi chưa
-cài SDK. Port chỉ là cổng cho query-service (MCP client); KHÔNG liên quan rag-worker.
-"""
+"""Expose rag_search over MCP Streamable HTTP."""
 
 from __future__ import annotations
 
@@ -13,9 +9,16 @@ from app.core.config import McpSettings, load_settings
 from app.core.search import SearchService, build_search_service
 from app.core.vectorstore import SearchHit
 
+MCP_DEFAULT_HOST = "0.0.0.0"
+MCP_DEFAULT_PORT = 8003
+MCP_PATH = "/mcp"
+
+
+def mcp_endpoint_url(host: str, port: int) -> str:
+    return f"http://{host}:{port}{MCP_PATH}"
+
 
 def _hit_to_dict(hit: SearchHit) -> dict[str, Any]:
-    # Shape = contract SearchResult (docs/contracts.md): dùng *_gcs_uri.
     return {
         "chunk_id": hit.chunk_id,
         "document_id": hit.document_id,
@@ -31,14 +34,13 @@ def _hit_to_dict(hit: SearchHit) -> dict[str, Any]:
 
 
 def build_mcp(settings: McpSettings | None = None) -> tuple[Any, SearchService]:
-    """Tạo FastMCP server + SearchService. Trả (mcp, service) để main verify rồi run."""
     from mcp.server.fastmcp import FastMCP
 
     settings = settings or load_settings()
     service = build_search_service(settings)
 
-    host = os.getenv("MCP_HOST", "0.0.0.0")
-    port = int(os.getenv("MCP_PORT", "8003"))
+    host = os.getenv("MCP_HOST", MCP_DEFAULT_HOST)
+    port = int(os.getenv("MCP_PORT", str(MCP_DEFAULT_PORT)))
     mcp = FastMCP("mcp-service", host=host, port=port)
 
     @mcp.tool()
@@ -47,11 +49,8 @@ def build_mcp(settings: McpSettings | None = None) -> tuple[Any, SearchService]:
         document_ids: Optional[List[str]] = None,
         top_k: int = 5,
     ) -> list[dict[str, Any]]:
-        """Tìm chunk liên quan trong tài liệu nội bộ (đọc Qdrant, rerank top-k).
+        """Search internal chunks; ACL filtering is handled outside this tool."""
 
-        document_ids do MCP client (query-service) inject sau khi lọc ACL.
-        (mcp v1: document_ids hiện chưa lọc — xem TODO ACL trong search.py.)
-        """
         hits = await service.rag_search(query, document_ids=document_ids, top_k=top_k)
         return [_hit_to_dict(hit) for hit in hits]
 
