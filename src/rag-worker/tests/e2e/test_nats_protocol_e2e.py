@@ -71,7 +71,7 @@ def _ensure_uploaded_to_minio(bucket: str, key: str, data: bytes) -> None:
 
 
 def _resolve_collection(prefix: str) -> str | None:
-    """Engine đặt tên collection = {VECTOR_COLLECTION}__d{dimension} -> resolve theo prefix."""
+    """Engine đặt tên collection = {VECTOR_COLLECTION}__{model_tag}__d{dimension} -> resolve theo prefix."""
     from qdrant_client import QdrantClient
 
     client = QdrantClient(url=VECTOR_DB_URL, api_key=os.getenv("VECTOR_DB_API_KEY") or None)

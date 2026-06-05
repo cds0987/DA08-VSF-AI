@@ -111,7 +111,7 @@ def test_collection_name_must_not_preencode_dimension(
 ) -> None:
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("AI_PROVIDER", "offline")
-    monkeypatch.setenv("VECTOR_COLLECTION", "rag_chatbot__d1024")
+    monkeypatch.setenv("VECTOR_COLLECTION", "rag_chatbot__te3s__d1536")
 
     with pytest.raises(ValueError, match="VECTOR_COLLECTION must not encode model/dimension"):
         with TestClient(create_app()):
