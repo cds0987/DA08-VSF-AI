@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from app.application.ports import AuthenticatedUser
+from app.domain.repositories.notification_repository import NotificationRepository
 from app.infrastructure.config import Settings, get_settings
-from app.infrastructure.db.mock_notification_repo import InMemoryNotificationRepository
 from app.infrastructure.messaging.notification_service import DocNewEvent, NotificationService
 from app.infrastructure.sse.connection_manager import ConnectionManager
 from app.interfaces.api.dependencies import (
@@ -62,7 +62,7 @@ async def notifications_history(
     offset: int = 0,
     unread_only: bool = False,
     user: AuthenticatedUser = Depends(get_current_user),
-    repo: InMemoryNotificationRepository = Depends(get_notification_repo),
+    repo: NotificationRepository = Depends(get_notification_repo),
 ) -> NotificationList:
     items = await repo.list_history(
         user_id=user.id,
@@ -90,7 +90,7 @@ async def notifications_history(
 @router.get("/notifications/unread-count", response_model=UnreadCount)
 async def unread_count(
     user: AuthenticatedUser = Depends(get_current_user),
-    repo: InMemoryNotificationRepository = Depends(get_notification_repo),
+    repo: NotificationRepository = Depends(get_notification_repo),
 ) -> UnreadCount:
     return UnreadCount(unread=await repo.unread_count(user.id))
 
@@ -99,7 +99,7 @@ async def unread_count(
 async def mark_read(
     notification_id: str,
     user: AuthenticatedUser = Depends(get_current_user),
-    repo: InMemoryNotificationRepository = Depends(get_notification_repo),
+    repo: NotificationRepository = Depends(get_notification_repo),
 ) -> NotificationItem:
     item = await repo.mark_read_for_user(user.id, notification_id)
     if not item:

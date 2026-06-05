@@ -89,6 +89,17 @@ MCP_TIMEOUT_SECONDS=10
 
 `MCP_MODE=mcp` se goi JSON-RPC endpoint `http://localhost:8003/mcp` voi tool `rag_search` va `hr_query`. Neu khong chay mcp-service, giu `MCP_MODE=mock`.
 
+Neu muon test infrastructure NATS/query_db that:
+
+```env
+NATS_MODE=nats
+NATS_URL=nats://localhost:4222
+NATS_JETSTREAM_ENABLED=true
+DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/query_db
+```
+
+Voi `NATS_MODE=nats`, Query Service se start subscriber cho `doc.access` va `notify.doc_new`. Query Service khong subscribe `doc.ingest`, khong request `rag.search`, va khong goi rag-worker truc tiep. Neu chi test offline/API mock, giu `NATS_MODE=mock`.
+
 Config intent classifier v2:
 
 ```env
@@ -331,7 +342,7 @@ curl.exe -N -X POST http://localhost:8001/query `
   --data-binary "@$bodyPath"
 ```
 
-Expected: co source `Finance_Report_Guideline.xlsx`, khong co `Executive_Compensation_Top_Secret.pdf`. Query Service inject `document_ids` theo ACL cua user finance.
+Expected: co source `Finance_Report_Guideline.xlsx`, khong co `Executive_Compensation_Top_Secret.pdf`. Moi source dung field `source_gcs_uri`. Query Service inject `document_ids` theo ACL cua user finance.
 
 Test user mismatch:
 
@@ -534,6 +545,9 @@ pytest tests/test_api.py -k "paraphrased or tool_decision or unknown_tool or inv
 
 # MCP JSON-RPC adapter khi MCP_MODE=mcp
 pytest tests/test_mcp_json_rpc_client.py -v
+
+# NATS/query_db infrastructure adapters
+pytest tests/test_nats_infrastructure.py -v
 ```
 
 Expected automated suite hien tai: tat ca tests pass trong mock mode. Neu chay full suite bang Python trong `.venv`:

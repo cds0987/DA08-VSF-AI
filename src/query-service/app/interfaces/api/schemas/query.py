@@ -8,7 +8,7 @@ class Source(BaseModel):
     caption: str
     heading_path: list[str]
     score: float
-    source_s3_uri: str
+    source_gcs_uri: str
 
 
 class QueryRequest(BaseModel):

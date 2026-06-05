@@ -1,16 +1,33 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.infrastructure.config import get_settings
+from app.interfaces.api.dependencies import get_nats_subscriber_manager
 from app.interfaces.api.routers import admin, conversations, feedback, notifications, query
 
 
 settings = get_settings()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    manager = get_nats_subscriber_manager()
+    if manager is not None:
+        await manager.start()
+    try:
+        yield
+    finally:
+        if manager is not None:
+            await manager.stop()
+
+
 app = FastAPI(
     title="Query Service",
     version="0.1.0-phase1",
     description="LLM orchestration, MCP client mock, SSE, conversations, feedback, and notifications.",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

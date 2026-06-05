@@ -1,0 +1,5 @@
+INFO:     127.0.0.1:54700 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54738 - "HEAD /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52004 - "GET /documents?limit=5&offset=0 HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:52079 - "GET /documents?limit=5&offset=0 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54510 - "GET /health HTTP/1.1" 200 OK

@@ -26,8 +26,8 @@ class SearchResult:
     heading_path: list[str]
     score: float
     page_number: int | None = None
-    source_s3_uri: str = ""
-    markdown_s3_uri: str = ""
+    source_gcs_uri: str = ""
+    markdown_gcs_uri: str = ""
 
 
 @dataclass(frozen=True)
@@ -125,8 +125,8 @@ class MockMCPClient:
                     heading_path=document.heading_path,
                     score=min(score, 0.99),
                     page_number=1,
-                    source_s3_uri=document.source_s3_uri,
-                    markdown_s3_uri=document.source_s3_uri.replace(".pdf", ".md"),
+                    source_gcs_uri=document.source_gcs_uri,
+                    markdown_gcs_uri=document.source_gcs_uri.replace(".pdf", ".md"),
                 )
             )
         return sorted(results, key=lambda item: item.score, reverse=True)[:top_k]
@@ -381,21 +381,25 @@ def _extract_tool_payload(result: dict[str, Any]) -> Any:
 
 def _search_result_from_payload(item: dict[str, Any]) -> SearchResult:
     return SearchResult(
-        chunk_id=str(item.get("chunk_id") or item.get("node_id") or item.get("unit_id") or ""),
+        chunk_id=str(
+            item.get("chunk_id") or item.get("section_id") or item.get("node_id") or item.get("unit_id") or ""
+        ),
         document_id=str(item.get("document_id", "")),
         document_name=str(item.get("document_name") or item.get("display_name") or ""),
         caption=str(item.get("caption", "")),
-        parent_text=str(item.get("parent_text") or item.get("content") or ""),
+        parent_text=str(item.get("parent_text") or item.get("section_content") or item.get("content") or ""),
         heading_path=list(item.get("heading_path") or []),
         score=float(item.get("score") or item.get("rerank_score") or 0.0),
         page_number=item.get("page_number"),
-        source_s3_uri=str(
-            item.get("source_s3_uri")
+        source_gcs_uri=str(
+            item.get("source_gcs_uri")
+            or item.get("source_s3_uri")
             or (item.get("lineage", {}) or {}).get("source_uri")
             or ""
         ),
-        markdown_s3_uri=str(
-            item.get("markdown_s3_uri")
+        markdown_gcs_uri=str(
+            item.get("markdown_gcs_uri")
+            or item.get("markdown_s3_uri")
             or (item.get("lineage", {}) or {}).get("artifact_uri")
             or ""
         ),

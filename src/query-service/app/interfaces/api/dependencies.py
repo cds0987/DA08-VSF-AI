@@ -13,6 +13,8 @@ from app.infrastructure.config import Settings, get_settings
 from app.infrastructure.db.mock_conversation_repo import InMemoryConversationRepository
 from app.infrastructure.db.mock_document_access_repo import InMemoryDocumentAccessRepository
 from app.infrastructure.db.mock_notification_repo import InMemoryNotificationRepository
+from app.infrastructure.db.postgres_document_access_repo import PostgresDocumentAccessRepository
+from app.infrastructure.db.postgres_notification_repo import PostgresNotificationRepository
 from app.infrastructure.external.mcp_client import MCPJsonRpcClient, MockMCPClient
 from app.infrastructure.external.intent_ai_client import (
     OpenAIIntentEmbeddingClient,
@@ -21,6 +23,8 @@ from app.infrastructure.external.intent_ai_client import (
 )
 from app.infrastructure.external.openai_client import OpenAIStreamingClient
 from app.infrastructure.external.tool_decision_client import MockToolDecisionClient, OpenAIToolDecisionClient
+from app.infrastructure.messaging.nats_events import QueryNatsEventHandler
+from app.infrastructure.messaging.nats_subscriber import NatsSubscriberManager
 from app.infrastructure.messaging.notification_service import NotificationService
 from app.infrastructure.sse.connection_manager import ConnectionManager
 
@@ -52,12 +56,18 @@ def get_conversation_repo() -> InMemoryConversationRepository:
 
 
 @lru_cache
-def get_document_access_repo() -> InMemoryDocumentAccessRepository:
+def get_document_access_repo():
+    settings = get_settings()
+    if settings.nats_mode.strip().lower() == "nats" and settings.database_url:
+        return PostgresDocumentAccessRepository(settings.database_url)
     return InMemoryDocumentAccessRepository()
 
 
 @lru_cache
-def get_notification_repo() -> InMemoryNotificationRepository:
+def get_notification_repo():
+    settings = get_settings()
+    if settings.nats_mode.strip().lower() == "nats" and settings.database_url:
+        return PostgresNotificationRepository(settings.database_url)
     return InMemoryNotificationRepository()
 
 
@@ -149,10 +159,26 @@ def get_notification_service() -> NotificationService:
     )
 
 
+@lru_cache
+def get_nats_subscriber_manager() -> NatsSubscriberManager | None:
+    settings = get_settings()
+    if settings.nats_mode.strip().lower() != "nats":
+        return None
+    handler = QueryNatsEventHandler(
+        document_access_repo=get_document_access_repo(),
+        notification_service=get_notification_service(),
+    )
+    return NatsSubscriberManager(settings, handler)
+
+
 def reset_state_for_tests() -> None:
     get_conversation_repo().reset()
-    get_document_access_repo().reset()
-    get_notification_repo().reset()
+    access_reset = getattr(get_document_access_repo(), "reset", None)
+    if access_reset:
+        access_reset()
+    notification_reset = getattr(get_notification_repo(), "reset", None)
+    if notification_reset:
+        notification_reset()
     get_connection_manager().reset()
     mcp_reset = getattr(get_mcp_client(), "reset", None)
     if mcp_reset:
@@ -162,6 +188,7 @@ def reset_state_for_tests() -> None:
     decision_reset = getattr(get_tool_decision_client(), "reset", None)
     if decision_reset:
         decision_reset()
+    get_nats_subscriber_manager.cache_clear()
     get_intent_embedding_client.cache_clear()
     get_intent_llm_client.cache_clear()
     get_intent_classifier.cache_clear()

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import Optional
 
 
@@ -19,6 +20,7 @@ class DocumentAccessRepository(ABC):
         classification: str,
         allowed_departments: list[str],
         allowed_user_ids: list[str],
+        occurred_at: datetime | None = None,
     ) -> None:
         """Upsert local ACL projection from doc.access events."""
 

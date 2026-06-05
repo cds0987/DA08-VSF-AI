@@ -23,8 +23,8 @@ class SearchResultLike(Protocol):
     heading_path: list[str]
     score: float
     page_number: int | None
-    source_s3_uri: str
-    markdown_s3_uri: str
+    source_gcs_uri: str
+    markdown_gcs_uri: str
 
 
 class HrQueryResultLike(Protocol):

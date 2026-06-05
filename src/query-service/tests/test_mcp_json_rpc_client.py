@@ -54,16 +54,16 @@ class FakeAsyncClient:
                                 "json": {
                                     "results": [
                                         {
-                                            "chunk_id": "chunk-1",
+                                            "section_id": "section-1",
                                             "document_id": "doc-1",
                                             "document_name": "Policy.pdf",
                                             "caption": "Policy",
-                                            "parent_text": "Policy text",
+                                            "section_content": "Policy text",
                                             "heading_path": ["Policy"],
                                             "score": 0.91,
                                             "page_number": 1,
-                                            "source_s3_uri": "s3://docs/policy.pdf",
-                                            "markdown_s3_uri": "s3://docs/policy.md",
+                                            "source_gcs_uri": "gs://docs/policy.pdf",
+                                            "markdown_gcs_uri": "gs://docs/policy.md",
                                         }
                                     ]
                                 },
@@ -116,8 +116,11 @@ async def test_mcp_json_rpc_client_calls_tools_and_maps_results(monkeypatch):
         "document_ids": ["doc-1"],
         "top_k": 3,
     }
-    assert rag_results[0].chunk_id == "chunk-1"
+    assert rag_results[0].chunk_id == "section-1"
+    assert rag_results[0].parent_text == "Policy text"
     assert rag_results[0].score == 0.91
+    assert rag_results[0].source_gcs_uri == "gs://docs/policy.pdf"
+    assert rag_results[0].markdown_gcs_uri == "gs://docs/policy.md"
     assert FakeAsyncClient.calls[2]["json"]["params"]["arguments"] == {
         "user_id": "user-1",
         "intent": "payroll",

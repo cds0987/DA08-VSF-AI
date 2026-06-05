@@ -257,7 +257,7 @@ class QueryOrchestrationUseCase:
             "caption": result.caption,
             "heading_path": result.heading_path,
             "score": result.score,
-            "source_s3_uri": result.source_s3_uri,
+            "source_gcs_uri": result.source_gcs_uri,
         }
 
 

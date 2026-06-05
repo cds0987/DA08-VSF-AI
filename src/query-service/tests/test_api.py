@@ -392,6 +392,8 @@ async def test_rag_query_returns_relevant_sources_without_top_secret_for_regular
     source_names = [source["document_name"] for source in done["sources"]]
     assert "Chinh_sach_nghi_phep_2026.pdf" in source_names
     assert "Executive_Compensation_Top_Secret.pdf" not in source_names
+    assert done["sources"][0]["source_gcs_uri"]
+    assert "source_s3_uri" not in done["sources"][0]
 
 
 @pytest.mark.asyncio
