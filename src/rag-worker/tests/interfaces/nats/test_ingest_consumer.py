@@ -7,9 +7,11 @@ import pytest
 
 from app.domain.entities.ingest_job import IngestJob, IngestJobStatus
 from app.interfaces.nats.ingest_consumer import (
+    DocDeleteConsumer,
     DocIngestConsumer,
     DocStatusPublisher,
     build_doc_status,
+    start_doc_delete_subscription,
     start_doc_ingest_subscription,
 )
 
@@ -17,6 +19,7 @@ from app.interfaces.nats.ingest_consumer import (
 class FakeIngestUseCase:
     def __init__(self, *, fail: bool = False) -> None:
         self.calls: list[dict] = []
+        self.deleted: list[str] = []
         self._fail = fail
 
     async def enqueue(self, **kwargs):
@@ -24,6 +27,11 @@ class FakeIngestUseCase:
             raise RuntimeError("db down")
         self.calls.append(kwargs)
         return object()
+
+    async def delete(self, document_id: str) -> None:
+        if self._fail:
+            raise RuntimeError("vector store down")
+        self.deleted.append(document_id)
 
 
 class FakeBroker:
@@ -93,6 +101,21 @@ async def test_handle_maps_payload_to_enqueue() -> None:
     assert call["file_type"] == "pdf"
     assert call["markdown"] is None
     assert call["correlation_id"] == "nats:doc.ingest:d1"
+
+
+@pytest.mark.asyncio
+async def test_handle_accepts_s3_key_fallback() -> None:
+    # document-service hiện publish s3_key thay vì gcs_key -> vẫn map được (backward-compat).
+    use_case = FakeIngestUseCase()
+    consumer = DocIngestConsumer(use_case)
+    raw = json.dumps(
+        {"doc_id": "d1", "s3_key": "s3://bucket/x.pdf", "file_type": "pdf"}
+    ).encode()
+
+    doc_id = await consumer.handle(raw)
+
+    assert doc_id == "d1"
+    assert use_case.calls[0]["source_uri"] == "s3://bucket/x.pdf"
 
 
 @pytest.mark.asyncio
@@ -196,6 +219,70 @@ async def test_subscription_naks_on_transient_error() -> None:
     )
     cb = broker.subscribed["cb"]
     msg = FakeMsg(json.dumps({"doc_id": "d1", "gcs_key": "s3://b/k", "file_type": "pdf"}).encode())
+
+    await cb(msg)
+
+    assert msg.naked and not msg.acked and not msg.termed
+
+
+# --- doc.delete consumer ---------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_delete_handle_calls_delete() -> None:
+    use_case = FakeIngestUseCase()
+    consumer = DocDeleteConsumer(use_case)
+
+    doc_id = await consumer.handle(json.dumps({"doc_id": "d1"}).encode())
+
+    assert doc_id == "d1"
+    assert use_case.deleted == ["d1"]
+
+
+@pytest.mark.asyncio
+async def test_delete_handle_rejects_missing_doc_id() -> None:
+    consumer = DocDeleteConsumer(FakeIngestUseCase())
+    with pytest.raises(ValueError):
+        await consumer.handle(json.dumps({}).encode())
+
+
+@pytest.mark.asyncio
+async def test_delete_subscription_acks_on_success() -> None:
+    broker = FakeBroker()
+    consumer = DocDeleteConsumer(FakeIngestUseCase())
+    await start_doc_delete_subscription(
+        broker, consumer, subject="doc.delete", durable="d"
+    )
+    cb = broker.subscribed["cb"]
+    msg = FakeMsg(json.dumps({"doc_id": "d1"}).encode())
+
+    await cb(msg)
+
+    assert msg.acked and not msg.naked and not msg.termed
+
+
+@pytest.mark.asyncio
+async def test_delete_subscription_terms_poison_payload() -> None:
+    broker = FakeBroker()
+    consumer = DocDeleteConsumer(FakeIngestUseCase())
+    await start_doc_delete_subscription(
+        broker, consumer, subject="doc.delete", durable="d"
+    )
+    cb = broker.subscribed["cb"]
+    msg = FakeMsg(b"{bad json")
+
+    await cb(msg)
+
+    assert msg.termed and not msg.acked and not msg.naked
+
+
+@pytest.mark.asyncio
+async def test_delete_subscription_naks_on_transient_error() -> None:
+    broker = FakeBroker()
+    consumer = DocDeleteConsumer(FakeIngestUseCase(fail=True))  # vector store down
+    await start_doc_delete_subscription(
+        broker, consumer, subject="doc.delete", durable="d"
+    )
+    cb = broker.subscribed["cb"]
+    msg = FakeMsg(json.dumps({"doc_id": "d1"}).encode())
 
     await cb(msg)
 
