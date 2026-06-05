@@ -24,35 +24,68 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
 
-      # NATS server với JetStream — service container không override được command,
-      # nên chạy bằng docker run + chờ port mở. CI runner luôn có docker.
+      # --- Hạ tầng THẬT bằng docker (giống production) -------------------------
+      # NATS JetStream cần arg `-js` (service container không override command được) -> docker run.
+      # MinIO = S3 object storage; Qdrant = vector DB host riêng. Cả ba cùng docker engine của runner.
       - name: Start NATS (JetStream)
+        run: docker run -d --name nats -p 4222:4222 nats:2.10 -js
+
+      - name: Start MinIO (S3)
         run: |
-          docker run -d --name nats -p 4222:4222 nats:2.10 -js
-          for i in $(seq 1 30); do
-            if (echo > /dev/tcp/127.0.0.1/4222) 2>/dev/null; then echo "nats up"; exit 0; fi
-            sleep 1
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data
+
+      - name: Start Qdrant (vector DB)
+        run: docker run -d --name qdrant -p 6333:6333 qdrant/qdrant
+
+      - name: Wait for infra (NATS 4222 / MinIO 9000 / Qdrant 6333)
+        run: |
+          ready() { (echo > /dev/tcp/127.0.0.1/$1) 2>/dev/null; }
+          for port in 4222 9000 6333; do
+            ok=""
+            for i in $(seq 1 60); do
+              if ready "$port"; then echo "port $port up"; ok=1; break; fi
+              sleep 1
+            done
+            if [ -z "$ok" ]; then
+              echo "infra port $port did not become ready" >&2
+              docker ps -a
+              docker logs nats || true; docker logs minio || true; docker logs qdrant || true
+              exit 1
+            fi
           done
-          echo "NATS did not become ready" >&2
-          docker logs nats || true
-          exit 1
 
       # Suite chính chạy NATS OFF (các test dựng app không cần broker; set NATS_URL
-      # toàn cục sẽ làm mọi TestClient mở subscription -> trùng durable).
-      - name: Run rag-worker tests (NATS off)
+      # toàn cục sẽ làm mọi TestClient mở subscription -> trùng durable). E2e tách riêng.
+      - name: Run rag-worker tests (infra off)
         env:
           APP_ENV: development
           AI_PROVIDER: offline
-        run: pytest tests -q -ra --ignore=tests/e2e/test_nats_ingest.py
+        run: pytest tests -q -ra --ignore=tests/e2e
 
-      # Test NATS thật chạy riêng với NATS_URL trỏ broker JetStream ở trên.
-      - name: Run NATS integration test (NATS on)
+      # E2e THẬT: rag-worker chạy trên NATS + MinIO + Qdrant thật; chỉ message
+      # document-service được giả lập (upload MinIO + publish doc.ingest/doc.delete).
+      - name: Run e2e protocol tests (real infra on)
         env:
           APP_ENV: development
           AI_PROVIDER: offline
           NATS_URL: nats://127.0.0.1:4222
-        run: pytest tests/e2e/test_nats_ingest.py -q -ra
+          # S3 / MinIO (rag-worker s3_parser + test upload đều đọc các biến S3_*)
+          PARSER_IMPL: s3
+          S3_ENDPOINT_URL: http://127.0.0.1:9000
+          S3_ACCESS_KEY_ID: minioadmin
+          S3_SECRET_ACCESS_KEY: minioadmin
+          S3_REGION: us-east-1
+          E2E_S3_BUCKET: rag-e2e
+          # Qdrant (vector DB host riêng)
+          VECTOR_DB_URL: http://127.0.0.1:6333
+        run: pytest tests/e2e -q -ra
 
-      - name: NATS logs on failure
+      - name: Infra logs on failure
         if: failure()
-        run: docker logs nats || true
+        run: |
+          docker logs nats || true
+          docker logs minio || true
+          docker logs qdrant || true

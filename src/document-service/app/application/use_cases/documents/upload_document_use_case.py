@@ -21,6 +21,9 @@ class DocumentStorage(Protocol):
     async def upload_file(self, key: str, content: bytes, content_type: str | None = None) -> None:
         ...
 
+    def object_uri(self, key: str) -> str:
+        ...
+
 
 class DocumentEventPublisher(Protocol):
     async def publish_doc_ingest(self, payload: dict) -> None:
@@ -92,15 +95,15 @@ class UploadDocumentUseCase:
 
         document_id = str(uuid4())
         safe_name = PurePath(filename).name
-        s3_key = f"raw/{document_id}/{safe_name}"
+        gcs_key = f"raw/{document_id}/{safe_name}"
 
-        await self.storage.upload_file(s3_key, content, content_type=content_type)
+        await self.storage.upload_file(gcs_key, content, content_type=content_type)
         document = await self.document_repository.create(
             Document(
                 id=document_id,
                 name=safe_name,
                 file_type=file_type,
-                s3_key=s3_key,
+                gcs_key=gcs_key,
                 status=DocumentStatus.QUEUED,
                 uploaded_by=actor.id,
                 created_at=datetime.now(timezone.utc),
@@ -111,10 +114,12 @@ class UploadDocumentUseCase:
         )
 
         try:
+            source_uri = self.storage.object_uri(document.gcs_key)
             await self.publisher.publish_doc_ingest(
                 {
                     "doc_id": document.id,
-                    "s3_key": document.s3_key,
+                    "gcs_key": source_uri,
+                    "document_name": document.name,
                     "file_type": document.file_type,
                     "classification": document.classification,
                     "allowed_departments": document.allowed_departments,

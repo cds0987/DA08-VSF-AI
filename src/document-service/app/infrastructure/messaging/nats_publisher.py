@@ -1,6 +1,11 @@
 import json
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from app.core.config import Settings
+
+
+JETSTREAM_EVENT_SUBJECTS = {"doc.ingest", "doc.access", "doc.status", "notify.doc_new"}
 
 
 class NatsPublisher:
@@ -32,7 +37,7 @@ class NatsPublisher:
         nats = _import_nats()
         nc = await nats.connect(self.settings.nats_url)
         try:
-            data = json.dumps(payload).encode("utf-8")
+            data = json.dumps(_with_event_metadata(subject, payload)).encode("utf-8")
             if self.settings.nats_jetstream_enabled:
                 js = nc.jetstream()
                 await js.publish(subject, data)
@@ -49,4 +54,17 @@ def _import_nats():
     except ImportError as exc:
         raise RuntimeError("nats-py is required for NATS messaging") from exc
     return nats
+
+
+def _with_event_metadata(subject: str, payload: dict) -> dict:
+    if subject not in JETSTREAM_EVENT_SUBJECTS:
+        return payload
+    enriched = dict(payload)
+    enriched.setdefault("event_id", str(uuid4()))
+    enriched.setdefault("event_version", 1)
+    enriched.setdefault(
+        "occurred_at",
+        datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    )
+    return enriched
 

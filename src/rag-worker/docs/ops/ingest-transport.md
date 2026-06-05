@@ -1,8 +1,9 @@
 # Ingest transport: NATS `doc.ingest` + nguồn S3/GCS
 
-> Trạng thái: **đã thực thi** (code + unit-test bằng broker/S3 giả). NATS **chưa
-> verify e2e với JetStream thật** (môi trường dev chưa có NATS server). Tài liệu này
-> mô tả cửa vào ingest hiện tại của `rag-worker`. Thiết kế nền: [../decide/technique/ingestion.md](../decide/technique/ingestion.md);
+> Trạng thái: **đã thực thi + verify e2e THẬT trong CI** (NATS JetStream + MinIO + Qdrant
+> dựng bằng docker; `tests/e2e/test_nats_protocol_e2e.py` chạy luồng thật, không mock phía
+> rag-worker). Đã thêm consumer `doc.delete` (xóa vector). Bug S3 client gặp khi e2e thật:
+> [s3-client-botocore.md](s3-client-botocore.md). Thiết kế nền: [../decide/technique/ingestion.md](../decide/technique/ingestion.md);
 > wiring khai báo: [../refactor/config-driven-pipeline.md](../refactor/config-driven-pipeline.md).
 
 ## 0. Tóm tắt

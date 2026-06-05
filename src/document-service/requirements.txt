@@ -6,7 +6,7 @@ python-dotenv
 python-jose
 python-multipart
 pydantic
-boto3
+google-cloud-storage
 nats-py
 pytest
 pytest-asyncio

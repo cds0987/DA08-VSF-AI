@@ -78,7 +78,8 @@ Payload example:
   "event_version": 1,
   "occurred_at": "2026-06-05T09:15:30Z",
   "doc_id": "2e73f65e-0d2a-4f62-bb9f-f7c9a0bb2a5d",
-  "s3_key": "raw/2e73f65e-0d2a-4f62-bb9f-f7c9a0bb2a5d/policy.pdf",
+  "gcs_key": "gs://rag-chatbot-docs/raw/2e73f65e-0d2a-4f62-bb9f-f7c9a0bb2a5d/policy.pdf",
+  "document_name": "policy.pdf",
   "file_type": "pdf",
   "classification": "internal",
   "allowed_departments": [],
@@ -86,7 +87,7 @@ Payload example:
 }
 ```
 
-Required fields: `event_id`, `event_version`, `occurred_at`, `doc_id`, `s3_key`, `file_type`, `classification`, `allowed_departments`, `allowed_user_ids`.
+Required fields: `event_id`, `event_version`, `occurred_at`, `doc_id`, `gcs_key`, `document_name`, `file_type`, `classification`, `allowed_departments`, `allowed_user_ids`.
 
 ## `doc.status`
 
@@ -258,8 +259,8 @@ Reply example:
       "section_content": "Employees may claim eligible flight expenses...",
       "heading_path": ["Travel Policy", "Reimbursement"],
       "score": 0.87,
-      "source_s3_uri": "s3://rag-chatbot-docs/raw/2e73f65e/policy.pdf",
-      "markdown_s3_uri": "s3://rag-chatbot-docs/processed/2e73f65e/policy.md"
+      "source_gcs_uri": "gs://rag-chatbot-docs/raw/2e73f65e/policy.pdf",
+      "markdown_gcs_uri": "gs://rag-chatbot-docs/processed/2e73f65e/policy.md"
     }
   ]
 }
@@ -267,6 +268,6 @@ Reply example:
 
 Reply required fields: `results`.
 
-Each result required fields: `section_id`, `document_id`, `document_name`, `caption`, `section_content`, `heading_path`, `score`, `source_s3_uri`, `markdown_s3_uri`.
+Each result required fields: `section_id`, `document_id`, `document_name`, `caption`, `section_content`, `heading_path`, `score`, `source_gcs_uri`, `markdown_gcs_uri`.
 
 Compatibility note: `section_id` maps to the RAG Worker chunk identifier if the implementation uses `chunk_id` internally. `section_content` maps to parent/section text returned for LLM context.

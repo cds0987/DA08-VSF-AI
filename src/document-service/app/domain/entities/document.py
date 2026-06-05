@@ -16,7 +16,7 @@ class Document:
     id: str
     name: str
     file_type: str
-    s3_key: str
+    gcs_key: str
     status: DocumentStatus
     uploaded_by: str
     created_at: datetime
