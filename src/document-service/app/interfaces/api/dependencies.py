@@ -1,0 +1,125 @@
+from collections.abc import AsyncGenerator
+
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.application.auth import CurrentUser
+from app.application.exceptions import PermissionDeniedError
+from app.application.use_cases.documents.delete_document_use_case import DeleteDocumentUseCase
+from app.application.use_cases.documents.get_document_file_use_case import GetDocumentFileUseCase
+from app.application.use_cases.documents.get_document_use_case import GetDocumentUseCase
+from app.application.use_cases.documents.list_documents_use_case import ListDocumentsUseCase
+from app.application.use_cases.documents.upload_document_use_case import UploadDocumentUseCase
+from app.core.config import Settings, get_settings
+from app.infrastructure.db.postgres_audit_log_repository import PostgresAuditLogRepository
+from app.infrastructure.db.postgres_document_repository import PostgresDocumentRepository
+from app.infrastructure.db.session import get_session
+from app.infrastructure.messaging.nats_publisher import NatsPublisher
+from app.infrastructure.storage.s3_client import S3Client
+
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+    async for session in get_session():
+        yield session
+
+
+def get_document_repository(
+    session: AsyncSession = Depends(get_db_session),
+) -> PostgresDocumentRepository:
+    return PostgresDocumentRepository(session)
+
+
+def get_audit_logger(
+    session: AsyncSession = Depends(get_db_session),
+) -> PostgresAuditLogRepository:
+    return PostgresAuditLogRepository(session)
+
+
+def get_storage(settings: Settings = Depends(get_settings)) -> S3Client:
+    return S3Client(settings)
+
+
+def get_publisher(settings: Settings = Depends(get_settings)) -> NatsPublisher:
+    return NatsPublisher(settings)
+
+
+def get_upload_document_use_case(
+    document_repository: PostgresDocumentRepository = Depends(get_document_repository),
+    storage: S3Client = Depends(get_storage),
+    publisher: NatsPublisher = Depends(get_publisher),
+    audit_logger: PostgresAuditLogRepository = Depends(get_audit_logger),
+) -> UploadDocumentUseCase:
+    return UploadDocumentUseCase(document_repository, storage, publisher, audit_logger)
+
+
+def get_list_documents_use_case(
+    document_repository: PostgresDocumentRepository = Depends(get_document_repository),
+) -> ListDocumentsUseCase:
+    return ListDocumentsUseCase(document_repository)
+
+
+def get_get_document_use_case(
+    document_repository: PostgresDocumentRepository = Depends(get_document_repository),
+) -> GetDocumentUseCase:
+    return GetDocumentUseCase(document_repository)
+
+
+def get_get_document_file_use_case(
+    document_repository: PostgresDocumentRepository = Depends(get_document_repository),
+    storage: S3Client = Depends(get_storage),
+) -> GetDocumentFileUseCase:
+    return GetDocumentFileUseCase(document_repository, storage)
+
+
+def get_delete_document_use_case(
+    document_repository: PostgresDocumentRepository = Depends(get_document_repository),
+    storage: S3Client = Depends(get_storage),
+    publisher: NatsPublisher = Depends(get_publisher),
+    audit_logger: PostgresAuditLogRepository = Depends(get_audit_logger),
+) -> DeleteDocumentUseCase:
+    return DeleteDocumentUseCase(document_repository, storage, publisher, audit_logger)
+
+
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    settings: Settings = Depends(get_settings),
+) -> CurrentUser:
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+    except JWTError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        ) from exc
+
+    user_id = payload.get("sub")
+    role = payload.get("role")
+    if not user_id or not role:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+    return CurrentUser(
+        id=str(user_id),
+        role=str(role),
+        department=str(payload.get("department") or ""),
+    )
+
+
+async def require_admin(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=PermissionDeniedError.detail,
+        )
+    return current_user
+

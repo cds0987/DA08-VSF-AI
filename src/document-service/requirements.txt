@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+asyncpg
+python-dotenv
+python-jose
+python-multipart
+pydantic
+boto3
+nats-py
+pytest
+pytest-asyncio
+httpx
+

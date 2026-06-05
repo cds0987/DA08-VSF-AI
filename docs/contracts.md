@@ -330,7 +330,7 @@ class Document:
     id: str
     name: str
     file_type: str              # pdf, docx, txt, xlsx, csv, pptx, md
-    gcs_key: str
+    s3_key: str
     status: DocumentStatus
     uploaded_by: str            # user_id
     created_at: datetime
@@ -443,7 +443,7 @@ class Document:
     id: str
     name: str
     file_type: str              # pdf, docx, txt, xlsx, csv, pptx, md
-    gcs_key: str
+    s3_key: str
     status: DocumentStatus
     uploaded_by: str            # user_id (Admin)
     created_at: datetime
@@ -480,7 +480,7 @@ class DocumentRepository(ABC):
 
     @abstractmethod
     async def delete(self, document_id: str) -> None:
-        """Xóa document (record + báo xóa GCS/Qdrant)."""
+        """Xóa document (record + báo xóa S3/Qdrant)."""
 ```
 
 ---

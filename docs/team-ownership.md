@@ -9,7 +9,7 @@
 | **Backend Dev** | Vũ Quang Dũng | User Service + Document Service: auth, JWT, document management + **chủ NATS subject contract & JetStream config** | `src/user-service/`, `src/document-service/`, `infra/nats/` | Sau khi SA freeze domain |
 | **RAG Engineer** | Trần Thanh Nguyên | RAG Worker (ingestion + retrieval, NATS) + **MCP Tool Service** (tool rag_search/hr_query + rerank) | `src/rag-worker/app/`, `src/mcp-service/app/` | Sau khi SA freeze domain |
 | **AI/Agent Engineer** | Phạm Quốc Dũng | Query Service: LLM orchestration, SSE streaming, notify, memory, MCP client | `src/query-service/app/` | Sau khi SA freeze domain |
-| **DevOps** | Trần Hữu Gia Huy | Docker, GCP, CI/CD, Nginx, **deploy/vận hành NATS container**, monitoring | `infra/`, `docker-compose.yml` | Ngay — song song với SA |
+| **DevOps** | Trần Hữu Gia Huy | Docker, AWS, CI/CD, Nginx, **deploy/vận hành NATS container**, monitoring | `infra/`, `docker-compose.yml` | Ngay — song song với SA |
 
 ---
 
@@ -212,18 +212,18 @@ src/document-service/app/
 ├── application/
 │   └── use_cases/
 │       └── documents/
-│           ├── upload_document_use_case.py   ← Lưu GCS → tạo record status=queued → publish doc.ingest
+│           ├── upload_document_use_case.py   ← Lưu S3 → tạo record status=queued → publish doc.ingest
 │           ├── list_documents_use_case.py    ← Liệt kê (filter status, phân trang)
 │           ├── get_document_use_case.py       ← Chi tiết 1 document
-│           ├── get_document_file_use_case.py  ← Trả signed GCS URL (cho FE Document Viewer) — check ACL
-│           └── delete_document_use_case.py    ← Xóa GCS + record + trigger xóa vectors Qdrant
+│           ├── get_document_file_use_case.py  ← Trả presigned S3 URL (cho FE Document Viewer) — check ACL
+│           └── delete_document_use_case.py    ← Xóa S3 + record + trigger xóa vectors Qdrant
 │
 ├── infrastructure/
 │   ├── db/
 │   │   ├── models.py                          ← SQLAlchemy model bảng documents + audit_logs (document events) — chủ sở hữu doc_db
 │   │   └── postgres_document_repository.py    ← Implement DocumentRepository
 │   ├── storage/
-│   │   └── gcs_client.py                      ← Upload / xóa file gốc trên Cloud Storage (GCS)
+│   │   └── s3_client.py                       ← Upload / xóa file gốc trên S3
 │   └── messaging/
 │       ├── nats_publisher.py                  ← Publish doc.ingest (RAG Worker) + doc.access (Query Service ACL)
 │       │                                         + notify.doc_new (khi indexed → Query Service đẩy thông báo)
@@ -239,9 +239,9 @@ src/document-service/app/
 ```
 
 **Key logic — document-service:**
-- `upload_document_use_case.py`: validate file (≤50MB, đúng loại) → upload GCS → `doc_repo.create(status=queued)` → publish `doc.ingest` (RAG Worker xử lý) **và** `doc.access` (Query Service cập nhật phân quyền). Trả `202 { document_id, status:"queued" }`.
+- `upload_document_use_case.py`: validate file (≤50MB, đúng loại) → upload S3 → `doc_repo.create(status=queued)` → publish `doc.ingest` (RAG Worker xử lý) **và** `doc.access` (Query Service cập nhật phân quyền). Trả `202 { document_id, status:"queued" }`.
 - `nats_subscriber.py`: lắng nghe `doc.status` từ RAG Worker → `doc_repo.update_status(indexed/failed, chunk_count)`. **Đây là nơi DUY NHẤT cập nhật trạng thái ingestion** — RAG Worker chỉ publish event, không ghi bảng documents. Khi `indexed` → publish thêm `notify.doc_new` để Query Service đẩy thông báo "có tài liệu mới".
-- `delete_document_use_case.py`: xóa record + file GCS, publish `doc.access { deleted:true }` (Query Service gỡ khỏi projection) + trigger xóa vectors Qdrant.
+- `delete_document_use_case.py`: xóa record + file S3, publish `doc.access { deleted:true }` (Query Service gỡ khỏi projection) + trigger xóa vectors Qdrant.
 - **Event-driven ACL (database-per-service)**: mọi thay đổi quyền (upload / đổi classification / xóa) → publish `doc.access` lên NATS JetStream. Query Service tự giữ bản sao — **không ai đọc thẳng `doc_db` của service khác**.
 - **Document Service là chủ duy nhất bảng `documents`** (create + update status). Khớp [api-spec.md](api-spec.md) — `doc.status`: "Document Service subscribe để cập nhật PostgreSQL".
 
@@ -295,8 +295,8 @@ src/rag-worker/app/
 **Key logic cần implement:**
 
 *Ingestion pipeline (`ingest_document_use_case.py`):*
-1. Subscribe NATS `doc.ingest` (JetStream) → nhận `doc_id`, `gcs_key`, `file_type`
-2. Tải file từ GCS → detect loại: PDF scan / PDF text / DOCX / TXT / XLSX / ...
+1. Subscribe NATS `doc.ingest` (JetStream) → nhận `doc_id`, `s3_key`, `file_type`
+2. Tải file từ S3 → detect loại: PDF scan / PDF text / DOCX / TXT / XLSX / ...
 3. OCR (nếu PDF scan): gọi `gemini_ocr_client.py` — Gemini Vision API
 4. Parse text: PyMuPDF (PDF text layer), python-docx (DOCX), openpyxl (XLSX)
 5. Parent-Child Chunking: LlamaIndex HierarchicalNodeParser (config TBD)
@@ -442,7 +442,7 @@ src/query-service/app/
 docker-compose.yml               ← 12 containers: nginx, nuxt-chat, nuxt-admin, user-service,
                                     document-service, query-service, rag-worker, mcp-service,
                                     nats (JetStream), qdrant, redis, langfuse :3100
-                                    (PostgreSQL = GCP Cloud SQL external, không có container)
+                                    (PostgreSQL = AWS RDS external, không có container)
 
 src/user-service/Dockerfile
 src/document-service/Dockerfile
@@ -464,21 +464,21 @@ nginx/
 └── ssl/                         ← Let's Encrypt cert (production)
 
 infra/
-├── gcp/
-│   └── gce-setup.sh             ← Script init GCE: install Docker, clone repo, start compose
+├── aws/
+│   └── ec2-setup.sh             ← Script init EC2: install Docker, clone repo, start compose
 └── scripts/
     ├── db-migrate.sh            ← Chạy CREATE SCHEMA + DDL scripts từ data-schema.md
     └── smoke-test.sh            ← 10 câu hỏi mẫu sau deploy, pass hết mới OK
 
 .github/
 └── workflows/
-    └── deploy.yml               ← CI: test → build image → push Artifact Registry → SSH GCE → docker compose pull + up
+    └── deploy.yml               ← CI: test → build image → push ECR → SSH EC2 → docker compose pull + up
 ```
 
 **Key setup cần làm:**
-- **Langfuse server**: dựng + vận hành container `langfuse :3100` (DB backing, expose port, retention). Cấp **API key (public/secret) qua GCP Secret Manager** cho rag-worker + query-service dùng chung 1 project. DevOps chỉ lo hạ tầng — **không** viết `langfuse_client.py` (chủ service tự nhúng client).
+- **Langfuse server**: dựng + vận hành container `langfuse :3100` (DB backing, expose port, retention). Cấp **API key (public/secret) qua AWS Secrets Manager** cho rag-worker + query-service dùng chung 1 project. DevOps chỉ lo hạ tầng — **không** viết `langfuse_client.py` (chủ service tự nhúng client).
 - **NATS container**: deploy + vận hành broker (port 4222, JetStream enabled). **Subject + stream config do Backend Dev quyết** (DevOps chỉ chạy container theo cấu hình đó).
-- **Cloud Monitoring alarm**: ngưỡng phải đồng bộ với Circuit Breaker (`fail_max`, `reset_timeout`) của `mcp_client.py` (query-service → mcp-service).
+- **CloudWatch alarm**: ngưỡng phải đồng bộ với Circuit Breaker (`fail_max`, `reset_timeout`) của `mcp_client.py` (query-service → mcp-service).
 
 **Không được đụng:** bất kỳ file Python `.py` logic nào.
 
@@ -493,10 +493,10 @@ Ngày 1–2:
 
 Ngày 3+ (song song):
   Frontend  → frontend/base (auth + design system) trước → frontend/chat (chat SSE, notifications, document viewer) + frontend/admin (documents, users, analytics)
-  Backend Dev       → user-service (auth, DB, JWT, quản lý user) + document-service (upload, GCS, NATS doc.ingest/doc.status)
+  Backend Dev       → user-service (auth, DB, JWT, quản lý user) + document-service (upload, S3, NATS doc.ingest/doc.status)
   RAG Engineer      → rag-worker (ingestion Parent-Child + Gemini OCR + retrieval) + mcp-service (tool rag_search/hr_query + rerank)
   AI/Agent Engineer → query-service (FunctionCallingAgent + MCP client + SSE streaming + notify + history)
-  DevOps            → GCP GCE setup + CI/CD + Langfuse server
+  DevOps            → AWS EC2 setup + CI/CD + Langfuse server
 ```
 
 ---
@@ -536,10 +536,10 @@ Câu hỏi user
 |------|-----------------|----------|
 | SA | Nặng tuần 1 → nhẹ dần (review PR) | Review, không code |
 | Frontend Dev | **Nặng** — 2 micro-frontend Nuxt 4: base layer (auth + design system) + Chat app (SSE + Notification Center + Document Viewer + conversation history) + Admin app (documents + users + Analytics Dashboard) | Trung bình — mở rộng dashboard, realtime 2 chiều |
-| Backend Dev | **Nặng hơn trước** — user-service (auth + user CRUD) + document-service (upload, GCS, NATS doc.ingest/doc.status, delete) + **chủ NATS subject contract** | Nhẹ — ít thay đổi |
+| Backend Dev | **Nặng hơn trước** — user-service (auth + user CRUD) + document-service (upload, S3, NATS doc.ingest/doc.status, delete) + **chủ NATS subject contract** | Nhẹ — ít thay đổi |
 | RAG Engineer | **Rất nặng** — rag-worker (ingestion Parent-Child + Gemini OCR + retrieval Top-5) + mcp-service (tool rag_search/hr_query + rerank) | Tune chất lượng, chunk config |
 | AI/Agent Engineer | **Nặng** — query-service (FunctionCallingAgent + MCP client + SSE + notify + history) | Teams Bot (cũng là MCP client), dashboard analytics |
-| DevOps | Trung bình — Docker + GCP setup | Nhẹ — maintain |
+| DevOps | Trung bình — Docker + AWS setup | Nhẹ — maintain |
 
 ---
 
@@ -611,7 +611,7 @@ feature branches:
 | NATS subject contract + JetStream config (`infra/nats/`) | **Backend Dev** owns (rag.search payload = RAG Eng) | Đổi tên subject / payload / stream → báo Backend Dev; DevOps deploy container theo config |
 | `openai_client.py` (query-service) | AI/Agent Engineer owns | RAG Engineer không dùng, không đụng |
 | `openai_embedding_client.py` (rag-worker) | RAG Engineer owns | AI/Agent Engineer không dùng, không đụng |
-| `mcp_client.py` (query-service) | AI/Agent Engineer owns | Circuit Breaker (fail_max, reset_timeout) cho call query-service → mcp-service; đồng bộ Cloud Monitoring alarm |
+| `mcp_client.py` (query-service) | AI/Agent Engineer owns | Circuit Breaker (fail_max, reset_timeout) cho call query-service → mcp-service; đồng bộ CloudWatch alarm |
 | `nats_rag_client.py` (mcp-service) | **RAG Engineer** owns | Trong tool rag_search của mcp-service (gọi rag-worker qua NATS) |
 | `langfuse_client.py` (rag-worker) | RAG Engineer owns | Bắt buộc fail silently — không throw exception ra ngoài, không ảnh hưởng request |
 | `langfuse_client.py` (query-service) | AI/Agent Engineer owns | File riêng, độc lập với client rag-worker. Bắt buộc fail silently |

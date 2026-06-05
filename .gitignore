@@ -1,21 +1,12 @@
 .claude/
 proposal/
-src/rag-worker/haystack/
-
-# Python
-__pycache__/
-*.py[cod]
+.env
 .venv/
 venv/
+__pycache__/
 .pytest_cache/
 .ruff_cache/
-
-# Secrets — KHÔNG commit (.env chứa API key thật)
-.env
-*.env
-!.env.example
-
-# Service scratch payloads
+*.py[cod]
 query-body.json
 feedback-body.json
 notify-body.json

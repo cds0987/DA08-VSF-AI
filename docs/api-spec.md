@@ -148,7 +148,7 @@ Response 403:  { "detail": "Admin only" }
 
 ### `GET /documents/{document_id}/file`
 
-> Trả **presigned GCS URL** (TTL ngắn) để Frontend Document Viewer mở file gốc + highlight citation. Kiểm tra ACL theo user.
+> Trả **presigned S3 URL** (TTL ngắn) để Frontend Document Viewer mở file gốc + highlight citation. Kiểm tra ACL theo user.
 
 ```
 Response 200:  { "url": "https://<bucket>.s3.../...&X-Amz-Expires=300", "file_type": "pdf", "expires_in": 300 }
@@ -282,7 +282,7 @@ Response 503:  { "status": "degraded", "degraded_reasons": ["rag_worker unreacha
 
 | Subject | Type | Payload | Mô tả |
 |---------|------|---------|-------|
-| `doc.ingest` | Subscribe | `{ doc_id, gcs_key, file_type, classification, allowed_departments, allowed_user_ids }` | Document Service publish khi Admin upload. RAG Worker nhận → chạy pipeline ingestion. |
+| `doc.ingest` | Subscribe | `{ doc_id, s3_key, file_type, classification, allowed_departments, allowed_user_ids }` | Document Service publish khi Admin upload. RAG Worker nhận → chạy pipeline ingestion. |
 | `doc.status` | Publish | `{ doc_id, status: "indexed"\|"failed", chunk_count?, error? }` | RAG Worker publish sau khi ingestion xong. Document Service subscribe để cập nhật PostgreSQL. |
 | `rag.search` | Request-Reply | Request: `{ query_text, document_ids, top_k }` → Reply: `{ results: [...] }` | Query Service gửi request, RAG Worker xử lý và reply. Timeout 10s. |
 

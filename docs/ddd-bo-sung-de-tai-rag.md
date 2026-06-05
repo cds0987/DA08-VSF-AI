@@ -175,8 +175,8 @@ DDD yêu cầu xác định rõ đâu là **Core Domain** (điểm tạo ra giá
 | **Core Domain** ⭐ | Hallucination Control | Cơ chế Fallback khi score < 0.7 — đây là điểm khác biệt với các sản phẩm khác |
 | **Core Domain** ⭐ | Answer Generation với Citation | Sinh câu trả lời có dẫn nguồn rõ ràng |
 | **Generic Subdomain** | Authentication (JWT, SSO) | Dùng thư viện có sẵn (python-jose, msal) |
-| **Generic Subdomain** | File Storage (GCS) | Infrastructure chuẩn |
-| **Generic Subdomain** | Logging, Monitoring | Langfuse + Cloud Monitoring |
+| **Generic Subdomain** | File Storage (S3) | Infrastructure chuẩn |
+| **Generic Subdomain** | Logging, Monitoring | Langfuse + CloudWatch |
 | **Generic Subdomain** | UI/UX Chat Interface | Nuxt 4 + Tailwind, không phải điểm sáng |
 
 **Kết luận:** Đầu tư chính vào Core Domain — chunking strategy, threshold tuning, citation format. Đừng tự build lại Generic Subdomain.

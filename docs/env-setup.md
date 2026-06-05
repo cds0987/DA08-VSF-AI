@@ -17,8 +17,8 @@ cp src/mcp-service/.env.example       src/mcp-service/.env
 ## User Service — `src/user-service/.env.example`
 
 ```env
-# Database (Cloud SQL — user_db)
-DATABASE_URL=postgresql+asyncpg://user:password@<cloud-sql-ip>:5432/user_db
+# Database (RDS — user_db)
+DATABASE_URL=postgresql+asyncpg://user:password@<rds-endpoint>:5432/user_db
 
 # JWT (phải khớp với tất cả services)
 JWT_SECRET_KEY=your-secret-key-change-in-production
@@ -36,7 +36,7 @@ MICROSOFT_TENANT_ID=common    # "common" = chấp nhận mọi Microsoft account
 
 | Biến | Mô tả | Lấy ở đâu |
 |------|-------|-----------|
-| `DATABASE_URL` | Connection string PostgreSQL | Cloud SQL IP — database `user_db` |
+| `DATABASE_URL` | Connection string PostgreSQL | RDS endpoint — database `user_db` |
 | `JWT_SECRET_KEY` | Secret ký JWT — phải khớp các services verify token | Tự generate: `openssl rand -hex 32` |
 | `JWT_EXPIRE_MINUTES` | Thời gian hết hạn token (phút) | Mặc định 480 = 8 giờ |
 | `MICROSOFT_CLIENT_ID` | App ID đăng ký trên Azure | Azure Portal → App registrations → Application (client) ID |
@@ -48,8 +48,8 @@ MICROSOFT_TENANT_ID=common    # "common" = chấp nhận mọi Microsoft account
 ## Document Service — `src/document-service/.env.example`
 
 ```env
-# Database (Cloud SQL — doc_db)
-DATABASE_URL=postgresql+asyncpg://user:password@<cloud-sql-ip>:5432/doc_db
+# Database (RDS — doc_db)
+DATABASE_URL=postgresql+asyncpg://user:password@<rds-endpoint>:5432/doc_db
 
 # JWT (shared secret — verify locally, không gọi User Service)
 JWT_SECRET_KEY=your-secret-key-change-in-production
@@ -59,29 +59,30 @@ JWT_ALGORITHM=HS256
 NATS_URL=nats://nats:4222
 NATS_JETSTREAM_ENABLED=true
 
-# GCP Cloud Storage
-GCS_BUCKET=rag-chatbot-docs
-GCP_PROJECT_ID=vsf-rag-chatbot
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json  # local dev only; GCE dùng instance service account
+# AWS S3
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_S3_BUCKET=rag-chatbot-docs
+AWS_REGION=ap-southeast-1
 ```
 
 | Biến | Mô tả | Lấy ở đâu |
 |------|-------|-----------|
-| `DATABASE_URL` | Connection string PostgreSQL | Cloud SQL IP — database `doc_db` |
+| `DATABASE_URL` | Connection string PostgreSQL | RDS endpoint — database `doc_db` |
 | `JWT_SECRET_KEY` | Phải khớp với User Service | Dùng cùng key đã generate |
 | `NATS_URL` | URL kết nối NATS broker | `nats://nats:4222` (Docker) hoặc `nats://localhost:4222` (local dev) |
 | `NATS_JETSTREAM_ENABLED` | Bật JetStream để persist message — RAG Worker restart không mất job | `true` |
-| `GCS_BUCKET` | Tên GCS bucket chứa file gốc | GCP Console → Cloud Storage → Create bucket |
-| `GCP_PROJECT_ID` | GCP project ID | GCP Console → Project selector |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Path tới service account JSON (local dev) | GCP Console → IAM → Service Accounts → Keys |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Credentials upload file lên S3 | AWS Console → IAM → Users → Security credentials |
+| `AWS_S3_BUCKET` | Tên S3 bucket chứa file gốc | Tạo bucket trong AWS Console |
+| `AWS_REGION` | AWS region | `ap-southeast-1` (Singapore) |
 
 ---
 
 ## Query Service — `src/query-service/.env.example`
 
 ```env
-# Database (Cloud SQL — query_db)
-DATABASE_URL=postgresql+asyncpg://user:password@<cloud-sql-ip>:5432/query_db
+# Database (RDS — query_db)
+DATABASE_URL=postgresql+asyncpg://user:password@<rds-endpoint>:5432/query_db
 
 # JWT (shared secret — verify locally)
 JWT_SECRET_KEY=your-secret-key-change-in-production
@@ -115,7 +116,7 @@ LANGFUSE_HOST=http://langfuse:3100
 
 | Biến | Mô tả | Lấy ở đâu |
 |------|-------|-----------|
-| `DATABASE_URL` | Connection string PostgreSQL | Cloud SQL IP — database `query_db` |
+| `DATABASE_URL` | Connection string PostgreSQL | RDS endpoint — database `query_db` |
 | `JWT_SECRET_KEY` | Phải khớp với User Service | Dùng cùng key đã generate |
 | `OPENAI_API_KEY` | Key gọi OpenAI API (LLM + Embedding semantic cache) | platform.openai.com → API keys |
 | `OPENAI_LLM_MODEL` | Model LLM — streaming + Function Calling | `gpt-4o-mini` |
@@ -129,7 +130,7 @@ LANGFUSE_HOST=http://langfuse:3100
 ## RAG Worker — `src/rag-worker/.env.example`
 
 ```env
-# RAG Worker KHÔNG dùng PostgreSQL (no DATABASE_URL) — chỉ Qdrant + Cloud Storage (GCS) + NATS.
+# RAG Worker KHÔNG dùng PostgreSQL (no DATABASE_URL) — chỉ Qdrant + S3 + NATS.
 # Không expose HTTP nên không verify JWT.
 
 # OpenAI Embedding — 1536 dims
@@ -147,10 +148,11 @@ NATS_JETSTREAM_ENABLED=true
 QDRANT_URL=http://qdrant:6333
 QDRANT_COLLECTION=rag_chatbot
 
-# GCP Cloud Storage
-GCS_BUCKET=rag-chatbot-docs
-GCP_PROJECT_ID=vsf-rag-chatbot
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json  # local dev only; GCE dùng instance service account
+# AWS S3
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_S3_BUCKET=rag-chatbot-docs
+AWS_REGION=ap-southeast-1
 
 # Langfuse
 LANGFUSE_PUBLIC_KEY=...
@@ -166,17 +168,16 @@ LANGFUSE_HOST=http://langfuse:3100
 | `NATS_URL` | URL kết nối NATS broker | `nats://nats:4222` |
 | `QDRANT_URL` | Vector DB endpoint | `http://qdrant:6333` (Docker) hoặc `http://localhost:6333` (local) |
 | `QDRANT_COLLECTION` | Tên collection Qdrant | Giữ nguyên `rag_chatbot` |
-| `GCS_BUCKET` | Tên GCS bucket chứa file gốc | GCP Console → Cloud Storage → Create bucket |
-| `GCP_PROJECT_ID` | GCP project ID | GCP Console → Project selector |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Path tới service account JSON (local dev) | GCP Console → IAM → Service Accounts → Keys |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Credentials download file từ S3 | AWS Console → IAM → Users → Security credentials |
+| `AWS_REGION` | AWS region | `ap-southeast-1` (Singapore) |
 
 ---
 
 ## MCP Tool Service — `src/mcp-service/.env.example`
 
 ```env
-# Database (Cloud SQL — mcp_db, chứa hr_mock)
-DATABASE_URL=postgresql+asyncpg://user:password@<cloud-sql-ip>:5432/mcp_db
+# Database (RDS — mcp_db, chứa hr_mock)
+DATABASE_URL=postgresql+asyncpg://user:password@<rds-endpoint>:5432/mcp_db
 
 # JWT (verify token nội bộ do Query Service truyền — optional)
 JWT_SECRET_KEY=your-secret-key-change-in-production
@@ -201,7 +202,7 @@ MCP_PORT=8003
 
 | Biến | Mô tả | Lấy ở đâu |
 |------|-------|-----------|
-| `DATABASE_URL` | Connection string PostgreSQL | Cloud SQL IP — database `mcp_db` (hr_mock) |
+| `DATABASE_URL` | Connection string PostgreSQL | RDS endpoint — database `mcp_db` (hr_mock) |
 | `JWT_SECRET_KEY` | Phải khớp với User Service (nếu verify token nội bộ) | Dùng cùng key đã generate |
 | `NATS_URL` | URL kết nối NATS (gọi rag.search tới RAG Worker) | `nats://nats:4222` |
 | `OPENAI_API_KEY` | Key gọi OpenAI (query rewrite) | platform.openai.com → API keys |
@@ -217,7 +218,7 @@ MCP_PORT=8003
 # Local development
 NUXT_PUBLIC_USER_SERVICE_URL=http://localhost:8000   # auth /auth
 NUXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8001  # chat SSE + notifications
-# Production (GCP) — cùng domain, Nginx route theo path prefix
+# Production (AWS) — cùng domain, Nginx route theo path prefix
 # NUXT_PUBLIC_USER_SERVICE_URL=/api/user
 # NUXT_PUBLIC_QUERY_SERVICE_URL=/api/query
 ```
@@ -228,7 +229,7 @@ NUXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8001  # chat SSE + notifications
 NUXT_PUBLIC_USER_SERVICE_URL=http://localhost:8000      # auth /auth + quản lý user /users
 NUXT_PUBLIC_DOCUMENT_SERVICE_URL=http://localhost:8002  # quản lý tài liệu
 NUXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8001     # /admin/metrics
-# Production (GCP)
+# Production (AWS)
 # NUXT_PUBLIC_USER_SERVICE_URL=/api/user
 # NUXT_PUBLIC_DOCUMENT_SERVICE_URL=/api/documents
 # NUXT_PUBLIC_QUERY_SERVICE_URL=/api/query
@@ -240,7 +241,7 @@ NUXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8001     # /admin/metrics
 | `NUXT_PUBLIC_DOCUMENT_SERVICE_URL` | Upload / quản lý tài liệu (Admin only) | Admin |
 | `NUXT_PUBLIC_QUERY_SERVICE_URL` | Query / conversations / feedback (Chat); `/admin/metrics` (Admin) | Chat + Admin |
 
-> **Production note:** Frontend deploy cùng GCE với backend. Nginx route `/api/user/*` → `user-service:8000`, `/api/documents/*` → `document-service:8002`, `/api/query/*` → `query-service:8001`, `/api/mcp/*` → `mcp-service:8003`. Không cần CORS config vì cùng domain. (MCP Service chủ yếu được Query Service gọi nội bộ.)
+> **Production note:** Frontend deploy cùng EC2 với backend. Nginx route `/api/user/*` → `user-service:8000`, `/api/documents/*` → `document-service:8002`, `/api/query/*` → `query-service:8001`, `/api/mcp/*` → `mcp-service:8003`. Không cần CORS config vì cùng domain. (MCP Service chủ yếu được Query Service gọi nội bộ.)
 
 ---
 
@@ -250,10 +251,10 @@ NUXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8001     # /admin/metrics
 LANGFUSE_PORT=3100
 LANGFUSE_NEXTAUTH_SECRET=...      # generate: openssl rand -hex 32
 LANGFUSE_SALT=...                  # generate: openssl rand -hex 32
-DATABASE_URL=postgresql://user:password@<cloud-sql-ip>:5432/langfuse_db
+DATABASE_URL=postgresql://user:password@<rds-endpoint>:5432/langfuse_db
 ```
 
-> Langfuse chạy trên port **:3100** (tránh conflict với Nuxt: chat :3000, admin :3001). Truy cập dashboard tại `http://<gce-ip>:3100` — IT/DevOps only.
+> Langfuse chạy trên port **:3100** (tránh conflict với Nuxt: chat :3000, admin :3001). Truy cập dashboard tại `http://<ec2-ip>:3100` — IT/DevOps only.
 
 ---
 
