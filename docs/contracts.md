@@ -196,8 +196,6 @@ class NotificationRepository(ABC):
 
 ## mcp-service — Domain
 
-> Update 2026-06-05: contract hiện hành của `mcp-service` là search-only, code nằm ở `src/mcp-service/app/core/*`, chỉ expose `rag_search(query, document_ids?, top_k=5) -> List[SearchResult]`, dùng field `source_gcs_uri` / `markdown_gcs_uri`, hỗ trợ reranker `none|lexical|llm`, và chưa implement `hr_query`.
-
 MCP Tool Service expose tool qua giao thức MCP. Mỗi tool self-contained. `RerankService` nằm ở đây (trong tool `rag_search`).
 
 ```python

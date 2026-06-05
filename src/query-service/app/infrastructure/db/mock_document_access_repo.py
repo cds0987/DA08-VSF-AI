@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from app.domain.repositories.document_access_repository import DocumentAccessRepository
 from app.infrastructure.db.mock_data import MOCK_DOCUMENTS, MockDocument
 
@@ -38,6 +40,7 @@ class InMemoryDocumentAccessRepository(DocumentAccessRepository):
         classification: str,
         allowed_departments: list[str],
         allowed_user_ids: list[str],
+        occurred_at: datetime | None = None,
     ) -> None:
         self._records[document_id] = {
             "classification": classification,

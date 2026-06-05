@@ -2,9 +2,9 @@ from dataclasses import dataclass, field
 
 from app.application.ports import AuthenticatedUser
 from app.domain.entities.notification import Notification
+from app.domain.repositories.notification_repository import NotificationRepository
 from app.infrastructure.db.mock_data import mock_users
 from app.infrastructure.db.mock_document_access_repo import can_access_document
-from app.infrastructure.db.mock_notification_repo import InMemoryNotificationRepository
 from app.infrastructure.sse.connection_manager import ConnectionManager
 
 
@@ -20,7 +20,7 @@ class DocNewEvent:
 class NotificationService:
     def __init__(
         self,
-        repository: InMemoryNotificationRepository,
+        repository: NotificationRepository,
         connection_manager: ConnectionManager,
     ) -> None:
         self._repository = repository

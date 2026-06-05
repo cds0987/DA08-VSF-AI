@@ -41,7 +41,7 @@ class GetDocumentFileUseCase:
             raise PermissionDeniedError("Khong co quyen xem tai lieu nay")
 
         return DocumentFileResult(
-            url=await self.storage.generate_presigned_url(document.s3_key, expires_in=300),
+            url=await self.storage.generate_presigned_url(document.gcs_key, expires_in=300),
             file_type=document.file_type,
             expires_in=300,
         )

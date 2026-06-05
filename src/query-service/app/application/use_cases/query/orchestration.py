@@ -12,7 +12,9 @@ from app.application.ports import (
     MCPToolClient,
     SearchResultLike,
     SemanticCache,
+    ToolDecisionClient,
 )
+from app.application.tool_decision import ToolDecision, normalize_tool_decision
 from app.domain.repositories.conversation_repository import ConversationRepository
 from app.domain.repositories.document_access_repository import DocumentAccessRepository
 from app.infrastructure.config import Settings
@@ -27,6 +29,7 @@ class QueryOrchestrationUseCase:
         semantic_cache: SemanticCache,
         mcp_client: MCPToolClient,
         openai_client: LLMStreamingClient,
+        tool_decision_client: ToolDecisionClient,
     ) -> None:
         self._settings = settings
         self._conversation_repo = conversation_repo
@@ -34,6 +37,7 @@ class QueryOrchestrationUseCase:
         self._semantic_cache = semantic_cache
         self._mcp_client = mcp_client
         self._openai_client = openai_client
+        self._tool_decision_client = tool_decision_client
 
     async def stream(
         self,
@@ -46,17 +50,17 @@ class QueryOrchestrationUseCase:
 
         context = await self._conversation_repo.get_context(user.id, recent_k=5)
         recent_messages = [(message.role, message.content) for message in context.recent_messages]
-        intent = self._detect_intent(question)
-        if intent == "identity":
+        if _is_identity_question(question):
             async for event in self._handle_identity(user.id, session_id, started):
                 yield event
             return
 
-        if intent.startswith("hr:"):
+        decision = await self._choose_tool(question, recent_messages)
+        if decision.tool_name == "hr_query":
             async for event in self._handle_hr(
                 question=question,
                 user=user,
-                intent=intent.removeprefix("hr:"),
+                intent=str(decision.arguments["intent"]),
                 recent_messages=recent_messages,
                 session_id=session_id,
                 started=started,
@@ -64,6 +68,43 @@ class QueryOrchestrationUseCase:
                 yield event
             return
 
+        async for event in self._handle_rag(
+            question=question,
+            user=user,
+            recent_messages=recent_messages,
+            session_id=session_id,
+            started=started,
+        ):
+            yield event
+
+    async def _choose_tool(
+        self,
+        question: str,
+        recent_messages: list[tuple[str, str]],
+    ) -> ToolDecision:
+        try:
+            available_tools = await self._mcp_client.list_tools()
+            raw_decision = await self._tool_decision_client.choose_tool(
+                question=question,
+                recent_messages=recent_messages,
+                available_tools=available_tools,
+            )
+        except Exception:
+            return ToolDecision(tool_name="rag_search", arguments={}, reason="tool decision failed")
+
+        decision = normalize_tool_decision(raw_decision)
+        if decision.tool_name not in set(available_tools):
+            return ToolDecision(tool_name="rag_search", arguments={}, reason="chosen tool unavailable")
+        return decision
+
+    async def _handle_rag(
+        self,
+        question: str,
+        user: AuthenticatedUser,
+        recent_messages: list[tuple[str, str]],
+        session_id: str,
+        started: float,
+    ) -> AsyncIterator[dict]:
         allowed_doc_ids = await self._document_access_repo.get_allowed_doc_ids(
             user_id=user.id,
             role=user.role,
@@ -216,44 +257,8 @@ class QueryOrchestrationUseCase:
             "caption": result.caption,
             "heading_path": result.heading_path,
             "score": result.score,
-            "source_s3_uri": result.source_s3_uri,
+            "source_gcs_uri": result.source_gcs_uri,
         }
-
-    @staticmethod
-    def _detect_intent(question: str) -> str:
-        lower = question.lower()
-        normalized = _normalize_text(question)
-        if any(
-            keyword in normalized
-            for keyword in [
-                "ban la ai",
-                "ban lam duoc gi",
-                "ban co the lam gi",
-                "gioi thieu ve ban",
-                "who are you",
-                "what can you do",
-            ]
-        ):
-            return "identity"
-        if any(keyword in normalized for keyword in ["luong", "payroll", "khau tru"]) or any(
-            keyword in lower for keyword in ["lương", "payroll", "khấu trừ"]
-        ):
-            return "hr:payroll"
-        if any(
-            keyword in normalized
-            for keyword in ["don nghi", "leave request", "trang thai nghi"]
-        ) or any(
-            keyword in lower for keyword in ["đơn nghỉ", "leave request", "trạng thái nghỉ"]
-        ):
-            return "hr:leave_requests"
-        if any(
-            keyword in normalized
-            for keyword in ["ngay nghi", "nghi phep con", "leave balance"]
-        ) or any(
-            keyword in lower for keyword in ["ngày nghỉ", "nghỉ phép còn", "leave balance"]
-        ):
-            return "hr:leave_balance"
-        return "rag"
 
 
 def _hr_context_text(result: HrQueryResultLike) -> str:
@@ -295,6 +300,19 @@ def _normalize_text(text: str) -> str:
     )
     without_punctuation = re.sub(r"[_\W]+", " ", without_accents, flags=re.UNICODE)
     return re.sub(r"\s+", " ", without_punctuation).strip()
+
+
+def _is_identity_question(question: str) -> bool:
+    normalized = _normalize_text(question)
+    phrases = (
+        "ban la ai",
+        "ban lam duoc gi",
+        "ban co the lam gi",
+        "gioi thieu ve ban",
+        "who are you",
+        "what can you do",
+    )
+    return any(phrase in normalized for phrase in phrases)
 
 
 def _is_fallback_answer(answer: str) -> bool:

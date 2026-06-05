@@ -60,7 +60,7 @@ class DeleteDocumentUseCase:
         if document is None:
             raise NotFoundError()
 
-        await self.storage.delete_file(document.s3_key)
+        await self.storage.delete_file(document.gcs_key)
         await self.document_repository.delete(document.id)
         await self.publisher.publish_doc_access(
             {
@@ -78,7 +78,7 @@ class DeleteDocumentUseCase:
             actor_role=actor.role,
             resource_type="document",
             resource_id=document.id,
-            detail={"s3_key": document.s3_key},
+            detail={"gcs_key": document.gcs_key},
             ip_address=ip_address,
         )
         return DeleteDocumentResult(message="Document deleted")
