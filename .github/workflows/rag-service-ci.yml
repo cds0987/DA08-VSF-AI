@@ -1,4 +1,4 @@
-name: rag-worker-ci
+name: rag-worker + mcp-service search semantic
 
 on:
   push:
@@ -111,11 +111,11 @@ jobs:
           docker logs minio || true
           docker logs qdrant || true
 
-  # E2e interop rag-worker (producer) <-> mcp-service (consumer) QUA QDRANT THẬT.
-  # Chứng minh: ranh giới duy nhất là Qdrant; dấu niêm contract khớp -> mcp search
-  # được; nếu mcp lệch model -> mcp FAIL-CLOSED (crash). Xem
-  # docs/search-split-vectorstore-contract.md §7.3.
-  mcp-e2e:
+  # LUỒNG THẬT 2 service: rag-worker (producer) ingest TOÀN BỘ validation corpus qua
+  # message thật (NATS) + object storage thật (MinIO) vào Qdrant; mcp-service (consumer)
+  # semantic search lại trên CÙNG Qdrant. Service ở giữa (document-service / query-service)
+  # được GIẢ LẬP bằng message + script. Ranh giới duy nhất giữa 2 service là Qdrant.
+  search-semantic:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -123,16 +123,36 @@ jobs:
         with:
           python-version: "3.13"
 
+      # --- Hạ tầng THẬT bằng docker (giống production) -------------------------
+      - name: Start NATS (JetStream)
+        run: docker run -d --name nats -p 4222:4222 nats:2.10 -js
+
+      - name: Start MinIO (S3 object storage)
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data
+
       - name: Start Qdrant (vector DB)
         run: docker run -d --name qdrant -p 6333:6333 qdrant/qdrant
 
-      - name: Wait for Qdrant 6333
+      - name: Wait for infra (NATS 4222 / MinIO 9000 / Qdrant 6333)
         run: |
-          for i in $(seq 1 60); do
-            if (echo > /dev/tcp/127.0.0.1/6333) 2>/dev/null; then echo "qdrant up"; exit 0; fi
-            sleep 1
+          ready() { (echo > /dev/tcp/127.0.0.1/$1) 2>/dev/null; }
+          for port in 4222 9000 6333; do
+            ok=""
+            for i in $(seq 1 60); do
+              if ready "$port"; then echo "port $port up"; ok=1; break; fi
+              sleep 1
+            done
+            if [ -z "$ok" ]; then
+              echo "infra port $port did not become ready" >&2
+              docker ps -a
+              docker logs nats || true; docker logs minio || true; docker logs qdrant || true
+              exit 1
+            fi
           done
-          echo "qdrant did not become ready" >&2; docker logs qdrant || true; exit 1
 
       - name: Install deps (rag-worker producer + mcp-service consumer)
         run: |
@@ -140,22 +160,34 @@ jobs:
           pip install -r src/rag-worker/requirements.txt
           pip install -r src/mcp-service/requirements.txt
 
-      # PRODUCER: rag-worker ingest 1 doc (offline) + ghi dấu niêm vào Qdrant.
-      - name: Seed Qdrant via rag-worker (producer)
+      # PRODUCER: rag-worker ingest CẢ corpus qua NATS+MinIO + ghi dấu niêm vào Qdrant.
+      # KHÔNG override VECTOR_COLLECTION -> collection mặc định khớp index_id mcp đọc.
+      - name: Seed Qdrant via rag-worker (full corpus, NATS + MinIO)
         working-directory: src/rag-worker
         env:
+          APP_ENV: development
           AI_PROVIDER: offline
+          PARSER_IMPL: s3
+          NATS_URL: nats://127.0.0.1:4222
+          S3_ENDPOINT_URL: http://127.0.0.1:9000
+          S3_ACCESS_KEY_ID: minioadmin
+          S3_SECRET_ACCESS_KEY: minioadmin
+          S3_REGION: us-east-1
+          E2E_S3_BUCKET: rag-e2e
           VECTOR_DB_URL: http://127.0.0.1:6333
-        run: python scripts/seed_qdrant_e2e.py
+        run: python scripts/seed_validation_corpus_e2e.py
 
-      # CONSUMER happy path: mcp verify dấu niêm + search -> phải exit 0, ra hit.
-      - name: mcp-service verify + search (expect success)
+      # CONSUMER happy path: mcp verify dấu niêm + semantic search cả corpus.
+      # offline embed không ngữ nghĩa -> lexical rerank + threshold 0 lái đúng doc.
+      - name: mcp-service verify + search full corpus (expect success)
         working-directory: src/mcp-service
         env:
           AI_PROVIDER: offline
-          RERANK_PROVIDER: none
+          RERANK_PROVIDER: lexical
+          RERANK_THRESHOLD: "0"
+          SEARCH_TOP_K: "50"
           VECTOR_DB_URL: http://127.0.0.1:6333
-        run: python scripts/e2e_search.py
+        run: python scripts/e2e_search_validation.py
 
       # CONSUMER drift: mcp dùng model khác (bge-m3) -> collection/stamp không khớp
       # -> verify FAIL-CLOSED. CI phải thấy non-zero; nếu exit 0 là guard thủng.
@@ -167,12 +199,15 @@ jobs:
           RERANK_PROVIDER: none
           VECTOR_DB_URL: http://127.0.0.1:6333
         run: |
-          if python scripts/e2e_search.py; then
+          if python scripts/e2e_search_validation.py; then
             echo "DRIFT NOT CAUGHT: mcp phục vụ search dù lệch contract" >&2
             exit 1
           fi
           echo "OK: mcp fail-closed khi lệch contract"
 
-      - name: Qdrant logs on failure
+      - name: Infra logs on failure
         if: failure()
-        run: docker logs qdrant || true
+        run: |
+          docker logs nats || true
+          docker logs minio || true
+          docker logs qdrant || true
