@@ -32,7 +32,7 @@ If the container name is different, use the active NATS container name from `doc
 
 Review these points in `subjects.md`:
 
-- `doc.ingest` payload contains `doc_id`, `s3_key`, `file_type`, `classification`, `allowed_departments`, `allowed_user_ids`.
+- `doc.ingest` payload contains `doc_id`, `gcs_key`, `document_name`, `file_type`, `classification`, `allowed_departments`, `allowed_user_ids`.
 - `doc.status` payload contains `doc_id`, `status`, and optional `chunk_count` or `error`.
 - `doc.access` payload contains `classification`, ACL fields, and `deleted`.
 - `notify.doc_new` payload contains `doc_id`, `document_name`, and ACL fields.
@@ -52,7 +52,7 @@ Review these points in `subjects.md`:
 
 ```text
 Admin upload
-  -> Document Service saves file to S3
+  -> Document Service saves file to GCS
   -> Document Service creates document row with status `queued`
   -> Document Service publishes `doc.ingest`
   -> RAG Worker ingests and indexes

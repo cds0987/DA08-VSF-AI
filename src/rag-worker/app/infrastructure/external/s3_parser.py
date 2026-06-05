@@ -79,21 +79,29 @@ def _default_client_factory() -> Any:
         raise ModuleNotFoundError(
             "S3SourceParser cần boto3. Cài: pip install boto3"
         ) from exc
+    base_config = dict(
+        signature_version="s3v4",
+        connect_timeout=float(os.getenv("S3_CONNECT_TIMEOUT", "10")),
+        read_timeout=float(os.getenv("S3_READ_TIMEOUT", "60")),
+        retries={"max_attempts": int(os.getenv("S3_MAX_ATTEMPTS", "3"))},
+    )
+    # GCS/R2/MinIO từ chối flexible-checksum header của botocore -> tắt. Chỉ botocore
+    # >=1.36 mới có 2 tham số này; bản cũ (vd boto3 1.35.x) sẽ raise TypeError -> fallback.
+    try:
+        config = Config(
+            **base_config,
+            request_checksum_calculation="when_required",
+            response_checksum_validation="when_required",
+        )
+    except TypeError:
+        config = Config(**base_config)
     return boto3.client(
         "s3",
         endpoint_url=_env("S3_ENDPOINT_URL", "R2_ENDPOINT_URL") or None,
         aws_access_key_id=_env("S3_ACCESS_KEY_ID", "R2_ACCESS_KEY_ID"),
         aws_secret_access_key=_env("S3_SECRET_ACCESS_KEY", "R2_SECRET_ACCESS_KEY"),
         region_name=_env("S3_REGION", default="auto"),
-        config=Config(
-            signature_version="s3v4",
-            connect_timeout=float(os.getenv("S3_CONNECT_TIMEOUT", "10")),
-            read_timeout=float(os.getenv("S3_READ_TIMEOUT", "60")),
-            retries={"max_attempts": int(os.getenv("S3_MAX_ATTEMPTS", "3"))},
-            # GCS/R2/MinIO từ chối flexible-checksum header của botocore -> tắt.
-            request_checksum_calculation="when_required",
-            response_checksum_validation="when_required",
-        ),
+        config=config,
     )
 
 
