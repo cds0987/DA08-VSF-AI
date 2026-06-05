@@ -155,9 +155,9 @@ src/mcp-service/                    ← Container 5: MCP Tool Service (:8003)
 │   │   └── mcp_server.py           # Expose tool qua MCP (Streamable HTTP/SSE)
 │   └── main.py                     # MCP server :8003
 
-src/frontend/base/                  ← Nuxt Layer dùng chung (auth /auth + design system + useApi) — build-time, KHÔNG container
-src/frontend/chat/                  ← Container 6: Chat app End User (:3000) — extends frontend/base → Query Service
-src/frontend/admin/                 ← Container 7: Admin console (:3001) — extends frontend/base → Document + User /users + metrics
+src/frontend/base/                  ← Nuxt Layer dùng chung (useAuth + useApi + middleware/auth + design system) — build-time, KHÔNG container
+src/frontend/chat/                  ← Container 6: Chat app End User (:3000) — /login gọi POST /auth/login (user + admin) → Query Service
+src/frontend/admin/                 ← Container 7: Admin console (:3001) — /login gọi POST /auth/admin/login (admin only) → Document + User /users + metrics
 ```
 
 ---
