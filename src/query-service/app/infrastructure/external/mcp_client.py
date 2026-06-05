@@ -2,8 +2,12 @@ from dataclasses import dataclass
 import re
 from typing import Any
 import unicodedata
+from uuid import uuid4
+
+import httpx
 
 from app.infrastructure.db.mock_data import MOCK_DOCUMENTS, MOCK_HR_DATA
+from app.infrastructure.config import Settings
 
 
 @dataclass(frozen=True)
@@ -190,6 +194,81 @@ class MockMCPClient:
         self.last_tool_calls.clear()
 
 
+class MCPJsonRpcClient:
+    def __init__(self, settings: Settings) -> None:
+        self._endpoint_url = _mcp_endpoint_url(settings.mcp_service_url)
+        self._timeout_seconds = settings.mcp_timeout_seconds
+
+    async def list_tools(self) -> list[str]:
+        result = await self._request("tools/list", {})
+        tools = result.get("tools", [])
+        names: list[str] = []
+        for tool in tools:
+            if isinstance(tool, str):
+                names.append(tool)
+            elif isinstance(tool, dict) and tool.get("name"):
+                names.append(str(tool["name"]))
+        return names
+
+    async def rag_search(
+        self,
+        query: str,
+        document_ids: list[str],
+        top_k: int = 5,
+    ) -> list[SearchResult]:
+        result = await self._call_tool(
+            "rag_search",
+            {
+                "query": query,
+                "document_ids": list(document_ids),
+                "top_k": top_k,
+            },
+        )
+        payload = _extract_tool_payload(result)
+        raw_results = payload.get("results", payload if isinstance(payload, list) else [])
+        if not isinstance(raw_results, list):
+            return []
+        return [_search_result_from_payload(item) for item in raw_results if isinstance(item, dict)]
+
+    async def hr_query(self, user_id: str, intent: str) -> HrQueryResult:
+        result = await self._call_tool(
+            "hr_query",
+            {
+                "user_id": user_id,
+                "intent": intent,
+            },
+        )
+        payload = _extract_tool_payload(result)
+        if not isinstance(payload, dict):
+            payload = {}
+        return _hr_result_from_payload(payload, intent)
+
+    async def _call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        return await self._request(
+            "tools/call",
+            {
+                "name": name,
+                "arguments": arguments,
+            },
+        )
+
+    async def _request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        request = {
+            "jsonrpc": "2.0",
+            "id": str(uuid4()),
+            "method": method,
+            "params": params,
+        }
+        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+            response = await client.post(self._endpoint_url, json=request)
+        response.raise_for_status()
+        payload = response.json()
+        if payload.get("error"):
+            raise RuntimeError(f"MCP JSON-RPC error: {payload['error']}")
+        result = payload.get("result", {})
+        return result if isinstance(result, dict) else {}
+
+
 def _leave_balance_summary(balance: LeaveBalanceDTO) -> str:
     return (
         f"Bạn còn {balance.annual_remaining} ngày nghỉ phép năm "
@@ -270,3 +349,105 @@ def _normalize_text(text: str) -> str:
     )
     without_punctuation = re.sub(r"[_\W]+", " ", without_accents, flags=re.UNICODE)
     return re.sub(r"\s+", " ", without_punctuation).strip()
+
+
+def _mcp_endpoint_url(service_url: str) -> str:
+    base = service_url.rstrip("/")
+    if base.endswith("/mcp"):
+        return base
+    return f"{base}/mcp"
+
+
+def _extract_tool_payload(result: dict[str, Any]) -> Any:
+    if "structuredContent" in result:
+        return result["structuredContent"]
+    content = result.get("content")
+    if isinstance(content, list):
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            if "json" in item:
+                return item["json"]
+            text = item.get("text")
+            if isinstance(text, str):
+                try:
+                    import json
+
+                    return json.loads(text)
+                except ValueError:
+                    continue
+    return result
+
+
+def _search_result_from_payload(item: dict[str, Any]) -> SearchResult:
+    return SearchResult(
+        chunk_id=str(item.get("chunk_id") or item.get("node_id") or item.get("unit_id") or ""),
+        document_id=str(item.get("document_id", "")),
+        document_name=str(item.get("document_name") or item.get("display_name") or ""),
+        caption=str(item.get("caption", "")),
+        parent_text=str(item.get("parent_text") or item.get("content") or ""),
+        heading_path=list(item.get("heading_path") or []),
+        score=float(item.get("score") or item.get("rerank_score") or 0.0),
+        page_number=item.get("page_number"),
+        source_s3_uri=str(
+            item.get("source_s3_uri")
+            or (item.get("lineage", {}) or {}).get("source_uri")
+            or ""
+        ),
+        markdown_s3_uri=str(
+            item.get("markdown_s3_uri")
+            or (item.get("lineage", {}) or {}).get("artifact_uri")
+            or ""
+        ),
+    )
+
+
+def _hr_result_from_payload(payload: dict[str, Any], requested_intent: str) -> HrQueryResult:
+    leave_balance = None
+    if isinstance(payload.get("leave_balance"), dict):
+        balance = payload["leave_balance"]
+        leave_balance = LeaveBalanceDTO(
+            annual_total=int(balance.get("annual_total") or balance.get("annual_leave_total") or 0),
+            annual_used=int(balance.get("annual_used") or balance.get("annual_leave_used") or 0),
+            annual_remaining=int(
+                balance.get("annual_remaining") or balance.get("annual_leave_remaining") or 0
+            ),
+            sick_total=int(balance.get("sick_total") or balance.get("sick_leave_total") or 0),
+            sick_used=int(balance.get("sick_used") or balance.get("sick_leave_used") or 0),
+            sick_remaining=int(balance.get("sick_remaining") or 0),
+        )
+
+    leave_requests = None
+    if isinstance(payload.get("leave_requests"), list):
+        leave_requests = [
+            LeaveRequestDTO(
+                leave_type=str(item.get("leave_type", "")),
+                start_date=str(item.get("start_date", "")),
+                end_date=str(item.get("end_date", "")),
+                days_count=int(item.get("days_count", 0)),
+                status=str(item.get("status", "")),
+            )
+            for item in payload["leave_requests"]
+            if isinstance(item, dict)
+        ]
+
+    payroll = None
+    if isinstance(payload.get("payroll"), list):
+        payroll = [
+            PayrollDTO(
+                period=str(item.get("period", "")),
+                gross_salary=float(item.get("gross_salary", 0.0)),
+                deductions=float(item.get("deductions", 0.0)),
+                net_salary=float(item.get("net_salary", 0.0)),
+            )
+            for item in payload["payroll"]
+            if isinstance(item, dict)
+        ]
+
+    return HrQueryResult(
+        intent=str(payload.get("intent") or requested_intent),
+        leave_balance=leave_balance,
+        leave_requests=leave_requests,
+        payroll=payroll,
+        summary=str(payload.get("summary", "")),
+    )

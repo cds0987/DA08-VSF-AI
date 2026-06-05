@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     query_rate_limit_per_minute: int = 20
     notification_keepalive_seconds: int = 25
 
+    intent_classifier_mode: str = "hybrid"
+    intent_rule_confidence_threshold: float = 0.90
+    intent_embedding_confidence_threshold: float = 0.78
+    intent_embedding_margin: float = 0.08
+    intent_llm_confidence_threshold: float = 0.70
+    intent_llm_model: str = "gpt-4o-mini"
+    intent_llm_timeout_seconds: int = 5
+
     enable_dev_endpoints: bool = Field(default=True)
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

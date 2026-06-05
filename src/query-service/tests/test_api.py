@@ -4,10 +4,11 @@ import httpx
 import jwt
 import pytest
 
+from app.application.tool_decision import ToolDecision
 from app.infrastructure.auth import auth_service
 from app.infrastructure.auth.auth_service import AuthService
 from app.infrastructure.config import Settings, get_settings
-from app.interfaces.api.dependencies import get_mcp_client
+from app.interfaces.api.dependencies import get_mcp_client, get_tool_decision_client
 from app.interfaces.api.main import app
 
 
@@ -228,6 +229,140 @@ async def test_hr_tool_injects_authenticated_user_id(client, tokens):
     assert response.status_code == 200
     assert "27200000" not in response.text
     assert '"sources": []' in response.text
+
+
+@pytest.mark.asyncio
+async def test_paraphrased_leave_balance_question_routes_to_hr_tool(client, tokens):
+    mcp_client = get_mcp_client()
+    mcp_client.reset()
+
+    response = await client.post(
+        "/query",
+        headers=auth(tokens["finance"]),
+        json={
+            "question": "How much remaining leave do I still have?",
+            "user_id": FINANCE_USER_ID,
+        },
+    )
+
+    assert response.status_code == 200
+    last_call = mcp_client.last_tool_calls[-1]
+    assert last_call.tool_name == "hr_query"
+    assert last_call.arguments == {
+        "user_id": FINANCE_USER_ID,
+        "intent": "leave_balance",
+    }
+    assert '"sources": []' in response.text
+
+
+@pytest.mark.asyncio
+async def test_valid_hr_tool_decision_ignores_llm_supplied_user_id(client, tokens):
+    mcp_client = get_mcp_client()
+    mcp_client.reset()
+    decision_client = get_tool_decision_client()
+    decision_client.force_next_decision(
+        ToolDecision(
+            tool_name="hr_query",
+            arguments={
+                "intent": "payroll",
+                "user_id": ADMIN_USER_ID,
+            },
+        )
+    )
+
+    response = await client.post(
+        "/query",
+        headers=auth(tokens["finance"]),
+        json={"question": "Cho tôi xem bảng lương tháng này", "user_id": FINANCE_USER_ID},
+    )
+
+    assert response.status_code == 200
+    last_call = mcp_client.last_tool_calls[-1]
+    assert last_call.tool_name == "hr_query"
+    assert last_call.arguments == {
+        "user_id": FINANCE_USER_ID,
+        "intent": "payroll",
+    }
+    assert '"sources": []' in response.text
+
+
+@pytest.mark.asyncio
+async def test_rag_tool_decision_ignores_llm_supplied_acl_arguments(client, tokens):
+    mcp_client = get_mcp_client()
+    mcp_client.reset()
+    decision_client = get_tool_decision_client()
+    decision_client.force_next_decision(
+        ToolDecision(
+            tool_name="rag_search",
+            arguments={
+                "query": "Executive compensation",
+                "document_ids": ["dddddddd-0004-4000-8000-000000000004"],
+                "top_k": 99,
+            },
+        )
+    )
+
+    response = await client.post(
+        "/query",
+        headers=auth(tokens["finance"]),
+        json={"question": "Finance report guideline", "user_id": FINANCE_USER_ID},
+    )
+
+    assert response.status_code == 200
+    last_call = mcp_client.last_tool_calls[-1]
+    assert last_call.tool_name == "rag_search"
+    assert last_call.arguments["query"] == "Finance report guideline"
+    assert last_call.arguments["top_k"] == 5
+    assert "dddddddd-0003-4000-8000-000000000003" in last_call.arguments["document_ids"]
+    assert "dddddddd-0004-4000-8000-000000000004" not in last_call.arguments["document_ids"]
+
+
+@pytest.mark.asyncio
+async def test_invalid_tool_decision_falls_back_to_rag_search(client, tokens):
+    mcp_client = get_mcp_client()
+    mcp_client.reset()
+    decision_client = get_tool_decision_client()
+    decision_client.force_next_decision(
+        ToolDecision(
+            tool_name="hr_query",
+            arguments={"intent": "benefits"},
+        )
+    )
+
+    response = await client.post(
+        "/query",
+        headers=auth(tokens["finance"]),
+        json={"question": "Finance report guideline", "user_id": FINANCE_USER_ID},
+    )
+
+    assert response.status_code == 200
+    last_call = mcp_client.last_tool_calls[-1]
+    assert last_call.tool_name == "rag_search"
+    assert last_call.arguments["document_ids"]
+
+
+@pytest.mark.asyncio
+async def test_unknown_tool_decision_falls_back_to_rag_search(client, tokens):
+    mcp_client = get_mcp_client()
+    mcp_client.reset()
+    decision_client = get_tool_decision_client()
+    decision_client.force_next_decision(
+        ToolDecision(
+            tool_name="delete_document",
+            arguments={"document_ids": ["dddddddd-0004-4000-8000-000000000004"]},
+        )
+    )
+
+    response = await client.post(
+        "/query",
+        headers=auth(tokens["finance"]),
+        json={"question": "Finance report guideline", "user_id": FINANCE_USER_ID},
+    )
+
+    assert response.status_code == 200
+    last_call = mcp_client.last_tool_calls[-1]
+    assert last_call.tool_name == "rag_search"
+    assert "dddddddd-0004-4000-8000-000000000004" not in last_call.arguments["document_ids"]
 
 
 @pytest.mark.asyncio

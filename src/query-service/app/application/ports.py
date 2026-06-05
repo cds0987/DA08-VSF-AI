@@ -2,6 +2,8 @@ from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from app.application.tool_decision import ToolDecision
+
 
 @dataclass(frozen=True)
 class AuthenticatedUser:
@@ -55,6 +57,16 @@ class LLMStreamingClient(Protocol):
         sources: Sequence[SearchResultLike],
         is_hr_answer: bool = False,
     ) -> AsyncIterator[str]:
+        ...
+
+
+class ToolDecisionClient(Protocol):
+    async def choose_tool(
+        self,
+        question: str,
+        recent_messages: list[tuple[str, str]],
+        available_tools: Sequence[str],
+    ) -> ToolDecision:
         ...
 
 
