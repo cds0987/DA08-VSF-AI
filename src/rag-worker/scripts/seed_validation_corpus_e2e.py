@@ -29,9 +29,13 @@ import contextlib
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 
 RAG_WORKER_ROOT = Path(__file__).resolve().parents[1]
+# Chạy `python scripts/...` đặt scripts/ lên sys.path, KHÔNG phải rag-worker root ->
+# thêm root để import được app.* / core_engine.* (giống mcp scripts/e2e_search.py).
+sys.path.insert(0, str(RAG_WORKER_ROOT))
 VALIDATION_DIR = RAG_WORKER_ROOT / "eval" / "validation"
 MANIFEST_PATH = VALIDATION_DIR / "manifest.json"
 

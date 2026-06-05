@@ -79,6 +79,7 @@ class RerankerConfig(ComponentWithParams):
     model: str = "gpt-4o-mini"
     base_url: str = ""
     api_key: str = ""
+    timeout_seconds: float = 30.0   # mcp-service LLM reranker đọc field này (params: batch_size/passage_chars)
 
     @model_validator(mode="after")
     def validate_reranker(self) -> "RerankerConfig":
