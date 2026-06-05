@@ -601,8 +601,14 @@ def _nats_config() -> dict | None:
     }
 
 
-async def start_nats_ingest(runtime: "RuntimeState", logger: logging.Logger):
-    """Bật cửa ingest NATS nếu có NATS_URL. Trả (broker, subscription, status_publisher)."""
+async def start_nats_ingest(
+    runtime: "RuntimeState", logger: logging.Logger
+) -> tuple[Any, Any, Any]:
+    """Bật cửa ingest NATS nếu có NATS_URL. Trả (broker, subscription, status_publisher).
+
+    Lỗi khi bật NATS -> đóng broker + degrade gracefully (trả None): search/HTTP độc
+    lập vẫn chạy, không để NATS hỏng kéo sập cả service. Ops theo dõi log ERROR.
+    """
     cfg = _nats_config()
     if cfg is None or runtime.ingest_use_case is None:
         return None, None, None
@@ -615,18 +621,30 @@ async def start_nats_ingest(runtime: "RuntimeState", logger: logging.Logger):
     )
 
     broker = NatsBroker(cfg["url"])
-    await broker.connect()
-    await broker.ensure_stream(
-        cfg["stream"], [cfg["doc_ingest_subject"], cfg["doc_status_subject"]]
-    )
-    consumer = DocIngestConsumer(runtime.ingest_use_case, logger=logger)
-    subscription = await start_doc_ingest_subscription(
-        broker,
-        consumer,
-        subject=cfg["doc_ingest_subject"],
-        durable=cfg["durable"],
-        logger=logger,
-    )
+    try:
+        await broker.connect()
+        await broker.ensure_stream(
+            cfg["stream"], [cfg["doc_ingest_subject"], cfg["doc_status_subject"]]
+        )
+        consumer = DocIngestConsumer(runtime.ingest_use_case, logger=logger)
+        subscription = await start_doc_ingest_subscription(
+            broker,
+            consumer,
+            subject=cfg["doc_ingest_subject"],
+            durable=cfg["durable"],
+            logger=logger,
+        )
+    except Exception as exc:  # noqa: BLE001 - NATS hỏng không được giết search/HTTP
+        with contextlib.suppress(Exception):
+            await broker.close()
+        log_event(
+            logger,
+            logging.ERROR,
+            "nats_ingest_start_failed",
+            stage="startup",
+            error=str(exc),
+        )
+        return None, None, None
     publisher = DocStatusPublisher(
         broker, subject=cfg["doc_status_subject"], logger=logger
     )
@@ -663,6 +681,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     worker_count = int(os.getenv("INGEST_WORKER_COUNT", "1"))
     worker_poll_interval = float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5"))
+    if status_publisher is not None and worker_count <= 0:
+        # NATS enqueue được nhưng không worker nào xử lý -> không bao giờ publish
+        # doc.status. Cảnh báo để cấu hình sai lộ ra thay vì doc kẹt im lặng.
+        log_event(
+            logger,
+            logging.WARNING,
+            "nats_ingest_without_worker",
+            stage="startup",
+            worker_count=worker_count,
+        )
     worker_tasks = []
     if runtime.ingest_use_case is not None:
         worker_tasks = [

@@ -53,6 +53,22 @@ class IngestDocumentUseCase:
         if not markdown and not source_uri:
             raise ValueError("ingest requires either markdown or source_uri")
         request_correlation_id = correlation_id or f"ingest:{document_id}"
+        # Dedup redelivery: NATS at-least-once có thể gửi lại doc.ingest. Nếu đã có
+        # job chưa-terminal cho document_id, bỏ qua tạo job mới (tránh re-fetch S3 +
+        # parse + embed dư thừa và hai worker chạy song song cùng doc).
+        existing = await self._jobs.find_active_job(document_id)
+        if existing is not None:
+            log_event(
+                self._logger,
+                logging.INFO,
+                "ingest_enqueue_skipped_duplicate",
+                stage="queue",
+                document_id=document_id,
+                correlation_id=request_correlation_id,
+                existing_job_id=existing.id,
+                existing_status=existing.status.value,
+            )
+            return existing
         now = datetime.now(UTC)
         await self._documents.create(
             Document(
@@ -144,7 +160,11 @@ class IngestDocumentUseCase:
                     created_at=datetime.now(UTC),
                 )
             )
-            raise
+            # KHÔNG raise: fail_job đã đặt FAILED terminal (retry do stale-reaper lo khi
+            # worker CHẾT, không phải khi job lỗi). Trả job FAILED để worker publish
+            # doc.status:failed (nếu raise thì nhánh except của worker nuốt job -> mất
+            # status, contract vỡ). Job terminal nên không bị claim lại -> không busy-loop.
+            return await self._jobs.get_job(job.id)
         finally:
             heartbeat_stop.set()
             heartbeat_task.cancel()

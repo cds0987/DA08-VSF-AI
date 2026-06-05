@@ -42,12 +42,27 @@ claim, lease/heartbeat, stale-reaper, retry) thay vì dựa hoàn toàn vào Jet
 | Tình huống | Hành động | Vì sao |
 |---|---|---|
 | enqueue OK | `ack` | message an toàn trong DB queue |
-| payload hỏng (thiếu field / JSON sai) | `term` | poison → KHÔNG redeliver vô hạn |
+| payload hỏng (thiếu field / JSON sai → `BadPayloadError`) | `term` | poison → KHÔNG redeliver vô hạn |
 | lỗi tạm (DB down…) | `nak` | JetStream gửi lại để retry |
 
-> Độ bền hai lớp: JetStream giữ message tới khi ack; DB job-queue giữ job tới khi xử
-> lý xong. Idempotency dựa `document_id` deterministic → duplicate delivery tự khử
-> ([ingestion.md §7](../decide/technique/ingestion.md)).
+> Độ bền hai lớp: JetStream giữ message tới khi ack; DB job-queue giữ job tới khi xử lý xong.
+
+**Idempotency / redelivery.** JetStream là at-least-once → có thể gửi lại `doc.ingest`.
+`enqueue` **dedup**: nếu đã có job chưa-terminal (pending/processing/stale) cho cùng
+`document_id` thì bỏ qua, không tạo job mới (tránh re-fetch S3 + parse + embed dư và
+hai worker chạy song song). Check này phủ redelivery phổ biến (redeliver tới SAU khi
+job đầu đã vào DB). Race đồng-thời hiếm vẫn vô hại: `chunk_id` deterministic + upsert
+OVERWRITE → ghi đè cùng vector. **Khử trùng tuyệt đối cross-process cần unique partial
+index** trên `document_id WHERE status non-terminal — TODO** ([ingestion.md §7](../decide/technique/ingestion.md)).
+
+**Trạng thái terminal:** job lỗi → `process_next_job` trả job FAILED (KHÔNG raise) →
+worker publish `doc.status: failed`. Job thành công → `indexed`. (Trước đây nhánh FAILED
+bị nuốt ở worker → BE không nhận được failed; đã sửa.)
+
+**doc.status là best-effort.** `publish_for_job` nuốt lỗi publish (chỉ log) để không
+làm sập worker. Nếu NATS chớp tắt đúng lúc publish → BE **mất tín hiệu** indexed/failed,
+hiện CHƯA retry/outbox. Giới hạn đã biết → cân nhắc outbox/re-publish khi cần handshake
+chắc chắn (xem §6).
 
 ## 2. Nguồn S3/GCS (`PARSER_IMPL=s3`)
 
@@ -109,8 +124,20 @@ doc.status round-trip). Tự **skip nếu chưa set `NATS_URL`**.
 - **Local** (nếu muốn): tải `nats-server` (1 binary), rồi
   `nats-server -js` + `NATS_URL=nats://localhost:4222 pytest tests/e2e/test_nats_ingest.py`.
 
-## 6. Việc còn lại
+## 6. Việc còn lại / giới hạn đã biết
 
+- **doc.status best-effort → outbox.** Publish lỗi hiện chỉ log (best-effort), trong
+  khi ingest durable → bất đối xứng độ tin cậy. Cần **outbox/re-publish** nếu BE phụ
+  thuộc tuyệt đối vào handshake status.
+- **Dedup tuyệt đối cross-process** cần unique partial index trên `document_id` (status
+  non-terminal); hiện là check-then-insert + chunk_id deterministic (đủ cho redelivery
+  thường, race hiếm vô hại).
+- **Multi-replica:** durable-only push = 1 subscription/process; scale ngang nhiều
+  replica cần deliver-group hoặc pull consumer.
+- **`INGEST_WORKER_COUNT=0` + NATS bật:** message được enqueue nhưng không worker xử
+  lý → không publish status (startup log WARNING `nats_ingest_without_worker`).
+- **NATS hỏng lúc startup → degrade:** `start_nats_ingest` đóng broker + log ERROR
+  `nats_ingest_start_failed`, service vẫn boot (search/HTTP chạy), ingest tắt.
 - ⚠️ **Smoke-test toàn trình production** (publish `doc.ingest` thật → Qdrant có
   vector → nhận `doc.status`) cần DevOps dựng NATS bền + Qdrant + Postgres; chi tiết
   hạ tầng ở [deploy/CI-CD.md](../../deploy/CI-CD.md). `infra/nats/jetstream.conf` còn stub.

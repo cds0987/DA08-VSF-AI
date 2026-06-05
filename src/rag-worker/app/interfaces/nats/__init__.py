@@ -1,4 +1,5 @@
 from app.interfaces.nats.ingest_consumer import (
+    BadPayloadError,
     DocIngestConsumer,
     DocStatusPublisher,
     build_doc_status,
@@ -6,6 +7,7 @@ from app.interfaces.nats.ingest_consumer import (
 )
 
 __all__ = [
+    "BadPayloadError",
     "DocIngestConsumer",
     "DocStatusPublisher",
     "build_doc_status",

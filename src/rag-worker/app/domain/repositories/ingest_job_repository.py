@@ -16,6 +16,15 @@ class IngestJobRepository(ABC):
         """Return a job by id."""
 
     @abstractmethod
+    async def find_active_job(self, document_id: str) -> IngestJob | None:
+        """Return a non-terminal (pending/processing/stale) job for the document, if any.
+
+        Dùng để dedup redelivery NATS: bỏ qua enqueue nếu đã có job đang chờ/chạy
+        cho cùng document_id. (Khử trùng tuyệt đối cần unique partial index ở DB —
+        TODO; check này phủ trường hợp redelivery phổ biến vì redeliver tới SAU.)
+        """
+
+    @abstractmethod
     async def claim_next_pending(self, claim_id: str) -> IngestJob | None:
         """Atomically claim one pending/stale job for processing."""
 

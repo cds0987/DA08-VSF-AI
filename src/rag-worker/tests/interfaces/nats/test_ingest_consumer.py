@@ -135,6 +135,27 @@ async def test_status_publisher_publishes_only_terminal() -> None:
     assert broker.published == [("doc.status", {"doc_id": "doc-1", "status": "indexed", "chunk_count": 3})]
 
 
+@pytest.mark.asyncio
+async def test_status_publisher_publishes_failed() -> None:
+    broker = FakeBroker()
+    publisher = DocStatusPublisher(broker, subject="doc.status")
+
+    await publisher.publish_for_job(_job(IngestJobStatus.FAILED, error="boom"))
+
+    assert broker.published == [("doc.status", {"doc_id": "doc-1", "status": "failed", "error": "boom"})]
+
+
+@pytest.mark.asyncio
+async def test_status_publisher_swallows_broker_error() -> None:
+    class FailingBroker:
+        async def publish_json(self, subject, payload):
+            raise RuntimeError("nats down")
+
+    publisher = DocStatusPublisher(FailingBroker(), subject="doc.status")
+    # Publish lỗi không được làm sập worker -> không raise (best-effort, chỉ log).
+    await publisher.publish_for_job(_job(IngestJobStatus.COMPLETED, chunk_count=1))
+
+
 # --- subscription cb: ack / nak / term ------------------------------------- #
 @pytest.mark.asyncio
 async def test_subscription_acks_on_success() -> None:

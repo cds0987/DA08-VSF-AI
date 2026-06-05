@@ -19,6 +19,15 @@ from app.application.use_cases.ingestion import IngestDocumentUseCase
 from app.domain.entities.ingest_job import IngestJob, IngestJobStatus
 
 
+class BadPayloadError(ValueError):
+    """Payload doc.ingest hỏng/thiếu field — POISON: term (không redeliver vô hạn).
+
+    Tách riêng khỏi ValueError chung để semantics retry của transport (term vs nak)
+    KHÔNG dính vào exception domain (vd enqueue raise ValueError) — lỗi domain phải
+    nak để retry, chỉ payload hỏng mới term.
+    """
+
+
 class DocIngestConsumer:
     """Map payload `doc.ingest` -> enqueue ingest job. Trả document_id đã nhận."""
 
@@ -35,15 +44,15 @@ class DocIngestConsumer:
         try:
             payload = json.loads(raw)
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise ValueError(f"doc.ingest payload không phải JSON hợp lệ: {exc}") from exc
+            raise BadPayloadError(f"doc.ingest payload không phải JSON hợp lệ: {exc}") from exc
         if not isinstance(payload, dict):
-            raise ValueError("doc.ingest payload phải là object JSON")
+            raise BadPayloadError("doc.ingest payload phải là object JSON")
 
         doc_id = str(payload.get("doc_id") or "").strip()
         gcs_key = str(payload.get("gcs_key") or "").strip()
         file_type = str(payload.get("file_type") or "").strip()
         if not doc_id or not gcs_key or not file_type:
-            raise ValueError(
+            raise BadPayloadError(
                 "doc.ingest thiếu trường bắt buộc: cần doc_id, gcs_key, file_type"
             )
 
@@ -122,7 +131,7 @@ async def start_doc_ingest_subscription(
             doc_id = await consumer.handle(msg.data)
             await msg.ack()
             log.info("doc_ingest_enqueued doc_id=%s", doc_id)
-        except ValueError as exc:
+        except BadPayloadError as exc:
             # Payload hỏng (poison): term để KHÔNG gửi lại vô hạn.
             log.warning("doc_ingest_bad_payload error=%s", exc)
             term = getattr(msg, "term", None)

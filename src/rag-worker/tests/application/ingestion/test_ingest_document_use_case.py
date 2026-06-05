@@ -243,8 +243,11 @@ def test_ingest_use_case_logs_failed_runs() -> None:
             file_type="md",
             markdown="# Title\nBody",
         )
-        with pytest.raises(RuntimeError, match="embed failed"):
-            await use_case.process_next_job()
+        # process_next_job KHÔNG raise nữa: trả job FAILED (để worker publish doc.status:failed).
+        processed = await use_case.process_next_job()
+        assert processed is not None
+        assert processed.status is IngestJobStatus.FAILED
+        assert processed.error_message and "embed failed" in processed.error_message
 
         stored = await use_case.get_document("doc-fail")
         assert stored is not None
@@ -273,8 +276,10 @@ def test_ingest_use_case_fails_when_ingest_produces_zero_chunks() -> None:
             file_type="pdf",
             markdown="# Empty",
         )
-        with pytest.raises(ValueError, match="0 chunks"):
-            await use_case.process_next_job()
+        processed = await use_case.process_next_job()
+        assert processed is not None
+        assert processed.status is IngestJobStatus.FAILED
+        assert processed.error_message and "0 chunks" in processed.error_message
 
         stored = await use_case.get_document("doc-empty")
         assert stored is not None
@@ -382,5 +387,27 @@ def test_ingest_use_case_does_not_overwrite_document_when_claim_is_stale() -> No
         assert stored is not None
         assert stored.status.value == "processing"
         assert stored.chunk_count == 7
+
+    asyncio.run(scenario())
+
+
+def test_enqueue_dedups_redelivered_document() -> None:
+    # NATS at-least-once: doc.ingest gửi lại -> enqueue lần 2 KHÔNG tạo job mới.
+    async def scenario() -> None:
+        documents = InMemoryDocumentRepository()
+        use_case = IngestDocumentUseCase(
+            StubEngine(), documents, documents, StubParser(), StubArtifactStore()
+        )
+
+        first = await use_case.enqueue(
+            document_id="doc-dup", document_name="D", file_type="md", markdown="# A"
+        )
+        second = await use_case.enqueue(
+            document_id="doc-dup", document_name="D", file_type="md", markdown="# A"
+        )
+
+        assert second.id == first.id  # trả lại job đang chờ, không tạo mới
+        active = [j for j in documents._jobs.values() if j.document_id == "doc-dup"]
+        assert len(active) == 1
 
     asyncio.run(scenario())
