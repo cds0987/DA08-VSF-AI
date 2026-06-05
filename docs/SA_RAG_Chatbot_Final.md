@@ -155,7 +155,9 @@ graph LR
         DOCMGMT["Document Management\nupload · validate · classify"]
     end
 
-    NATS[("NATS :4222\nJetStream enabled")]
+    subgraph MSG_BUS["Message Bus — GCE (self-hosted)"]
+        NATS[("NATS :4222\nJetStream enabled")]
+    end
 
     subgraph QUERY_SVC["Query Service :8001"]
         ORCH["Single Agent\n(MCP client)"]
@@ -219,6 +221,7 @@ graph LR
     ORCH -->|"MCP: rag_search / hr_query"| MCPSRV
     MCPSRV --> RETR
     RETR --> RERANK
+    RERANK --> RETR
     MCPSRV --> HRQ
     HRQ --> MCP_DB
     ORCH --> LFI
@@ -228,7 +231,6 @@ graph LR
     CONV --> QUERY_PG
     LFI --> LF
     LF --> LF_PG
-    RETR --> EMB
     RETR -->|"rag.search (request)"| NATS
     NATS -->|"rag.search"| SEARCH
     SEARCH -->|"hybrid search Top-5"| QDRANT
@@ -242,7 +244,7 @@ graph LR
     EMB --> QDRANT
     INGEST -->|"doc.status"| NATS
     NATS -->|"doc.status"| DOCMGMT
-    INGEST --> LFI
+    INGEST --> LF
 ```
 
 > _Phase 1: Semantic Cache (Redis) đặt giữa Query Module và Qdrant. Phase 2 (Production Scale): Cloud Pub/Sub Queue thay thế BackgroundTasks cho Ingestion._
