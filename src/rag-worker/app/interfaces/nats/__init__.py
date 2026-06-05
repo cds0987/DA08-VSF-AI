@@ -1,19 +1,25 @@
 from app.interfaces.nats.ingest_consumer import (
     BadPayloadError,
+    DocAccessDeleteConsumer,
     DocDeleteConsumer,
     DocIngestConsumer,
     DocStatusPublisher,
     build_doc_status,
+    normalize_source_uri,
+    start_doc_access_subscription,
     start_doc_delete_subscription,
     start_doc_ingest_subscription,
 )
 
 __all__ = [
     "BadPayloadError",
+    "DocAccessDeleteConsumer",
     "DocDeleteConsumer",
     "DocIngestConsumer",
     "DocStatusPublisher",
     "build_doc_status",
+    "normalize_source_uri",
+    "start_doc_access_subscription",
     "start_doc_delete_subscription",
     "start_doc_ingest_subscription",
 ]
