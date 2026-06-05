@@ -50,14 +50,16 @@ class NatsBroker:
         subject: str,
         *,
         durable: str,
-        queue: str,
         cb: MessageHandler,
     ) -> Any:
-        """Push-subscribe durable + queue group; ack thủ công (cb tự ack/nak)."""
+        """Durable push-subscribe; ack thủ công (cb tự ack/nak).
+
+        Một subscription/process (worker poll DB queue, không poll NATS). Multi-replica
+        cần deliver-group/pull consumer — TODO khi scale ngang (xem docs/ops/ingest-transport.md).
+        """
         return await self._js.subscribe(
             subject,
             durable=durable,
-            queue=queue,
             cb=cb,
             manual_ack=True,
         )

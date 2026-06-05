@@ -598,7 +598,6 @@ def _nats_config() -> dict | None:
         "doc_ingest_subject": os.getenv("NATS_DOC_INGEST_SUBJECT", "doc.ingest"),
         "doc_status_subject": os.getenv("NATS_DOC_STATUS_SUBJECT", "doc.status"),
         "durable": os.getenv("NATS_DURABLE", "rag-worker-ingest"),
-        "queue": os.getenv("NATS_QUEUE", "rag-worker"),
     }
 
 
@@ -626,7 +625,6 @@ async def start_nats_ingest(runtime: "RuntimeState", logger: logging.Logger):
         consumer,
         subject=cfg["doc_ingest_subject"],
         durable=cfg["durable"],
-        queue=cfg["queue"],
         logger=logger,
     )
     publisher = DocStatusPublisher(

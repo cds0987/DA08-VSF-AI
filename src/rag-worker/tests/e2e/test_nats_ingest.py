@@ -64,7 +64,6 @@ async def test_doc_ingest_roundtrip_enqueues_and_acks() -> None:
         consumer,
         subject=ingest_subject,
         durable=f"ingest_{suffix}",
-        queue=f"q_{suffix}",
     )
     try:
         await broker.publish_json(

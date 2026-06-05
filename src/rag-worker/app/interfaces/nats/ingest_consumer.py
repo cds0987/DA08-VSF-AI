@@ -112,7 +112,6 @@ async def start_doc_ingest_subscription(
     *,
     subject: str,
     durable: str,
-    queue: str,
     logger: logging.Logger | None = None,
 ) -> Any:
     """Subscribe doc.ingest; ack khi enqueue thành công, nak để JetStream gửi lại khi lỗi."""
@@ -135,4 +134,4 @@ async def start_doc_ingest_subscription(
             log.warning("doc_ingest_enqueue_failed error=%s", exc)
             await msg.nak()
 
-    return await broker.subscribe(subject, durable=durable, queue=queue, cb=_cb)
+    return await broker.subscribe(subject, durable=durable, cb=_cb)

@@ -81,8 +81,7 @@ NATS_URL=nats://nats:4222
 NATS_STREAM=DOCS
 NATS_DOC_INGEST_SUBJECT=doc.ingest
 NATS_DOC_STATUS_SUBJECT=doc.status
-NATS_DURABLE=rag-worker-ingest
-NATS_QUEUE=rag-worker
+NATS_DURABLE=rag-worker-ingest    # durable push consumer (1 subscription/process)
 
 # Tải nguồn từ GCS (S3-interop). Cần: pip install boto3
 PARSER_IMPL=s3

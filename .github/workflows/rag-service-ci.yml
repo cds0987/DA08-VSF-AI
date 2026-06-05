@@ -37,13 +37,21 @@ jobs:
           docker logs nats || true
           exit 1
 
-      - name: Run rag-worker tests
+      # Suite chính chạy NATS OFF (các test dựng app không cần broker; set NATS_URL
+      # toàn cục sẽ làm mọi TestClient mở subscription -> trùng durable).
+      - name: Run rag-worker tests (NATS off)
         env:
           APP_ENV: development
           AI_PROVIDER: offline
-          # Bật test NATS opt-in (tests/e2e/test_nats_ingest.py chạy thật với broker này).
+        run: pytest tests -q -ra --ignore=tests/e2e/test_nats_ingest.py
+
+      # Test NATS thật chạy riêng với NATS_URL trỏ broker JetStream ở trên.
+      - name: Run NATS integration test (NATS on)
+        env:
+          APP_ENV: development
+          AI_PROVIDER: offline
           NATS_URL: nats://127.0.0.1:4222
-        run: pytest tests -q -ra
+        run: pytest tests/e2e/test_nats_ingest.py -q -ra
 
       - name: NATS logs on failure
         if: failure()

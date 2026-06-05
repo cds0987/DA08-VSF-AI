@@ -34,8 +34,8 @@ class FakeBroker:
     async def publish_json(self, subject: str, payload: dict) -> None:
         self.published.append((subject, payload))
 
-    async def subscribe(self, subject, *, durable, queue, cb):
-        self.subscribed = {"subject": subject, "durable": durable, "queue": queue, "cb": cb}
+    async def subscribe(self, subject, *, durable, cb):
+        self.subscribed = {"subject": subject, "durable": durable, "cb": cb}
         return "subscription"
 
 
@@ -141,7 +141,7 @@ async def test_subscription_acks_on_success() -> None:
     broker = FakeBroker()
     consumer = DocIngestConsumer(FakeIngestUseCase())
     await start_doc_ingest_subscription(
-        broker, consumer, subject="doc.ingest", durable="d", queue="q"
+        broker, consumer, subject="doc.ingest", durable="d"
     )
     cb = broker.subscribed["cb"]
     msg = FakeMsg(json.dumps({"doc_id": "d1", "gcs_key": "s3://b/k", "file_type": "pdf"}).encode())
@@ -156,7 +156,7 @@ async def test_subscription_terms_poison_payload() -> None:
     broker = FakeBroker()
     consumer = DocIngestConsumer(FakeIngestUseCase())
     await start_doc_ingest_subscription(
-        broker, consumer, subject="doc.ingest", durable="d", queue="q"
+        broker, consumer, subject="doc.ingest", durable="d"
     )
     cb = broker.subscribed["cb"]
     msg = FakeMsg(b"{bad json")  # payload hỏng -> term (không gửi lại vô hạn)
@@ -171,7 +171,7 @@ async def test_subscription_naks_on_transient_error() -> None:
     broker = FakeBroker()
     consumer = DocIngestConsumer(FakeIngestUseCase(fail=True))  # enqueue lỗi (DB down)
     await start_doc_ingest_subscription(
-        broker, consumer, subject="doc.ingest", durable="d", queue="q"
+        broker, consumer, subject="doc.ingest", durable="d"
     )
     cb = broker.subscribed["cb"]
     msg = FakeMsg(json.dumps({"doc_id": "d1", "gcs_key": "s3://b/k", "file_type": "pdf"}).encode())
