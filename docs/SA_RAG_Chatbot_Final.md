@@ -335,7 +335,7 @@ graph LR
 | 2b | Document Service (FastAPI) | Microservice 2: Admin document management — upload và xóa tài liệu. Lưu file lên GCS, tạo record PostgreSQL (status=queued). Publish NATS subject `doc.ingest` ngay sau khi upload. Subscribe `doc.status` để cập nhật trạng thái ingestion từ RAG Worker. Chỉ Admin mới có quyền truy cập. | ✅ MVP |
 | 2c | RAG Worker (Python/NATS) | Worker thuần NATS — không expose HTTP. Subscribe `doc.ingest` → chạy pipeline ingestion (OCR→chunk→embed→store Qdrant). Subscribe `rag.search` từ MCP Service → embed query → hybrid search → trả chunks. | ✅ MVP |
 | 2d | Query Service (FastAPI) | Microservice 3: User chat — nhận câu hỏi, ACL check, Semantic Cache check, Single Agent (MCP client) gọi tool ở mcp-service, nhận kết quả, gọi LLM, stream **SSE** về frontend (+ stream `/notifications` đẩy thông báo). Conversation history, feedback. Verify JWT locally. | ✅ MVP |
-| 2e | NATS Message Broker | Message broker trung tâm: (1) Async ingestion — Document Service publish `doc.ingest`, RAG Worker subscribe. (2) Request-reply retrieval — Query Service request `rag.search`, RAG Worker reply. Port 4222. **JetStream enabled** — persist message, tránh mất khi RAG Worker restart. | ✅ MVP |
+| 2e | NATS Message Broker | Message broker trung tâm: (1) Async ingestion — Document Service publish `doc.ingest`, RAG Worker subscribe. (2) Request-reply retrieval — mcp-service (tool rag_search) request `rag.search`, RAG Worker reply. Port 4222. **JetStream enabled** — persist message, tránh mất khi RAG Worker restart. | ✅ MVP |
 | 2f | Single Agent / Function Calling | LLM Orchestration dùng LlamaIndex FunctionCallingAgent là **MCP client** — liệt kê tool từ mcp-service và để LLM tự chọn. Query Service inject `document_ids`/`user_id` vào lời gọi tool. | ✅ MVP |
 | 2g | MCP Tool Service (port 8003) | Microservice 5: **MCP server** expose tool dùng chung cho mọi agent. `rag_search` (NATS rag.search → rerank BGE-Reranker → Top-3) và `hr_query` (đọc `mcp_db.hr_mock`). Self-contained; transport Streamable HTTP/SSE. | ✅ MVP |
 | 3 | OCR Module | Detect PDF scan → Gemini Vision API (OCR). PDF text-based → PyMuPDF (local). | ✅ MVP |
@@ -418,7 +418,7 @@ graph LR
 | 11 | Feedback Loop | Người dùng đánh giá câu trả lời (thumbs up/down). Lưu vào PostgreSQL và sync lên Langfuse để phân tích chất lượng. | ✅ MVP |
 | 12 | Langfuse Observability | Trace toàn bộ LLM pipeline. Dashboard latency, token cost, RAGAS scores, feedback. IT/DevOps dùng để monitor và debug. | ✅ MVP |
 | 13 | Semantic Cache | Cache câu hỏi tương tự (cosine similarity > 0.95). TTL 1 giờ. Tiết kiệm ~60% API cost. | ✅ MVP |
-| 14 | Document Classification & Access Control | Admin chọn classification khi upload. **ACL pre-filter:** Query Service decode JWT → query PostgreSQL `rag_svc.documents` → lấy `allowed_doc_ids` user được phép đọc → truyền vào NATS request `rag.search` dưới dạng `document_ids` filter. RAG Worker chỉ search trong các doc đó — unauthorized data không rời khỏi Qdrant. `document_ids=None` mặc định chỉ search public docs (fail-secure). Kết quả cache Redis TTL ~60s. | ✅ MVP |
+| 14 | Document Classification & Access Control | Admin chọn classification khi upload. **ACL pre-filter:** Query Service decode JWT → query projection `query_db.document_access` (bản sao local, cập nhật qua event `doc.access`) → lấy `allowed_doc_ids` → inject vào MCP call `rag_search(document_ids=allowed_doc_ids)`. mcp-service truyền `document_ids` vào NATS request `rag.search`. RAG Worker chỉ search trong các doc đó — unauthorized data không rời khỏi Qdrant. `document_ids=None` mặc định chỉ search public docs (fail-secure). Kết quả cache Redis TTL ~60s. | ✅ MVP |
 
 > **Định nghĩa 4 cấp phân loại tài liệu:**
 >
@@ -569,8 +569,10 @@ flowchart LR
     EU -->|"question"| QUERY
     QUERY -->|"ACL query"| PG
     QUERY -->|"allowed_doc_ids (TTL ~60s)"| REDIS
-    QUERY -->|"request rag.search"| NATS
-    NATS -->|"reply chunks"| QUERY
+    QUERY -->|"MCP: rag_search(document_ids)"| MCP_SRV["mcp-service\n(MCP server)"]
+    MCP_SRV -->|"request rag.search"| NATS
+    NATS -->|"reply chunks"| MCP_SRV
+    MCP_SRV -->|"Top-3 (reranked)"| QUERY
     QUERY -->|"embed query"| EMB
     QUERY -->|"conversation context"| PG
     QUERY -->|"prompt + Top-3 chunks"| LLM
@@ -608,7 +610,7 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Ingestion Pipel
 | 8 | Ingestion Module | **Parent-Child Chunking** (LlamaIndex HierarchicalNodeParser): Parent node giữ nguyên chunk lớn để cung cấp context cho LLM; Child node nhỏ hơn dùng để embed và search. Config sizes: TBD khi implement. | List of `{ parent_node, child_nodes[], heading_path }` |
 | 8b | Ingestion Module | Generate caption cho mỗi node: thử dùng LLM nếu có, fallback về heuristic từ heading đầu tiên. | node_id → caption |
 | 9 | Embedding Service | Gọi OpenAI text-embedding-3-small (API), batch embed child node content. | Child node text → vector [1536 dims] |
-| 10 | Qdrant | Upsert vectors với payload: node_id, document_id, document_name, caption, heading_path, source_s3_uri, classification, ocr_confidence. | Vector + payload |
+| 10 | Qdrant | Upsert vectors với payload: node_id, document_id, document_name, caption, heading_path, source_gcs_uri, classification, ocr_confidence. | Vector + payload |
 | 11 | RAG Worker | **Không ghi `doc_db`** (database-per-service). Document record + status `indexed` do Document Service cập nhật ở bước 14 qua `doc.status`. RAG Worker chỉ giữ vectors trong Qdrant. | — |
 | 12 | Langfuse | Log ingestion metrics: parse_time, chunk_count, embed_time, total_latency, status (success/failed). Error message nếu thất bại. | Ingestion trace data |
 | 13 | RAG Worker | Publish NATS subject `doc.status` với `{ doc_id, status: 'indexed' \| 'failed', error? }`. | NATS message |
@@ -655,8 +657,8 @@ _[Tham chiếu: Application Architecture Diagram – Level 2 – Query Pipeline]
 >
 > RAGAS chỉ áp dụng cho Query flow — không áp dụng cho Ingestion flow.
 
-> **RAG Worker Failure — Circuit Breaker:** Query Service wrap NATS request `rag.search` bằng Circuit Breaker (`pybreaker`, fail_max=5, reset_timeout=30s).
-> - **Closed** (bình thường): gọi RAG Worker qua NATS bình thường
+> **RAG Worker Failure — Circuit Breaker:** Query Service wrap MCP call tới mcp-service bằng Circuit Breaker (`pybreaker`, fail_max=5, reset_timeout=30s) trong `mcp_client.py`.
+> - **Closed** (bình thường): gọi mcp-service qua MCP bình thường
 > - **Open** (≥5 timeout/failure liên tiếp trong 60s): fail-fast, trả 503 ngay không chờ NATS timeout
 > - **Half-Open** (sau 30s): cho 1 request thử — success → Closed, fail → Open lại
 >

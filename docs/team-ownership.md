@@ -307,7 +307,7 @@ src/rag-worker/app/
 *Retrieval pipeline (`retrieval.py`):*
 1. Embed query: gọi `embedding_svc.embed(query_text)` — text-embedding-3-small
 2. Hybrid search: `vector_repo.hybrid_search(vector, query_text, top_k=5, document_ids=document_ids)`
-   - `document_ids` được Query Service truyền vào — RAG Worker không biết ACL logic
+   - `document_ids` được mcp-service truyền vào (Query Service đã lọc ACL và inject qua MCP call) — RAG Worker không biết ACL logic
    - `None` → chỉ search public docs (fail-secure)
 3. Score threshold filter: loại candidates dưới ngưỡng 0.5
 4. Trả về `List[SearchResult]` qua NATS reply

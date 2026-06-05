@@ -203,7 +203,7 @@ MCP Tool Service expose tool qua giao thức MCP. Mỗi tool self-contained. `Re
 # Bản sao contract NATS reply rag.search (database-per-service → mỗi service giữ bản riêng,
 # đồng bộ shape qua infra/nats/subjects.md). CÙNG shape với SearchResult của rag-worker:
 #   chunk_id, document_id, document_name, caption, parent_text, heading_path, score,
-#   page_number, source_s3_uri, markdown_s3_uri
+#   page_number, source_gcs_uri, markdown_gcs_uri
 @dataclass
 class SearchResult:
     chunk_id: str
@@ -214,8 +214,8 @@ class SearchResult:
     heading_path: List[str]
     score: float
     page_number: Optional[int] = None
-    source_s3_uri: str = ""
-    markdown_s3_uri: str = ""
+    source_gcs_uri: str = ""
+    markdown_gcs_uri: str = ""
 ```
 
 ```python
@@ -350,8 +350,8 @@ class Chunk:                     # Parent-Child Chunking (LlamaIndex Hierarchica
     caption: str                # nhãn ngắn (= section_title trong Qdrant payload; AI-gen/heuristic từ heading)
     heading_path: List[str]     # breadcrumb: ["Chính sách công tác", "Hoàn tiền vé máy bay"]
     page_number: Optional[int] = None
-    source_s3_uri: str = ""     # URI file gốc — dùng để cite nguồn
-    markdown_s3_uri: str = ""   # URI full document Markdown — dùng khi cần context rộng hơn
+    source_gcs_uri: str = ""     # URI file gốc — dùng để cite nguồn
+    markdown_gcs_uri: str = ""   # URI full document Markdown — dùng khi cần context rộng hơn
 ```
 
 > `Document` + `Chunk` ở đây chỉ là **entity xử lý in-memory** cho ingestion (parse → **Parent-Child chunk** → embed).
@@ -390,8 +390,8 @@ class SearchResult:           # = contract NATS reply rag.search (Top-K chunks s
     heading_path: List[str] # breadcrumb từ root đến chunk
     score: float            # similarity của child_text sau vector search + threshold filter
     page_number: Optional[int] = None
-    source_s3_uri: str = "" # URI file gốc — dùng để cite nguồn
-    markdown_s3_uri: str = ""  # URI full document Markdown
+    source_gcs_uri: str = "" # URI file gốc — dùng để cite nguồn
+    markdown_gcs_uri: str = ""  # URI full document Markdown
 
 class VectorRepository(ABC):
 
@@ -499,7 +499,7 @@ class Source(BaseModel):
     caption: str
     heading_path: List[str]
     score: float
-    source_s3_uri: str
+    source_gcs_uri: str
 
 class QueryRequest(BaseModel):
     question: str

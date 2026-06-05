@@ -234,8 +234,8 @@ Collection name: `rag_chatbot`
   "page_number": 1,
   "section_title": "string",
   "heading_path": ["Chính sách công tác", "Hoàn tiền vé máy bay"],
-  "source_s3_uri": "s3://bucket/raw/{doc_id}.pdf",
-  "markdown_s3_uri": "s3://bucket/processed/{doc_id}.md",
+  "source_gcs_uri": "gs://bucket/raw/{doc_id}.pdf",
+  "markdown_gcs_uri": "gs://bucket/processed/{doc_id}.md",
   "classification": "public | internal | secret | top_secret",
   "allowed_departments": ["HR", "Finance"],
   "allowed_user_ids": ["uuid"],
@@ -244,7 +244,7 @@ Collection name: `rag_chatbot`
 }
 ```
 
-> Vector dimension: 1536 (text-embedding-3-small). Chỉ embed `child_text`. `parent_text` lưu trong payload để đưa vào LLM context. `source_s3_uri` (file gốc) + `markdown_s3_uri` (full Markdown) lưu trong payload để RAG Worker populate trực tiếp `SearchResult` khi reply `rag.search` — **không cần tra DB** (rag-worker không dùng PostgreSQL). `section_title` → map sang `caption`, `heading_path` (breadcrumb) → map thẳng sang SearchResult. `ocr_confidence` chỉ có với PDF scan, dùng để flag low-quality chunks. Chunk size: Parent-Child (LlamaIndex HierarchicalNodeParser) — config TBD sau khi implement.
+> Vector dimension: 1536 (text-embedding-3-small). Chỉ embed `child_text`. `parent_text` lưu trong payload để đưa vào LLM context. `source_gcs_uri` (file gốc) + `markdown_gcs_uri` (full Markdown) lưu trong payload để RAG Worker populate trực tiếp `SearchResult` khi reply `rag.search` — **không cần tra DB** (rag-worker không dùng PostgreSQL). `section_title` → map sang `caption`, `heading_path` (breadcrumb) → map thẳng sang SearchResult. `ocr_confidence` chỉ có với PDF scan, dùng để flag low-quality chunks. Chunk size: Parent-Child (LlamaIndex HierarchicalNodeParser) — config TBD sau khi implement.
 
 ---
 
