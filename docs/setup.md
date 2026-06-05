@@ -74,7 +74,7 @@ cp src/rag-worker/.env.example      src/rag-worker/.env
 cp src/mcp-service/.env.example     src/mcp-service/.env
 ```
 
-Xem đầy đủ nội dung từng file và hướng dẫn lấy API keys tại **[env-setup.md](env-setup.md)**.
+Xem đầy đủ nội dung từng file và hướng dẫn lấy API keys tại **[docs/env-setup.md](env-setup.md)**.
 
 > **Quan trọng:** `JWT_SECRET_KEY` phải giống nhau ở cả 5 services. Generate bằng `openssl rand -hex 32` rồi điền vào cả 5 file `.env`.
 >
@@ -84,9 +84,9 @@ Xem đầy đủ nội dung từng file và hướng dẫn lấy API keys tại 
 
 ## 4. Chạy PostgreSQL + Qdrant local (Docker)
 
-**Production:** PostgreSQL chạy trên AWS RDS — không có container. Xem chi tiết tại [docs/env-setup.md](env-setup.md).
+**Production:** PostgreSQL chạy trên GCP Cloud SQL — không có container. Xem chi tiết tại [docs/env-setup.md](env-setup.md).
 
-**Local dev:** Có thể dùng PostgreSQL Docker để test nhanh mà không cần RDS:
+**Local dev:** Có thể dùng PostgreSQL Docker để test nhanh mà không cần Cloud SQL:
 
 ```bash
 # PostgreSQL local — tạo 5 databases riêng như production
@@ -130,7 +130,7 @@ cd ../query-service    && alembic upgrade head   # query_db (conversations, mess
 cd ../mcp-service      && alembic upgrade head   # mcp_db (hr_mock)
 ```
 
-> RAG Worker **không có** migration — không dùng PostgreSQL (chỉ Qdrant + S3 + NATS).
+> RAG Worker **không có** migration — không dùng PostgreSQL (chỉ Qdrant + Cloud Storage (GCS) + NATS).
 > Schema thay đổi → tạo migration mới (`alembic revision --autogenerate -m "..."`) thay vì sửa DDL trực tiếp.
 
 ---
@@ -272,7 +272,7 @@ Services sau khi `docker compose up`:
 | redis | 6379 | JWT blacklist + rate limiting + semantic cache |
 | langfuse | 3100 | LLM observability dashboard (IT/DevOps only) |
 
-> **PostgreSQL:** Không có container — dùng **AWS RDS db.t3.micro** với 5 databases riêng: `user_db`, `doc_db`, `query_db`, `mcp_db`, `langfuse_db`. Mỗi service kết nối đến database của mình qua cùng 1 RDS endpoint.
+> **PostgreSQL:** Không có container — dùng **GCP Cloud SQL db-g1-small** với 5 databases riêng: `user_db`, `doc_db`, `query_db`, `mcp_db`, `langfuse_db`. Mỗi service kết nối đến database của mình qua cùng 1 Cloud SQL IP.
 
 ---
 
