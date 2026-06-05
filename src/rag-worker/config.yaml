@@ -21,14 +21,7 @@ profiles:
       params:
         max_chars: ${CAPTION_MAX_CHARS:-6000}
 
-    reranker:
-      impl: ${RERANK_PROVIDER:-llm}
-      model: ${RERANK_MODEL:-gpt-4o-mini}
-      base_url: ${RERANK_BASE_URL:-}
-      api_key: ${RERANK_API_KEY:-}
-      params:
-        passage_chars: ${RERANK_PASSAGE_CHARS:-800}
-
+    # NOTE: rag-worker = INGEST-ONLY. KHÔNG có reranker/retrieval (việc của mcp-service).
     parser:
       impl: ${PARSER_IMPL:-local}
       params:
@@ -56,13 +49,3 @@ profiles:
       provider: ${VECTOR_DB_PROVIDER:-qdrant}
       collection: ${VECTOR_COLLECTION:-rag_chatbot}
       embed_model: ${EMBED_MODEL:-text-embedding-3-small}
-
-    retrieval:
-      top_k_candidates: ${SEARCH_TOP_K:-20}
-      rerank_top_k: ${RERANK_TOP_K:-3}
-      rerank_threshold: ${RERANK_THRESHOLD:-0.7}
-
-  exp_rerank_none:
-    extends: baseline
-    reranker:
-      impl: none

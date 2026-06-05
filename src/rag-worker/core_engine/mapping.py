@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from core_engine.ocr import ProviderImageTextExtractor
 
 from core_engine.ai import AIProvider, AISettings, CapabilityConfig, build_provider
 from core_engine.ai.offline_provider import OfflineProvider
@@ -13,7 +16,6 @@ from core_engine.config_schema import PipelineConfig
 from core_engine.contract import resolve_dimension
 from core_engine.embedding import ProviderEmbeddingService
 from core_engine.engine import HaystackRagEngine
-from core_engine.ocr import ProviderImageTextExtractor
 from core_engine.registry import Registry
 from core_engine.rerank import (
     LLMReranker,
@@ -165,6 +167,11 @@ def build_engine_from_config(
             else resolve_dimension(_effective_embed_model(cfg), cfg.embedder.dimension)
         )
     )
+    # Lazy import: ocr (vision/OCR) chỉ cần cho INGEST. Để top-level sẽ kéo
+    # core_engine.ocr vào mọi `import core_engine.*` → vỡ hygiene read-path (mcp
+    # search KHÔNG được kéo dep ingest nặng). Xem docs/search-split-vectorstore-contract.md §4.3.
+    from core_engine.ocr import ProviderImageTextExtractor
+
     ctx = WireContext(
         provider=provider,
         dim=resolved_dim,

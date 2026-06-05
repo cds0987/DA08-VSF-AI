@@ -32,6 +32,7 @@ from core_engine.factory import (
     caption_enabled_from_env,
     rerank_provider_from_env,
 )
+from core_engine.rerank import NoopRerankerService
 from core_engine.logging_utils import configure_logging, log_event
 from core_engine.mapping import (
     build_ai_provider,
@@ -530,14 +531,21 @@ def bootstrap_runtime() -> RuntimeState:
                 params=pipeline_cfg.parser.params,
                 image_text_extractor=ProviderImageTextExtractor(provider),
             )
+            # rag-worker = INGEST-ONLY: ép reranker = noop (không search nên không
+            # dựng LLM reranker vô ích). Rerank là việc của mcp-service.
             engine = build_engine_from_config(
                 pipeline_cfg,
                 provider=provider,
                 vector_config_override=vector_config,
+                reranker_override=NoopRerankerService(),
             )
         else:
             parser = build_parser(provider)
-            engine = build_engine(provider=provider, vector_config=vector_config)
+            engine = build_engine(
+                provider=provider,
+                vector_config=vector_config,
+                reranker=NoopRerankerService(),
+            )
         vector_config = engine.vectors.config
         ingest_use_case = IngestDocumentUseCase(
             engine,
