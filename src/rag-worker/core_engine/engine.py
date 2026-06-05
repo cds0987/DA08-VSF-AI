@@ -7,14 +7,12 @@ import logging
 from typing import List, Optional
 from uuid import uuid4
 
-from app.domain.repositories.embedding_service import EmbeddingService
-from app.domain.repositories.vector_repository import SearchResult, VectorRepository
-
 from core_engine.caption import Captioner
 from core_engine.chunking import Chunker, SectionChunker
 from core_engine.config import HaystackSettings, load_settings
 from core_engine.logging_utils import Stopwatch, log_event
 from core_engine.rerank import Reranker
+from core_engine.types import EmbeddingService, SearchResult, VectorRepository
 from core_engine.vectorstore.types import VectorRecord
 
 

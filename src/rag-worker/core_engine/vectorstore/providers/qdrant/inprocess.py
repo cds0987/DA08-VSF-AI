@@ -14,11 +14,10 @@ from core_engine.vectorstore.providers.qdrant.base import QdrantBase, point_id
 
 from qdrant_client import QdrantClient
 
-from app.domain.repositories.vector_repository import SearchResult
-
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.store import VectorStore
 from core_engine.vectorstore.types import VectorRecord
+from core_engine.types import SearchResult
 
 
 class QdrantInProcessProvider(QdrantBase):

@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from typing import Mapping, Sequence
 
-from app.domain.repositories.vector_repository import SearchResult, VectorRepository
-
+from core_engine.types import SearchResult, VectorRepository
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.provider import VectorStoreProvider
 from core_engine.vectorstore.types import VectorRecord

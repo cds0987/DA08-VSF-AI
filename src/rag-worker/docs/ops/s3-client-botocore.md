@@ -88,9 +88,10 @@ S3_REGION=...              # AWS: vùng thật; GCS/R2/MinIO: 'auto' hoặc 'us-
 - KHÔNG gửi key tương đối (`raw/<id>/<name>`) — parser không tự ghép bucket.
 
 ### 5.4 Tên collection Qdrant
-- Engine đặt collection = **`{VECTOR_COLLECTION}__d{dimension}`** (vd `rag_chatbot__d1024`),
-  KHÔNG phải tên trần. Khi thao tác/monitor Qdrant trực tiếp, resolve theo prefix hoặc kèm
-  hậu tố `__d{dim}`. (E2e đã xử lý đúng điều này.)
+- Engine đặt collection = **`{VECTOR_COLLECTION}__{model_tag}__d{dimension}`**
+  (vd `rag_chatbot__te3s__d1536`), KHÔNG phải tên trần.
+- Khi thao tác/monitor Qdrant trực tiếp, resolve theo prefix hoặc kèm đầy đủ hậu tố model+dim.
+- Cùng dimension nhưng khác model vẫn ra collection khác, nên không còn đè/đọc nhầm vector.
 
 ### 5.5 Giới hạn tải an toàn (đã có guard trong `s3_parser.py`)
 - `MAX_REMOTE_SOURCE_BYTES` / `MAX_SOURCE_SIZE_BYTES`: trần kích thước file (HEAD trước khi tải).

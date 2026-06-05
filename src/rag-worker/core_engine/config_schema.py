@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from core_engine.contract import resolve_dimension
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class CommonConfig(BaseModel):
@@ -19,14 +21,38 @@ class EmbedderConfig(BaseModel):
     model: str = "text-embedding-3-small"
     base_url: str = ""
     api_key: str = ""
-    dimension: int = 1024
+    dimension: int | None = None
+
+    @field_validator("dimension", mode="before")
+    @classmethod
+    def blank_dimension_means_auto(cls, value: Any) -> Any:
+        if value == "":
+            return None
+        return value
 
     @model_validator(mode="after")
     def validate_embedder(self) -> "EmbedderConfig":
-        if self.dimension <= 0:
-            raise ValueError("EMBED_DIMENSION must be > 0")
         if not self.model.strip():
             raise ValueError("AI config for embed must include a model")
+        resolve_dimension(self.model, self.dimension)
+        return self
+
+
+class VectorstoreContractConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    collection: str
+    embed_model: str
+
+    @model_validator(mode="after")
+    def validate_contract(self) -> "VectorstoreContractConfig":
+        if not self.provider.strip():
+            raise ValueError("vectorstore_contract.provider must not be empty")
+        if not self.collection.strip():
+            raise ValueError("vectorstore_contract.collection must not be empty")
+        if not self.embed_model.strip():
+            raise ValueError("vectorstore_contract.embed_model must not be empty")
         return self
 
 
@@ -53,6 +79,7 @@ class RerankerConfig(ComponentWithParams):
     model: str = "gpt-4o-mini"
     base_url: str = ""
     api_key: str = ""
+    timeout_seconds: float = 30.0   # mcp-service LLM reranker đọc field này (params: batch_size/passage_chars)
 
     @model_validator(mode="after")
     def validate_reranker(self) -> "RerankerConfig":
@@ -159,4 +186,5 @@ class PipelineConfig(BaseModel):
             params={"collection": "rag_chatbot", "url": "", "api_key": ""},
         )
     )
+    vectorstore_contract: VectorstoreContractConfig | None = None
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)

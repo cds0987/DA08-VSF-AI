@@ -7,10 +7,12 @@ import pytest
 
 from app.domain.entities.ingest_job import IngestJob, IngestJobStatus
 from app.interfaces.nats.ingest_consumer import (
+    DocAccessDeleteConsumer,
     DocDeleteConsumer,
     DocIngestConsumer,
     DocStatusPublisher,
     build_doc_status,
+    start_doc_access_subscription,
     start_doc_delete_subscription,
     start_doc_ingest_subscription,
 )
@@ -116,6 +118,35 @@ async def test_handle_accepts_s3_key_fallback() -> None:
 
     assert doc_id == "d1"
     assert use_case.calls[0]["source_uri"] == "s3://bucket/x.pdf"
+
+
+@pytest.mark.asyncio
+async def test_handle_prefixes_bare_key_with_default_bucket() -> None:
+    # document-service publish key TRẦN (raw/<id>/<file>) -> consumer ghép s3://bucket/key
+    # để S3SourceParser nhận ra và tự tải; nếu không sẽ rơi vào parser local rồi fail.
+    use_case = FakeIngestUseCase()
+    consumer = DocIngestConsumer(use_case, default_bucket="rag-chatbot-docs")
+    raw = json.dumps(
+        {"doc_id": "d1", "s3_key": "raw/d1/file.pdf", "file_type": "pdf"}
+    ).encode()
+
+    await consumer.handle(raw)
+
+    assert use_case.calls[0]["source_uri"] == "s3://rag-chatbot-docs/raw/d1/file.pdf"
+
+
+@pytest.mark.asyncio
+async def test_handle_keeps_full_uri_even_with_default_bucket() -> None:
+    # Key đã có scheme (BE đổi contract) -> giữ nguyên, KHÔNG ghép bucket lần nữa.
+    use_case = FakeIngestUseCase()
+    consumer = DocIngestConsumer(use_case, default_bucket="rag-chatbot-docs")
+    raw = json.dumps(
+        {"doc_id": "d1", "gcs_key": "gs://other/x.pdf", "file_type": "pdf"}
+    ).encode()
+
+    await consumer.handle(raw)
+
+    assert use_case.calls[0]["source_uri"] == "gs://other/x.pdf"
 
 
 @pytest.mark.asyncio
@@ -283,6 +314,85 @@ async def test_delete_subscription_naks_on_transient_error() -> None:
     )
     cb = broker.subscribed["cb"]
     msg = FakeMsg(json.dumps({"doc_id": "d1"}).encode())
+
+    await cb(msg)
+
+    assert msg.naked and not msg.acked and not msg.termed
+
+
+# --- doc.access(deleted=true) consumer ------------------------------------- #
+# document-service KHÔNG publish doc.delete; lúc xóa nó publish doc.access(deleted=true).
+@pytest.mark.asyncio
+async def test_access_handle_deletes_when_deleted_true() -> None:
+    use_case = FakeIngestUseCase()
+    consumer = DocAccessDeleteConsumer(use_case)
+
+    doc_id = await consumer.handle(json.dumps({"doc_id": "d1", "deleted": True}).encode())
+
+    assert doc_id == "d1"
+    assert use_case.deleted == ["d1"]
+
+
+@pytest.mark.asyncio
+async def test_access_handle_skips_when_not_deleted() -> None:
+    # Sự kiện upload (deleted=false) -> None, KHÔNG xóa.
+    use_case = FakeIngestUseCase()
+    consumer = DocAccessDeleteConsumer(use_case)
+
+    doc_id = await consumer.handle(json.dumps({"doc_id": "d1", "deleted": False}).encode())
+
+    assert doc_id is None
+    assert use_case.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_access_handle_rejects_missing_doc_id_on_delete() -> None:
+    consumer = DocAccessDeleteConsumer(FakeIngestUseCase())
+    with pytest.raises(ValueError):
+        await consumer.handle(json.dumps({"deleted": True}).encode())
+
+
+@pytest.mark.asyncio
+async def test_access_subscription_acks_and_deletes() -> None:
+    broker = FakeBroker()
+    use_case = FakeIngestUseCase()
+    await start_doc_access_subscription(
+        broker, DocAccessDeleteConsumer(use_case), subject="doc.access", durable="a"
+    )
+    cb = broker.subscribed["cb"]
+    msg = FakeMsg(json.dumps({"doc_id": "d1", "deleted": True}).encode())
+
+    await cb(msg)
+
+    assert msg.acked and not msg.naked and not msg.termed
+    assert use_case.deleted == ["d1"]
+
+
+@pytest.mark.asyncio
+async def test_access_subscription_acks_and_skips_upload() -> None:
+    broker = FakeBroker()
+    use_case = FakeIngestUseCase()
+    await start_doc_access_subscription(
+        broker, DocAccessDeleteConsumer(use_case), subject="doc.access", durable="a"
+    )
+    cb = broker.subscribed["cb"]
+    msg = FakeMsg(json.dumps({"doc_id": "d1", "deleted": False}).encode())
+
+    await cb(msg)
+
+    assert msg.acked and not msg.naked and not msg.termed
+    assert use_case.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_access_subscription_naks_on_transient_error() -> None:
+    broker = FakeBroker()
+    consumer = DocAccessDeleteConsumer(FakeIngestUseCase(fail=True))  # vector store down
+    await start_doc_access_subscription(
+        broker, consumer, subject="doc.access", durable="a"
+    )
+    cb = broker.subscribed["cb"]
+    msg = FakeMsg(json.dumps({"doc_id": "d1", "deleted": True}).encode())
 
     await cb(msg)
 

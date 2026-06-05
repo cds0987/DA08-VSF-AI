@@ -37,15 +37,26 @@ class NatsBroker:
         return self
 
     async def ensure_stream(self, stream: str, subjects: list[str]) -> None:
-        """Tạo stream nếu CHƯA TỒN TẠI (idempotent). Lỗi connection/permission ở
+        """Tạo stream nếu chưa có; nếu đã có mà THIẾU subject thì cập nhật (idempotent).
+
+        add_stream chỉ chạy lần đầu. Khi thêm subject mới (vd doc.access, doc.delete)
+        vào một stream đã tồn tại, phải update_stream — nếu không subject mới KHÔNG
+        được stream bắt và durable subscribe sẽ lỗi. Lỗi connection/permission ở
         stream_info được propagate (không nuốt thành 'tạo mới')."""
         from nats.js.api import StreamConfig
         from nats.js.errors import NotFoundError
 
         try:
-            await self._js.stream_info(stream)
+            info = await self._js.stream_info(stream)
         except NotFoundError:
             await self._js.add_stream(StreamConfig(name=stream, subjects=subjects))
+            return
+
+        existing = list(getattr(info.config, "subjects", None) or [])
+        missing = [s for s in subjects if s not in existing]
+        if missing:
+            info.config.subjects = existing + missing
+            await self._js.update_stream(info.config)
 
     async def subscribe(
         self,

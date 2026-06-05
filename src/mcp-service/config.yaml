@@ -1,0 +1,43 @@
+active: ${PIPELINE_PROFILE:-baseline}
+
+profiles:
+  baseline:
+    common:
+      ai_mode: ${AI_PROVIDER:-offline}
+      timeout: 60
+      max_retries: 5
+
+    embedder:
+      model: ${EMBED_MODEL:-text-embedding-3-small}
+      base_url: ${EMBED_BASE_URL:-}
+      api_key: ${OPENAI_API_KEY:-}
+      dimension: ${EMBED_DIMENSION:-}
+
+    # NOTE: mcp-service = SEARCH-ONLY. KHÔNG có captioner/parser/chunker (việc ingest
+    # của rag-worker). Chỉ giữ embedder (embed query) + reranker + retrieval.
+    reranker:
+      impl: ${RERANK_PROVIDER:-none}
+      model: ${RERANK_MODEL:-gpt-4o-mini}
+      base_url: ${RERANK_BASE_URL:-}
+      api_key: ${RERANK_API_KEY:-}
+      timeout_seconds: ${RERANK_TIMEOUT_SECONDS:-30}
+      params:
+        batch_size: ${RERANK_BATCH_SIZE:-8}
+        passage_chars: ${RERANK_PASSAGE_CHARS:-800}
+
+    vector_store:
+      impl: ${VECTOR_DB_PROVIDER:-qdrant}
+      params:
+        collection: ${VECTOR_COLLECTION:-rag_chatbot}
+        url: ${VECTOR_DB_URL:-}
+        api_key: ${VECTOR_DB_API_KEY:-}
+
+    vectorstore_contract:
+      provider: ${VECTOR_DB_PROVIDER:-qdrant}
+      collection: ${VECTOR_COLLECTION:-rag_chatbot}
+      embed_model: ${EMBED_MODEL:-text-embedding-3-small}
+
+    retrieval:
+      top_k_candidates: ${SEARCH_TOP_K:-20}
+      rerank_top_k: ${RERANK_TOP_K:-3}
+      rerank_threshold: ${RERANK_THRESHOLD:-0.7}

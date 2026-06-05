@@ -27,7 +27,7 @@ from core_engine.ai.base import (
 )
 from core_engine.text_utils import hash_embed, overlap_score
 
-DEFAULT_DIM = 1024
+DEFAULT_DIM = 256
 
 
 class OfflineProvider(AIProvider):

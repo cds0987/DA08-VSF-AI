@@ -1,6 +1,12 @@
 """S3SourceParser — ingest theo `source_uri=s3://bucket/key` (GCP/GCS qua S3-interop,
 R2, MinIO, AWS). BE chỉ gửi URL; parser này TỰ tải về rồi giao cho parser local cũ.
 
+LƯU Ý TÊN GỌI: "S3" ở đây là *giao thức/SDK* (boto3), KHÔNG phải dịch vụ AWS. Backend
+do `S3_ENDPOINT_URL` quyết định — PRODUCTION = GCP (Google Cloud Storage) qua API
+S3-interoperability: cùng client boto3, chỉ đổi endpoint + dùng HMAC key. Giữ tên S3
+(không đổi thành GCS_*) là CHỦ Ý: một client phục vụ GCS/MinIO/R2/AWS, và boto3 chỉ
+nói giao thức S3. CI/e2e chạy MinIO (S3-compatible), prod chạy GCS — cùng code đường này.
+
 Trọng tâm: TẢI AN TOÀN, không làm sập server (OOM/đầy đĩa/treo worker). 5 lớp guard:
 
   1. HEAD trước khi tải  -> biết ContentLength, quá ngưỡng thì từ chối NGAY (ko tải).

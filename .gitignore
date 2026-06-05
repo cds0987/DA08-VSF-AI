@@ -5,8 +5,12 @@ proposal/
 venv/
 __pycache__/
 .pytest_cache/
+.pytest-run-*/
+.pytest-tmp*/
 .ruff_cache/
+pytest-cache-files-*/
 *.py[cod]
 query-body.json
 feedback-body.json
 notify-body.json
+src/mcp-service/tests/.tmp/

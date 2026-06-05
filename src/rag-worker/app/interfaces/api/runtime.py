@@ -16,7 +16,6 @@ from fastapi import FastAPI
 from sqlalchemy.engine import make_url
 
 from app.application.use_cases.ingestion import IngestDocumentUseCase
-from app.application.use_cases.query import RetrievalUseCase
 from app.domain.repositories.artifact_store import ArtifactStore
 from app.domain.repositories.document_repository import DocumentRepository
 from app.domain.repositories.ingest_job_repository import IngestJobRepository
@@ -33,6 +32,7 @@ from core_engine.factory import (
     caption_enabled_from_env,
     rerank_provider_from_env,
 )
+from core_engine.rerank import NoopRerankerService
 from core_engine.logging_utils import configure_logging, log_event
 from core_engine.mapping import (
     build_ai_provider,
@@ -43,6 +43,7 @@ from core_engine.mapping import (
 )
 from core_engine.ocr import ProviderImageTextExtractor
 from core_engine.vectorstore import VectorStoreConfig, available_providers
+from core_engine.vectorstore.qdrant_contract import write_contract_stamp
 
 
 def _is_production(app_env: str) -> bool:
@@ -67,7 +68,6 @@ class HealthReport:
 @dataclass
 class RuntimeState:
     ingest_use_case: IngestDocumentUseCase | None
-    retrieval_use_case: RetrievalUseCase | None
     document_repository: DocumentRepository
     job_repository: IngestJobRepository
     parser: Parser
@@ -148,9 +148,9 @@ def validate_vector_config(
 ) -> None:
     if not vector_config.collection.strip():
         raise ValueError("VECTOR_COLLECTION must not be empty")
-    if re.search(r"__d\d+$", vector_config.collection):
+    if re.search(r"__(?:[a-z0-9-]+__)?d\d+$", vector_config.collection):
         raise ValueError(
-            "VECTOR_COLLECTION must not encode dimension; index_id() appends __d{EMBED_DIMENSION}"
+            "VECTOR_COLLECTION must not encode model/dimension; index_id() appends __{model_tag}__d{dimension}"
         )
     if vector_config.provider.lower() not in available_providers():
         raise ValueError(
@@ -464,10 +464,10 @@ def bootstrap_runtime() -> RuntimeState:
                     )
                 }
             )
-        settings = to_settings(pipeline_cfg, dim=pipeline_cfg.embedder.dimension)
-        ai_settings = build_ai_settings(pipeline_cfg)
-        validate_ai_config(ai_settings, settings)
         provider = build_ai_provider(pipeline_cfg)
+        ai_settings = build_ai_settings(pipeline_cfg)
+        settings = to_settings(pipeline_cfg, dim=ai_settings.embed_dimension or provider.dimension)
+        validate_ai_config(ai_settings, settings)
         vector_config = to_vector_store_config(
             pipeline_cfg,
             dim=settings.embed_dimension,
@@ -477,11 +477,23 @@ def bootstrap_runtime() -> RuntimeState:
         validate_runtime_settings()
         settings = load_settings()
         ai_settings = load_ai_settings()
-        validate_ai_config(ai_settings, settings)
-        vector_config = VectorStoreConfig.from_env(dimension=settings.embed_dimension)
-        validate_vector_config(vector_config)
         reset_ai_provider()
         provider = get_ai_provider()
+        vector_config = VectorStoreConfig.from_env(
+            model="offline" if provider.name == "offline" else None,
+            dimension=provider.dimension if provider.name == "offline" else settings.embed_dimension,
+        )
+        settings = HaystackSettings(
+            embed_dimension=vector_config.dimension,
+            parent_max_words=settings.parent_max_words,
+            child_max_words=settings.child_max_words,
+            child_overlap_words=settings.child_overlap_words,
+            top_k_candidates=settings.top_k_candidates,
+            rerank_top_k=settings.rerank_top_k,
+            rerank_threshold=settings.rerank_threshold,
+        )
+        validate_ai_config(ai_settings, settings)
+        validate_vector_config(vector_config)
 
     reasons: list[str] = []
     if provider.name == "offline":
@@ -506,12 +518,11 @@ def bootstrap_runtime() -> RuntimeState:
         raise RuntimeError("Production fail-closed: " + " ".join(reasons))
 
     ingest_use_case = None
-    retrieval_use_case = None
     engine = None
     document_repository = build_document_repository()
     if not isinstance(document_repository, IngestJobRepository):
         raise TypeError("document repository must implement IngestJobRepository")
-    parser: Parser
+    parser: Parser = build_parser(provider)
     artifact_store = build_artifact_store()
     try:
         if pipeline_cfg is not None:
@@ -520,14 +531,22 @@ def bootstrap_runtime() -> RuntimeState:
                 params=pipeline_cfg.parser.params,
                 image_text_extractor=ProviderImageTextExtractor(provider),
             )
+            # rag-worker = INGEST-ONLY: ép reranker = noop (không search nên không
+            # dựng LLM reranker vô ích). Rerank là việc của mcp-service.
             engine = build_engine_from_config(
                 pipeline_cfg,
                 provider=provider,
                 vector_config_override=vector_config,
+                reranker_override=NoopRerankerService(),
             )
         else:
             parser = build_parser(provider)
-            engine = build_engine(provider=provider, vector_config=vector_config)
+            engine = build_engine(
+                provider=provider,
+                vector_config=vector_config,
+                reranker=NoopRerankerService(),
+            )
+        vector_config = engine.vectors.config
         ingest_use_case = IngestDocumentUseCase(
             engine,
             document_repository,
@@ -536,7 +555,6 @@ def bootstrap_runtime() -> RuntimeState:
             artifact_store,
             claim_heartbeat_interval_seconds=lease_settings.heartbeat_interval_seconds,
         )
-        retrieval_use_case = RetrievalUseCase(engine)
     except Exception as exc:
         reasons.append(f"Engine bootstrap failed: {exc}")
         if _is_production(app_env):
@@ -562,11 +580,12 @@ def bootstrap_runtime() -> RuntimeState:
         ai_provider=provider.name,
         vector_provider=vector_config.provider,
         vector_deployment=vector_config.deployment,
+        vector_index=vector_config.index_id(),
+        vector_fingerprint=vector_config.contract().fingerprint,
         metadata_backend=metadata_backend,
     )
     return RuntimeState(
         ingest_use_case=ingest_use_case,
-        retrieval_use_case=retrieval_use_case,
         document_repository=document_repository,
         job_repository=document_repository,
         parser=parser,
@@ -598,29 +617,42 @@ def _nats_config() -> dict | None:
         "doc_ingest_subject": os.getenv("NATS_DOC_INGEST_SUBJECT", "doc.ingest"),
         "doc_status_subject": os.getenv("NATS_DOC_STATUS_SUBJECT", "doc.status"),
         "doc_delete_subject": os.getenv("NATS_DOC_DELETE_SUBJECT", "doc.delete"),
+        # document-service không gửi doc.delete; lúc xóa nó publish doc.access(deleted=true).
+        # Subscribe doc.access là đường xóa thực tế giữa 2 service.
+        "doc_access_subject": os.getenv("NATS_DOC_ACCESS_SUBJECT", "doc.access"),
         "durable": os.getenv("NATS_DURABLE", "rag-worker-ingest"),
         "delete_durable": os.getenv("NATS_DELETE_DURABLE", "rag-worker-delete"),
+        "access_durable": os.getenv("NATS_ACCESS_DURABLE", "rag-worker-access"),
+        # Bucket ghép vào key trần (raw/<id>/<file>) document-service publish -> s3://bucket/key.
+        # Trống -> không ghép (giữ hành vi cũ). Fallback R2_BUCKET cho cấu hình R2.
+        "source_bucket": (
+            os.getenv("S3_SOURCE_BUCKET", "").strip()
+            or os.getenv("R2_BUCKET", "").strip()
+        ),
     }
 
 
 async def start_nats_ingest(
     runtime: "RuntimeState", logger: logging.Logger
-) -> tuple[Any, Any, Any, Any]:
+) -> tuple[Any, Any, Any, Any, Any]:
     """Bật cửa ingest NATS nếu có NATS_URL.
 
-    Trả (broker, ingest_subscription, delete_subscription, status_publisher).
-    Lỗi khi bật NATS -> đóng broker + degrade gracefully (trả None): search/HTTP độc
-    lập vẫn chạy, không để NATS hỏng kéo sập cả service. Ops theo dõi log ERROR.
+    Trả (broker, ingest_subscription, delete_subscription, access_subscription,
+    status_publisher). Lỗi khi bật NATS -> đóng broker + degrade gracefully (trả
+    None): search/HTTP độc lập vẫn chạy, không để NATS hỏng kéo sập cả service. Ops
+    theo dõi log ERROR.
     """
     cfg = _nats_config()
     if cfg is None or runtime.ingest_use_case is None:
-        return None, None, None, None
+        return None, None, None, None, None
     # Lazy import: chưa cài nats-py / không bật NATS thì không kéo dependency.
     from app.infrastructure.external.nats_client import NatsBroker
     from app.interfaces.nats import (
+        DocAccessDeleteConsumer,
         DocDeleteConsumer,
         DocIngestConsumer,
         DocStatusPublisher,
+        start_doc_access_subscription,
         start_doc_delete_subscription,
         start_doc_ingest_subscription,
     )
@@ -634,9 +666,14 @@ async def start_nats_ingest(
                 cfg["doc_ingest_subject"],
                 cfg["doc_status_subject"],
                 cfg["doc_delete_subject"],
+                cfg["doc_access_subject"],
             ],
         )
-        consumer = DocIngestConsumer(runtime.ingest_use_case, logger=logger)
+        consumer = DocIngestConsumer(
+            runtime.ingest_use_case,
+            default_bucket=cfg["source_bucket"] or None,
+            logger=logger,
+        )
         subscription = await start_doc_ingest_subscription(
             broker,
             consumer,
@@ -652,6 +689,14 @@ async def start_nats_ingest(
             durable=cfg["delete_durable"],
             logger=logger,
         )
+        access_consumer = DocAccessDeleteConsumer(runtime.ingest_use_case, logger=logger)
+        access_subscription = await start_doc_access_subscription(
+            broker,
+            access_consumer,
+            subject=cfg["doc_access_subject"],
+            durable=cfg["access_durable"],
+            logger=logger,
+        )
     except Exception as exc:  # noqa: BLE001 - NATS hỏng không được giết search/HTTP
         with contextlib.suppress(Exception):
             await broker.close()
@@ -662,7 +707,7 @@ async def start_nats_ingest(
             stage="startup",
             error=str(exc),
         )
-        return None, None, None, None
+        return None, None, None, None, None
     publisher = DocStatusPublisher(
         broker, subject=cfg["doc_status_subject"], logger=logger
     )
@@ -675,14 +720,25 @@ async def start_nats_ingest(
         ingest_subject=cfg["doc_ingest_subject"],
         status_subject=cfg["doc_status_subject"],
         delete_subject=cfg["doc_delete_subject"],
+        access_subject=cfg["doc_access_subject"],
+        source_bucket=cfg["source_bucket"] or "(none)",
     )
-    return broker, subscription, delete_subscription, publisher
+    return broker, subscription, delete_subscription, access_subscription, publisher
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     runtime = bootstrap_runtime()
     logger = logging.getLogger(__name__)
+    await write_contract_stamp(runtime.vector_config, written_by="rag-worker")
+    log_event(
+        logger,
+        logging.INFO,
+        "vectorstore_contract_stamp_written",
+        stage="startup",
+        vector_index=runtime.vector_config.index_id(),
+        vector_fingerprint=runtime.vector_config.contract().fingerprint,
+    )
     retention_settings = load_job_log_retention_settings()
     lease_settings = load_ingest_lease_settings()
     prune_task = asyncio.create_task(
@@ -696,6 +752,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         nats_broker,
         nats_subscription,
         nats_delete_subscription,
+        nats_access_subscription,
         status_publisher,
     ) = await start_nats_ingest(runtime, logger)
     on_job_finished = (
@@ -730,8 +787,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.nats_broker = nats_broker
     app.state.nats_subscription = nats_subscription
     app.state.nats_delete_subscription = nats_delete_subscription
+    app.state.nats_access_subscription = nats_access_subscription
     app.state.ingest_use_case = runtime.ingest_use_case
-    app.state.retrieval_use_case = runtime.retrieval_use_case
     app.state.runtime = runtime
     app.state.health = runtime.health
     app.state.job_log_prune_task = prune_task
@@ -778,6 +835,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if nats_delete_subscription is not None:
             with contextlib.suppress(Exception):
                 await nats_delete_subscription.unsubscribe()
+        if nats_access_subscription is not None:
+            with contextlib.suppress(Exception):
+                await nats_access_subscription.unsubscribe()
         if nats_broker is not None:
             with contextlib.suppress(Exception):
                 await nats_broker.close()

@@ -19,10 +19,9 @@ except (ModuleNotFoundError, ImportError) as e:
         "Cai: pip install 'pymilvus>=2.5'"
     ) from e
 
-from app.domain.repositories.vector_repository import SearchResult
-
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.store import VectorStore
+from core_engine.types import SearchResult
 from core_engine.vectorstore.types import VectorRecord
 
 

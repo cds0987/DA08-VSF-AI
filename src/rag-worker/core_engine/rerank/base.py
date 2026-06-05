@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import List, Protocol, runtime_checkable
 
-from app.domain.repositories.vector_repository import SearchResult
+from core_engine.types import SearchResult
 
 
 @runtime_checkable

@@ -13,7 +13,7 @@ import logging
 import re
 from typing import Dict, List
 
-from app.domain.repositories.vector_repository import SearchResult
+from core_engine.types import SearchResult
 
 from core_engine.ai import AIProvider, RERANK, RERANK_QUERY_MARKER, get_ai_provider
 from core_engine.logging_utils import log_event

@@ -25,6 +25,16 @@ factory + ai/, KHÔNG sửa engine/use-case.
 """
 
 from core_engine.config import HaystackSettings, load_settings
+from core_engine.contract import (
+    EMBED_MODELS,
+    PAYLOAD_SCHEMA_VERSION,
+    ResolvedVectorstoreContract,
+    index_id,
+    model_tag,
+    resolve_dimension,
+    resolve_vectorstore_contract,
+    vectorstore_fingerprint,
+)
 from core_engine.engine import HaystackRagEngine, IngestInput
 from core_engine.factory import build_engine, build_engine_probe
 from core_engine.mapping import build_engine_from_config, register
@@ -43,6 +53,12 @@ from core_engine.ai import (
 
 # Port adapters + capability (cho composition tuỳ biến / test).
 from core_engine.embedding import ProviderEmbeddingService
+from core_engine.types import (
+    EmbeddingService,
+    SearchLineage,
+    SearchResult,
+    VectorRepository,
+)
 from core_engine.vectorstore import (
     VectorRecord,
     VectorStoreConfig,
@@ -75,6 +91,14 @@ __all__ = [
     "IngestInput",
     "HaystackSettings",
     "load_settings",
+    "EMBED_MODELS",
+    "PAYLOAD_SCHEMA_VERSION",
+    "ResolvedVectorstoreContract",
+    "resolve_dimension",
+    "model_tag",
+    "index_id",
+    "resolve_vectorstore_contract",
+    "vectorstore_fingerprint",
     # AI gateway
     "AIProvider",
     "AISettings",
@@ -84,7 +108,11 @@ __all__ = [
     "OpenAIProvider",
     "OfflineProvider",
     # ports / capabilities
+    "EmbeddingService",
     "ProviderEmbeddingService",
+    "SearchLineage",
+    "SearchResult",
+    "VectorRepository",
     "VectorRecord",
     "VectorStore",
     "VectorStoreProvider",
