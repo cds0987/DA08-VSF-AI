@@ -17,7 +17,7 @@ from app.infrastructure.db.postgres_audit_log_repository import PostgresAuditLog
 from app.infrastructure.db.postgres_document_repository import PostgresDocumentRepository
 from app.infrastructure.db.session import get_session
 from app.infrastructure.messaging.nats_publisher import NatsPublisher
-from app.infrastructure.storage.s3_client import S3Client
+from app.infrastructure.storage.gcs_client import GCSClient
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
@@ -40,8 +40,8 @@ def get_audit_logger(
     return PostgresAuditLogRepository(session)
 
 
-def get_storage(settings: Settings = Depends(get_settings)) -> S3Client:
-    return S3Client(settings)
+def get_storage(settings: Settings = Depends(get_settings)) -> GCSClient:
+    return GCSClient(settings)
 
 
 def get_publisher(settings: Settings = Depends(get_settings)) -> NatsPublisher:
@@ -50,7 +50,7 @@ def get_publisher(settings: Settings = Depends(get_settings)) -> NatsPublisher:
 
 def get_upload_document_use_case(
     document_repository: PostgresDocumentRepository = Depends(get_document_repository),
-    storage: S3Client = Depends(get_storage),
+    storage: GCSClient = Depends(get_storage),
     publisher: NatsPublisher = Depends(get_publisher),
     audit_logger: PostgresAuditLogRepository = Depends(get_audit_logger),
 ) -> UploadDocumentUseCase:
@@ -71,14 +71,14 @@ def get_get_document_use_case(
 
 def get_get_document_file_use_case(
     document_repository: PostgresDocumentRepository = Depends(get_document_repository),
-    storage: S3Client = Depends(get_storage),
+    storage: GCSClient = Depends(get_storage),
 ) -> GetDocumentFileUseCase:
     return GetDocumentFileUseCase(document_repository, storage)
 
 
 def get_delete_document_use_case(
     document_repository: PostgresDocumentRepository = Depends(get_document_repository),
-    storage: S3Client = Depends(get_storage),
+    storage: GCSClient = Depends(get_storage),
     publisher: NatsPublisher = Depends(get_publisher),
     audit_logger: PostgresAuditLogRepository = Depends(get_audit_logger),
 ) -> DeleteDocumentUseCase:
@@ -96,10 +96,22 @@ async def get_current_user(
             algorithms=[settings.jwt_algorithm],
         )
     except JWTError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-        ) from exc
+        # --- ĐOẠN CODE IN CHI TIẾT ĐỂ KIỂM TRA SEGMENT ---
+        print("\n" + "="*50)
+        print("🔴 LỖI AUTH: THIẾU HOẶC SAI CẤU TRÚC TOKEN!")
+        print(f"👉 Chuỗi nhận được thực tế: '{token}'")
+        
+        if token:
+            segments = token.split('.')
+            print(f"👉 Số lượng segment đếm được (Phải bằng 3): {len(segments)}")
+            for idx, seg in enumerate(segments):
+                print(f"   + Segment {idx + 1}: '{seg}'")
+        else:
+            print("👉 CẢNH BÁO: Chuỗi token gửi lên bị RỖNG HOÀN TOÀN (None hoặc '')!")
+        print("="*50 + "\n")
+        
+        raise HTTPException(status_code=401, detail="Not authenticated")
+        
 
     user_id = payload.get("sub")
     role = payload.get("role")

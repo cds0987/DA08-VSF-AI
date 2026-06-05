@@ -4,7 +4,7 @@
 Service nay:
 
 - so huu bang `doc_svc.documents`
-- luu file goc len S3
+- luu file goc len GCS
 - phat event qua NATS
 - nhan trang thai tu worker qua `doc.status`
 
@@ -22,7 +22,7 @@ Service nay:
 - Python 3.11+
 - PostgreSQL
 - NATS
-- AWS S3
+- GCP Cloud Storage
 
 File cau hinh mau nam o [src/document-service/.env.example](D:/DA08-VSF/src/document-service/.env.example).
 
@@ -54,7 +54,7 @@ cd src/document-service
 - publish `doc.access`
 - list/get/delete API bang dependency override
 
-No khong kiem tra PostgreSQL that, NATS that hay AWS S3 that.
+No khong kiem tra PostgreSQL that, NATS that hay GCP Cloud Storage that.
 
 ## Huong dan test that voi user-service
 
@@ -114,16 +114,16 @@ Route login nam o:
 http://localhost:8000/auth/login
 ```
 
-### 2.2 Storage hien tai la AWS S3
+### 2.2 Storage hien tai la GCP Cloud Storage
 
-Code hien tai dung [s3_client.py](D:/DA08-VSF/src/document-service/app/infrastructure/storage/s3_client.py).
+Code hien tai dung [gcs_client.py](D:/DA08-VSF/src/document-service/app/infrastructure/storage/gcs_client.py).
 
 De test `upload`, `get file`, `delete` on dinh, ban nen dung:
 
-- AWS S3 that
-- 1 bucket that, vi du `rag-chatbot-docs`
+- GCS bucket that, vi du `rag-chatbot-docs`
+- Service account co quyen doc/ghi object trong bucket
 
-Neu AWS credentials hoac bucket sai:
+Neu GCP credentials hoac bucket sai:
 
 - upload se fail
 - presigned URL se fail
@@ -239,7 +239,7 @@ CREATE TABLE IF NOT EXISTS doc_svc.documents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(500) NOT NULL,
     file_type VARCHAR(20) NOT NULL,
-    s3_key VARCHAR(1000) NOT NULL,
+    gcs_key VARCHAR(1000) NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'queued',
     uploaded_by UUID NOT NULL,
     classification VARCHAR(20) NOT NULL DEFAULT 'internal',
@@ -349,10 +349,9 @@ JWT_SECRET_KEY=your-secret-key-change-in-production
 JWT_ALGORITHM=HS256
 NATS_URL=nats://localhost:4222
 NATS_JETSTREAM_ENABLED=true
-AWS_ACCESS_KEY_ID=<aws-access-key-id>
-AWS_SECRET_ACCESS_KEY=<aws-secret-access-key>
-AWS_S3_BUCKET=rag-chatbot-docs
-AWS_REGION=ap-southeast-1
+GCS_BUCKET=rag-chatbot-docs
+GCP_PROJECT_ID=vsf-rag-chatbot
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 ```
 
 `JWT_SECRET_KEY` o hai file phai giong nhau.
@@ -474,7 +473,7 @@ Ket qua mong doi:
 ### 9.2 Kiem tra record da vao DB va status = queued
 
 ```powershell
-docker exec -it da08-postgres psql -U user -d rag_chatbot -c "SELECT id, name, status, classification, s3_key, chunk_count, error_message, deleted_at FROM doc_svc.documents WHERE id = '$DocId';"
+docker exec -it da08-postgres psql -U user -d rag_chatbot -c "SELECT id, name, status, classification, gcs_key, chunk_count, error_message, deleted_at FROM doc_svc.documents WHERE id = '$DocId';"
 ```
 
 ### 9.3 Xem event doc.ingest
@@ -488,7 +487,8 @@ docker run --rm -it natsio/nats-box:latest sh -lc "nats --server nats://host.doc
 Upload lai 1 file nua, ban se thay payload co cac truong:
 
 - `doc_id`
-- `s3_key`
+- `gcs_key`
+- `document_name`
 - `file_type`
 - `classification`
 - `allowed_departments`
@@ -630,7 +630,7 @@ Khi test xong, ban co the doi chieu ket qua o cac noi sau:
 - record `queued/indexed/failed`: bang `doc_svc.documents`
 - audit log: bang `doc_svc.audit_logs`
 - event NATS: `doc.ingest`, `doc.access`, `notify.doc_new`
-- file da upload: bucket S3 that trong AWS Console
+- file da upload: bucket GCS that trong Google Cloud Console
 - signed URL: response `GET /documents/{id}/file`
 - xoa mem: cot `deleted_at` trong `doc_svc.documents`
 
@@ -674,8 +674,8 @@ Hay dung admin token.
 
 Thuong la do:
 
-- AWS credentials sai
-- bucket S3 khong ton tai
+- GCP credentials sai
+- bucket GCS khong ton tai
 - NATS chua chay
 - DB/schema chua tao
 
