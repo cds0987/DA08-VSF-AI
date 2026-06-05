@@ -67,12 +67,29 @@ def _ensure_uploaded_to_minio(bucket: str, key: str, data: bytes) -> None:
     client.put_object(Bucket=bucket, Key=key, Body=data)
 
 
-def _qdrant_point_count(collection: str) -> int:
+def _resolve_collection(prefix: str) -> str | None:
+    """Engine đặt tên collection = {VECTOR_COLLECTION}__d{dimension} -> resolve theo prefix."""
     from qdrant_client import QdrantClient
 
     client = QdrantClient(url=VECTOR_DB_URL, api_key=os.getenv("VECTOR_DB_API_KEY") or None)
     try:
-        return client.count(collection_name=collection, exact=True).count
+        for c in client.get_collections().collections:
+            if c.name.startswith(prefix):
+                return c.name
+        return None
+    finally:
+        client.close()
+
+
+def _qdrant_point_count(prefix: str) -> int:
+    from qdrant_client import QdrantClient
+
+    name = _resolve_collection(prefix)
+    if name is None:
+        return 0
+    client = QdrantClient(url=VECTOR_DB_URL, api_key=os.getenv("VECTOR_DB_API_KEY") or None)
+    try:
+        return client.count(collection_name=name, exact=True).count
     finally:
         client.close()
 
@@ -209,6 +226,8 @@ async def test_document_service_to_rag_worker_real_infra() -> None:
         with contextlib.suppress(Exception):
             from qdrant_client import QdrantClient
 
-            c = QdrantClient(url=VECTOR_DB_URL, api_key=os.getenv("VECTOR_DB_API_KEY") or None)
-            c.delete_collection(collection_name=collection)
-            c.close()
+            name = _resolve_collection(collection)
+            if name is not None:
+                c = QdrantClient(url=VECTOR_DB_URL, api_key=os.getenv("VECTOR_DB_API_KEY") or None)
+                c.delete_collection(collection_name=name)
+                c.close()
