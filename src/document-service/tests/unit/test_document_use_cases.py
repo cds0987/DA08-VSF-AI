@@ -9,6 +9,7 @@ from app.application.use_cases.documents.common import MAX_FILE_BYTES
 from app.application.use_cases.documents.get_document_file_use_case import GetDocumentFileUseCase
 from app.application.use_cases.documents.upload_document_use_case import UploadDocumentUseCase
 from app.domain.entities.document import Document, DocumentStatus
+from app.infrastructure.messaging.nats_publisher import _with_event_metadata
 
 
 class InMemoryDocuments:
@@ -55,6 +56,9 @@ class FakeStorage:
     async def upload_file(self, key: str, content: bytes, content_type: str | None = None) -> None:
         self.uploads.append(key)
 
+    def object_uri(self, key: str) -> str:
+        return f"gs://rag-chatbot-docs/{key}"
+
     async def delete_file(self, key: str) -> None:
         self.deletes.append(key)
 
@@ -95,7 +99,7 @@ def document(
         id=str(uuid4()),
         name="policy.pdf",
         file_type="pdf",
-        s3_key="raw/policy.pdf",
+        gcs_key="raw/policy.pdf",
         status=DocumentStatus.INDEXED,
         uploaded_by=str(uuid4()),
         created_at=datetime.now(timezone.utc),
@@ -111,6 +115,15 @@ def make_upload_case() -> tuple[UploadDocumentUseCase, InMemoryDocuments, FakePu
     publisher = FakePublisher()
     audit = FakeAudit()
     return UploadDocumentUseCase(repo, storage, publisher, audit), repo, publisher, audit
+
+
+def test_nats_event_metadata_is_added_to_doc_events() -> None:
+    payload = _with_event_metadata("doc.ingest", {"doc_id": "doc-1"})
+
+    assert payload["doc_id"] == "doc-1"
+    assert payload["event_version"] == 1
+    assert payload["event_id"]
+    assert payload["occurred_at"].endswith("Z")
 
 
 @pytest.mark.asyncio
@@ -167,7 +180,13 @@ async def test_upload_publishes_ingest_and_access_events() -> None:
 
     assert result.status == "queued"
     assert result.document_id in repo.documents
+    assert next(iter(repo.documents.values())).gcs_key.startswith(f"raw/{result.document_id}/")
     assert publisher.ingest_payloads[0]["doc_id"] == result.document_id
+    assert publisher.ingest_payloads[0]["gcs_key"].startswith(
+        f"gs://rag-chatbot-docs/raw/{result.document_id}/"
+    )
+    assert publisher.ingest_payloads[0]["document_name"] == "policy.pdf"
+    assert "s3_key" not in publisher.ingest_payloads[0]
     assert publisher.access_payloads[0] == {
         "doc_id": result.document_id,
         "classification": "secret",

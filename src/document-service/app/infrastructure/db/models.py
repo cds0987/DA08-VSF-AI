@@ -17,7 +17,7 @@ class DocumentModel(Base):
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     file_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    s3_key: Mapped[str] = mapped_column(String(1000), nullable=False)
+    gcs_key: Mapped[str] = mapped_column(String(1000), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued", index=True)
     uploaded_by: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
     classification: Mapped[str] = mapped_column(String(20), nullable=False, default="internal")

@@ -26,10 +26,8 @@ class Settings(BaseModel):
         "yes",
         "on",
     }
-    aws_access_key_id: str | None = getenv("AWS_ACCESS_KEY_ID")
-    aws_secret_access_key: str | None = getenv("AWS_SECRET_ACCESS_KEY")
-    aws_s3_bucket: str = getenv("AWS_S3_BUCKET", "rag-chatbot-docs")
-    aws_region: str = getenv("AWS_REGION", "ap-southeast-1")
+    gcs_bucket: str = getenv("GCS_BUCKET", "rag-chatbot-docs")
+    gcp_project_id: str | None = getenv("GCP_PROJECT_ID")
 
 
 @lru_cache

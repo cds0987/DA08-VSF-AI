@@ -37,7 +37,7 @@ def sample_document(
         id=document_id,
         name="policy.pdf",
         file_type="pdf",
-        s3_key=f"raw/{document_id}/policy.pdf",
+        gcs_key=f"raw/{document_id}/policy.pdf",
         status=DocumentStatus.QUEUED,
         uploaded_by=ADMIN_ID,
         created_at=datetime.now(timezone.utc),
@@ -88,6 +88,11 @@ def test_admin_upload_returns_queued_and_publishes_events() -> None:
     assert body["status"] == "queued"
     assert body["message"] == "Ingestion started"
     assert publisher.ingest_payloads[0]["doc_id"] == body["document_id"]
+    assert publisher.ingest_payloads[0]["gcs_key"].startswith(
+        f"gs://rag-chatbot-docs/raw/{body['document_id']}/"
+    )
+    assert publisher.ingest_payloads[0]["document_name"] == "policy.pdf"
+    assert "s3_key" not in publisher.ingest_payloads[0]
     assert publisher.access_payloads[0]["deleted"] is False
 
 
