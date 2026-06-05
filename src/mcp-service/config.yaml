@@ -13,36 +13,15 @@ profiles:
       api_key: ${OPENAI_API_KEY:-}
       dimension: ${EMBED_DIMENSION:-}
 
-    captioner:
-      impl: none
-      model: ${CAPTION_MODEL:-gpt-4o-mini}
-      base_url: ${CAPTION_BASE_URL:-}
-      api_key: ${CAPTION_API_KEY:-}
-      params: {}
-
+    # NOTE: mcp-service = SEARCH-ONLY. KHÔNG có captioner/parser/chunker (việc ingest
+    # của rag-worker). Chỉ giữ embedder (embed query) + reranker + retrieval.
     reranker:
-      impl: ${RERANK_PROVIDER:-llm}
+      impl: ${RERANK_PROVIDER:-none}   # mcp v1: none|lexical (llm chưa port)
       model: ${RERANK_MODEL:-gpt-4o-mini}
       base_url: ${RERANK_BASE_URL:-}
       api_key: ${RERANK_API_KEY:-}
       params:
         passage_chars: ${RERANK_PASSAGE_CHARS:-800}
-
-    parser:
-      impl: local
-      params:
-        max_workers: ${PARSER_MAX_WORKERS:-2}
-      ocr:
-        model: ${OCR_MODEL:-gpt-4o-mini}
-        base_url: ${OCR_BASE_URL:-}
-        api_key: ${OCR_API_KEY:-}
-
-    chunker:
-      impl: heading_sections
-      params:
-        parent_max_words: ${SECTION_MAX_WORDS:-220}
-        child_max_words: ${CHILD_MAX_WORDS:-90}
-        child_overlap_words: ${CHILD_OVERLAP_WORDS:-15}
 
     vector_store:
       impl: ${VECTOR_DB_PROVIDER:-qdrant}
