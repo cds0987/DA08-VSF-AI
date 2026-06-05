@@ -29,5 +29,13 @@ class NotificationRepository(ABC):
         """Return unread notification count for one user."""
 
     @abstractmethod
+    async def total_for_user(self, user_id: str, unread_only: bool = False) -> int:
+        """Return total notification count for one user."""
+
+    @abstractmethod
     async def mark_read(self, notification_id: str) -> None:
         """Mark one notification as read."""
+
+    @abstractmethod
+    async def mark_read_for_user(self, user_id: str, notification_id: str) -> Notification | None:
+        """Mark one notification as read if it belongs to the user."""

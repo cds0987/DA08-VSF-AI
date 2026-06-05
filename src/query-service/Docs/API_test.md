@@ -4,6 +4,18 @@ Huong dan nay test rieng `query-service` Phase 1 mock-first, khong can user-serv
 
 Theo docs 4/6 v2, tai lieu khong con buoc approve/reject: Admin upload -> `queued` -> ingest -> `indexed`. Query Service chi truy van cac tai lieu da indexed/da co trong projection mock.
 
+Cap nhat v2 intent/tool routing:
+
+- API public `POST /query` khong doi body hay response SSE.
+- Query Service khong con chi dua vao keyword intent cu. Luong `/query` hien chon tool bang `tool_decision_client`:
+  - `identity` shortcut: cau hoi "ban la ai" tra loi truc tiep, khong goi MCP/RAG.
+  - `hr_query`: cau hoi HR ca nhan, vi du leave balance, leave request, payroll.
+  - `rag_search`: cau hoi tai lieu/chinh sach/noi dung noi bo.
+- Moi tham so nhay cam van do backend inject:
+  - `hr_query` luon dung `user.id` tu token.
+  - `rag_search` luon dung `allowed_doc_ids` tu ACL projection, khong tin `document_ids` do LLM sinh.
+- Module `HybridIntentClassifier` van co test rieng cho huong rule/embedding/LLM classifier, nhung API `/query` production routing hien duoc cover bang tool decision flow.
+
 ## 1. Setup local
 
 ```powershell
@@ -24,8 +36,15 @@ De test offline khong ton OpenAI key, sua `.env`:
 ```env
 AUTH_MODE=mock
 LLM_MODE=mock
+MCP_MODE=mock
 ENABLE_DEV_ENDPOINTS=true
 ```
+
+Voi mode mock:
+
+- `MockToolDecisionClient` chon tool bang rule offline.
+- `MockMCPClient` tra du lieu RAG/HR mock.
+- `HybridIntentClassifier` neu test truc tiep se dung token-hash embedding offline, khong can OpenAI.
 
 De test Query Service voi User Service that da chay o port `8000`, sua `.env`:
 
@@ -51,7 +70,49 @@ Neu muon goi OpenAI that:
 LLM_MODE=openai
 OPENAI_API_KEY=<your_api_key>
 OPENAI_LLM_MODEL=gpt-4o-mini
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 ```
+
+Khi `LLM_MODE=openai` va co `OPENAI_API_KEY`:
+
+- `OpenAIToolDecisionClient` goi LLM de chon `rag_search` hoac `hr_query`.
+- `OpenAIStreamingClient` goi LLM de stream cau tra loi.
+- Intent classifier test truc tiep co the dung OpenAI embedding/LLM theo config `INTENT_*`.
+
+Neu muon goi MCP Service that thay mock:
+
+```env
+MCP_MODE=mcp
+MCP_SERVICE_URL=http://localhost:8003
+MCP_TIMEOUT_SECONDS=10
+```
+
+`MCP_MODE=mcp` se goi JSON-RPC endpoint `http://localhost:8003/mcp` voi tool `rag_search` va `hr_query`. Neu khong chay mcp-service, giu `MCP_MODE=mock`.
+
+Neu muon test infrastructure NATS/query_db that:
+
+```env
+NATS_MODE=nats
+NATS_URL=nats://localhost:4222
+NATS_JETSTREAM_ENABLED=true
+DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/query_db
+```
+
+Voi `NATS_MODE=nats`, Query Service se start subscriber cho `doc.access` va `notify.doc_new`. Query Service khong subscribe `doc.ingest`, khong request `rag.search`, va khong goi rag-worker truc tiep. Neu chi test offline/API mock, giu `NATS_MODE=mock`.
+
+Config intent classifier v2:
+
+```env
+INTENT_CLASSIFIER_MODE=hybrid
+INTENT_RULE_CONFIDENCE_THRESHOLD=0.90
+INTENT_EMBEDDING_CONFIDENCE_THRESHOLD=0.78
+INTENT_EMBEDDING_MARGIN=0.08
+INTENT_LLM_CONFIDENCE_THRESHOLD=0.70
+INTENT_LLM_MODEL=gpt-4o-mini
+INTENT_LLM_TIMEOUT_SECONDS=5
+```
+
+Luu y: cac bien `INTENT_*` ap dung cho module `HybridIntentClassifier` va automated tests cua classifier. Routing API `/query` hien uu tien `tool_decision_client`, nen test API thu cong nen quan sat ket qua tool route qua response/fallback thay vi mong `/query` tra truc tiep `intent`.
 
 Chay server:
 
@@ -202,6 +263,86 @@ curl.exe -N -X POST http://localhost:8001/query `
 ```
 
 Expected: `sources` rong vi dung tool `hr_query`, va du lieu HR duoc filter theo user trong token.
+
+Test HR paraphrase v2, khong can dung dung keyword tieng Viet:
+
+```powershell
+$body = @{
+  question = "How much remaining leave do I still have?"
+  user_id = "22222222-2222-4222-8222-222222222222"
+} | ConvertTo-Json -Compress
+
+$bodyPath = Join-Path $env:TEMP "query-body.json"
+$body | Set-Content -LiteralPath $bodyPath -NoNewline -Encoding utf8
+
+curl.exe -N -X POST http://localhost:8001/query `
+  -H "Authorization: Bearer mock-user-finance" `
+  -H "Content-Type: application/json" `
+  --data-binary "@$bodyPath"
+```
+
+Expected:
+
+- SSE co token tra loi tu HR mock.
+- Event done co `"sources":[]`.
+- Khong tra source tai lieu RAG, vi cau hoi duoc route sang `hr_query(intent=leave_balance)`.
+
+Test payroll HR:
+
+```powershell
+$body = @{
+  question = "Cho toi xem phieu luong thang nay"
+  user_id = "22222222-2222-4222-8222-222222222222"
+} | ConvertTo-Json -Compress
+
+$bodyPath = Join-Path $env:TEMP "query-body.json"
+$body | Set-Content -LiteralPath $bodyPath -NoNewline -Encoding utf8
+
+curl.exe -N -X POST http://localhost:8001/query `
+  -H "Authorization: Bearer mock-user-finance" `
+  -H "Content-Type: application/json" `
+  --data-binary "@$bodyPath"
+```
+
+Expected: `sources` rong va noi dung den tu HR mock payroll cua user finance.
+
+Test identity shortcut:
+
+```powershell
+$body = @{
+  question = "Ban la ai?"
+  user_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+} | ConvertTo-Json -Compress
+
+$bodyPath = Join-Path $env:TEMP "query-body.json"
+$body | Set-Content -LiteralPath $bodyPath -NoNewline -Encoding utf8
+
+curl.exe -N -X POST http://localhost:8001/query `
+  -H "Authorization: Bearer mock-admin" `
+  -H "Content-Type: application/json" `
+  --data-binary "@$bodyPath"
+```
+
+Expected: tra loi gioi thieu tro ly noi bo VinSmartFuture, `sources` rong, khong can RAG/HR tool.
+
+Test RAG route va ACL:
+
+```powershell
+$body = @{
+  question = "Finance report guideline"
+  user_id = "22222222-2222-4222-8222-222222222222"
+} | ConvertTo-Json -Compress
+
+$bodyPath = Join-Path $env:TEMP "query-body.json"
+$body | Set-Content -LiteralPath $bodyPath -NoNewline -Encoding utf8
+
+curl.exe -N -X POST http://localhost:8001/query `
+  -H "Authorization: Bearer mock-user-finance" `
+  -H "Content-Type: application/json" `
+  --data-binary "@$bodyPath"
+```
+
+Expected: co source `Finance_Report_Guideline.xlsx`, khong co `Executive_Compensation_Top_Secret.pdf`. Moi source dung field `source_gcs_uri`. Query Service inject `document_ids` theo ACL cua user finance.
 
 Test user mismatch:
 
@@ -389,7 +530,30 @@ Expected:
 cd src/query-service
 .\.venv\Scripts\Activate.ps1
 $env:LLM_MODE="mock"
+$env:MCP_MODE="mock"
 pytest -v
+```
+
+Test rieng cac phan v2:
+
+```powershell
+# Hybrid intent classifier unit tests
+pytest tests/test_intent_classifier.py -v
+
+# /query tool routing va guardrails
+pytest tests/test_api.py -k "paraphrased or tool_decision or unknown_tool or invalid_tool" -v
+
+# MCP JSON-RPC adapter khi MCP_MODE=mcp
+pytest tests/test_mcp_json_rpc_client.py -v
+
+# NATS/query_db infrastructure adapters
+pytest tests/test_nats_infrastructure.py -v
+```
+
+Expected automated suite hien tai: tat ca tests pass trong mock mode. Neu chay full suite bang Python trong `.venv`:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
 ## 10. Loi thuong gap
@@ -399,4 +563,6 @@ pytest -v
 | `401 Not authenticated` | Thieu Bearer token | Them `Authorization: Bearer mock-user-hr` |
 | `403 user_id must match authenticated user` | Body `user_id` khac token | Dung dung user id cua token mock |
 | `503 OPENAI_API_KEY is required` | `LLM_MODE=openai` nhung chua set key | Set key hoac doi `LLM_MODE=mock` |
+| `OpenAI tool decision unavailable` | `LLM_MODE=openai` nhung OpenAI loi khi chon tool | Kiem tra key/model/network hoac doi `LLM_MODE=mock` de test offline |
+| `MCP service unavailable` / loi JSON-RPC | `MCP_MODE=mcp` nhung mcp-service chua chay hoac sai URL | Chay mcp-service tai `MCP_SERVICE_URL` hoac doi `MCP_MODE=mock` |
 | `429 Rate limit exceeded` | Qua 20 request/phut/user | Doi 60 giay hoac tang `QUERY_RATE_LIMIT_PER_MINUTE` khi dev |

@@ -14,7 +14,7 @@ class MockDocument:
     caption: str
     heading_path: list[str]
     section_content: str
-    source_s3_uri: str
+    source_gcs_uri: str
     score: float
     allowed_departments: list[str] = field(default_factory=list)
     allowed_user_ids: list[str] = field(default_factory=list)
@@ -32,7 +32,7 @@ MOCK_DOCUMENTS: list[MockDocument] = [
             "Nhân viên mới cần hoàn tất hồ sơ, kích hoạt tài khoản nội bộ, "
             "đọc quy định bảo mật và tham gia buổi giới thiệu công ty."
         ),
-        source_s3_uri="s3://rag-chatbot-docs/public/onboarding-handbook-2026.md",
+        source_gcs_uri="gs://rag-chatbot-docs/public/onboarding-handbook-2026.md",
         score=0.86,
     ),
     MockDocument(
@@ -46,7 +46,7 @@ MOCK_DOCUMENTS: list[MockDocument] = [
             "Mỗi nhân viên chính thức có 12 ngày nghỉ phép năm. "
             "Ngày nghỉ chưa dùng cần được đăng ký và phê duyệt trên hệ thống HR."
         ),
-        source_s3_uri="s3://rag-chatbot-docs/internal/chinh-sach-nghi-phep-2026.pdf",
+        source_gcs_uri="gs://rag-chatbot-docs/internal/chinh-sach-nghi-phep-2026.pdf",
         score=0.92,
     ),
     MockDocument(
@@ -60,7 +60,7 @@ MOCK_DOCUMENTS: list[MockDocument] = [
             "Báo cáo tài chính nội bộ chỉ được chia sẻ trong phòng Finance. "
             "Mọi file dự thảo phải được trưởng bộ phận phê duyệt trước khi gửi."
         ),
-        source_s3_uri="s3://rag-chatbot-docs/secret/finance-report-guideline.xlsx",
+        source_gcs_uri="gs://rag-chatbot-docs/secret/finance-report-guideline.xlsx",
         score=0.89,
         allowed_departments=["Finance"],
     ),
@@ -75,7 +75,7 @@ MOCK_DOCUMENTS: list[MockDocument] = [
             "Tài liệu này chỉ dành cho người được chỉ định trong danh sách "
             "allowed_user_ids và không được đưa vào trace chi tiết."
         ),
-        source_s3_uri="s3://rag-chatbot-docs/top-secret/executive-compensation.pdf",
+        source_gcs_uri="gs://rag-chatbot-docs/top-secret/executive-compensation.pdf",
         score=0.94,
         allowed_user_ids=["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
     ),

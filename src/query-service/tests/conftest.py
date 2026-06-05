@@ -4,9 +4,16 @@ from pathlib import Path
 
 import pytest
 
-os.environ.setdefault("AUTH_MODE", "mock")
-os.environ.setdefault("LLM_MODE", "mock")
-os.environ.setdefault("ENABLE_DEV_ENDPOINTS", "true")
+TEST_ENV = {
+    "AUTH_MODE": "mock",
+    "LLM_MODE": "mock",
+    "MCP_MODE": "mock",
+    "NATS_MODE": "mock",
+    "DATABASE_URL": "",
+    "OPENAI_API_KEY": "",
+    "ENABLE_DEV_ENDPOINTS": "true",
+}
+os.environ.update(TEST_ENV)
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVICE_ROOT))
@@ -20,7 +27,9 @@ def reset_state():
     get_settings.cache_clear()
     reset_state_for_tests()
     yield
+    get_settings.cache_clear()
     reset_state_for_tests()
+    get_settings.cache_clear()
 
 
 @pytest.fixture
