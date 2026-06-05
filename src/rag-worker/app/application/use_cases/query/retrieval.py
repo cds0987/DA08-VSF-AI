@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from app.domain.repositories.vector_repository import SearchResult
 from core_engine.engine import HaystackRagEngine
@@ -12,8 +12,15 @@ class RetrievalUseCase:
 
     async def execute(
         self,
-        question: str,
+        query_text: str,
         *,
+        document_ids: Optional[List[str]] = None,
+        top_k: int = 5,
         correlation_id: str | None = None,
     ) -> List[SearchResult]:
-        return await self._engine.search(question, correlation_id=correlation_id)
+        return await self._engine.search(
+            query_text,
+            top_k=top_k,
+            document_ids=document_ids,
+            correlation_id=correlation_id,
+        )

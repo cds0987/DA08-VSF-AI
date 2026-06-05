@@ -37,14 +37,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core_engine import IngestInput, build_engine  # noqa: E402
+from core_engine import IngestInput, build_engine, build_engine_from_config  # noqa: E402
 from core_engine.ai import get_ai_provider, reset_ai_provider  # noqa: E402
 from core_engine.config import load_settings  # noqa: E402
+from core_engine.config_loader import load_config  # noqa: E402
 from core_engine.factory import (  # noqa: E402
     caption_enabled_from_env,
     rerank_provider_from_env,
 )
 from core_engine.logging_utils import _EVENT_FIELDS_ATTR  # noqa: E402
+from core_engine.mapping import build_ai_provider, to_settings, to_vector_store_config  # noqa: E402
 from core_engine.vectorstore import VectorStoreConfig  # noqa: E402
 
 _CORPUS = [
@@ -131,9 +133,20 @@ def _summary(values: list[float]) -> dict:
 
 async def _run(repeat: int, top_k: int) -> dict:
     reset_ai_provider()
-    provider = get_ai_provider()
-    settings = load_settings()
-    vector_config = VectorStoreConfig.from_env()
+    config_path = Path(os.getenv("PIPELINE_CONFIG", "config.yaml"))
+    if config_path.is_file():
+        pipeline_cfg = load_config(config_path)
+        provider = build_ai_provider(pipeline_cfg)
+        settings = to_settings(pipeline_cfg, dim=pipeline_cfg.embedder.dimension)
+        vector_config = to_vector_store_config(
+            pipeline_cfg,
+            dim=settings.embed_dimension,
+        )
+    else:
+        pipeline_cfg = None
+        provider = get_ai_provider()
+        settings = load_settings()
+        vector_config = VectorStoreConfig.from_env()
     capture = _EventCapture()
     root = logging.getLogger()
     root.addHandler(capture)
@@ -142,7 +155,15 @@ async def _run(repeat: int, top_k: int) -> dict:
 
     tracemalloc.start()
     try:
-        engine = build_engine(provider=provider)
+        engine = (
+            build_engine_from_config(
+                pipeline_cfg,
+                provider=provider,
+                vector_config_override=vector_config,
+            )
+            if pipeline_cfg is not None
+            else build_engine(provider=provider)
+        )
         for document in _CORPUS:
             await engine.ingest(document)
 
@@ -165,6 +186,7 @@ async def _run(repeat: int, top_k: int) -> dict:
             "embed_dimension": settings.embed_dimension,
             "vector_provider": vector_config.provider,
             "vector_deployment": vector_config.deployment,
+            "pipeline_profile": os.getenv("PIPELINE_PROFILE", "baseline"),
             "rerank_provider": rerank_provider_from_env(),
             "caption_enabled": caption_enabled_from_env(),
             "top_k_candidates": settings.top_k_candidates,

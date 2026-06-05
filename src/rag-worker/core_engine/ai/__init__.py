@@ -39,6 +39,10 @@ def _build_provider(settings: AISettings | None = None) -> AIProvider:
     raise ValueError(f"AI_PROVIDER khong hop le: {mode!r} (auto|openai|offline)")
 
 
+def build_provider(settings: AISettings | None = None) -> AIProvider:
+    return _build_provider(settings)
+
+
 def get_ai_provider() -> AIProvider:
     global _provider
     if _provider is None:
@@ -76,6 +80,7 @@ __all__ = [
     "RERANK_QUERY_MARKER",
     "load_ai_settings",
     "retry_async",
+    "build_provider",
     "OpenAIProvider",
     "OfflineProvider",
     "get_ai_provider",

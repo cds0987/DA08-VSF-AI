@@ -11,7 +11,7 @@ from app.domain.repositories.embedding_service import EmbeddingService
 from app.domain.repositories.vector_repository import SearchResult, VectorRepository
 
 from core_engine.caption import Captioner
-from core_engine.chunking import split_sections
+from core_engine.chunking import Chunker, SectionChunker
 from core_engine.config import HaystackSettings, load_settings
 from core_engine.logging_utils import Stopwatch, log_event
 from core_engine.rerank import Reranker
@@ -37,12 +37,18 @@ class HaystackRagEngine:
         vectors: VectorRepository,
         reranker: Reranker,
         captioner: Optional[Captioner] = None,
+        chunker: Chunker | None = None,
     ):
         self.settings = settings or load_settings()
         self.embedder = embedder
         self.vectors = vectors
         self.reranker = reranker
         self.captioner = captioner
+        self.chunker = chunker or SectionChunker(
+            parent_max_words=self.settings.parent_max_words,
+            child_max_words=self.settings.child_max_words,
+            child_overlap_words=self.settings.child_overlap_words,
+        )
         self._logger = logging.getLogger(__name__)
 
     async def ingest(self, doc: IngestInput) -> int:
@@ -61,12 +67,7 @@ class HaystackRagEngine:
         source_uri = doc.source_uri or f"local://{doc.document_id}"
         artifact_uri = doc.artifact_uri or f"{source_uri}#artifact"
         split_sw = Stopwatch()
-        sections = split_sections(
-            doc.markdown,
-            parent_max_words=settings.parent_max_words,
-            child_max_words=settings.child_max_words,
-            child_overlap_words=settings.child_overlap_words,
-        )
+        sections = self.chunker.split(doc.markdown)
         split_ms = split_sw.elapsed_ms()
         caption_ms = 0.0
 
@@ -157,6 +158,7 @@ class HaystackRagEngine:
         top_k: Optional[int] = None,
         rerank_threshold: Optional[float] = None,
         correlation_id: Optional[str] = None,
+        document_ids: Optional[List[str]] = None,
     ) -> List[SearchResult]:
         settings = self.settings
         effective_top_k = top_k if top_k is not None else settings.rerank_top_k
@@ -173,12 +175,16 @@ class HaystackRagEngine:
             correlation_id=request_correlation_id,
             top_k=effective_top_k,
             rerank_threshold=threshold,
+            document_id_count=len(document_ids) if document_ids is not None else None,
         )
 
         embed_sw = Stopwatch()
         query_vector = await self.embedder.embed(query_text)
         embed_ms = embed_sw.elapsed_ms()
         vector_sw = Stopwatch()
+        # TODO(ACL): thread `document_ids` xuong hybrid_search de filter theo quyen
+        # (fail-secure: None => chi public / rong). Hien moi nhan o boundary; provider
+        # filter se lam o buoc ACL tiep theo.
         candidates = await self.vectors.hybrid_search(
             query_vector,
             query_text,
