@@ -8,6 +8,7 @@ import re
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, AsyncIterator
 from urllib.parse import urlparse
 
@@ -22,15 +23,24 @@ from app.domain.repositories.ingest_job_repository import IngestJobRepository
 from app.domain.repositories.parser import Parser
 from app.infrastructure.db import InMemoryDocumentRepository
 from app.infrastructure.external.local_artifact_store import LocalArtifactStore
-from app.infrastructure.external.local_parser import LocalFileParser
+from app.interfaces.api.composition import resolve_parser
 from core_engine.ai import AISettings, get_ai_provider, load_ai_settings, reset_ai_provider
 from core_engine.config import HaystackSettings, load_settings
+from core_engine.config_loader import load_config
+from core_engine.config_schema import PipelineConfig
 from core_engine.factory import (
     build_engine,
     caption_enabled_from_env,
     rerank_provider_from_env,
 )
 from core_engine.logging_utils import configure_logging, log_event
+from core_engine.mapping import (
+    build_ai_provider,
+    build_ai_settings,
+    build_engine_from_config,
+    to_settings,
+    to_vector_store_config,
+)
 from core_engine.ocr import ProviderImageTextExtractor
 from core_engine.vectorstore import VectorStoreConfig, available_providers
 
@@ -340,6 +350,7 @@ async def run_ingest_worker(
     ingest_use_case: IngestDocumentUseCase,
     poll_interval_seconds: float,
     logger: logging.Logger,
+    on_job_finished: Any | None = None,
 ) -> None:
     while True:
         try:
@@ -357,6 +368,9 @@ async def run_ingest_worker(
                     document_id=job.document_id,
                     status=job.status.value,
                 )
+                # Publish doc.status qua NATS (no-op nếu không bật NATS).
+                if on_job_finished is not None:
+                    await on_job_finished(job)
         except Exception as exc:  # noqa: BLE001 - worker must stay alive and keep polling
             log_event(
                 logger,
@@ -372,8 +386,9 @@ async def run_ingest_worker(
 def build_parser(provider: Any) -> Parser:
     # OCR/vision đi qua AI gateway: parser nhận extractor wired từ provider, không
     # tự ôm engine OCR. Composition root là nơi DUY NHẤT nối AI vào parser.
-    return LocalFileParser(
-        max_workers=load_parser_execution_settings().max_workers,
+    return resolve_parser(
+        "local",
+        params={"max_workers": load_parser_execution_settings().max_workers},
         image_text_extractor=ProviderImageTextExtractor(provider),
     )
 
@@ -423,19 +438,50 @@ def bootstrap_runtime() -> RuntimeState:
     configure_logging(logging.getLevelNamesMapping().get(os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO))
     logger = logging.getLogger(__name__)
     app_env = os.getenv("APP_ENV", "development")
-    validate_runtime_settings()
-    settings = load_settings()
     lease_settings = load_ingest_lease_settings()
-    ai_settings = load_ai_settings()
-    validate_ai_config(ai_settings, settings)
-    vector_config = VectorStoreConfig.from_env(dimension=settings.embed_dimension)
-    validate_vector_config(vector_config)
+    validate_job_log_retention_settings()
+    validate_ingest_lease_settings()
+    validate_parser_execution_settings()
+    caption_enabled_from_env()
+    rerank_provider_from_env()
+    if int(os.getenv("INGEST_WORKER_COUNT", "1")) <= 0:
+        raise ValueError("INGEST_WORKER_COUNT must be > 0")
+    if float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5")) <= 0:
+        raise ValueError("INGEST_WORKER_POLL_INTERVAL_SECONDS must be > 0")
     database_url = os.getenv("DATABASE_URL", "").strip()
     validate_metadata_backend(app_env, database_url)
     metadata_backend = metadata_backend_name(database_url)
+    pipeline_cfg: PipelineConfig | None = None
+    pipeline_config_path = Path(os.getenv("PIPELINE_CONFIG", "config.yaml"))
 
-    reset_ai_provider()
-    provider = get_ai_provider()
+    if pipeline_config_path.is_file():
+        pipeline_cfg = load_config(pipeline_config_path)
+        if os.getenv("CAPTION_ENABLED", "").strip():
+            pipeline_cfg = pipeline_cfg.model_copy(
+                update={
+                    "captioner": pipeline_cfg.captioner.model_copy(
+                        update={"impl": "provider" if caption_enabled_from_env() else "none"}
+                    )
+                }
+            )
+        settings = to_settings(pipeline_cfg, dim=pipeline_cfg.embedder.dimension)
+        ai_settings = build_ai_settings(pipeline_cfg)
+        validate_ai_config(ai_settings, settings)
+        provider = build_ai_provider(pipeline_cfg)
+        vector_config = to_vector_store_config(
+            pipeline_cfg,
+            dim=settings.embed_dimension,
+        )
+        validate_vector_config(vector_config)
+    else:
+        validate_runtime_settings()
+        settings = load_settings()
+        ai_settings = load_ai_settings()
+        validate_ai_config(ai_settings, settings)
+        vector_config = VectorStoreConfig.from_env(dimension=settings.embed_dimension)
+        validate_vector_config(vector_config)
+        reset_ai_provider()
+        provider = get_ai_provider()
 
     reasons: list[str] = []
     if provider.name == "offline":
@@ -465,10 +511,23 @@ def bootstrap_runtime() -> RuntimeState:
     document_repository = build_document_repository()
     if not isinstance(document_repository, IngestJobRepository):
         raise TypeError("document repository must implement IngestJobRepository")
-    parser = build_parser(provider)
+    parser: Parser
     artifact_store = build_artifact_store()
     try:
-        engine = build_engine(provider=provider, vector_config=vector_config)
+        if pipeline_cfg is not None:
+            parser = resolve_parser(
+                pipeline_cfg.parser.impl,
+                params=pipeline_cfg.parser.params,
+                image_text_extractor=ProviderImageTextExtractor(provider),
+            )
+            engine = build_engine_from_config(
+                pipeline_cfg,
+                provider=provider,
+                vector_config_override=vector_config,
+            )
+        else:
+            parser = build_parser(provider)
+            engine = build_engine(provider=provider, vector_config=vector_config)
         ingest_use_case = IngestDocumentUseCase(
             engine,
             document_repository,
@@ -528,6 +587,79 @@ def build_document_repository() -> DocumentRepository:
     return PostgresDocumentRepository(database_url)
 
 
+def _nats_config() -> dict | None:
+    """Cấu hình NATS ingest. Không set NATS_URL -> None (không bật NATS)."""
+    url = os.getenv("NATS_URL", "").strip()
+    if not url:
+        return None
+    return {
+        "url": url,
+        "stream": os.getenv("NATS_STREAM", "DOCS"),
+        "doc_ingest_subject": os.getenv("NATS_DOC_INGEST_SUBJECT", "doc.ingest"),
+        "doc_status_subject": os.getenv("NATS_DOC_STATUS_SUBJECT", "doc.status"),
+        "durable": os.getenv("NATS_DURABLE", "rag-worker-ingest"),
+    }
+
+
+async def start_nats_ingest(
+    runtime: "RuntimeState", logger: logging.Logger
+) -> tuple[Any, Any, Any]:
+    """Bật cửa ingest NATS nếu có NATS_URL. Trả (broker, subscription, status_publisher).
+
+    Lỗi khi bật NATS -> đóng broker + degrade gracefully (trả None): search/HTTP độc
+    lập vẫn chạy, không để NATS hỏng kéo sập cả service. Ops theo dõi log ERROR.
+    """
+    cfg = _nats_config()
+    if cfg is None or runtime.ingest_use_case is None:
+        return None, None, None
+    # Lazy import: chưa cài nats-py / không bật NATS thì không kéo dependency.
+    from app.infrastructure.external.nats_client import NatsBroker
+    from app.interfaces.nats import (
+        DocIngestConsumer,
+        DocStatusPublisher,
+        start_doc_ingest_subscription,
+    )
+
+    broker = NatsBroker(cfg["url"])
+    try:
+        await broker.connect()
+        await broker.ensure_stream(
+            cfg["stream"], [cfg["doc_ingest_subject"], cfg["doc_status_subject"]]
+        )
+        consumer = DocIngestConsumer(runtime.ingest_use_case, logger=logger)
+        subscription = await start_doc_ingest_subscription(
+            broker,
+            consumer,
+            subject=cfg["doc_ingest_subject"],
+            durable=cfg["durable"],
+            logger=logger,
+        )
+    except Exception as exc:  # noqa: BLE001 - NATS hỏng không được giết search/HTTP
+        with contextlib.suppress(Exception):
+            await broker.close()
+        log_event(
+            logger,
+            logging.ERROR,
+            "nats_ingest_start_failed",
+            stage="startup",
+            error=str(exc),
+        )
+        return None, None, None
+    publisher = DocStatusPublisher(
+        broker, subject=cfg["doc_status_subject"], logger=logger
+    )
+    log_event(
+        logger,
+        logging.INFO,
+        "nats_ingest_started",
+        stage="startup",
+        stream=cfg["stream"],
+        ingest_subject=cfg["doc_ingest_subject"],
+        status_subject=cfg["doc_status_subject"],
+    )
+    return broker, subscription, publisher
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     runtime = bootstrap_runtime()
@@ -540,8 +672,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     stale_reaper_task = asyncio.create_task(
         run_stale_job_reaper(runtime.job_repository, lease_settings, logger)
     )
+    # Bật cửa ingest NATS (nếu có NATS_URL); status_publisher đẩy doc.status sau xử lý.
+    nats_broker, nats_subscription, status_publisher = await start_nats_ingest(
+        runtime, logger
+    )
+    on_job_finished = (
+        status_publisher.publish_for_job if status_publisher is not None else None
+    )
     worker_count = int(os.getenv("INGEST_WORKER_COUNT", "1"))
     worker_poll_interval = float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5"))
+    if status_publisher is not None and worker_count <= 0:
+        # NATS enqueue được nhưng không worker nào xử lý -> không bao giờ publish
+        # doc.status. Cảnh báo để cấu hình sai lộ ra thay vì doc kẹt im lặng.
+        log_event(
+            logger,
+            logging.WARNING,
+            "nats_ingest_without_worker",
+            stage="startup",
+            worker_count=worker_count,
+        )
     worker_tasks = []
     if runtime.ingest_use_case is not None:
         worker_tasks = [
@@ -551,10 +700,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     runtime.ingest_use_case,
                     worker_poll_interval,
                     logger,
+                    on_job_finished,
                 )
             )
             for index in range(worker_count)
         ]
+    app.state.nats_broker = nats_broker
+    app.state.nats_subscription = nats_subscription
     app.state.ingest_use_case = runtime.ingest_use_case
     app.state.retrieval_use_case = runtime.retrieval_use_case
     app.state.runtime = runtime
@@ -597,6 +749,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     "ingest_worker_stopped",
                     stage="worker",
                 )
+        if nats_subscription is not None:
+            with contextlib.suppress(Exception):
+                await nats_subscription.unsubscribe()
+        if nats_broker is not None:
+            with contextlib.suppress(Exception):
+                await nats_broker.close()
         close_parser = getattr(runtime.parser, "close", None)
         if close_parser is not None:
             with contextlib.suppress(Exception):

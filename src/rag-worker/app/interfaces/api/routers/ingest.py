@@ -5,34 +5,12 @@ from app.interfaces.api.dependencies import get_ingest_use_case
 from app.interfaces.api.schemas.ingest import (
     DocumentResponse,
     IngestJobResponse,
-    IngestRequest,
-    IngestResponse,
 )
 
 router = APIRouter()
 
-
-@router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_202_ACCEPTED)
-async def ingest_document(
-    payload: IngestRequest,
-    use_case: IngestDocumentUseCase = Depends(get_ingest_use_case),
-) -> IngestResponse:
-    job = await use_case.enqueue(
-        document_id=payload.document_id,
-        document_name=payload.document_name,
-        file_type=payload.file_type,
-        markdown=payload.markdown,
-        source_uri=payload.source_uri,
-        artifact_uri=payload.artifact_uri,
-        correlation_id=payload.correlation_id,
-    )
-    return IngestResponse(
-        job_id=job.id,
-        document_id=payload.document_id,
-        status="queued",
-        chunk_count=0,
-        message="document queued",
-    )
+# Tạo ingest đã chuyển sang NATS (subject doc.ingest) — không còn POST /ingest.
+# Các endpoint dưới chỉ ĐỌC/quản lý trạng thái tài liệu + job.
 
 
 @router.get("/ingest/{document_id}", response_model=DocumentResponse)

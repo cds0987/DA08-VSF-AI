@@ -83,6 +83,21 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
     async def get_job(self, job_id: str) -> IngestJob | None:
         return self._jobs.get(job_id)
 
+    async def find_active_job(self, document_id: str) -> IngestJob | None:
+        active = {
+            IngestJobStatus.PENDING,
+            IngestJobStatus.PROCESSING,
+            IngestJobStatus.STALE,
+        }
+        candidates = [
+            job
+            for job in self._jobs.values()
+            if job.document_id == document_id and job.status in active
+        ]
+        if not candidates:
+            return None
+        return sorted(candidates, key=lambda item: (item.created_at, item.id))[0]
+
     async def claim_next_pending(self, claim_id: str) -> IngestJob | None:
         candidates = sorted(
             self._jobs.values(),

@@ -28,27 +28,26 @@ không dùng (vd qdrant-client/pymilvus/chromadb chỉ cần khi chọn đúng p
 
 from __future__ import annotations
 
-from typing import Callable, Dict, List
+from typing import Callable, List
 
+from core_engine.registry import Registry
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.provider import VectorStoreProvider
 from core_engine.vectorstore.store import VectorStore
 
 VectorStoreFactory = Callable[[VectorStoreConfig], VectorStore | VectorStoreProvider]
 
-_PROVIDERS: Dict[str, VectorStoreFactory] = {}
+# Cùng primitive với chunker/captioner/reranker (mapping) + parser (composition).
+_PROVIDERS: Registry[VectorStoreFactory] = Registry(
+    "provider", entry_point_group="rag_worker.vector_store"
+)
 
 
 def register_backend(
     name: str, factory: VectorStoreFactory, *, override: bool = False
 ) -> None:
     """Dang ky provider. Trung ten ma khong `override=True` -> raise."""
-    key = name.lower()
-    if key in _PROVIDERS and not override:
-        raise ValueError(
-            f"Provider {key!r} da dang ky. Truyen override=True neu co y thay the."
-        )
-    _PROVIDERS[key] = factory
+    _PROVIDERS.register(name, factory, override=override)
 
 
 # Alias tên theo trục mới; `register_backend` giữ lại cho caller cũ (MOSA).
@@ -56,7 +55,7 @@ register_provider = register_backend
 
 
 def available_backends() -> List[str]:
-    return sorted(_PROVIDERS)
+    return _PROVIDERS.available()
 
 
 # Alias tên theo trục mới.
@@ -66,11 +65,7 @@ available_providers = available_backends
 def build_vector_store(config: VectorStoreConfig | None = None) -> VectorStore:
     """Dung VectorStore theo `config.provider`; deployment do provider tu xu ly."""
     config = config or VectorStoreConfig.from_env()
-    factory = _PROVIDERS.get(config.provider.lower())
-    if factory is None:
-        raise ValueError(
-            f"provider={config.provider!r} chua dang ky. Co: {available_backends()}"
-        )
+    factory = _PROVIDERS.get(config.provider)
     built = factory(config)
     if isinstance(built, VectorStore):
         return built

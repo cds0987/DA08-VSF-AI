@@ -31,7 +31,8 @@ class Captioner(Protocol):
 class ProviderCaptioner:
     def __init__(self, provider: AIProvider | None = None, *, max_chars: int = 6000):
         self._provider = provider or get_ai_provider()
-        self._max_chars = max_chars
+        # Config-driven params đến từ ${VAR} interpolation dưới dạng string -> coerce.
+        self._max_chars = int(max_chars)
         self._logger = logging.getLogger(__name__)
 
     async def caption(self, text: str) -> str:

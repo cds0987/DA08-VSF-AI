@@ -254,6 +254,29 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
                 return None
             return self._to_job(record)
 
+    async def find_active_job(self, document_id: str) -> IngestJob | None:
+        return await asyncio.to_thread(self._find_active_job_sync, document_id)
+
+    def _find_active_job_sync(self, document_id: str) -> IngestJob | None:
+        with self._session() as session:
+            stmt = (
+                select(IngestJobRecord)
+                .where(
+                    IngestJobRecord.document_id == document_id,
+                    IngestJobRecord.status.in_(
+                        [
+                            IngestJobStatus.PENDING.value,
+                            IngestJobStatus.PROCESSING.value,
+                            IngestJobStatus.STALE.value,
+                        ]
+                    ),
+                )
+                .order_by(IngestJobRecord.created_at.asc(), IngestJobRecord.id.asc())
+                .limit(1)
+            )
+            record = session.execute(stmt).scalars().first()
+            return self._to_job(record) if record is not None else None
+
     async def claim_next_pending(self, claim_id: str) -> IngestJob | None:
         return await asyncio.to_thread(self._claim_next_pending_sync, claim_id)
 
