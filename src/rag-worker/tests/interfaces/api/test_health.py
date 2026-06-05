@@ -4,6 +4,8 @@ import pytest
 from app.interfaces.api import main as main_module
 from app.interfaces.api.main import create_app
 from app.interfaces.api.runtime import HealthReport
+from app.infrastructure.external.local_parser import LocalFileParser
+from app.infrastructure.external.s3_parser import S3SourceParser
 
 
 def test_health_reports_unhealthy_when_running_degraded(
@@ -36,6 +38,59 @@ def test_production_startup_fails_closed_when_degraded(
     monkeypatch.delenv("QDRANT_URL", raising=False)
 
     with pytest.raises(RuntimeError, match="Production fail-closed"):
+        with TestClient(create_app()):
+            pass
+
+
+def test_health_reports_storage_preflight_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.interfaces.api import runtime as runtime_module
+
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AI_PROVIDER", "offline")
+    monkeypatch.setenv("S3_SOURCE_BUCKET", "docs-bucket")
+    monkeypatch.setattr(
+        runtime_module,
+        "build_parser",
+        lambda provider: S3SourceParser(LocalFileParser(max_workers=1)),
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "collect_storage_startup_diagnostics",
+        lambda **kwargs: (["Object storage preflight failed for bucket docs-bucket: 403"], []),
+    )
+
+    with TestClient(create_app()) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 503
+    assert "Object storage preflight failed for bucket docs-bucket: 403" in response.json()["reasons"]
+
+
+def test_production_startup_fails_closed_on_storage_preflight_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.interfaces.api import runtime as runtime_module
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("AI_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("VECTOR_DB_URL", "http://localhost:6333")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://user:pass@localhost:5432/rag")
+    monkeypatch.setenv("S3_SOURCE_BUCKET", "docs-bucket")
+    monkeypatch.setattr(
+        runtime_module,
+        "build_parser",
+        lambda provider: S3SourceParser(LocalFileParser(max_workers=1)),
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "collect_storage_startup_diagnostics",
+        lambda **kwargs: (["Object storage preflight failed for bucket docs-bucket: 403"], []),
+    )
+
+    with pytest.raises(RuntimeError, match="Object storage preflight failed"):
         with TestClient(create_app()):
             pass
 

@@ -22,6 +22,10 @@ from app.domain.repositories.ingest_job_repository import IngestJobRepository
 from app.domain.repositories.parser import Parser
 from app.infrastructure.db import InMemoryDocumentRepository
 from app.infrastructure.external.local_artifact_store import LocalArtifactStore
+from app.infrastructure.external.s3_parser import (
+    S3SourceParser,
+    collect_storage_startup_diagnostics,
+)
 from app.interfaces.api.composition import resolve_parser
 from core_engine.ai import AISettings, get_ai_provider, load_ai_settings, reset_ai_provider
 from core_engine.config import HaystackSettings, load_settings
@@ -76,6 +80,8 @@ class RuntimeState:
     provider: Any
     vector_config: VectorStoreConfig
     health: HealthReport
+    startup_reasons: list[str] = field(default_factory=list)
+    source_bucket: str | None = None
 
 
 @dataclass(frozen=True)
@@ -397,8 +403,15 @@ def build_artifact_store() -> ArtifactStore:
     return LocalArtifactStore()
 
 
+def _source_bucket() -> str:
+    return (
+        os.getenv("S3_SOURCE_BUCKET", "").strip()
+        or os.getenv("R2_BUCKET", "").strip()
+    )
+
+
 async def compute_health(runtime: RuntimeState) -> HealthReport:
-    reasons: list[str] = []
+    reasons = list(runtime.startup_reasons)
     if runtime.provider.name == "offline":
         reasons.append("AI provider is offline.")
     if runtime.vector_config.deployment != "remote":
@@ -496,6 +509,7 @@ def bootstrap_runtime() -> RuntimeState:
         validate_vector_config(vector_config)
 
     reasons: list[str] = []
+    startup_reasons: list[str] = []
     if provider.name == "offline":
         reasons.append("AI provider is offline.")
     if vector_config.deployment != "remote":
@@ -524,6 +538,7 @@ def bootstrap_runtime() -> RuntimeState:
         raise TypeError("document repository must implement IngestJobRepository")
     parser: Parser = build_parser(provider)
     artifact_store = build_artifact_store()
+    source_bucket = _source_bucket() or None
     try:
         if pipeline_cfg is not None:
             parser = resolve_parser(
@@ -555,10 +570,37 @@ def bootstrap_runtime() -> RuntimeState:
             artifact_store,
             claim_heartbeat_interval_seconds=lease_settings.heartbeat_interval_seconds,
         )
+        if isinstance(parser, S3SourceParser):
+            storage_reasons, storage_warnings = collect_storage_startup_diagnostics(
+                source_bucket=source_bucket
+            )
+            startup_reasons.extend(storage_reasons)
+            for warning in storage_warnings:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "storage_startup_warning",
+                    stage="startup",
+                    warning=warning,
+                    source_bucket=source_bucket or "(none)",
+                )
     except Exception as exc:
-        reasons.append(f"Engine bootstrap failed: {exc}")
+        startup_reasons.append(f"Engine bootstrap failed: {exc}")
         if _is_production(app_env):
             raise
+
+    reasons.extend(startup_reasons)
+    if _is_production(app_env) and startup_reasons:
+        log_event(
+            logger,
+            logging.ERROR,
+            "runtime_storage_fail_closed",
+            stage="startup",
+            app_env=app_env,
+            reasons=startup_reasons,
+            source_bucket=source_bucket or "(none)",
+        )
+        raise RuntimeError("Production fail-closed: " + " ".join(startup_reasons))
 
     health = HealthReport(
         status="healthy" if not reasons else "unhealthy",
@@ -594,6 +636,8 @@ def bootstrap_runtime() -> RuntimeState:
         provider=provider,
         vector_config=vector_config,
         health=health,
+        startup_reasons=startup_reasons,
+        source_bucket=source_bucket,
     )
 
 
@@ -627,10 +671,7 @@ def _nats_config() -> dict | None:
         "access_durable": os.getenv("NATS_ACCESS_DURABLE", "rag-worker-access"),
         # Bucket ghép vào key trần (raw/<id>/<file>) document-service publish -> s3://bucket/key.
         # Trống -> không ghép (giữ hành vi cũ). Fallback R2_BUCKET cho cấu hình R2.
-        "source_bucket": (
-            os.getenv("S3_SOURCE_BUCKET", "").strip()
-            or os.getenv("R2_BUCKET", "").strip()
-        ),
+        "source_bucket": _source_bucket(),
     }
 
 

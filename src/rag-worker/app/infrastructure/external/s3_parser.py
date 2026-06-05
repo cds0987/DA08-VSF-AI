@@ -35,6 +35,7 @@ from typing import Any, Callable
 from app.domain.repositories.parser import ParsedArtifact, Parser
 
 _S3_SCHEMES = ("s3://", "gs://")
+DOCUMENT_SERVICE_UPLOAD_LIMIT_BYTES = 50 * 1024 * 1024
 
 
 def _source_root() -> Path:
@@ -44,7 +45,7 @@ def _source_root() -> Path:
 def _max_remote_bytes() -> int:
     # Trần kích thước file tải từ S3. Tách env riêng để chỉnh độc lập với file local.
     raw = os.getenv("MAX_REMOTE_SOURCE_BYTES") or os.getenv(
-        "MAX_SOURCE_SIZE_BYTES", str(10 * 1024 * 1024)
+        "MAX_SOURCE_SIZE_BYTES", str(DOCUMENT_SERVICE_UPLOAD_LIMIT_BYTES)
     )
     return int(raw)
 
@@ -63,6 +64,54 @@ def _env(*names: str, default: str = "") -> str:
         if value:
             return value
     return default
+
+
+def current_s3_endpoint_url() -> str:
+    return _env("S3_ENDPOINT_URL", "R2_ENDPOINT_URL")
+
+
+def current_source_bucket() -> str:
+    return _env("S3_SOURCE_BUCKET", "R2_BUCKET")
+
+
+def current_remote_source_limit() -> int:
+    return _max_remote_bytes()
+
+
+def collect_storage_startup_diagnostics(
+    *,
+    client_factory: Callable[[], Any] | None = None,
+    source_bucket: str | None = None,
+) -> tuple[list[str], list[str]]:
+    reasons: list[str] = []
+    warnings: list[str] = []
+
+    max_bytes = current_remote_source_limit()
+    if max_bytes < DOCUMENT_SERVICE_UPLOAD_LIMIT_BYTES:
+        warnings.append(
+            "MAX_REMOTE_SOURCE_BYTES "
+            f"({max_bytes}) is below the document upload ceiling "
+            f"({DOCUMENT_SERVICE_UPLOAD_LIMIT_BYTES}); uploads accepted upstream may fail during ingest."
+        )
+
+    endpoint_url = current_s3_endpoint_url()
+    if not endpoint_url:
+        warnings.append(
+            "S3_ENDPOINT_URL is empty. If ingest receives gs:// URIs, boto3 will use the AWS S3 "
+            "default endpoint instead of GCS; set S3_ENDPOINT_URL=https://storage.googleapis.com "
+            "for GCS S3-interop."
+        )
+
+    bucket = (source_bucket or current_source_bucket()).strip()
+    if not bucket:
+        return reasons, warnings
+
+    factory = client_factory or _default_client_factory
+    try:
+        factory().head_bucket(Bucket=bucket)
+    except Exception as exc:  # noqa: BLE001 - surfaced via health/logs
+        reasons.append(f"Object storage preflight failed for bucket {bucket}: {exc}")
+    return reasons, warnings
 
 
 def parse_s3_uri(source_uri: str) -> tuple[str, str]:
