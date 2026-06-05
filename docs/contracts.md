@@ -196,6 +196,8 @@ class NotificationRepository(ABC):
 
 ## mcp-service — Domain
 
+> Update 2026-06-05: contract hiện hành của `mcp-service` là search-only, code nằm ở `src/mcp-service/app/core/*`, chỉ expose `rag_search(query, document_ids?, top_k=5) -> List[SearchResult]`, dùng field `source_gcs_uri` / `markdown_gcs_uri`, hỗ trợ reranker `none|lexical|llm`, và chưa implement `hr_query`.
+
 MCP Tool Service expose tool qua giao thức MCP. Mỗi tool self-contained. `RerankService` nằm ở đây (trong tool `rag_search`).
 
 ```python
@@ -538,6 +540,9 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+# POST /auth/login       → Chat app (:3000) — nhận cả user lẫn admin
+# POST /auth/admin/login → Admin app (:3001) — chỉ nhận admin; user trả 401 generic
 
 # src/user-service/app/interfaces/api/schemas/user.py  (Quản lý user — Admin)
 class UserItem(BaseModel):
