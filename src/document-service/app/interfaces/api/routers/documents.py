@@ -100,13 +100,18 @@ async def list_documents(
 @router.get("/{document_id}", response_model=DocumentDetail)
 async def get_document(
     document_id: str,
-    actor: CurrentUser = Depends(require_admin),
+    actor: CurrentUser = Depends(get_current_user),
     use_case: GetDocumentUseCase = Depends(get_get_document_use_case),
 ) -> DocumentDetail:
     try:
         document = await use_case.execute(actor, document_id)
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.detail) from exc
+    except PermissionDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc) or "Khong co quyen xem tai lieu nay",
+        ) from exc
     return _to_detail(document)
 
 

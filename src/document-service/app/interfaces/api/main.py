@@ -16,7 +16,11 @@ app.include_router(documents.router)
 
 @app.on_event("startup")
 async def startup() -> None:
-    app.state.nats_status_subscriber = await start_status_subscriber(settings)
+    app.state.nats_publisher = NatsPublisher(settings)
+    app.state.nats_status_subscriber = await start_status_subscriber(
+        settings,
+        app.state.nats_publisher,
+    )
 
 
 @app.on_event("shutdown")
@@ -24,6 +28,9 @@ async def shutdown() -> None:
     subscriber = getattr(app.state, "nats_status_subscriber", None)
     if subscriber is not None:
         await subscriber.close()
+    publisher = getattr(app.state, "nats_publisher", None)
+    if publisher is not None:
+        await publisher.close()
 
 
 @app.get("/health")
@@ -35,7 +42,10 @@ async def health() -> JSONResponse:
     except Exception:
         degraded_reasons.append("database unreachable")
 
-    nats_ok = await NatsPublisher(settings).health_check()
+    publisher = getattr(app.state, "nats_publisher", None)
+    if publisher is None:
+        publisher = NatsPublisher(settings)
+    nats_ok = await publisher.health_check()
     if not nats_ok:
         degraded_reasons.append("nats unreachable")
 

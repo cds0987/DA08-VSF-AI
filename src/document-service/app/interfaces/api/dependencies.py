@@ -1,6 +1,7 @@
 from collections.abc import AsyncGenerator
+import logging
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +22,7 @@ from app.infrastructure.storage.gcs_client import GCSClient
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+logger = logging.getLogger(__name__)
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
@@ -44,7 +46,13 @@ def get_storage(settings: Settings = Depends(get_settings)) -> GCSClient:
     return GCSClient(settings)
 
 
-def get_publisher(settings: Settings = Depends(get_settings)) -> NatsPublisher:
+def get_publisher(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> NatsPublisher:
+    publisher = getattr(request.app.state, "nats_publisher", None)
+    if isinstance(publisher, NatsPublisher):
+        return publisher
     return NatsPublisher(settings)
 
 
@@ -93,25 +101,15 @@ async def get_current_user(
         payload = jwt.decode(
             token,
             settings.jwt_secret_key,
-            algorithms=[settings.jwt_algorithm],
+            algorithms=["HS256"],
+            options={"verify_exp": True},
         )
     except JWTError as exc:
-        # --- ĐOẠN CODE IN CHI TIẾT ĐỂ KIỂM TRA SEGMENT ---
-        print("\n" + "="*50)
-        print("🔴 LỖI AUTH: THIẾU HOẶC SAI CẤU TRÚC TOKEN!")
-        print(f"👉 Chuỗi nhận được thực tế: '{token}'")
-        
-        if token:
-            segments = token.split('.')
-            print(f"👉 Số lượng segment đếm được (Phải bằng 3): {len(segments)}")
-            for idx, seg in enumerate(segments):
-                print(f"   + Segment {idx + 1}: '{seg}'")
-        else:
-            print("👉 CẢNH BÁO: Chuỗi token gửi lên bị RỖNG HOÀN TOÀN (None hoặc '')!")
-        print("="*50 + "\n")
-        
-        raise HTTPException(status_code=401, detail="Not authenticated")
-        
+        logger.info("authentication failed: invalid bearer token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        ) from exc
 
     user_id = payload.get("sub")
     role = payload.get("role")
@@ -134,4 +132,3 @@ async def require_admin(current_user: CurrentUser = Depends(get_current_user)) -
             detail=PermissionDeniedError.detail,
         )
     return current_user
-
