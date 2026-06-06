@@ -84,7 +84,14 @@ def _reject_nested_embed_keys(cfg: dict[str, Any]) -> None:
     walk(cfg, path=())
 
 
-def load_config(path: str | os.PathLike[str]) -> PipelineConfig:
+def resolve_config_dict(path: str | os.PathLike[str]) -> dict[str, Any]:
+    """Đọc YAML → chọn profile (+`extends`) → interpolate `${VAR}` → trả dict đã resolve.
+
+    Tách riêng khỏi `load_config` để caller chỉ cần MỘT phần config (vd contract
+    check chỉ cần common/embedder/vector_store) có thể validate subset, KHÔNG ép cả
+    `PipelineConfig` ingest-only lên config của service khác (mcp = search-only có
+    reranker/retrieval). Vẫn giữ profile-resolution + interpolation dùng chung.
+    """
     payload = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     profiles = payload.get("profiles")
     if profiles:
@@ -102,4 +109,8 @@ def load_config(path: str | os.PathLike[str]) -> PipelineConfig:
     # Chỉ interpolate profile đã chọn + đã merge `extends`.
     resolved = _interpolate_value(resolved)
     _reject_nested_embed_keys(resolved)
-    return PipelineConfig.model_validate(resolved)
+    return resolved
+
+
+def load_config(path: str | os.PathLike[str]) -> PipelineConfig:
+    return PipelineConfig.model_validate(resolve_config_dict(path))
