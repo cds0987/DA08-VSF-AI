@@ -1,7 +1,90 @@
-# docker-compose.yml — DevOps (Trần Hữu Gia Huy)
-# TODO: định nghĩa 12 container theo docs/setup.md (Section 8) + docs/SA_RAG_Chatbot_Final.md:
-#   nginx, nuxt-chat (:3000), nuxt-admin (:3001), user-service, document-service, query-service,
-#   rag-worker, mcp-service, nats (JetStream), qdrant, redis, langfuse
-#   (PostgreSQL = AWS RDS external — không có container;
-#    frontend/base là Nuxt layer build-time, không deploy riêng)
-# Chi tiết phân công: docs/team-ownership.md (mục DevOps)
+version: "3.9"
+
+services:
+  nats:
+    image: nats:2.10
+    command: ["-js", "-sd", "/data", "-c", "/etc/nats/jetstream.conf"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - ./infra/nats/jetstream.conf:/etc/nats/jetstream.conf:ro
+      - nats_data:/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  user-service:
+    build:
+      context: ./src/user-service
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./deploy/env/user-service.env
+    restart: unless-stopped
+
+  document-service:
+    build:
+      context: ./src/document-service
+    ports:
+      - "8002:8002"
+    env_file:
+      - ./deploy/env/document-service.env
+    depends_on:
+      - nats
+    restart: unless-stopped
+
+  query-service:
+    build:
+      context: ./src/query-service
+    ports:
+      - "8001:8001"
+    env_file:
+      - ./deploy/env/query-service.env
+    depends_on:
+      - nats
+      - redis
+    restart: unless-stopped
+
+  rag-worker:
+    build:
+      context: ./src/rag-worker
+    env_file:
+      - ./deploy/env/rag-worker.env
+    depends_on:
+      - nats
+    restart: unless-stopped
+
+  mcp-service:
+    build:
+      context: ./src/mcp-service
+    ports:
+      - "8003:8003"
+    env_file:
+      - ./deploy/env/mcp-service.env
+    depends_on:
+      - nats
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - user-service
+      - document-service
+      - query-service
+      - mcp-service
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+
+volumes:
+  nats_data:
+  redis_data:

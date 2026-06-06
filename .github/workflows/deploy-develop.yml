@@ -1,0 +1,29 @@
+name: Deploy develop to GCP VM
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          port: ${{ secrets.VM_SSH_PORT || 22 }}
+          script: |
+            set -e
+            cd ${{ secrets.APP_DIR }}
+            git fetch origin
+            git checkout develop
+            git reset --hard origin/develop
+            docker compose up --build -d
+            docker image prune -f
