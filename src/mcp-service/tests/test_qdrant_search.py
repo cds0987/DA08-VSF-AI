@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -62,7 +63,7 @@ def test_verify_and_search_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         reader,
         "_search_local",
-        lambda vector, top_k: [
+        lambda vector, top_k, document_ids=None: [
             SearchHit(
                 chunk_id="doc1::p0::c0",
                 document_id="doc1",
@@ -107,3 +108,47 @@ def test_verify_fails_when_collection_missing(monkeypatch: pytest.MonkeyPatch) -
 
     with pytest.raises(VectorstoreContractError):
         asyncio.run(reader.verify_contract())
+
+
+def test_build_filter_scopes_to_document_ids() -> None:
+    scoped = QdrantReader._build_filter(["doc-a", "doc-b"])
+
+    assert scoped is not None
+    condition = scoped.must[0]
+    assert condition.key == "document_id"
+    assert list(condition.match.any) == ["doc-a", "doc-b"]
+
+
+@pytest.mark.asyncio
+async def test_remote_search_passes_document_filter_and_reuses_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _settings()
+    settings = McpSettings(**{**settings.__dict__, "url": "http://qdrant:6333"})
+    reader = QdrantReader(settings)
+    recorded_filters: list[object] = []
+
+    class FakeClient:
+        async def query_points(self, **kwargs):
+            recorded_filters.append(kwargs.get("query_filter"))
+            payload = {
+                "chunk_id": "chunk-1",
+                "document_id": "doc-a",
+                "document_name": "Doc A",
+                "caption": "Leave policy",
+                "parent_text": "Annual leave is 12 days.",
+            }
+            return SimpleNamespace(points=[SimpleNamespace(payload=payload, score=0.9)])
+
+        async def close(self):
+            return None
+
+    fake_client = FakeClient()
+    monkeypatch.setattr(reader, "_client", fake_client)
+
+    first = await reader.search([0.1, 0.2], "leave", top_k=5, document_ids=["doc-a"])
+    second = await reader.search([0.1, 0.2], "leave", top_k=5, document_ids=["doc-a"])
+
+    assert [hit.document_id for hit in first] == ["doc-a"]
+    assert [hit.document_id for hit in second] == ["doc-a"]
+    assert len(recorded_filters) == 2
+    assert recorded_filters[0] is not None
+    assert recorded_filters[1] is not None

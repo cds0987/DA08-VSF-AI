@@ -33,6 +33,7 @@ def hash_embed(texts: List[str], dim: int) -> List[List[float]]:
     for text in texts:
         vec = [0.0] * dim
         for tok in tokens(text):
+            # nosec B324 - deterministic hash for offline embeddings, not a security primitive
             h = int(hashlib.md5(tok.encode("utf-8")).hexdigest(), 16)
             idx = h % dim
             vec[idx] += 1.0 if (h // dim) % 2 == 0 else -1.0

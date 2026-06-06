@@ -10,10 +10,20 @@ from app.interfaces.mcp_server import build_mcp, mcp_endpoint_url
 
 
 class FakeFastMCP:
-    def __init__(self, name: str, *, host: str, port: int) -> None:
+    def __init__(
+        self,
+        name: str,
+        *,
+        host: str,
+        port: int,
+        stateless_http: bool,
+        json_response: bool,
+    ) -> None:
         self.name = name
         self.host = host
         self.port = port
+        self.stateless_http = stateless_http
+        self.json_response = json_response
         self.tools: dict[str, object] = {}
         self.transport: str | None = None
 
@@ -97,22 +107,26 @@ def test_build_mcp_registers_rag_search_tool_and_query_service_shape(monkeypatch
     assert service is stub_service
     assert mcp.host == "0.0.0.0"
     assert mcp.port == 8003
+    assert mcp.stateless_http is True
+    assert mcp.json_response is True
     assert "rag_search" in mcp.tools
 
-    result = asyncio.run(mcp.tools["rag_search"]("leave policy", ["doc-1"], 2))
+    result = asyncio.run(mcp.tools["rag_search"]("leave policy", ["doc-1"], None))
 
-    assert stub_service.calls == [{"query": "leave policy", "document_ids": ["doc-1"], "top_k": 2}]
-    assert result == [
-        {
-            "chunk_id": "chunk-1",
-            "document_id": "doc-1",
-            "document_name": "Doc 1.pdf",
-            "caption": "Leave policy",
-            "parent_text": "Annual leave is 12 days.",
-            "heading_path": ["Benefits"],
-            "score": 0.92,
-            "page_number": 1,
-            "source_gcs_uri": "gs://bucket/doc-1.pdf",
-            "markdown_gcs_uri": "gs://bucket/doc-1.md",
-        }
-    ]
+    assert stub_service.calls == [{"query": "leave policy", "document_ids": ["doc-1"], "top_k": None}]
+    assert result == {
+        "results": [
+            {
+                "chunk_id": "chunk-1",
+                "document_id": "doc-1",
+                "document_name": "Doc 1.pdf",
+                "caption": "Leave policy",
+                "parent_text": "Annual leave is 12 days.",
+                "heading_path": ["Benefits"],
+                "score": 0.92,
+                "page_number": 1,
+                "source_gcs_uri": "gs://bucket/doc-1.pdf",
+                "markdown_gcs_uri": "gs://bucket/doc-1.md",
+            }
+        ]
+    }

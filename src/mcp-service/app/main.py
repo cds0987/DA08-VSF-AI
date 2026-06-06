@@ -48,7 +48,12 @@ def main() -> int:
         return 1
     logger.info("mcp_contract_verified index=%s", contract.index_id)
 
-    mcp.run(transport="streamable-http")
+    try:
+        mcp.run(transport="streamable-http")
+    finally:
+        close = getattr(service, "aclose", None)
+        if callable(close):
+            asyncio.run(close())
     return 0
 
 

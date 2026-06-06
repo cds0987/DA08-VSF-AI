@@ -72,6 +72,7 @@ class LlmReranker:
         self._passage_chars = max(1, int(passage_chars))
         self._score_batch = score_batch or self._score_batch_with_openai
         self._fallback = fallback or NoopReranker()
+        self._client = None
 
     async def rerank(
         self, query: str, hits: List[SearchHit], top_k: int, threshold: float
@@ -102,28 +103,35 @@ class LlmReranker:
         return [hit for _, hit in scored[:top_k]]
 
     async def _score_batch_with_openai(self, query: str, passages: list[str]) -> dict[int, float]:
-        from openai import AsyncOpenAI
-
-        client = AsyncOpenAI(
-            api_key=self._api_key or None,
-            base_url=self._base_url,
-            timeout=self._timeout_seconds,
+        response = await self._openai_client().chat.completions.create(
+            model=self._model,
+            temperature=0,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": _RERANK_SYSTEM_PROMPT},
+                {"role": "user", "content": self._build_user_prompt(query, passages)},
+            ],
         )
-        try:
-            response = await client.chat.completions.create(
-                model=self._model,
-                temperature=0,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": _RERANK_SYSTEM_PROMPT},
-                    {"role": "user", "content": self._build_user_prompt(query, passages)},
-                ],
-            )
-        finally:
-            await client.close()
 
         message = response.choices[0].message.content or ""
         return self._parse_scores(message, len(passages))
+
+    def _openai_client(self):
+        if self._client is None:
+            from openai import AsyncOpenAI
+
+            self._client = AsyncOpenAI(
+                api_key=self._api_key or None,
+                base_url=self._base_url,
+                timeout=self._timeout_seconds,
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        client = self._client
+        self._client = None
+        if client is not None:
+            await client.close()
 
     def _build_user_prompt(self, query: str, passages: list[str]) -> str:
         numbered_passages = "\n".join(
