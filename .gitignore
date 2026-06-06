@@ -1,9 +1,9 @@
 .claude/
 proposal/
 .env
-# Env thật của rag-worker + mcp-service (chứa key thật) — chỉ track *.example.
-deploy/env/rag-worker.env
-deploy/env/mcp-service.env
+# Env thật của các service (chứa key thật) — chỉ track *.example.
+deploy/env/*.env
+!deploy/env/*.env.example
 .env-backup-*/
 .venv/
 venv/
@@ -18,3 +18,4 @@ query-body.json
 feedback-body.json
 notify-body.json
 src/mcp-service/tests/.tmp/
+src\rag-worker\deploy\standalone\docker-compose.standalone.yml
