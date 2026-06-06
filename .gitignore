@@ -1,9 +1,7 @@
 .claude/
 proposal/
 .env
-# Env thật của các service (chứa key thật) — chỉ track *.example.
-deploy/env/*.env
-!deploy/env/*.env.example
+# Private repo nội bộ: env thật của các service được SHARE cho team (track trong git).
 .env-backup-*/
 .venv/
 venv/
