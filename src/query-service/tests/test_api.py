@@ -8,7 +8,7 @@ from app.application.tool_decision import ToolDecision
 from app.infrastructure.auth import auth_service
 from app.infrastructure.auth.auth_service import AuthService
 from app.infrastructure.config import Settings, get_settings
-from app.interfaces.api.dependencies import get_mcp_client, get_tool_decision_client
+from app.interfaces.api.dependencies import get_connection_manager, get_mcp_client, get_tool_decision_client
 from app.interfaces.api.main import app
 
 
@@ -312,7 +312,7 @@ async def test_rag_tool_decision_ignores_llm_supplied_acl_arguments(client, toke
     last_call = mcp_client.last_tool_calls[-1]
     assert last_call.tool_name == "rag_search"
     assert last_call.arguments["query"] == "Finance report guideline"
-    assert last_call.arguments["top_k"] == 5
+    assert last_call.arguments["top_k"] == 3
     assert "dddddddd-0003-4000-8000-000000000003" in last_call.arguments["document_ids"]
     assert "dddddddd-0004-4000-8000-000000000004" not in last_call.arguments["document_ids"]
 
@@ -504,6 +504,7 @@ async def test_cors_rejects_unknown_origin(client):
 
 @pytest.mark.asyncio
 async def test_notification_history_unread_and_mark_read(client, tokens):
+    await get_connection_manager().connect(auth_service.MOCK_TOKENS[tokens["hr"]])
     published = await client.post(
         "/dev/mock-notifications/doc-new",
         headers=auth(tokens["admin"]),
@@ -531,7 +532,39 @@ async def test_notification_history_unread_and_mark_read(client, tokens):
 
 
 @pytest.mark.asyncio
+async def test_notification_history_rejects_unbounded_limit(client, tokens):
+    response = await client.get(
+        "/notifications/history?limit=101",
+        headers=auth(tokens["hr"]),
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_dev_mock_notification_is_disabled_when_env_flag_false(client, tokens, monkeypatch):
+    monkeypatch.setenv("ENABLE_DEV_ENDPOINTS", "false")
+    get_settings.cache_clear()
+    payload = {
+        "doc_id": "dddddddd-0002-4000-8000-000000000002",
+        "document_name": "Chinh_sach_nghi_phep_2026.pdf",
+        "classification": "internal",
+        "allowed_departments": [],
+        "allowed_user_ids": [],
+    }
+
+    response = await client.post(
+        "/dev/mock-notifications/doc-new",
+        headers=auth(tokens["admin"]),
+        json=payload,
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_dev_mock_notification_requires_admin(client, tokens):
+    await get_connection_manager().connect(auth_service.MOCK_TOKENS[tokens["hr"]])
     payload = {
         "doc_id": "dddddddd-0002-4000-8000-000000000002",
         "document_name": "Chinh_sach_nghi_phep_2026.pdf",

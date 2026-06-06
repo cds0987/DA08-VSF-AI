@@ -82,12 +82,12 @@ Khi `LLM_MODE=openai` va co `OPENAI_API_KEY`:
 Neu muon goi MCP Service that thay mock:
 
 ```env
-MCP_MODE=mcp
+MCP_MODE=real
 MCP_SERVICE_URL=http://localhost:8003
 MCP_TIMEOUT_SECONDS=10
 ```
 
-`MCP_MODE=mcp` se goi JSON-RPC endpoint `http://localhost:8003/mcp` voi tool `rag_search` va `hr_query`. Neu khong chay mcp-service, giu `MCP_MODE=mock`.
+`MCP_MODE=real` se goi MCP Streamable HTTP endpoint `http://localhost:8003/mcp` bang official Python SDK. Legacy `MCP_MODE=mcp` van duoc chap nhan nhu alias tam thoi. Neu khong chay mcp-service, giu `MCP_MODE=mock`.
 
 Neu muon test infrastructure NATS/query_db that:
 
@@ -543,8 +543,8 @@ pytest tests/test_intent_classifier.py -v
 # /query tool routing va guardrails
 pytest tests/test_api.py -k "paraphrased or tool_decision or unknown_tool or invalid_tool" -v
 
-# MCP JSON-RPC adapter khi MCP_MODE=mcp
-pytest tests/test_mcp_json_rpc_client.py -v
+# MCP Streamable HTTP SDK adapter khi MCP_MODE=real
+pytest tests/test_mcp_streamable_client.py -v
 
 # NATS/query_db infrastructure adapters
 pytest tests/test_nats_infrastructure.py -v
@@ -564,5 +564,5 @@ Expected automated suite hien tai: tat ca tests pass trong mock mode. Neu chay f
 | `403 user_id must match authenticated user` | Body `user_id` khac token | Dung dung user id cua token mock |
 | `503 OPENAI_API_KEY is required` | `LLM_MODE=openai` nhung chua set key | Set key hoac doi `LLM_MODE=mock` |
 | `OpenAI tool decision unavailable` | `LLM_MODE=openai` nhung OpenAI loi khi chon tool | Kiem tra key/model/network hoac doi `LLM_MODE=mock` de test offline |
-| `MCP service unavailable` / loi JSON-RPC | `MCP_MODE=mcp` nhung mcp-service chua chay hoac sai URL | Chay mcp-service tai `MCP_SERVICE_URL` hoac doi `MCP_MODE=mock` |
+| `MCP service unavailable` / loi Streamable HTTP | `MCP_MODE=real` nhung mcp-service chua chay hoac sai URL | Chay mcp-service tai `MCP_SERVICE_URL` hoac doi `MCP_MODE=mock` |
 | `429 Rate limit exceeded` | Qua 20 request/phut/user | Doi 60 giay hoac tang `QUERY_RATE_LIMIT_PER_MINUTE` khi dev |

@@ -1,6 +1,6 @@
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 
 from app.application.ports import AuthenticatedUser
@@ -58,8 +58,8 @@ async def notifications_stream(
 
 @router.get("/notifications/history", response_model=NotificationList)
 async def notifications_history(
-    limit: int = 20,
-    offset: int = 0,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     unread_only: bool = False,
     user: AuthenticatedUser = Depends(get_current_user),
     repo: NotificationRepository = Depends(get_notification_repo),

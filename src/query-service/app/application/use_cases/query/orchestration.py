@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 import hashlib
+import logging
 import re
 from time import perf_counter
 import unicodedata
@@ -18,6 +19,9 @@ from app.application.tool_decision import ToolDecision, normalize_tool_decision
 from app.domain.repositories.conversation_repository import ConversationRepository
 from app.domain.repositories.document_access_repository import DocumentAccessRepository
 from app.infrastructure.config import Settings
+
+
+logger = logging.getLogger(__name__)
 
 
 class QueryOrchestrationUseCase:
@@ -128,21 +132,39 @@ class QueryOrchestrationUseCase:
         results = await self._mcp_client.rag_search(
             query=question,
             document_ids=list(allowed_doc_ids),
-            top_k=5,
+            top_k=self._settings.rag_result_limit,
         )
+        allowed_doc_id_set = set(allowed_doc_ids)
+        acl_filtered_results = []
+        for result in results:
+            if result.document_id not in allowed_doc_id_set:
+                logger.warning(
+                    "acl_post_filter_violation",
+                    extra={
+                        "user_id": user.id,
+                        "document_id": result.document_id,
+                        "chunk_id": result.chunk_id,
+                    },
+                )
+                continue
+            acl_filtered_results.append(result)
+        if not acl_filtered_results:
+            async for event in self._fallback(user.id, session_id, started):
+                yield event
+            return
+
         grounded_results = [
-            result for result in results if result.score >= self._settings.rag_score_threshold
+            result for result in acl_filtered_results if result.score >= self._settings.rag_score_threshold
         ]
         if not grounded_results:
             async for event in self._fallback(user.id, session_id, started):
                 yield event
             return
 
-        top_results = grounded_results[:3]
-        sources = [self._source_payload(result) for result in top_results]
+        sources = [self._source_payload(result) for result in grounded_results]
         context_text = "\n\n".join(
             f"[{index + 1}] {result.document_name} / {result.caption}\n{result.parent_text}"
-            for index, result in enumerate(top_results)
+            for index, result in enumerate(grounded_results)
         )
         answer_parts: list[str] = []
         async for token in _word_stream(
@@ -150,7 +172,7 @@ class QueryOrchestrationUseCase:
                 question=question,
                 context=context_text,
                 recent_messages=recent_messages,
-                sources=top_results,
+                sources=grounded_results,
                 is_hr_answer=False,
             )
         ):
@@ -242,10 +264,18 @@ class QueryOrchestrationUseCase:
                 latency_ms=latency_ms,
             )
             context = await self._conversation_repo.get_context(user_id, recent_k=6)
-            if len(context.recent_messages) >= 10:
+            if (
+                self._settings.llm_mode.strip().lower() == "mock"
+                and len(context.recent_messages) >= 10
+            ):
+                summary = _extractive_summary(
+                    [(message.role, message.content) for message in context.recent_messages]
+                )
+                if not summary:
+                    return
                 await self._conversation_repo.update_summary(
                     user_id,
-                    "Tóm tắt mock: người dùng đang trao đổi về chính sách nội bộ/HR.",
+                    summary,
                 )
         else:
             await self._conversation_repo.save_message(user_id, "assistant", answer)
@@ -265,6 +295,18 @@ def _hr_context_text(result: HrQueryResultLike) -> str:
     if result.summary:
         return result.summary
     return f"Không có dữ liệu HR phù hợp cho intent {result.intent}."
+
+
+def _extractive_summary(messages: list[tuple[str, str]]) -> str | None:
+    snippets = []
+    for role, content in messages:
+        normalized = " ".join(content.split())
+        if not normalized:
+            continue
+        snippets.append(f"{role}: {normalized[:180]}")
+    if not snippets:
+        return None
+    return "Recent conversation: " + " | ".join(snippets[-6:])
 
 
 def _word_chunks(text: str) -> list[str]:

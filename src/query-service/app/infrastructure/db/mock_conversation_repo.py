@@ -1,6 +1,6 @@
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
 from uuid import uuid4
 
 from app.domain.entities.conversation import ConversationContext, Message
@@ -26,8 +26,8 @@ class StoredConversation:
     user_id: str
     summary: str | None = None
     messages: list[StoredMessage] = field(default_factory=list)
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class InMemoryConversationRepository(ConversationRepository):
@@ -64,18 +64,18 @@ class InMemoryConversationRepository(ConversationRepository):
             user_id=user_id,
             role=role,
             content=content,
-            created_at=datetime.now(UTC),
+            created_at=datetime.now(timezone.utc),
             sources=sources or [],
             latency_ms=latency_ms,
         )
         conversation.messages.append(message)
-        conversation.updated_at = datetime.now(UTC)
+        conversation.updated_at = datetime.now(timezone.utc)
         return message
 
     async def update_summary(self, user_id: str, summary: str) -> None:
         conversation = self._ensure_conversation(user_id)
         conversation.summary = summary
-        conversation.updated_at = datetime.now(UTC)
+        conversation.updated_at = datetime.now(timezone.utc)
 
     async def clear_history(self, user_id: str) -> None:
         self._by_user.pop(user_id, None)

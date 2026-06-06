@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from app.domain.entities.notification import Notification
@@ -23,7 +23,7 @@ class InMemoryNotificationRepository(NotificationRepository):
             message=message,
             doc_id=doc_id,
             is_read=False,
-            created_at=datetime.now(UTC),
+            created_at=datetime.now(timezone.utc),
         )
         self._items.setdefault(user_id, []).append(notification)
         return notification

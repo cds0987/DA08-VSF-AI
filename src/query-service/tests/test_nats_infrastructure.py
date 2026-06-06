@@ -1,9 +1,11 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from app.application.ports import AuthenticatedUser
 from app.infrastructure.db.mock_document_access_repo import InMemoryDocumentAccessRepository
-from app.infrastructure.messaging.notification_service import NotificationService
+from app.infrastructure.messaging.notification_service import DocNewEvent, NotificationService
+from app.infrastructure.sse.connection_manager import ConnectionManager
 
 
 @pytest.mark.asyncio
@@ -12,7 +14,7 @@ async def test_doc_access_event_upserts_deletes_and_ignores_stale_events():
 
     repo = InMemoryDocumentAccessRepository()
     handler = QueryNatsEventHandler(document_access_repo=repo)
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     document_id = "eeeeeeee-0001-4000-8000-000000000001"
 
     await handler.handle_doc_access(
@@ -99,7 +101,7 @@ async def test_doc_access_event_passes_datetime_to_repository():
 
     repo = CapturingDocumentAccessRepository()
     handler = QueryNatsEventHandler(document_access_repo=repo)
-    occurred_at = datetime.now(UTC)
+    occurred_at = datetime.now(timezone.utc)
 
     await handler.handle_doc_access(
         {
@@ -120,8 +122,10 @@ async def test_doc_access_event_passes_datetime_to_repository():
 @pytest.mark.asyncio
 async def test_notify_doc_new_event_is_deduplicated():
     from app.infrastructure.messaging.nats_events import QueryNatsEventHandler
+    from app.infrastructure.auth import auth_service
     from app.interfaces.api.dependencies import get_connection_manager, get_notification_repo
 
+    await get_connection_manager().connect(auth_service.MOCK_TOKENS["mock-user-hr"])
     repo = get_notification_repo()
     service = NotificationService(
         repository=repo,
@@ -131,7 +135,7 @@ async def test_notify_doc_new_event_is_deduplicated():
 
     payload = {
         "event_id": "notify-1",
-        "occurred_at": datetime.now(UTC).isoformat(),
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
         "doc_id": "dddddddd-0002-4000-8000-000000000002",
         "document_name": "Internal Handbook.pdf",
         "classification": "internal",
@@ -145,6 +149,58 @@ async def test_notify_doc_new_event_is_deduplicated():
     assert delivered_first
     assert delivered_second == []
     assert await repo.unread_count("11111111-1111-4111-8111-111111111111") == 1
+
+
+@pytest.mark.asyncio
+async def test_notify_doc_new_only_delivers_to_online_eligible_users():
+    from app.infrastructure.db.mock_notification_repo import InMemoryNotificationRepository
+
+    manager = ConnectionManager()
+    repo = InMemoryNotificationRepository()
+    service = NotificationService(repository=repo, connection_manager=manager)
+    hr_user = AuthenticatedUser(
+        id="hr-user",
+        email="hr@example.com",
+        role="user",
+        department="HR",
+    )
+    finance_user = AuthenticatedUser(
+        id="finance-user",
+        email="finance@example.com",
+        role="user",
+        department="Finance",
+    )
+    hr_connection = await manager.connect(hr_user)
+    await manager.connect(finance_user)
+
+    delivered = await service.publish_doc_new(
+        DocNewEvent(
+            doc_id="doc-secret",
+            document_name="Secret HR.pdf",
+            classification="secret",
+            allowed_departments=["HR"],
+            allowed_user_ids=[],
+        )
+    )
+
+    assert [notification.user_id for notification in delivered] == ["hr-user"]
+    assert await repo.unread_count("hr-user") == 1
+    assert await repo.unread_count("finance-user") == 0
+    assert (await hr_connection.queue.get())["doc_id"] == "doc-secret"
+
+
+def test_nats_event_dedup_storage_is_bounded():
+    from app.infrastructure.messaging.nats_events import QueryNatsEventHandler
+
+    handler = QueryNatsEventHandler(processed_event_max_size=2, processed_event_ttl_seconds=60)
+
+    handler._remember_event("event-1")
+    handler._remember_event("event-2")
+    handler._remember_event("event-3")
+
+    assert len(handler._processed_event_ids) <= 2
+    assert not handler._is_duplicate_event("event-1")
+    assert handler._is_duplicate_event("event-3")
 
 
 def test_nats_mode_uses_postgres_repository_adapters(monkeypatch):

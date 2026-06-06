@@ -1,13 +1,16 @@
 from dataclasses import dataclass
+import json
 import re
 from typing import Any
 import unicodedata
-from uuid import uuid4
 
 import httpx
 
 from app.infrastructure.db.mock_data import MOCK_DOCUMENTS, MOCK_HR_DATA
 from app.infrastructure.config import Settings
+
+streamable_http_client = None
+ClientSession = None
 
 
 @dataclass(frozen=True)
@@ -194,20 +197,23 @@ class MockMCPClient:
         self.last_tool_calls.clear()
 
 
-class MCPJsonRpcClient:
+class MCPStreamableHttpClient:
     def __init__(self, settings: Settings) -> None:
         self._endpoint_url = _mcp_endpoint_url(settings.mcp_service_url)
         self._timeout_seconds = settings.mcp_timeout_seconds
 
     async def list_tools(self) -> list[str]:
-        result = await self._request("tools/list", {})
-        tools = result.get("tools", [])
+        async with self._session() as session:
+            tools_response = await session.list_tools()
+        tools = getattr(tools_response, "tools", [])
         names: list[str] = []
         for tool in tools:
             if isinstance(tool, str):
                 names.append(tool)
             elif isinstance(tool, dict) and tool.get("name"):
                 names.append(str(tool["name"]))
+            elif getattr(tool, "name", None):
+                names.append(str(tool.name))
         return names
 
     async def rag_search(
@@ -243,30 +249,58 @@ class MCPJsonRpcClient:
             payload = {}
         return _hr_result_from_payload(payload, intent)
 
-    async def _call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        return await self._request(
-            "tools/call",
-            {
-                "name": name,
-                "arguments": arguments,
-            },
-        )
+    async def _call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        async with self._session() as session:
+            result = await session.call_tool(name, arguments=arguments)
+        if bool(getattr(result, "isError", False)):
+            raise RuntimeError(f"MCP tool {name} returned an error")
+        return _call_tool_result_payload(result)
 
-    async def _request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
-        request = {
-            "jsonrpc": "2.0",
-            "id": str(uuid4()),
-            "method": method,
-            "params": params,
-        }
-        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
-            response = await client.post(self._endpoint_url, json=request)
-        response.raise_for_status()
-        payload = response.json()
-        if payload.get("error"):
-            raise RuntimeError(f"MCP JSON-RPC error: {payload['error']}")
-        result = payload.get("result", {})
-        return result if isinstance(result, dict) else {}
+    def _session(self):
+        return _McpSessionContext(self._endpoint_url, self._timeout_seconds)
+
+
+class _McpSessionContext:
+    def __init__(self, endpoint_url: str, timeout_seconds: int) -> None:
+        self._endpoint_url = endpoint_url
+        self._timeout_seconds = timeout_seconds
+        self._http_client = None
+        self._transport_cm = None
+        self._session_cm = None
+        self._session = None
+
+    async def __aenter__(self):
+        session_cls, transport_factory = _sdk_objects()
+        self._http_client = httpx.AsyncClient(timeout=self._timeout_seconds)
+        self._transport_cm = transport_factory(self._endpoint_url, http_client=self._http_client)
+        read_stream, write_stream, _ = await self._transport_cm.__aenter__()
+        self._session_cm = session_cls(read_stream, write_stream)
+        self._session = await self._session_cm.__aenter__()
+        await self._session.initialize()
+        return self._session
+
+    async def __aexit__(self, exc_type, exc, tb):
+        try:
+            if self._session_cm is not None:
+                await self._session_cm.__aexit__(exc_type, exc, tb)
+            if self._transport_cm is not None:
+                await self._transport_cm.__aexit__(exc_type, exc, tb)
+        finally:
+            if self._http_client is not None:
+                await self._http_client.aclose()
+
+
+def _sdk_objects():
+    global ClientSession, streamable_http_client
+    if ClientSession is None or streamable_http_client is None:
+        try:
+            from mcp import ClientSession as sdk_client_session
+            from mcp.client.streamable_http import streamable_http_client as sdk_streamable_http_client
+        except ImportError as exc:
+            raise RuntimeError("mcp>=1.27,<2 is required for MCP_MODE=real") from exc
+        ClientSession = sdk_client_session
+        streamable_http_client = sdk_streamable_http_client
+    return ClientSession, streamable_http_client
 
 
 def _leave_balance_summary(balance: LeaveBalanceDTO) -> str:
@@ -371,12 +405,33 @@ def _extract_tool_payload(result: dict[str, Any]) -> Any:
             text = item.get("text")
             if isinstance(text, str):
                 try:
-                    import json
-
                     return json.loads(text)
                 except ValueError:
                     continue
     return result
+
+
+def _call_tool_result_payload(result: Any) -> Any:
+    structured = getattr(result, "structuredContent", None)
+    if structured is None:
+        structured = getattr(result, "structured_content", None)
+    if structured is not None:
+        return structured
+    content = getattr(result, "content", None)
+    if isinstance(content, list):
+        for item in content:
+            if isinstance(item, dict):
+                if "json" in item:
+                    return item["json"]
+                text = item.get("text")
+            else:
+                text = getattr(item, "text", None)
+            if isinstance(text, str):
+                try:
+                    return json.loads(text)
+                except ValueError:
+                    continue
+    return {}
 
 
 def _search_result_from_payload(item: dict[str, Any]) -> SearchResult:
