@@ -26,7 +26,6 @@ class Settings(BaseSettings):
     mcp_mode: str = "mock"
     mcp_service_url: str = "http://localhost:8003"
     mcp_timeout_seconds: int = 10
-    mcp_internal_token: str | None = None
 
     nats_mode: str = "mock"
     nats_url: str = "nats://localhost:4222"
