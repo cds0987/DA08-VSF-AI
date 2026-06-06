@@ -19,6 +19,7 @@ from app.infrastructure.db.postgres_document_repository import PostgresDocumentR
 from app.infrastructure.db.session import get_session
 from app.infrastructure.messaging.nats_publisher import NatsPublisher
 from app.infrastructure.storage.gcs_client import GCSClient
+from app.infrastructure.storage.s3_client import S3StorageClient
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
@@ -42,7 +43,9 @@ def get_audit_logger(
     return PostgresAuditLogRepository(session)
 
 
-def get_storage(settings: Settings = Depends(get_settings)) -> GCSClient:
+def get_storage(settings: Settings = Depends(get_settings)):
+    if settings.storage_backend == "s3":
+        return S3StorageClient(settings)
     return GCSClient(settings)
 
 
