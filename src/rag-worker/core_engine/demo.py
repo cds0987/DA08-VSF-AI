@@ -1,9 +1,9 @@
-"""Demo end-to-end chạy offline (không cần BGE-M3/Qdrant/Azure).
+"""Demo ingest-only chạy offline (không cần BGE-M3/Qdrant/Azure).
 
     python -m core_engine.demo
 
-Ingest vài tài liệu rồi search để thấy: ingest → retrieval (dense) → rerank Top-3.
-Retrieval KHÔNG enforce access control — trả raw unit + lineage (search.md §6).
+Ingest vài tài liệu rồi in ra payload đã được ghi vào vector store để thấy:
+parse/section → caption/embed → upsert + lineage.
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ DOCS = [
 
 
 async def main() -> None:
-    # Offline (hash-embed + LLM-as-reranker giả lập) — không cần key/network.
+    # Offline (hash-embed) — không cần key/network.
     # caption=True: flow chuẩn embed *caption*. Đổi sang OpenAI: build_engine() khi có key.
     engine = build_engine(provider=OfflineProvider(256), caption=True)
 
@@ -66,22 +66,27 @@ async def main() -> None:
         n = await engine.ingest(d)
         print(f"  {d.document_id:<12} -> {n} chunks")
 
-    # rerank_threshold=0.0 để thấy Top-3 (stub lexical; production BGE dùng 0.7).
-    async def show(query: str) -> None:
-        results = await engine.search(query, rerank_threshold=0.0)
-        print(f"\n== SEARCH: {query!r} ==")
-        if not results:
-            print("  (no-answer)")
-        for r in results:
-            print(
-                f"  [{r.rerank_score:.2f}] {r.document_name} / {r.section_title}"
-                f"  (score={r.score:.4f})"
-            )
-            print(f"        {r.parent_text[:80].strip()}...")
-
-    await show("làm sao để reset mật khẩu")
-    await show("vector database dùng metric gì")
-    await show("ngân sách lương quý 2 tăng bao nhiêu")
+    print("\n== VECTOR PAYLOADS ==")
+    provider = engine.vectors.provider
+    client = getattr(provider, "_client", None)
+    if client is None:
+        print("  provider does not expose a local client; payload inspection unavailable")
+        return
+    result = client.scroll(
+        collection_name=engine.vectors.config.index_id(),
+        with_payload=True,
+        with_vectors=False,
+        limit=1000,
+    )
+    points = result[0] if isinstance(result, tuple) else result
+    for point in points:
+        payload = point.payload or {}
+        print(
+            f"  {payload.get('document_id', '?'):<12} "
+            f"{payload.get('section_title', '(no-title)')!s:<20} "
+            f"source={payload.get('source_uri', '')}"
+        )
+        print(f"        {str(payload.get('parent_text', ''))[:80].strip()}...")
 
 
 if __name__ == "__main__":

@@ -1,10 +1,10 @@
-"""Self-test offline bằng assert (không cần pytest / network):
+"""Self-test ingest-only offline bằng assert (không cần pytest / network):
 
     python -m core_engine.tests.selftest
 
-Khóa các bất biến: embedder cùng dimension & tất định (ingest==query), ingest tạo
-chunk, retrieval đúng tài liệu, idempotent (re-ingest không nhân đôi), delete gỡ
-hết vector, no-answer khi threshold cao. KHÔNG còn access control trong retrieval.
+Khóa các bất biến: embedder đúng dimension và tất định, ingest tạo chunk, payload
+được ghi với full-content + lineage, idempotent (re-ingest không nhân đôi), delete
+gỡ hết vector.
 """
 
 from __future__ import annotations
@@ -13,15 +13,11 @@ import asyncio
 
 from core_engine import build_engine, IngestInput, OfflineProvider
 from core_engine.embedding import ProviderEmbeddingService
-from core_engine.text_utils import hash_embed
-
 DIM = 256
 
 
 async def _count_doc_chunks(engine, document_id: str) -> int:
-    """Đếm chunk của một document backend-agnostic: search top_k lớn."""
-    res = await engine.vectors.search(hash_embed(["count"], DIM)[0], "count", top_k=100000)
-    return sum(1 for r in res if r.document_id == document_id)
+    return len(await engine.vectors.list_chunk_ids_by_document(document_id))
 
 
 async def run() -> None:
@@ -55,11 +51,21 @@ async def run() -> None:
         markdown="# Lương quý 2\nNgân sách lương quý 2 tăng 8 phần trăm.\n",
     ))
 
-    # 3. Retrieval đúng tài liệu + trả full content cho LLM.
-    res = await engine.search("reset mật khẩu", rerank_threshold=0.0)
-    assert res, "search phải có kết quả"
-    assert res[0].document_id == "d-pw", "kết quả top-1 sai tài liệu"
-    assert res[0].parent_text, "phải trả full content (parent_text) cho LLM"
+    # 3. Payload persist đủ full content + lineage.
+    provider_impl = engine.vectors.provider
+    client = getattr(provider_impl, "_client", None)
+    assert client is not None, "selftest expects in-process Qdrant provider"
+    result = client.scroll(
+        collection_name=engine.vectors.config.index_id(),
+        with_payload=True,
+        with_vectors=False,
+        limit=1000,
+    )
+    points = result[0] if isinstance(result, tuple) else result
+    payloads = [point.payload or {} for point in points if (point.payload or {}).get("document_id") == "d-pw"]
+    assert payloads, "ingest phải ghi payload cho document"
+    assert any(payload.get("parent_text") for payload in payloads), "phải lưu full content"
+    assert all(payload.get("source_uri") for payload in payloads), "phải có lineage source_uri"
 
     # 4. Idempotent: re-ingest cùng doc KHÔNG nhân đôi (OVERWRITE + id deterministic).
     before = await _count_doc_chunks(engine, "d-pw")
@@ -67,14 +73,9 @@ async def run() -> None:
     after = await _count_doc_chunks(engine, "d-pw")
     assert before == after, f"re-ingest phải idempotent: {before} -> {after}"
 
-    # 5. No-answer: threshold cao -> rỗng (không bịa).
-    none = await engine.search("xyzzy không liên quan gì", rerank_threshold=0.99)
-    assert none == [], "threshold cao phải cho no-answer, không trả kết quả yếu"
-
-    # 6. delete_by_document gỡ hết vector.
+    # 5. delete_by_document gỡ hết vector.
     await engine.vectors.delete_by_document("d-pw")
-    gone = await engine.search("reset mật khẩu", rerank_threshold=0.0)
-    assert all(r.document_id != "d-pw" for r in gone), "xóa document phải gỡ hết vector"
+    assert await _count_doc_chunks(engine, "d-pw") == 0, "xóa document phải gỡ hết vector"
 
     print("OK - all self-tests PASS")
 

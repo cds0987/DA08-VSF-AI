@@ -1,10 +1,10 @@
-"""Self-test BẤT ĐỒNG BỘ — kiểm tra async qua các giai đoạn pipeline:
+"""Self-test BẤT ĐỒNG BỘ — kiểm tra async qua các giai đoạn ingest pipeline:
 
     python -m core_engine.tests.selftest_async
 
 Bám docs:
 - embedding.md §1: embed là I/O-bound → async-native trả công (gather nhiều call
-  provider đồng thời). search.md §8: search & ingest chia sẻ embedder.
+  provider đồng thời).
 - providers/*: client SYNC (vd chromadb/milvus) bọc `asyncio.to_thread` để KHÔNG
   chặn event loop; client async-native (qdrant) thì async thuần.
 - embedding.md §2: idempotent response mapping — request ↔ vector đúng thứ tự.
@@ -32,7 +32,7 @@ from core_engine.ai import retry_async
 from core_engine.ai.base import AISettings, CapabilityConfig
 from core_engine.config import HaystackSettings
 from core_engine.engine import HaystackRagEngine
-from core_engine.text_utils import hash_embed, overlap_score
+from core_engine.text_utils import hash_embed
 from core_engine.vectorstore import VectorStoreConfig
 
 DIM = 64
@@ -55,12 +55,13 @@ def _vectors():
 
 
 async def _count_chunks(repo) -> int:
-    """Đếm chunk backend-agnostic: search top_k lớn -> số chunk_id distinct."""
-    res = await repo.search(hash_embed(["count"], DIM)[0], "count", top_k=100000)
-    return len({r.chunk_id for r in res})
+    all_ids: set[str] = set()
+    for i in range(20):
+        all_ids.update(await repo.list_chunk_ids_by_document(f"d{i}"))
+    return len(all_ids)
 
 
-# --- Fakes mô phỏng I/O-bound (await sleep) cho stage embed & rerank ---------- #
+# --- Fakes mô phỏng I/O-bound (await sleep) cho stage embed ------------------- #
 class SleepEmbedder(EmbeddingService):
     """Embedder I/O-bound giả: await sleep rồi hash-embed tất định."""
 
@@ -74,19 +75,6 @@ class SleepEmbedder(EmbeddingService):
         await asyncio.sleep(self.delay)
         return hash_embed(texts, self.dim)
 
-
-class SleepReranker:
-    def __init__(self, delay: float):
-        self.delay = delay
-
-    async def rerank(self, query, results, top_k, threshold):
-        await asyncio.sleep(self.delay)
-        for r in results:
-            r.rerank_score = overlap_score(query, r.parent_text or r.child_text)
-        results.sort(key=lambda r: r.rerank_score, reverse=True)
-        return [r for r in results if r.rerank_score >= threshold][:top_k]
-
-
 def _doc(i: int) -> IngestInput:
     return IngestInput(
         document_id=f"d{i}", document_name=f"Doc {i}", file_type="md",
@@ -95,7 +83,7 @@ def _doc(i: int) -> IngestInput:
 
 
 # --------------------------------------------------------------------------- #
-# A. I/O-bound concurrency: gather nhiều search CHỒNG nhau (không tuần tự)      #
+# A. I/O-bound concurrency: gather nhiều ingest CHỒNG nhau (không tuần tự)      #
 # --------------------------------------------------------------------------- #
 async def test_io_concurrency_overlap() -> None:
     if not _has_qdrant():
@@ -106,23 +94,19 @@ async def test_io_concurrency_overlap() -> None:
         settings=settings,
         embedder=SleepEmbedder(DIM, 0.1),
         vectors=_vectors(),
-        reranker=SleepReranker(0.1),
         captioner=None,
     )
-    await engine.ingest(_doc(1))
 
     N = 10
     t0 = time.perf_counter()
-    results = await asyncio.gather(
-        *[engine.search("word1", rerank_threshold=0.0) for _ in range(N)]
-    )
+    counts = await asyncio.gather(*[engine.ingest(_doc(i)) for i in range(N)])
     elapsed = time.perf_counter() - t0
 
-    # Mỗi search ~ embed(0.1)+rerank(0.1)=0.2s. Tuần tự N=10 -> ~2.0s.
-    # Async chồng nhau -> ~0.3-0.5s. Mốc <1.5s (nới cho máy bận) vẫn << 2.0s serial.
-    assert all(r for r in results), "mọi search concurrent phải có kết quả"
-    assert elapsed < 1.5, f"search không chồng async (tuần tự ~2.0s?): {elapsed:.2f}s"
-    print(f"  A. I/O concurrency: {N} search chồng nhau trong {elapsed:.2f}s (<1.5, serial~2.0): OK")
+    # Mỗi ingest ít nhất ăn 0.1s embed. Tuần tự N=10 -> ~1.0s+.
+    # Async chồng nhau phải nhanh hơn rõ rệt.
+    assert all(count >= 1 for count in counts), "mọi ingest concurrent phải ghi chunk"
+    assert elapsed < 0.8, f"ingest không chồng async (tuần tự ~1.0s+?): {elapsed:.2f}s"
+    print(f"  A. I/O concurrency: {N} ingest chồng nhau trong {elapsed:.2f}s (<0.8): OK")
 
 
 # --------------------------------------------------------------------------- #
@@ -136,9 +120,12 @@ class _BlockingStore(VectorRepository):
     async def list_chunk_ids_by_document(self, document_id) -> list: return []
     async def delete_many(self, chunk_ids) -> None: ...
     async def delete_by_document(self, document_id) -> None: ...
-
     async def hybrid_search(self, vector, query_text, top_k=20):
-        await asyncio.to_thread(time.sleep, 0.3)   # blocking CPU/I/O -> thread
+        await asyncio.to_thread(time.sleep, 0.3)
+        return []
+
+    async def list_chunk_ids_by_document(self, document_id) -> list:
+        await asyncio.to_thread(time.sleep, 0.3)
         return []
 
 
@@ -155,13 +142,13 @@ async def test_blocking_offload_keeps_loop_alive() -> None:
     # CONCURRENT: store blocking chạy song song với ticker.
     t0 = time.perf_counter()
     _, ticks = await asyncio.gather(
-        store.hybrid_search([0.0] * DIM, "q"), ticker()
+        store.list_chunk_ids_by_document("d1"), ticker()
     )
     t_concurrent = time.perf_counter() - t0
 
     # SERIAL baseline (cùng máy → tự hiệu chuẩn, miễn nhiễm granularity OS).
     t0 = time.perf_counter()
-    await store.hybrid_search([0.0] * DIM, "q")
+    await store.list_chunk_ids_by_document("d1")
     await ticker()
     t_serial = time.perf_counter() - t0
 
@@ -186,7 +173,6 @@ async def test_concurrent_ingest_no_lost_writes() -> None:
         settings=settings,
         embedder=ProviderEmbeddingService(OfflineProvider(DIM), dimension=DIM),
         vectors=_vectors(),
-        reranker=SleepReranker(0.0),
         captioner=None,
     )
 
@@ -202,9 +188,6 @@ async def test_concurrent_ingest_no_lost_writes() -> None:
     # Re-ingest đồng thời cùng tập -> idempotent, KHÔNG nhân đôi.
     await asyncio.gather(*[engine.ingest(_doc(i)) for i in range(N)])
     assert await _count_chunks(engine.vectors) == total_docs, "concurrent re-ingest phải idempotent"
-
-    res = await engine.search("word7", rerank_threshold=0.0)
-    assert any(r.document_id == "d7" for r in res), "search sau concurrent ingest phải tìm đúng doc"
     print(f"  C. concurrent ingest: {N} doc, {total_docs} chunk, không mất write + idempotent: OK")
 
 
