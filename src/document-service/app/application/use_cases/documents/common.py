@@ -57,13 +57,19 @@ def can_access_document(
     allowed_departments: list[str],
     allowed_user_ids: list[str],
 ) -> bool:
+    if user.role == "admin":
+        return True
     if classification == "public":
         return True
     if classification == "internal":
         # User Service verifies active users before issuing usable tokens; this service checks locally.
         return True
     if classification == "secret":
-        return user.department in allowed_departments
+        department = user.department.strip()
+        if not department:
+            return False
+        normalized_departments = {item.strip() for item in allowed_departments if item.strip()}
+        return department in normalized_departments
     if classification == "top_secret":
         return user.id in allowed_user_ids
     return False

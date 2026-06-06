@@ -137,6 +137,8 @@ def _default_client_factory() -> Any:
         ) from exc
     base_config = dict(
         signature_version="s3v4",
+        # path-style: MinIO/local không có DNS cho virtual-host (bucket.endpoint).
+        s3={"addressing_style": "path"},
         connect_timeout=float(os.getenv("S3_CONNECT_TIMEOUT", "10")),
         read_timeout=float(os.getenv("S3_READ_TIMEOUT", "60")),
         retries={"max_attempts": int(os.getenv("S3_MAX_ATTEMPTS", "3"))},

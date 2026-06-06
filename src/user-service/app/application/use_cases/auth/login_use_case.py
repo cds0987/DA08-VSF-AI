@@ -101,6 +101,7 @@ class LoginUseCase:
             user.hashed_password,
         ):
             await self._handle_failed_password(user, ip_address)
+            raise AuthenticationError()
 
         await self.login_state_repository.reset_login_failures(user.id)
         access_token = self.token_service.create_access_token(user)

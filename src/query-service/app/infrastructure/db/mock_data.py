@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from app.application.ports import AuthenticatedUser
 from app.infrastructure.auth.auth_service import MOCK_TOKENS
@@ -141,4 +141,4 @@ def mock_users() -> list[AuthenticatedUser]:
 
 
 def utcnow() -> datetime:
-    return datetime.now(UTC)
+    return datetime.now(timezone.utc)

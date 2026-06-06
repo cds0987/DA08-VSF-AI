@@ -3,7 +3,6 @@ from dataclasses import dataclass, field
 from app.application.ports import AuthenticatedUser
 from app.domain.entities.notification import Notification
 from app.domain.repositories.notification_repository import NotificationRepository
-from app.infrastructure.db.mock_data import mock_users
 from app.infrastructure.db.mock_document_access_repo import can_access_document
 from app.infrastructure.sse.connection_manager import ConnectionManager
 
@@ -34,7 +33,7 @@ class NotificationService:
             "doc_id": event.doc_id,
         }
         delivered: list[Notification] = []
-        for user in self._eligible_mock_users(event):
+        for user in self._eligible_online_users(event):
             notification = await self._repository.save(
                 user_id=user.id,
                 event="doc_new",
@@ -45,11 +44,10 @@ class NotificationService:
             await self._connection_manager.push_to_user(user.id, payload)
         return delivered
 
-    @staticmethod
-    def _eligible_mock_users(event: DocNewEvent) -> list[AuthenticatedUser]:
+    def _eligible_online_users(self, event: DocNewEvent) -> list[AuthenticatedUser]:
         return [
             user
-            for user in mock_users()
+            for user in self._connection_manager.online_users()
             if can_access_document(
                 user_id=user.id,
                 role=user.role,

@@ -5,7 +5,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from app.application.auth import CurrentUser
-from app.application.exceptions import MessagingPublishError, ValidationError
+from app.application.exceptions import MessagingPublishError, StorageError, ValidationError
 from app.application.use_cases.documents.common import (
     ALLOWED_EXTENSIONS,
     MAX_FILE_BYTES,
@@ -97,7 +97,10 @@ class UploadDocumentUseCase:
         safe_name = PurePath(filename).name
         gcs_key = f"raw/{document_id}/{safe_name}"
 
-        await self.storage.upload_file(gcs_key, content, content_type=content_type)
+        try:
+            await self.storage.upload_file(gcs_key, content, content_type=content_type)
+        except Exception as exc:
+            raise StorageError() from exc
         document = await self.document_repository.create(
             Document(
                 id=document_id,

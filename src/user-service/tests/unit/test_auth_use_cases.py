@@ -145,6 +145,27 @@ class InMemoryRefreshTokens:
         )
 
 
+class MissingUserResult:
+    def scalar_one_or_none(self) -> object | None:
+        return None
+
+
+class MissingUserSession:
+    def __init__(self) -> None:
+        self.commit_count = 0
+
+    async def execute(self, statement: object) -> MissingUserResult:
+        return MissingUserResult()
+
+    async def commit(self) -> None:
+        self.commit_count += 1
+
+
+class NonRaisingFailedPasswordLoginUseCase(LoginUseCase):
+    async def _handle_failed_password(self, user: User, ip_address: str | None) -> None:
+        return None
+
+
 def make_user(active: bool = True) -> User:
     return User(
         id=str(uuid4()),
@@ -204,6 +225,23 @@ async def test_login_failure_increments_count_and_locks() -> None:
 
 
 @pytest.mark.asyncio
+async def test_login_wrong_password_fails_even_if_helper_does_not_raise() -> None:
+    user = make_user()
+    hasher = FakePasswordHasher()
+    use_case = NonRaisingFailedPasswordLoginUseCase(
+        user_repository=InMemoryUsers([user]),
+        password_hasher=hasher,
+        token_service=FakeTokenService(),
+        refresh_token_issuer=RefreshTokenIssuer(InMemoryRefreshTokens(), hasher),
+        login_state_repository=InMemoryLoginState(),
+        audit_logger=InMemoryAudit(),
+    )
+
+    with pytest.raises(AuthenticationError):
+        await use_case.execute("user@company.com", "wrong")
+
+
+@pytest.mark.asyncio
 async def test_login_rejects_inactive_user() -> None:
     use_case, _, audit = make_login_case(make_user(active=False))
 
@@ -211,6 +249,24 @@ async def test_login_rejects_inactive_user() -> None:
         await use_case.execute("user@company.com", "secret")
 
     assert audit.actions == ["login_failed"]
+
+
+def test_settings_rejects_weak_jwt_secret() -> None:
+    from app.core.config import Settings
+
+    with pytest.raises(ValueError, match="JWT_SECRET_KEY"):
+        Settings(jwt_secret_key="change-me-in-env")
+
+
+def test_access_token_default_ttl_is_15_minutes() -> None:
+    from app.core.config import Settings
+    from app.infrastructure.security.jwt_token_service import JwtTokenService
+
+    settings = Settings(jwt_secret_key="strong-test-secret")
+    token_service = JwtTokenService(secret_key="strong-test-secret")
+
+    assert settings.access_token_ttl_minutes == 15
+    assert token_service.ttl_minutes == 15
 
 
 @pytest.mark.asyncio
@@ -236,4 +292,33 @@ async def test_refresh_rotates_token_and_rejects_old_one() -> None:
     assert result.refresh_token != old_refresh
     with pytest.raises(InvalidTokenError):
         await use_case.execute(old_refresh)
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_malformed_token_id() -> None:
+    user = make_user()
+    hasher = FakePasswordHasher()
+    use_case = RefreshTokenUseCase(
+        user_repository=InMemoryUsers([user]),
+        refresh_token_repository=InMemoryRefreshTokens(),
+        refresh_token_issuer=RefreshTokenIssuer(InMemoryRefreshTokens(), hasher),
+        password_hasher=hasher,
+        token_service=FakeTokenService(),
+    )
+
+    with pytest.raises(InvalidTokenError):
+        await use_case.execute("not-a-uuid.secret")
+
+
+@pytest.mark.asyncio
+async def test_login_state_repository_handles_missing_user_gracefully() -> None:
+    from app.infrastructure.db.postgres_user_repository import PostgresLoginStateRepository
+
+    session = MissingUserSession()
+    repository = PostgresLoginStateRepository(session)  # type: ignore[arg-type]
+
+    await repository.register_login_failure(str(uuid4()), 1, None)
+    await repository.reset_login_failures(str(uuid4()))
+
+    assert session.commit_count == 0
 

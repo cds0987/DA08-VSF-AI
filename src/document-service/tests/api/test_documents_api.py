@@ -1,7 +1,10 @@
+import os
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+
+os.environ.setdefault("JWT_SECRET_KEY", "test-document-service-secret")
 
 from app.application.auth import CurrentUser
 from app.application.use_cases.documents.delete_document_use_case import DeleteDocumentUseCase
@@ -122,6 +125,53 @@ def test_admin_can_list_get_and_delete_documents() -> None:
     assert delete_response.status_code == 200
     assert delete_response.json() == {"message": "Document deleted"}
     assert publisher.access_payloads[0]["deleted"] is True
+
+
+def test_authorized_user_can_get_document_detail() -> None:
+    doc = sample_document(classification="secret", allowed_departments=["Finance"])
+    repo = InMemoryDocuments([doc])
+    app.dependency_overrides[dependencies.get_current_user] = normal_user
+    app.dependency_overrides[dependencies.get_get_document_use_case] = (
+        lambda: GetDocumentUseCase(repo)
+    )
+
+    response = TestClient(app).get(
+        f"/documents/{doc.id}",
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == doc.id
+
+
+def test_unauthorized_user_cannot_get_document_detail() -> None:
+    doc = sample_document(classification="secret", allowed_departments=["HR"])
+    repo = InMemoryDocuments([doc])
+    app.dependency_overrides[dependencies.get_current_user] = normal_user
+    app.dependency_overrides[dependencies.get_get_document_use_case] = (
+        lambda: GetDocumentUseCase(repo)
+    )
+
+    response = TestClient(app).get(
+        f"/documents/{doc.id}",
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_invalid_token_does_not_print_raw_token(capsys) -> None:
+    token = "leaky-token-value"
+
+    response = TestClient(app).get(
+        f"/documents/{DOC_ID}/file",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    captured = capsys.readouterr()
+    assert response.status_code == 401
+    assert token not in captured.out
+    assert token not in captured.err
 
 
 def test_file_presign_forbidden_when_acl_does_not_match() -> None:

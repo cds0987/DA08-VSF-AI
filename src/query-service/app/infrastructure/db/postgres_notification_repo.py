@@ -1,4 +1,4 @@
-from datetime import UTC
+from datetime import timezone
 
 from app.domain.entities.notification import Notification
 from app.domain.repositories.notification_repository import NotificationRepository
@@ -112,7 +112,7 @@ class PostgresNotificationRepository(NotificationRepository):
 def _notification_from_row(row) -> Notification:
     created_at = row["created_at"]
     if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=UTC)
+        created_at = created_at.replace(tzinfo=timezone.utc)
     return Notification(
         id=str(row["id"]),
         user_id=str(row["user_id"]),
