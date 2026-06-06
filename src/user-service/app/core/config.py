@@ -14,7 +14,7 @@ class Settings(BaseModel):
         "USER_SERVICE_DATABASE_URL",
         getenv(
             "DATABASE_URL",
-            "postgresql+asyncpg://postgres:postgres@localhost:5432/user_db",
+            "postgresql+asyncpg://user:password@localhost:5432/rag_chatbot",
         ),
     )
     jwt_secret_key: str = getenv("JWT_SECRET_KEY", "change-me-in-env")
@@ -22,6 +22,15 @@ class Settings(BaseModel):
     refresh_token_ttl_days: int = int(getenv("REFRESH_TOKEN_TTL_DAYS", "7"))
     failed_login_threshold: int = int(getenv("FAILED_LOGIN_THRESHOLD", "5"))
     lockout_minutes: int = int(getenv("LOCKOUT_MINUTES", "15"))
+    allowed_origins: str = getenv(
+        "CORS_ORIGINS", "http://localhost:3000,http://localhost:3001"
+    )
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [
+            origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()
+        ]
 
     def __init__(self, **data: object) -> None:
         super().__init__(**data)
@@ -41,4 +50,3 @@ def _validate_jwt_secret(secret: str) -> None:
     }
     if secret.strip() in weak_defaults:
         raise ValueError("JWT_SECRET_KEY must be set to a strong non-default value")
-
