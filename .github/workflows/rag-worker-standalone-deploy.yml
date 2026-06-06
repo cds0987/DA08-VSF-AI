@@ -1,0 +1,84 @@
+name: Deploy rag-worker standalone to GCP
+
+# Luồng CD ĐỘC LẬP cho rag-worker:
+#   push nhánh rag-worker-prod (chỉ khi đụng src/rag-worker/**)
+#     -> build image trên CI
+#     -> push Artifact Registry (project vintravel-chatbot)
+#     -> SSH vào VM standalone: pull digest + docker compose up -d
+# Tách hoàn toàn khỏi luồng develop của team (deploy-develop.yml).
+
+on:
+  push:
+    branches: [rag-worker-prod]
+    paths:
+      - "src/rag-worker/**"
+      - ".github/workflows/rag-worker-standalone-deploy.yml"
+  workflow_dispatch:
+
+env:
+  GCP_PROJECT: vintravel-chatbot
+  GAR_LOCATION: asia-southeast1
+  GAR_REPO: rag-worker
+  IMAGE_NAME: rag-worker
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.image.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          # SA key JSON của vintravel-chatbot (role: Artifact Registry Writer).
+          # Tốt hơn nên dùng Workload Identity Federation thay vì key tĩnh.
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev --quiet
+
+      - name: Build & push image
+        id: image
+        run: |
+          set -e
+          BASE="${GAR_LOCATION}-docker.pkg.dev/${GCP_PROJECT}/${GAR_REPO}/${IMAGE_NAME}"
+          docker build -t "${BASE}:${GITHUB_SHA}" -t "${BASE}:latest" src/rag-worker
+          docker push "${BASE}:${GITHUB_SHA}"
+          docker push "${BASE}:latest"
+          # Lấy digest cố định (immutable) để deploy — không deploy theo tag mutable.
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${BASE}:${GITHUB_SHA}")
+          echo "ref=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "Deploying image: ${DIGEST}"
+
+  deploy:
+    needs: build-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH to standalone VM
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_REF: ${{ needs.build-push.outputs.image }}
+        with:
+          host: ${{ secrets.RAGW_VM_HOST }}
+          username: ${{ secrets.RAGW_VM_USER }}
+          key: ${{ secrets.RAGW_VM_SSH_KEY }}
+          port: ${{ secrets.RAGW_VM_SSH_PORT || 22 }}
+          envs: IMAGE_REF
+          script: |
+            set -e
+            cd ${{ secrets.RAGW_APP_DIR }}
+            git fetch origin
+            git checkout rag-worker-prod
+            git reset --hard origin/rag-worker-prod
+            cd src/rag-worker/deploy/standalone
+            # VM SA cần role Artifact Registry Reader để pull digest.
+            gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev --quiet
+            # CD ghi digest vào .env (compose interpolate ${RAG_WORKER_IMAGE}).
+            echo "RAG_WORKER_IMAGE=${IMAGE_REF}" > .env
+            docker compose -f docker-compose.standalone.yml pull
+            docker compose -f docker-compose.standalone.yml up -d
+            docker image prune -f
