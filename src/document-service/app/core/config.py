@@ -28,6 +28,15 @@ class Settings(BaseModel):
     }
     gcs_bucket: str = getenv("GCS_BUCKET", "rag-chatbot-docs")
     gcp_project_id: str | None = getenv("GCP_PROJECT_ID")
+    allowed_origins: str = getenv(
+        "CORS_ORIGINS", "http://localhost:3000,http://localhost:3001"
+    )
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [
+            origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()
+        ]
 
     def __init__(self, **data: object) -> None:
         super().__init__(**data)
