@@ -12,7 +12,6 @@ from __future__ import annotations
 import os
 
 from core_engine.ai import AIProvider, get_ai_provider
-from core_engine.ai.offline_provider import OfflineProvider
 from core_engine.config import HaystackSettings, load_settings
 from core_engine.config_schema import (
     CaptionerConfig,
@@ -63,13 +62,14 @@ def _wire(
 ) -> HaystackRagEngine:
     resolved_caption = _resolve_caption_enabled(caption)
     resolved_vector_config = vector_config or VectorStoreConfig.from_env(dimension=dim)
-    if isinstance(provider, OfflineProvider):
+    embed_model_override = provider.embed_model_override
+    if embed_model_override is not None:
         resolved_vector_config = (
-            resolved_vector_config.with_embed_model("offline").with_dimension(dim)
+            resolved_vector_config.with_embed_model(embed_model_override).with_dimension(dim)
         )
     cfg = PipelineConfig(
         common=CommonConfig(
-            ai_mode="offline" if isinstance(provider, OfflineProvider) else provider.name,
+            ai_mode=provider.name,
         ),
         embedder=EmbedderConfig(
             model=resolved_vector_config.embed_model,
@@ -116,8 +116,8 @@ def build_engine(
     provider = provider or get_ai_provider()
     settings = settings or load_settings()
     dim = (
-        provider.dimension
-        if isinstance(provider, OfflineProvider)
+        provider.fixed_dimension
+        if provider.fixed_dimension is not None
         else settings.embed_dimension
     )
     return _wire(settings, provider, vector_config, dim, caption=caption)
@@ -133,10 +133,10 @@ async def build_engine_probe(
     """Like build_engine, but probes the real dimension from an OpenAI model."""
     provider = provider or get_ai_provider()
     settings = settings or load_settings()
-    if provider.name == "openai":
+    if provider.fixed_dimension is not None:
+        dim = provider.fixed_dimension
+    elif provider.name == "openai":
         dim = await provider.probe_dimension()
-    elif isinstance(provider, OfflineProvider):
-        dim = provider.dimension
     else:
         dim = settings.embed_dimension
     return _wire(settings, provider, vector_config, dim, caption=caption)

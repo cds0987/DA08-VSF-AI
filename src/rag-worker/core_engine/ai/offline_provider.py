@@ -42,6 +42,16 @@ class OfflineProvider(AIProvider):
     def dimension(self) -> int:
         return self._dim
 
+    @property
+    def fixed_dimension(self) -> int:
+        # Offline hash-embed có dimension cố định, không probe mạng.
+        return self._dim
+
+    @property
+    def embed_model_override(self) -> str:
+        # Vector store đánh dấu corpus offline để không lẫn với embed model thật.
+        return "offline"
+
     async def embed(
         self, texts: List[str], *, dimension: Optional[int] = None
     ) -> List[List[float]]:

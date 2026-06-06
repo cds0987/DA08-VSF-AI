@@ -89,8 +89,18 @@ class ParserOcrConfig(BaseModel):
         return self
 
 
+class ReaderConfig(ComponentWithParams):
+    """Engine giải mã MỘT định dạng file (vd pdf -> pymupdf|pypdf).
+
+    `impl` tra `_READER_REGISTRY` trong local_parser; `params` truyền vào factory
+    reader. Section optional — thiếu thì local_parser dùng bản đồ suffix->impl mặc
+    định (backward-compatible).
+    """
+
+
 class ParserConfig(ComponentWithParams):
     ocr: ParserOcrConfig | None = None
+    readers: dict[str, ReaderConfig] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_parser(self) -> "ParserConfig":

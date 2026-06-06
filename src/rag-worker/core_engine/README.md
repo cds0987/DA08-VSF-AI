@@ -32,6 +32,40 @@ mỗi thứ chỉ một implementation, không dàn trải. Ingest & query do đ
 provider/model/dimension** — đảm bảo bằng kiến trúc, không bằng kỷ luật
 (`embedding.md` §0, `search.md` §2).
 
+## Hai trục tháo-lắp (đừng nhầm embedder là "thiếu sót")
+
+Pipeline tháo-lắp qua config — **KHÔNG đổi code** — nhưng dùng **hai cơ chế cố ý
+tách biệt theo loại workload**. Đây là chủ đích thiết kế, không phải bỏ sót:
+
+| Component | Cơ chế cắm | Vì sao |
+|---|---|---|
+| `parser` · `chunker` · `vector_store` | `Registry` (`core_engine/registry.py`) + `register(...)` + `impl:` trong `config.yaml` | logic chạy **in-process** → cần code Python cắm vào; built-in vẫn thua entry-point bên thứ ba (MOSA) |
+| `embed` · `caption` · `ocr` (AI nặng) | đổi `*_MODEL` + `*_BASE_URL` trong `config.yaml` (OpenAI SDK contract) | logic chạy **ở AI server riêng** (quá nặng để in-process) → chuẩn hóa qua OpenAI SDK; chỉ đổi config |
+
+**Vì sao `embedder` KHÔNG nằm trong `Registry` — và không nên đưa vào:**
+`ProviderEmbeddingService` (`embedding/service.py`) chỉ là lớp mỏng gọi
+`provider.embed(...)`; nó **không chứa logic model**. Toàn bộ việc nặng đẩy sang AI
+server qua `ai/openai_provider.py`. OpenAI SDK + `base_url` chính là **interface
+chuẩn hóa** để swap mọi backend AI (OpenAI thật · vLLM self-host · BGE-M3-served
+· gateway nội bộ) mà không đổi nơi gọi — vai trò tương đương `VectorRepository`
+port cho qdrant/milvus/chromadb. Đưa embedder vào `Registry` sẽ là **hai cơ chế
+plug-in chồng nhau cho cùng mục đích → thừa và sai tầng.**
+
+→ Kết luận: **toàn bộ pipeline tháo-lắp qua config**; chỉ là dùng đúng hai trục cho
+hai loại workload (in-process vs remote AI). Giới hạn thật duy nhất còn lại là vài
+giá trị hardcode trong `factory.py` `_wire` (`parser=local`, `chunker=heading_sections`,
+`max_workers=2`) — nhưng path đó **chỉ chạy khi KHÔNG có `config.yaml`** (fallback env).
+
+### Trục thứ ba (nội bộ parser): engine giải mã từng định dạng file
+Bên trong parser `local` còn một registry nhỏ nữa — **chọn engine đọc từng định dạng**
+(vd `pdf: pymupdf|pypdf`). Cấu hình qua `parser.readers` trong `config.yaml`
+(suffix → `impl` + `params`); thiếu suffix nào thì dùng `_DEFAULT_READER_IMPL`
+(`app/infrastructure/external/local_parser.py`). Đổi engine PDF hay thêm định dạng
+mới (entry-point `rag_worker.reader`, vd `.epub`) = **register + config, KHÔNG sửa
+code**. Reader CHỈ trả `_ParseStep` (text + ảnh thô); guard `SOURCE_ROOT` +
+OCR-qua-gateway + merge vẫn nằm ở `LocalFileParser` → bất biến bảo mật/OCR được giữ
+dù đổi reader. Lưu ý: `pypdf` là **text-only** (không OCR/ảnh) → chỉ hợp PDF digital.
+
 ## Chạy (offline — không cần key/Qdrant/Azure)
 
 ```bash

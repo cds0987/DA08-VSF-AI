@@ -26,6 +26,23 @@ profiles:
       impl: ${PARSER_IMPL:-local}
       params:
         max_workers: ${PARSER_MAX_WORKERS:-2}
+      # Engine giải mã từng định dạng — đổi impl/param qua config, KHÔNG sửa code.
+      # Thiếu suffix nào -> dùng mặc định (_DEFAULT_READER_IMPL). pdf: pymupdf|pypdf.
+      readers:
+        pdf:
+          impl: ${PDF_READER:-pymupdf}
+          params:
+            ocr_scale: ${PDF_OCR_SCALE:-2.0}
+            min_image_pixels: ${OCR_MIN_IMAGE_PIXELS:-64}
+            max_ocr_pages: ${MAX_OCR_PAGES:-25}
+        docx: { impl: docx_xml }
+        html: { impl: html_strip }
+        htm: { impl: html_strip }
+        txt: { impl: text }
+        md: { impl: text }
+        pptx: { impl: markitdown }
+        xls: { impl: markitdown }
+        xlsx: { impl: markitdown }
       ocr:
         model: ${OCR_MODEL:-gpt-4o-mini}
         base_url: ${OCR_BASE_URL:-}

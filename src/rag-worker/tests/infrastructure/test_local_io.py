@@ -319,3 +319,55 @@ def test_local_artifact_store_default_root_uses_rag_worker_service_dir(
         assert Path(artifact_uri[len("artifact://") :]).is_file()
 
     asyncio.run(scenario())
+
+
+def test_local_file_parser_pdf_reader_selectable_via_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """readers config chọn engine giải mã PDF (pypdf) thay mặc định (pymupdf),
+    KHÔNG sửa code. pypdf là text-only nên dùng fake module để kiểm định tuyến."""
+
+    class _FakePage:
+        def __init__(self, text: str) -> None:
+            self._text = text
+
+        def extract_text(self) -> str:
+            return self._text
+
+    class FakePdfReader:
+        def __init__(self, path: str) -> None:
+            self.pages = [_FakePage("Hello from pypdf"), _FakePage("page two")]
+
+    async def scenario() -> None:
+        source_root = tmp_path / "sources"
+        source_root.mkdir()
+        (source_root / "doc.pdf").write_bytes(b"%PDF-fake")
+        monkeypatch.setenv("SOURCE_ROOT", str(source_root))
+        monkeypatch.setitem(
+            sys.modules, "pypdf", types.SimpleNamespace(PdfReader=FakePdfReader)
+        )
+        parser = LocalFileParser(
+            max_workers=1,
+            readers_config={"pdf": {"impl": "pypdf"}},
+        )
+        try:
+            parsed = await parser.parse(
+                document_id="doc-1", file_type="pdf", source_uri="local://doc.pdf"
+            )
+        finally:
+            parser.close()
+
+        assert "Hello from pypdf" in parsed.markdown
+        assert "page two" in parsed.markdown
+
+    asyncio.run(scenario())
+
+
+def test_local_file_parser_unknown_reader_impl_raises(tmp_path: Path) -> None:
+    parser = LocalFileParser(readers_config={"pdf": {"impl": "does_not_exist"}})
+    try:
+        with pytest.raises(ValueError, match="chua dang ky"):
+            parser._reader_for_suffix("pdf")
+    finally:
+        parser.close()

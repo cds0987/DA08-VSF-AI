@@ -38,11 +38,14 @@ def resolve_parser(
     return factory(dict(params or {}), image_text_extractor)
 
 
+# `readers` (suffix -> {impl, params}) thread qua params: chọn engine giải mã từng
+# định dạng (vd pdf: pymupdf|pypdf) theo config, KHÔNG sửa code. Thiếu -> mặc định.
 register_parser(
     "local",
     lambda params, image_text_extractor: LocalFileParser(
         max_workers=int(params.get("max_workers", 2)),
         image_text_extractor=image_text_extractor,
+        readers_config=params.get("readers"),
     ),
 )
 
@@ -54,6 +57,7 @@ register_parser(
         LocalFileParser(
             max_workers=int(params.get("max_workers", 2)),
             image_text_extractor=image_text_extractor,
+            readers_config=params.get("readers"),
         ),
     ),
 )
