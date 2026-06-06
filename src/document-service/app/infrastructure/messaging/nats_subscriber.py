@@ -25,7 +25,10 @@ class SubscriberHandle:
             await self.connection.drain()
 
 
-async def start_status_subscriber(settings: Settings) -> SubscriberHandle:
+async def start_status_subscriber(
+    settings: Settings,
+    publisher: NatsPublisher | None = None,
+) -> SubscriberHandle:
     try:
         import nats
     except ImportError:
@@ -34,10 +37,10 @@ async def start_status_subscriber(settings: Settings) -> SubscriberHandle:
 
     try:
         nc = await nats.connect(settings.nats_url)
-        publisher = NatsPublisher(settings)
+        status_publisher = publisher or NatsPublisher(settings)
 
         async def handle_message(message) -> None:
-            await _handle_status_message(message, publisher)
+            await _handle_status_message(message, status_publisher)
 
         if settings.nats_jetstream_enabled:
             js = nc.jetstream()

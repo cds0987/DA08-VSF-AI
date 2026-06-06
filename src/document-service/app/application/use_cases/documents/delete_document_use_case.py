@@ -1,10 +1,14 @@
 from dataclasses import dataclass
+import logging
 from typing import Protocol
 
 from app.application.auth import CurrentUser
 from app.application.exceptions import NotFoundError
 from app.application.use_cases.documents.common import require_admin
 from app.domain.repositories.document_repository import DocumentRepository
+
+
+logger = logging.getLogger(__name__)
 
 
 class DeleteStorage(Protocol):
@@ -60,7 +64,6 @@ class DeleteDocumentUseCase:
         if document is None:
             raise NotFoundError()
 
-        await self.storage.delete_file(document.gcs_key)
         await self.document_repository.delete(document.id)
         await self.publisher.publish_doc_access(
             {
@@ -81,5 +84,9 @@ class DeleteDocumentUseCase:
             detail={"gcs_key": document.gcs_key},
             ip_address=ip_address,
         )
+        try:
+            await self.storage.delete_file(document.gcs_key)
+        except Exception:
+            logger.warning("failed to delete document object after soft-delete")
         return DeleteDocumentResult(message="Document deleted")
 

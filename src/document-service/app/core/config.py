@@ -29,8 +29,28 @@ class Settings(BaseModel):
     gcs_bucket: str = getenv("GCS_BUCKET", "rag-chatbot-docs")
     gcp_project_id: str | None = getenv("GCP_PROJECT_ID")
 
+    def __init__(self, **data: object) -> None:
+        super().__init__(**data)
+        _validate_jwt_secret(self.jwt_secret_key)
+        _validate_jwt_algorithm(self.jwt_algorithm)
+
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def _validate_jwt_secret(secret: str) -> None:
+    weak_defaults = {
+        "",
+        "change-me-in-env",
+        "your-secret-key-change-in-production",
+    }
+    if secret.strip() in weak_defaults:
+        raise ValueError("JWT_SECRET_KEY must be set to a strong non-default value")
+
+
+def _validate_jwt_algorithm(algorithm: str) -> None:
+    if algorithm != "HS256":
+        raise ValueError("JWT_ALGORITHM must be HS256")
 
