@@ -1,0 +1,86 @@
+# rag-worker STANDALONE trên 1 GCE VM (project vintravel-chatbot).
+#
+# Mô hình: rag-worker là 1 "server riêng lẻ". Các service khác (mcp-service,
+# document-service, query-service) chạy ở NƠI KHÁC và nối vào qua 3 ranh giới:
+#   - NATS   : do TEAM KHÁC cấp -> đặt NATS_URL trong rag-worker.env (KHÔNG chạy ở đây)
+#   - Qdrant : chạy ở đây, EXPOSE 6333 ra ngoài cho mcp-service đọc (khóa bằng firewall)
+#   - GCS    : managed, cấp qua S3-interop HMAC key trong rag-worker.env
+#
+# Image KHÔNG build ở đây — CD build trên CI rồi push Artifact Registry; VM chỉ PULL.
+# Biến RAG_WORKER_IMAGE do luồng CD ghi vào file .env cùng thư mục (digest cố định).
+#
+# Chạy thủ công:  docker compose -f docker-compose.standalone.yml up -d
+# (cần .env chứa RAG_WORKER_IMAGE=... và rag-worker.env đã điền giá trị thật)
+
+services:
+  # ── Qdrant: vectorstore, EXPOSE cho mcp-service ở ngoài đọc ──────────
+  qdrant:
+    image: qdrant/qdrant:v1.12.4   # >=1.10 để có Query API (/points/query)
+    ports:
+      # 6333 mở ra ngoài cho mcp-service. BẮT BUỘC khóa bằng GCP firewall
+      # (allowlist IP mcp-service). Qdrant không bật auth mặc định.
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      # image qdrant không có curl/wget -> dùng bash /dev/tcp.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/6333"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ── Postgres: job log / state của rag-worker (nội bộ VM, KHÔNG expose) ─
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: raguser
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in rag-worker.env}
+      POSTGRES_DB: rag_db
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U raguser -d rag_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ── Migration one-shot: alembic upgrade head trước khi worker chạy ───
+  migrate:
+    image: ${RAG_WORKER_IMAGE:?set RAG_WORKER_IMAGE in .env (CD ghi digest)}
+    command: ["alembic", "upgrade", "head"]
+    working_dir: /app
+    env_file:
+      - rag-worker.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # ── rag-worker: ingest (NATS consumer) + ghi Qdrant. HTTP chỉ health. ─
+  rag-worker:
+    image: ${RAG_WORKER_IMAGE:?set RAG_WORKER_IMAGE in .env (CD ghi digest)}
+    env_file:
+      - rag-worker.env
+    # /data ghi được cho SOURCE_ROOT/ARTIFACT_ROOT (image chạy user appuser).
+    volumes:
+      - work_data:/data
+    # health 8000 chỉ phục vụ giám sát nội bộ VM; KHÔNG cần expose ra ngoài.
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:
+  pg_data:
+  work_data:
