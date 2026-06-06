@@ -32,6 +32,7 @@ Contract fail-closed va fingerprint stamp van duoc giu nguyen. Khong sua logic n
 
 3. Da them connection pooling cho client remote.
    `AsyncQdrantClient`, OpenAI embed client, va OpenAI rerank client deu duoc lazy-init 1 lan va tai su dung.
+   Sau startup verify, service dong cac pooled client nay ngay de event loop phuc vu co the tao lai client gan dung loop cua no.
 
 4. Da bo round-trip thua trong `_search_remote`.
    Khong check `collection_exists()` truoc moi request nua; startup da verify fail-closed.
@@ -129,6 +130,8 @@ Trang thai moi:
 
 - Cac client duoc lazy-init va giu trong object song suot process.
 - Co `aclose()` de cleanup luc shutdown neu runtime goi duoc.
+- Startup verify khong de lai pooled client song qua doi event loop:
+  `main.py` verify xong se `aclose()` ngay trong cung `asyncio.run(...)`, roi serving loop moi lazy-init lai.
 
 ### 4. Double round-trip
 
