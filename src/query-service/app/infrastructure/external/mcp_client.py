@@ -201,6 +201,7 @@ class MCPStreamableHttpClient:
     def __init__(self, settings: Settings) -> None:
         self._endpoint_url = _mcp_endpoint_url(settings.mcp_service_url)
         self._timeout_seconds = settings.mcp_timeout_seconds
+        self._headers = _mcp_transport_headers(settings)
 
     async def list_tools(self) -> list[str]:
         async with self._session() as session:
@@ -257,13 +258,14 @@ class MCPStreamableHttpClient:
         return _call_tool_result_payload(result)
 
     def _session(self):
-        return _McpSessionContext(self._endpoint_url, self._timeout_seconds)
+        return _McpSessionContext(self._endpoint_url, self._timeout_seconds, self._headers)
 
 
 class _McpSessionContext:
-    def __init__(self, endpoint_url: str, timeout_seconds: int) -> None:
+    def __init__(self, endpoint_url: str, timeout_seconds: int, headers: dict[str, str]) -> None:
         self._endpoint_url = endpoint_url
         self._timeout_seconds = timeout_seconds
+        self._headers = headers
         self._http_client = None
         self._transport_cm = None
         self._session_cm = None
@@ -271,7 +273,7 @@ class _McpSessionContext:
 
     async def __aenter__(self):
         session_cls, transport_factory = _sdk_objects()
-        self._http_client = httpx.AsyncClient(timeout=self._timeout_seconds)
+        self._http_client = httpx.AsyncClient(timeout=self._timeout_seconds, headers=self._headers)
         self._transport_cm = transport_factory(self._endpoint_url, http_client=self._http_client)
         read_stream, write_stream, _ = await self._transport_cm.__aenter__()
         self._session_cm = session_cls(read_stream, write_stream)
@@ -390,6 +392,14 @@ def _mcp_endpoint_url(service_url: str) -> str:
     if base.endswith("/mcp"):
         return base
     return f"{base}/mcp"
+
+
+def _mcp_transport_headers(settings: Settings) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    token = (settings.mcp_internal_token or "").strip()
+    if token:
+        headers["X-Internal-Token"] = token
+    return headers
 
 
 def _extract_tool_payload(result: dict[str, Any]) -> Any:

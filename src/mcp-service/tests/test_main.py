@@ -22,9 +22,11 @@ class StubSettings:
 class StubMCP:
     def __init__(self) -> None:
         self.transport: str | None = None
+        self.run_kwargs: dict[str, object] = {}
 
-    def run(self, *, transport: str) -> None:
+    def run(self, *, transport: str, **kwargs) -> None:
         self.transport = transport
+        self.run_kwargs = kwargs
 
 
 class SuccessfulService:
@@ -63,6 +65,7 @@ def test_main_runs_streamable_http_after_contract_verify(monkeypatch) -> None:
 
     assert exit_code == 0
     assert mcp.transport == "streamable-http"
+    assert "middleware" in mcp.run_kwargs
     assert service.verify_calls == 1
     assert service.close_calls == 2
 

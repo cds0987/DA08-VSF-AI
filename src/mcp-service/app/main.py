@@ -9,7 +9,14 @@ import sys
 
 from app.core.config import load_settings
 from app.core.contract import VectorstoreContractError
-from app.interfaces.mcp_server import MCP_DEFAULT_HOST, MCP_DEFAULT_PORT, build_mcp, mcp_endpoint_url
+from app.interfaces.mcp_server import (
+    MCP_DEFAULT_HOST,
+    MCP_DEFAULT_PORT,
+    MCP_INTERNAL_TOKEN_ENV,
+    build_mcp,
+    build_mcp_middleware,
+    mcp_endpoint_url,
+)
 
 logger = logging.getLogger("mcp-service")
 
@@ -49,6 +56,8 @@ def main() -> int:
             int(os.getenv("MCP_PORT", str(MCP_DEFAULT_PORT))),
         ),
     )
+    auth_enabled = bool((os.getenv(MCP_INTERNAL_TOKEN_ENV) or "").strip())
+    logger.info("mcp_auth mode=%s", "internal-token" if auth_enabled else "disabled")
 
     mcp, service = build_mcp(settings)
 
@@ -60,7 +69,7 @@ def main() -> int:
     logger.info("mcp_contract_verified index=%s", contract.index_id)
 
     try:
-        mcp.run(transport="streamable-http")
+        mcp.run(transport="streamable-http", middleware=build_mcp_middleware())
     finally:
         asyncio.run(_close_service(service))
     return 0
