@@ -4,15 +4,18 @@ import asyncio
 import base64
 import os
 import zipfile
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import Any
 from xml.etree import ElementTree
 
 from app.domain.repositories.parser import ParsedArtifact, Parser
 from core_engine.ai import VisionImage
 from core_engine.ocr import ImageTextExtractor
+from core_engine.registry import Registry
 
 _IMAGE_MIME_BY_SUFFIX = {
     "png": "image/png",
@@ -208,52 +211,79 @@ def _read_docx_file(path: Path) -> _ParseStep:
     return _ParseStep(pages=[_Page(text="\n\n".join(paragraphs), images=media_images)])
 
 
-def _read_image_file(suffix: str):
-    mime = _IMAGE_MIME_BY_SUFFIX[suffix]
+def _read_image_file(path: Path) -> _ParseStep:
+    # Suy MIME từ đuôi file (đường dẫn có thể là file tạm `.s3-xxx.png`).
+    suffix = path.suffix.lstrip(".").lower()
+    mime = _IMAGE_MIME_BY_SUFFIX.get(suffix)
+    if mime is None:
+        raise ValueError(f"unsupported image suffix for local parser: {suffix}")
+    _ensure_source_file(path)
+    return _ParseStep(pages=[_Page(images=[_vision_image(path.read_bytes(), mime)])])
+
+
+def _make_pymupdf_reader(params: Mapping[str, Any]) -> Reader:
+    # Param override env (backward-compatible: thiếu param thì dùng env cũ).
+    min_pixels = int(params.get("min_image_pixels", _min_ocr_image_pixels()))
+    scale = float(params.get("ocr_scale", _pdf_ocr_scale()))
+    max_ocr_pages = int(params.get("max_ocr_pages", _max_ocr_pages()))
 
     def reader(path: Path) -> _ParseStep:
         _ensure_source_file(path)
-        return _ParseStep(pages=[_Page(images=[_vision_image(path.read_bytes(), mime)])])
+        try:
+            import fitz
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError("PyMuPDF is required to parse PDF sources") from exc
+        pages: list[_Page] = []
+        with fitz.open(path) as doc:
+            for page in doc:
+                text = _normalize_markdown(page.get_text("text"))
+                images: list[VisionImage] = []
+                if not text:
+                    # Trang scan / không có text-layer → rasterize cả trang cho vision.
+                    pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+                    images.append(_vision_image(pixmap.tobytes("png"), "image/png"))
+                else:
+                    # Trang có chữ + ảnh nhúng → giữ text, vision riêng từng ảnh.
+                    for img in page.get_images(full=True):
+                        xref = img[0]
+                        info = doc.extract_image(xref)
+                        mime = _IMAGE_MIME_BY_EXT.get((info.get("ext") or "").lower())
+                        if mime is None:
+                            continue
+                        if info.get("width", 0) < min_pixels or info.get("height", 0) < min_pixels:
+                            continue
+                        images.append(_vision_image(info["image"], mime))
+                pages.append(_Page(text=text, images=images))
+        step = _ParseStep(pages=pages)
+        if step.total_images() > max_ocr_pages:
+            raise ValueError(
+                f"document requires OCR on {step.total_images()} images but exceeds "
+                f"MAX_OCR_PAGES ({max_ocr_pages})"
+            )
+        return step
 
     return reader
 
 
-def _read_pdf_file(path: Path) -> _ParseStep:
-    _ensure_source_file(path)
-    try:
-        import fitz
-    except ModuleNotFoundError as exc:
-        raise ModuleNotFoundError("PyMuPDF is required to parse PDF sources") from exc
-    min_pixels = _min_ocr_image_pixels()
-    scale = _pdf_ocr_scale()
-    pages: list[_Page] = []
-    with fitz.open(path) as doc:
-        for page in doc:
-            text = _normalize_markdown(page.get_text("text"))
-            images: list[VisionImage] = []
-            if not text:
-                # Trang scan / không có text-layer → rasterize cả trang cho vision.
-                pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
-                images.append(_vision_image(pixmap.tobytes("png"), "image/png"))
-            else:
-                # Trang có chữ + ảnh nhúng → giữ text, vision riêng từng ảnh.
-                for img in page.get_images(full=True):
-                    xref = img[0]
-                    info = doc.extract_image(xref)
-                    mime = _IMAGE_MIME_BY_EXT.get((info.get("ext") or "").lower())
-                    if mime is None:
-                        continue
-                    if info.get("width", 0) < min_pixels or info.get("height", 0) < min_pixels:
-                        continue
-                    images.append(_vision_image(info["image"], mime))
-            pages.append(_Page(text=text, images=images))
-    step = _ParseStep(pages=pages)
-    if step.total_images() > _max_ocr_pages():
-        raise ValueError(
-            f"document requires OCR on {step.total_images()} images but exceeds "
-            f"MAX_OCR_PAGES ({_max_ocr_pages()})"
-        )
-    return step
+def _make_pypdf_reader(params: Mapping[str, Any]) -> Reader:
+    # Text-only: pypdf KHÔNG rasterize trang scan / KHÔNG trích ảnh nhúng → không OCR.
+    # Trang không có text-layer ra rỗng (PDF scan sẽ vỡ ở EmptyIngestResultError).
+    del params
+
+    def reader(path: Path) -> _ParseStep:
+        _ensure_source_file(path)
+        try:
+            from pypdf import PdfReader
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError("pypdf is required for the 'pypdf' reader") from exc
+        reader_obj = PdfReader(str(path))
+        pages = [
+            _Page(text=_normalize_markdown(page.extract_text() or ""))
+            for page in reader_obj.pages
+        ]
+        return _ParseStep(pages=pages)
+
+    return reader
 
 
 def _convert_with_markitdown(path: Path) -> _ParseStep:
@@ -264,17 +294,46 @@ def _convert_with_markitdown(path: Path) -> _ParseStep:
     return _text_step(MarkItDown().convert(str(path)).text_content)
 
 
-_SUFFIX_READERS = {
-    "md": _read_text_file,
-    "txt": _read_text_file,
-    "html": _read_html_file,
-    "htm": _read_html_file,
-    "docx": _read_docx_file,
-    "pdf": _read_pdf_file,
-    "pptx": _convert_with_markitdown,
-    "xls": _convert_with_markitdown,
-    "xlsx": _convert_with_markitdown,
+# --- Reader registry: engine giải mã MỘT định dạng (suffix-agnostic) --------- #
+# Cùng primitive Registry với parser/chunker/vectorstore. Reader CHỈ trả _ParseStep
+# (text + ảnh thô); guard SOURCE_ROOT + OCR-qua-gateway + merge vẫn nằm ở
+# LocalFileParser → bất biến bảo mật/OCR được giữ dù đổi reader. Bên thứ ba cắm định
+# dạng mới qua entry-point `rag_worker.reader` (vd .epub) KHÔNG sửa core.
+Reader = Callable[[Path], "_ParseStep"]
+ReaderFactory = Callable[[Mapping[str, Any]], Reader]
+
+_READER_REGISTRY: Registry[ReaderFactory] = Registry(
+    "reader", entry_point_group="rag_worker.reader"
+)
+_READER_REGISTRY.register("text", lambda params: _read_text_file)
+_READER_REGISTRY.register("html_strip", lambda params: _read_html_file)
+_READER_REGISTRY.register("docx_xml", lambda params: _read_docx_file)
+_READER_REGISTRY.register("image", lambda params: _read_image_file)
+_READER_REGISTRY.register("markitdown", lambda params: _convert_with_markitdown)
+_READER_REGISTRY.register("pymupdf", _make_pymupdf_reader)
+_READER_REGISTRY.register("pypdf", _make_pypdf_reader)
+
+# Bản đồ suffix -> impl MẶC ĐỊNH (khi config.parser.readers KHÔNG khai báo suffix đó).
+# Giữ y hệt hành vi cũ để backward-compatible.
+_DEFAULT_READER_IMPL: dict[str, str] = {
+    "md": "text",
+    "txt": "text",
+    "html": "html_strip",
+    "htm": "html_strip",
+    "docx": "docx_xml",
+    "pdf": "pymupdf",
+    "pptx": "markitdown",
+    "xls": "markitdown",
+    "xlsx": "markitdown",
+    **{suffix: "image" for suffix in _IMAGE_MIME_BY_SUFFIX},
 }
+
+
+def register_reader(
+    name: str, factory: ReaderFactory, *, override: bool = False
+) -> None:
+    """Đăng ký engine giải mã định dạng. Trùng tên mà ko override -> raise."""
+    _READER_REGISTRY.register(name, factory, override=override)
 
 
 class LocalFileParser(Parser):
@@ -292,12 +351,25 @@ class LocalFileParser(Parser):
         *,
         max_workers: int = 2,
         image_text_extractor: ImageTextExtractor | None = None,
+        readers_config: Mapping[str, Any] | None = None,
     ):
         self._executor = ThreadPoolExecutor(
             max_workers=max_workers,
             thread_name_prefix="rag-parse",
         )
         self._image_text_extractor = image_text_extractor
+        # suffix -> (impl, params). Mỗi spec là ReaderConfig (pydantic) hoặc dict.
+        # Thiếu suffix nào thì rơi về _DEFAULT_READER_IMPL.
+        self._readers_config: dict[str, tuple[str, Mapping[str, Any]]] = {}
+        for suffix, spec in (readers_config or {}).items():
+            impl = getattr(spec, "impl", None) if not isinstance(spec, Mapping) else spec.get("impl")
+            params = (
+                getattr(spec, "params", {}) if not isinstance(spec, Mapping)
+                else spec.get("params", {})
+            )
+            if not impl:
+                raise ValueError(f"reader config for {suffix!r} must define an impl")
+            self._readers_config[suffix.lower().lstrip(".")] = (impl, dict(params or {}))
 
     async def parse(
         self,
@@ -338,10 +410,14 @@ class LocalFileParser(Parser):
     def close(self) -> None:
         self._executor.shutdown(wait=False, cancel_futures=True)
 
-    def _reader_for_suffix(self, suffix: str):
-        reader = _SUFFIX_READERS.get(suffix)
-        if reader is not None:
-            return reader
-        if suffix in _IMAGE_MIME_BY_SUFFIX:
-            return _read_image_file(suffix)
-        raise ValueError(f"unsupported file_type for local parser: {suffix}")
+    def _reader_for_suffix(self, suffix: str) -> Reader:
+        override = self._readers_config.get(suffix)
+        if override is not None:
+            impl, params = override
+        else:
+            impl = _DEFAULT_READER_IMPL.get(suffix)
+            if impl is None:
+                raise ValueError(f"unsupported file_type for local parser: {suffix}")
+            params = {}
+        factory = _READER_REGISTRY.get(impl)
+        return factory(dict(params))

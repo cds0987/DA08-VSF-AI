@@ -1,6 +1,10 @@
 .claude/
 proposal/
 .env
+# Env thật của rag-worker + mcp-service (chứa key thật) — chỉ track *.example.
+deploy/env/rag-worker.env
+deploy/env/mcp-service.env
+.env-backup-*/
 .venv/
 venv/
 __pycache__/

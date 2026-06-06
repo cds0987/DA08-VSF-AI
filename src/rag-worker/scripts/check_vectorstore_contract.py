@@ -9,12 +9,20 @@ RAG_WORKER_SRC = ROOT / "src" / "rag-worker"
 if str(RAG_WORKER_SRC) not in sys.path:
     sys.path.insert(0, str(RAG_WORKER_SRC))
 
-from core_engine.config_loader import load_config
+from core_engine.config_loader import resolve_config_dict
+from core_engine.config_schema import PipelineConfig
 from core_engine.mapping import build_ai_settings, to_vector_store_config
+
+# Contract chỉ phụ thuộc embedder + vector_store (+ ai_mode). Validate SUBSET để
+# script chạy được trên CẢ config rag-worker (ingest-only) lẫn mcp-service
+# (search-only: có reranker/retrieval mà PipelineConfig ingest-only forbid).
+_CONTRACT_KEYS = ("common", "embedder", "vector_store", "vectorstore_contract")
 
 
 def _load_contract(path: Path) -> tuple[str, str, str]:
-    cfg = load_config(path)
+    resolved = resolve_config_dict(path)
+    subset = {key: resolved[key] for key in _CONTRACT_KEYS if key in resolved}
+    cfg = PipelineConfig.model_validate(subset)
     ai_settings = build_ai_settings(cfg)
     vector_config = to_vector_store_config(cfg, dim=ai_settings.embed_dimension or 0)
     contract = vector_config.contract()

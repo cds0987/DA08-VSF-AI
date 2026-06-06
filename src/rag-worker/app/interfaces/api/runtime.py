@@ -483,8 +483,12 @@ def bootstrap_runtime() -> RuntimeState:
         reset_ai_provider()
         provider = get_ai_provider()
         vector_config = VectorStoreConfig.from_env(
-            model="offline" if provider.name == "offline" else None,
-            dimension=provider.dimension if provider.name == "offline" else settings.embed_dimension,
+            model=provider.embed_model_override,
+            dimension=(
+                provider.fixed_dimension
+                if provider.fixed_dimension is not None
+                else settings.embed_dimension
+            ),
         )
         settings = HaystackSettings(
             embed_dimension=vector_config.dimension,
@@ -528,7 +532,10 @@ def bootstrap_runtime() -> RuntimeState:
         if pipeline_cfg is not None:
             parser = resolve_parser(
                 pipeline_cfg.parser.impl,
-                params=pipeline_cfg.parser.params,
+                params={
+                    **pipeline_cfg.parser.params,
+                    "readers": pipeline_cfg.parser.readers,
+                },
                 image_text_extractor=ProviderImageTextExtractor(provider),
             )
             engine = build_engine_from_config(

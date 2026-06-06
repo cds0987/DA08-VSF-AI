@@ -126,6 +126,19 @@ class AIProvider(ABC):
     def name(self) -> str:
         """Tên provider (cho health/log: 'openai' | 'offline')."""
 
+    @property
+    def fixed_dimension(self) -> Optional[int]:
+        """Dimension provider TỰ biết, không cần probe/settings (vd offline
+        hash-embed). None => caller lấy từ settings hoặc probe. Để composition
+        root khỏi `isinstance(provider, X)` — provider tự khai (OCP)."""
+        return None
+
+    @property
+    def embed_model_override(self) -> Optional[str]:
+        """Tên embed-model provider ÉP vào vector store (vd offline => 'offline').
+        None => dùng model từ config. Thay cho `isinstance` ở nơi lắp ráp (OCP)."""
+        return None
+
     @abstractmethod
     async def embed(
         self, texts: List[str], *, dimension: Optional[int] = None

@@ -8,7 +8,6 @@ if TYPE_CHECKING:
     from core_engine.ocr import ProviderImageTextExtractor
 
 from core_engine.ai import AIProvider, AISettings, CapabilityConfig, build_provider
-from core_engine.ai.offline_provider import OfflineProvider
 from core_engine.caption import ProviderCaptioner
 from core_engine.chunking import SectionChunker
 from core_engine.config import HaystackSettings
@@ -146,8 +145,8 @@ def build_engine_from_config(
         dim
         if dim is not None
         else (
-            provider.dimension
-            if isinstance(provider, OfflineProvider)
+            provider.fixed_dimension
+            if provider.fixed_dimension is not None
             else resolve_dimension(_effective_embed_model(cfg), cfg.embedder.dimension)
         )
     )
