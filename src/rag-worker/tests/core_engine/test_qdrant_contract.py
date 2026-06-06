@@ -84,7 +84,7 @@ def test_read_path_does_not_import_ocr() -> None:
         "import sys; "
         "import core_engine.contract, core_engine.embedding.service, "
         "core_engine.vectorstore.config, core_engine.vectorstore.qdrant_contract, "
-        "core_engine.rerank, core_engine.engine, core_engine.mapping; "
+        "core_engine.engine, core_engine.mapping; "
         "bad=[m for m in sys.modules if m.startswith('core_engine.ocr')]; "
         "assert not bad, 'read-path imports ingest-only ocr: %r' % bad"
     )

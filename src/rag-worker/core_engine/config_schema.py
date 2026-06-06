@@ -75,19 +75,6 @@ class CaptionerConfig(ComponentWithParams):
         return self
 
 
-class RerankerConfig(ComponentWithParams):
-    model: str = "gpt-4o-mini"
-    base_url: str = ""
-    api_key: str = ""
-    timeout_seconds: float = 30.0   # mcp-service LLM reranker đọc field này (params: batch_size/passage_chars)
-
-    @model_validator(mode="after")
-    def validate_reranker(self) -> "RerankerConfig":
-        if self.impl == "llm" and not self.model.strip():
-            raise ValueError("AI config for rerank must include a model")
-        return self
-
-
 class ParserOcrConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -138,26 +125,6 @@ class VectorStoreConfigModel(ComponentWithParams):
         return self
 
 
-class RetrievalConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    top_k_candidates: int = 20
-    rerank_top_k: int = 3
-    rerank_threshold: float = 0.7
-
-    @model_validator(mode="after")
-    def validate_retrieval(self) -> "RetrievalConfig":
-        if self.top_k_candidates <= 0:
-            raise ValueError("SEARCH_TOP_K must be > 0")
-        if self.rerank_top_k <= 0:
-            raise ValueError("RERANK_TOP_K must be > 0")
-        if self.top_k_candidates < self.rerank_top_k:
-            raise ValueError("SEARCH_TOP_K must be >= RERANK_TOP_K")
-        if not 0.0 <= self.rerank_threshold <= 1.0:
-            raise ValueError("RERANK_THRESHOLD must be between 0 and 1")
-        return self
-
-
 class PipelineConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -165,9 +132,6 @@ class PipelineConfig(BaseModel):
     embedder: EmbedderConfig = Field(default_factory=EmbedderConfig)
     captioner: CaptionerConfig = Field(
         default_factory=lambda: CaptionerConfig(impl="provider")
-    )
-    reranker: RerankerConfig = Field(
-        default_factory=lambda: RerankerConfig(impl="llm")
     )
     parser: ParserConfig = Field(default_factory=lambda: ParserConfig(impl="local"))
     chunker: ChunkerConfig = Field(
@@ -187,4 +151,3 @@ class PipelineConfig(BaseModel):
         )
     )
     vectorstore_contract: VectorstoreContractConfig | None = None
-    retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)

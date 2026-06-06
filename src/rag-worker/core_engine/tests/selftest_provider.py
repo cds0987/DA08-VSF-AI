@@ -6,9 +6,8 @@ Hai phần:
   A. Construct OpenAIProvider THẬT (openai.AsyncOpenAI) với key giả + validate()
      → chứng minh wiring qua OpenAI SDK hợp lệ (client init lazy, KHÔNG gọi mạng).
      Đây là code path thật khi có OPENAI_API_KEY.
-  B. End-to-end engine với OfflineProvider qua flow CHUẨN (caption-embed +
-     LLM-as-reranker) → chứng minh luồng embed→caption→hybrid→rerank chạy thật,
-     không phụ thuộc mạng.
+  B. End-to-end engine với OfflineProvider qua flow CHUẨN (caption-embed)
+     → chứng minh luồng embed→caption→vector-write chạy thật, không phụ thuộc mạng.
 
 Chạy thật: set OPENAI_API_KEY (hoặc EMBED_BASE_URL trỏ vLLM/OpenRouter) rồi
 `engine = await build_engine_probe()` — xem README.
@@ -25,7 +24,6 @@ if hasattr(sys.stdout, "reconfigure"):
 from core_engine import build_engine, IngestInput, OfflineProvider, OpenAIProvider
 from core_engine.ai.base import AISettings, CapabilityConfig
 from core_engine.caption import ProviderCaptioner
-from core_engine.rerank import LLMReranker
 
 DIM = 256
 
@@ -40,17 +38,20 @@ async def part_a_construct_real() -> None:
     """Construct OpenAIProvider thật (AsyncOpenAI) + validate — không gọi mạng."""
     provider = OpenAIProvider(_fake_openai_settings())
     provider.validate()                       # config hợp lệ (fail-fast path)
-    # Tạo client thật cho từng capability (lazy, không I/O).
-    assert provider._client(provider._s.embed) is not None
-    assert provider._client(provider._s.caption) is not None
+    try:
+        # Tạo client thật cho từng capability (lazy, không I/O).
+        assert provider._client(provider._s.embed) is not None
+        assert provider._client(provider._s.caption) is not None
+    except ModuleNotFoundError:
+        print("  A. construct OpenAIProvider thật: SKIP (chua cai openai)")
+        return
     print("  A. construct OpenAIProvider thật (AsyncOpenAI) + validate: OK (không gọi mạng)")
 
 
 async def part_b_end_to_end() -> None:
-    """Flow chuẩn (caption-embed + LLM-rerank) qua OfflineProvider."""
+    """Flow chuẩn (caption-embed) qua OfflineProvider."""
     provider = OfflineProvider(DIM)
-    engine = build_engine(provider=provider, caption=True,
-                          reranker=LLMReranker(provider))
+    engine = build_engine(provider=provider, caption=True)
 
     # caption qua provider (offline) — không rỗng.
     cap = await ProviderCaptioner(provider).caption("Vào Cài đặt > Bảo mật để đặt lại mật khẩu.")
@@ -62,10 +63,9 @@ async def part_b_end_to_end() -> None:
     ))
     assert n >= 1, "ingest (caption flow) phải tạo >=1 unit"
 
-    res = await engine.search("reset mật khẩu", rerank_threshold=0.0)
-    assert res and res[0].document_id == "d-pw", "search qua LLM-reranker sai top-1"
-    assert res[0].rerank_score > 0, "LLM-reranker phải gán rerank_score"
-    print("  B. end-to-end embed→caption→hybrid→LLM-rerank (offline provider): OK")
+    chunk_ids = await engine.vectors.list_chunk_ids_by_document("d-pw")
+    assert chunk_ids, "caption flow phải ghi chunk vào vector store"
+    print("  B. end-to-end embed→caption→vector-write (offline provider): OK")
 
 
 async def run() -> None:

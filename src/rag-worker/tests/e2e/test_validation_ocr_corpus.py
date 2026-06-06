@@ -1,4 +1,4 @@
-"""E2E (gated): image/scanned sources -> real LocalFileParser + vision OCR -> engine -> search.
+"""E2E (gated): image/scanned sources -> real LocalFileParser + vision OCR -> engine -> payload.
 
 Anh em với `test_validation_corpus_ingest_search.py`, nhưng cho nhánh KHÔNG có text-layer:
 ảnh (`png/jpg`), PDF scan (rasterize), và docx có ảnh nhúng — chữ chỉ nằm trong ảnh nên
@@ -24,6 +24,7 @@ from core_engine import IngestInput, build_engine
 from core_engine.ai import get_ai_provider, reset_ai_provider
 from core_engine.ocr import ProviderImageTextExtractor
 from core_engine.vectorstore import VectorStoreConfig
+from tests.e2e._vector_helpers import payloads_for_document
 
 VALIDATION_DIR = Path(__file__).resolve().parents[2] / "eval" / "validation"
 MANIFEST_PATH = VALIDATION_DIR / "manifest_ocr.json"
@@ -67,7 +68,7 @@ def parser(provider, monkeypatch: pytest.MonkeyPatch) -> LocalFileParser:
 
 
 @pytest.mark.asyncio
-async def test_ocr_corpus_files_ingest_and_retrieve_top_hit(provider, parser: LocalFileParser) -> None:
+async def test_ocr_corpus_files_ingest_and_persist_extracted_text(provider, parser: LocalFileParser) -> None:
     manifest = _load_manifest()
     vector_config = VectorStoreConfig(provider="qdrant", url="")  # in_process :memory:
     engine = build_engine(provider=provider, vector_config=vector_config, caption=False)
@@ -93,13 +94,9 @@ async def test_ocr_corpus_files_ingest_and_retrieve_top_hit(provider, parser: Lo
         assert chunk_count > 0, f"ingest produced no chunks for {entry['file']}"
 
     for entry in manifest:
-        results = await engine.search(entry["query"], top_k=5, rerank_threshold=0.0)
-        assert results, f"no result for query={entry['query']!r}"
-        assert results[0].document_id == entry["document_id"], (
-            f"query {entry['query']!r} expected top doc {entry['document_id']!r}, "
-            f"got {results[0].document_id!r}"
-        )
-        joined = " ".join(r.content for r in results if r.document_id == entry["document_id"])
+        payloads = payloads_for_document(engine, entry["document_id"])
+        assert payloads, f"no payloads persisted for {entry['document_id']!r}"
+        joined = " ".join(payload["parent_text"] for payload in payloads)
         # Keyword chỉ tồn tại trong ảnh => có nó nghĩa là OCR thực sự đọc được nội dung.
         assert entry["expect_keyword"].lower() in joined.lower(), (
             f"OCR output for {entry['file']} missing expected keyword "

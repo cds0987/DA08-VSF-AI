@@ -19,7 +19,7 @@ from typing import List
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from app.domain.repositories.vector_repository import SearchResult
+from core_engine.types import SearchResult
 
 from core_engine import IngestInput, OfflineProvider, build_engine
 from core_engine.tests._contract import assert_vector_repository_contract
@@ -163,7 +163,7 @@ async def test_engine_uses_selected_provider() -> None:
         QdrantInProcessRepository,
     )
 
-    engine = build_engine(provider=OfflineProvider(DIM), caption=False)
+    engine = build_engine(provider=OfflineProvider(256), caption=False)
     assert isinstance(engine.vectors, QdrantInProcessRepository)
     await engine.ingest(
         IngestInput(
@@ -173,8 +173,8 @@ async def test_engine_uses_selected_provider() -> None:
             markdown="# T\nreset mật khẩu trong cài đặt.\n",
         )
     )
-    res = await engine.search("reset mật khẩu", rerank_threshold=0.0)
-    assert res and res[0].document_id == "d1", "engine qua config object phai chay e2e"
+    chunk_ids = await engine.vectors.list_chunk_ids_by_document("d1")
+    assert chunk_ids, "engine qua config object phải ghi được chunk vào vector store"
     print("  7. build_engine dung provider qua config object + chay e2e: OK")
 
 

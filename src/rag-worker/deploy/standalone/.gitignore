@@ -1,0 +1,4 @@
+# Secrets / runtime — KHÔNG commit
+rag-worker.env
+.env
+.image.env

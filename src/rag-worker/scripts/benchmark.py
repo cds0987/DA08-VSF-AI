@@ -1,22 +1,20 @@
 #!/usr/bin/env python
-"""Benchmark harness — đo per-stage time + memory + recall theo cấu hình env hiện tại.
+"""Benchmark harness — đo per-stage ingest time + memory theo cấu hình env hiện tại.
 
 Tận dụng đúng tính "tháo-lắp bằng 1 dòng env" của service: KHÔNG nhận tham số model/
 backend trên CLI — script chỉ đọc môi trường (AI_PROVIDER, EMBED_MODEL, VECTOR_DB_*,
-RERANK_PROVIDER, CAPTION_ENABLED, chunk/retrieval knobs...) rồi dựng engine qua
+CAPTION_ENABLED, chunk knobs...) rồi dựng engine qua
 `build_engine()`. Muốn A/B: đổi 1 dòng `.env` (hoặc export) rồi chạy lại script.
 
 Cách đo:
-- Per-stage time: gắn một log handler bắt event `ingest_completed`/`search_completed`/
-  `ocr_extracted` do engine phát ra (V5-6), đọc các field `*_ms` — KHÔNG đo lại độc lập,
+- Per-stage time: gắn một log handler bắt event `ingest_completed`/`ocr_extracted`
+  do engine phát ra, đọc các field `*_ms` — KHÔNG đo lại độc lập,
   nên số khớp đúng những gì code production tự ghi.
-- Memory: `tracemalloc` bao quanh toàn bộ vòng ingest+search, báo peak (MB).
-- Recall@k: corpus golden nhỏ, mỗi query đúng 1 tài liệu liên quan.
+- Memory: `tracemalloc` bao quanh toàn bộ vòng ingest, báo peak (MB).
 
 Chạy (từ thư mục src/rag-service):
     python scripts/benchmark.py                 # offline mặc định
     AI_PROVIDER=offline python scripts/benchmark.py --repeat 20
-    RERANK_PROVIDER=none python scripts/benchmark.py
     python scripts/benchmark.py --csv bench.csv # append một dòng CSV để gom nhiều run
 
 Lưu ý: provider thật (AI_PROVIDER=openai + key) sẽ gọi network và phát sinh chi phí.
@@ -43,7 +41,6 @@ from core_engine.config import load_settings  # noqa: E402
 from core_engine.config_loader import load_config  # noqa: E402
 from core_engine.factory import (  # noqa: E402
     caption_enabled_from_env,
-    rerank_provider_from_env,
 )
 from core_engine.logging_utils import _EVENT_FIELDS_ATTR  # noqa: E402
 from core_engine.mapping import build_ai_provider, to_settings, to_vector_store_config  # noqa: E402
@@ -78,13 +75,6 @@ _CORPUS = [
         artifact_uri="artifact://doc-finance",
     ),
 ]
-
-_QUERIES = [
-    ("reset mat khau het han bao lau", "doc-account"),
-    ("nhan vien co bao nhieu ngay nghi phep nam", "doc-hr"),
-    ("nop hoa don cong tac trong bao nhieu ngay", "doc-finance"),
-]
-
 
 class _EventCapture(logging.Handler):
     """Bắt structured events của engine để đọc field `*_ms` (per-stage timing)."""
@@ -131,7 +121,7 @@ def _summary(values: list[float]) -> dict:
     }
 
 
-async def _run(repeat: int, top_k: int) -> dict:
+async def _run(repeat: int) -> dict:
     reset_ai_provider()
     config_path = Path(os.getenv("PIPELINE_CONFIG", "config.yaml"))
     if config_path.is_file():
@@ -165,14 +155,8 @@ async def _run(repeat: int, top_k: int) -> dict:
             else build_engine(provider=provider)
         )
         for document in _CORPUS:
-            await engine.ingest(document)
-
-        recalls: list[float] = []
-        for _ in range(repeat):
-            for query, relevant_id in _QUERIES:
-                results = await engine.search(query, top_k=top_k, rerank_threshold=0.0)
-                retrieved = [r.document_id for r in results[:top_k]]
-                recalls.append(1.0 if relevant_id in retrieved else 0.0)
+            for _ in range(repeat):
+                await engine.ingest(document)
         current, peak = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
@@ -187,13 +171,10 @@ async def _run(repeat: int, top_k: int) -> dict:
             "vector_provider": vector_config.provider,
             "vector_deployment": vector_config.deployment,
             "pipeline_profile": os.getenv("PIPELINE_PROFILE", "baseline"),
-            "rerank_provider": rerank_provider_from_env(),
             "caption_enabled": caption_enabled_from_env(),
-            "top_k_candidates": settings.top_k_candidates,
-            "rerank_top_k": top_k,
         },
         "ingest": {
-            "documents": len(_CORPUS),
+            "documents": len(_CORPUS) * repeat,
             "total_ms": _summary(capture.field_values("ingest_completed", "total_ms")),
             "split_ms": _summary(capture.field_values("ingest_completed", "split_ms")),
             "caption_ms": _summary(capture.field_values("ingest_completed", "caption_ms")),
@@ -201,16 +182,6 @@ async def _run(repeat: int, top_k: int) -> dict:
             "vector_write_ms": _summary(
                 capture.field_values("ingest_completed", "vector_write_ms")
             ),
-        },
-        "search": {
-            "queries": len(_QUERIES) * repeat,
-            "total_ms": _summary(capture.field_values("search_completed", "total_ms")),
-            "embed_ms": _summary(capture.field_values("search_completed", "embed_ms")),
-            "vector_search_ms": _summary(
-                capture.field_values("search_completed", "vector_search_ms")
-            ),
-            "rerank_ms": _summary(capture.field_values("search_completed", "rerank_ms")),
-            "recall_at_k": round(statistics.fmean(recalls), 3) if recalls else 0.0,
         },
         "ocr": {
             "pages_per_second": _summary(
@@ -231,14 +202,8 @@ def _append_csv(path: Path, report: dict) -> None:
         "embed_dimension": report["config"]["embed_dimension"],
         "vector_provider": report["config"]["vector_provider"],
         "vector_deployment": report["config"]["vector_deployment"],
-        "rerank_provider": report["config"]["rerank_provider"],
         "caption_enabled": report["config"]["caption_enabled"],
         "ingest_total_p95_ms": report["ingest"]["total_ms"].get("p95_ms"),
-        "search_total_p95_ms": report["search"]["total_ms"].get("p95_ms"),
-        "search_embed_p95_ms": report["search"]["embed_ms"].get("p95_ms"),
-        "search_vector_p95_ms": report["search"]["vector_search_ms"].get("p95_ms"),
-        "search_rerank_p95_ms": report["search"]["rerank_ms"].get("p95_ms"),
-        "recall_at_k": report["search"]["recall_at_k"],
         "peak_mb": report["memory"]["peak_mb"],
     }
     write_header = not path.exists()
@@ -252,15 +217,14 @@ def _append_csv(path: Path, report: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--repeat", type=int, default=10, help="lần lặp mỗi query để p95 ổn định"
+        "--repeat", type=int, default=10, help="lần lặp ingest mỗi document để p95 ổn định"
     )
-    parser.add_argument("--top-k", type=int, default=3, help="rerank_top_k khi search")
     parser.add_argument(
         "--csv", type=Path, default=None, help="append một dòng tổng hợp vào file CSV"
     )
     args = parser.parse_args()
 
-    report = asyncio.run(_run(repeat=max(1, args.repeat), top_k=max(1, args.top_k)))
+    report = asyncio.run(_run(repeat=max(1, args.repeat)))
     print(json.dumps(report, ensure_ascii=False, indent=2))
     if args.csv is not None:
         _append_csv(args.csv, report)
