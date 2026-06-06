@@ -1,0 +1,59 @@
+# rag-worker CLOUD mode: dùng Qdrant Cloud + Cloud SQL + GCS (managed).
+# KHÁC docker-compose.standalone.yml (cái kia tự host Qdrant+Postgres in-VM).
+#
+# Ở đây chỉ chạy:
+#   - nats      : JetStream TẠM, thay cho NATS chung DevOps chưa cấp (chỉ để trigger ingest)
+#   - migrate   : alembic upgrade head lên Cloud SQL (one-shot)
+#   - rag-worker: consumer doc.ingest -> đọc GCS -> embed -> ghi Qdrant Cloud
+#
+# Image: build TẠI CHỖ từ src/rag-worker/Dockerfile (không cần Artifact Registry để test).
+# Khi có CD/digest thật, thay `build:` bằng `image: <digest>`.
+#
+# Chạy:  docker compose -f docker-compose.cloud.yml up -d --build
+# Trigger 1 doc:  python trigger_ingest.py s3://vsf-rag-chatbot-docs-dev/raw/doc-001/test.pdf pdf
+# (rag-worker.env phải đã điền giá trị thật; xem rag-worker.env.example)
+
+services:
+  # ── NATS JetStream TẠM (chờ DevOps cấp server chung) ────────────────
+  nats:
+    image: nats:2.10-alpine
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "127.0.0.1:4222:4222"   # expose loopback để trigger_ingest.py chạy trên VM nối vào
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ── Migration one-shot: alembic upgrade head lên Cloud SQL ──────────
+  migrate:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: rag-worker:local
+    command: ["alembic", "upgrade", "head"]
+    working_dir: /app
+    env_file:
+      - rag-worker.env
+    restart: "no"
+
+  # ── rag-worker: ingest consumer + ghi Qdrant Cloud ──────────────────
+  rag-worker:
+    image: rag-worker:local
+    env_file:
+      - rag-worker.env
+    volumes:
+      - work_data:/data
+    ports:
+      - "127.0.0.1:8000:8000"   # /readyz /livez giám sát nội bộ
+    depends_on:
+      nats:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  work_data:
