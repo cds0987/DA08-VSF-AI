@@ -7,15 +7,16 @@ from app.application.ports import AuthenticatedUser
 from app.application.intent_classifier import HybridIntentClassifier
 from app.application.use_cases.query.orchestration import QueryOrchestrationUseCase
 from app.infrastructure.auth.auth_service import AuthService
-from app.infrastructure.cache.rate_limiter import InMemoryRateLimiter
+from app.infrastructure.cache.rate_limiter import InMemoryRateLimiter, RedisRateLimiter
 from app.infrastructure.cache.semantic_cache import InMemorySemanticCache
 from app.infrastructure.config import Settings, get_settings
 from app.infrastructure.db.mock_conversation_repo import InMemoryConversationRepository
 from app.infrastructure.db.mock_document_access_repo import InMemoryDocumentAccessRepository
 from app.infrastructure.db.mock_notification_repo import InMemoryNotificationRepository
+from app.infrastructure.db.postgres_conversation_repo import PostgresConversationRepository
 from app.infrastructure.db.postgres_document_access_repo import PostgresDocumentAccessRepository
 from app.infrastructure.db.postgres_notification_repo import PostgresNotificationRepository
-from app.infrastructure.external.mcp_client import MCPJsonRpcClient, MockMCPClient
+from app.infrastructure.external.mcp_client import MCPStreamableHttpClient, MockMCPClient
 from app.infrastructure.external.intent_ai_client import (
     OpenAIIntentEmbeddingClient,
     OpenAIIntentLLMClient,
@@ -51,7 +52,10 @@ def require_admin(user: AuthenticatedUser = Depends(get_current_user)) -> Authen
 
 
 @lru_cache
-def get_conversation_repo() -> InMemoryConversationRepository:
+def get_conversation_repo():
+    settings = get_settings()
+    if settings.database_url:
+        return PostgresConversationRepository(settings.database_url)
     return InMemoryConversationRepository()
 
 
@@ -79,8 +83,8 @@ def get_connection_manager() -> ConnectionManager:
 @lru_cache
 def get_mcp_client():
     settings = get_settings()
-    if settings.mcp_mode.strip().lower() == "mcp":
-        return MCPJsonRpcClient(settings)
+    if settings.mcp_mode.strip().lower() in {"real", "mcp"}:
+        return MCPStreamableHttpClient(settings)
     return MockMCPClient()
 
 
@@ -130,8 +134,16 @@ def get_semantic_cache() -> InMemorySemanticCache:
 
 
 @lru_cache
-def get_rate_limiter() -> InMemoryRateLimiter:
+def get_rate_limiter():
     settings = get_settings()
+    if (
+        settings.rate_limiter_mode.strip().lower() == "redis"
+        or settings.app_env.strip().lower() == "production"
+    ):
+        return RedisRateLimiter(
+            redis_url=settings.redis_url,
+            max_requests_per_minute=settings.query_rate_limit_per_minute,
+        )
     return InMemoryRateLimiter(settings.query_rate_limit_per_minute)
 
 
@@ -167,12 +179,16 @@ def get_nats_subscriber_manager() -> NatsSubscriberManager | None:
     handler = QueryNatsEventHandler(
         document_access_repo=get_document_access_repo(),
         notification_service=get_notification_service(),
+        processed_event_max_size=settings.nats_processed_event_max_size,
+        processed_event_ttl_seconds=settings.nats_processed_event_ttl_seconds,
     )
     return NatsSubscriberManager(settings, handler)
 
 
 def reset_state_for_tests() -> None:
-    get_conversation_repo().reset()
+    conversation_reset = getattr(get_conversation_repo(), "reset", None)
+    if conversation_reset:
+        conversation_reset()
     access_reset = getattr(get_document_access_repo(), "reset", None)
     if access_reset:
         access_reset()
@@ -189,6 +205,14 @@ def reset_state_for_tests() -> None:
     if decision_reset:
         decision_reset()
     get_nats_subscriber_manager.cache_clear()
+    get_conversation_repo.cache_clear()
+    get_document_access_repo.cache_clear()
+    get_notification_repo.cache_clear()
+    get_connection_manager.cache_clear()
+    get_mcp_client.cache_clear()
+    get_semantic_cache.cache_clear()
+    get_rate_limiter.cache_clear()
+    get_tool_decision_client.cache_clear()
     get_intent_embedding_client.cache_clear()
     get_intent_llm_client.cache_clear()
     get_intent_classifier.cache_clear()

@@ -1,5 +1,6 @@
+from collections import OrderedDict
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.domain.repositories.document_access_repository import DocumentAccessRepository
@@ -37,12 +38,16 @@ class QueryNatsEventHandler:
         self,
         document_access_repo: DocumentAccessRepository | None = None,
         notification_service: NotificationService | None = None,
+        processed_event_max_size: int = 10000,
+        processed_event_ttl_seconds: int = 86400,
     ) -> None:
         self._document_access_repo = document_access_repo
         self._notification_service = notification_service
-        self._processed_event_ids: set[str] = set()
+        self._processed_event_ids: OrderedDict[str, datetime] = OrderedDict()
         self._doc_access_seen_at: dict[str, datetime] = {}
-        self._notify_fallback_keys: set[str] = set()
+        self._notify_fallback_keys: OrderedDict[str, datetime] = OrderedDict()
+        self._processed_event_max_size = max(1, processed_event_max_size)
+        self._processed_event_ttl = timedelta(seconds=max(1, processed_event_ttl_seconds))
 
     async def handle_doc_access(self, payload: dict[str, Any]) -> None:
         if self._document_access_repo is None:
@@ -75,7 +80,7 @@ class QueryNatsEventHandler:
         if self._is_duplicate_event(event.event_id):
             return []
         fallback_key = f"{event.doc_id}:doc_new"
-        if event.event_id is None and fallback_key in self._notify_fallback_keys:
+        if event.event_id is None and self._is_duplicate_fallback_key(fallback_key):
             return []
 
         delivered = await self._notification_service.publish_doc_new(
@@ -88,15 +93,36 @@ class QueryNatsEventHandler:
             )
         )
         self._remember_event(event.event_id)
-        self._notify_fallback_keys.add(fallback_key)
+        self._remember_fallback_key(fallback_key)
         return delivered
 
     def _is_duplicate_event(self, event_id: str | None) -> bool:
+        self._prune_store(self._processed_event_ids)
         return bool(event_id and event_id in self._processed_event_ids)
 
     def _remember_event(self, event_id: str | None) -> None:
         if event_id:
-            self._processed_event_ids.add(event_id)
+            self._remember_key(self._processed_event_ids, event_id)
+
+    def _is_duplicate_fallback_key(self, key: str) -> bool:
+        self._prune_store(self._notify_fallback_keys)
+        return key in self._notify_fallback_keys
+
+    def _remember_fallback_key(self, key: str) -> None:
+        self._remember_key(self._notify_fallback_keys, key)
+
+    def _remember_key(self, store: OrderedDict[str, datetime], key: str) -> None:
+        self._prune_store(store)
+        store[key] = datetime.now(timezone.utc)
+        store.move_to_end(key)
+        while len(store) > self._processed_event_max_size:
+            store.popitem(last=False)
+
+    def _prune_store(self, store: OrderedDict[str, datetime]) -> None:
+        cutoff = datetime.now(timezone.utc) - self._processed_event_ttl
+        expired_keys = [key for key, seen_at in store.items() if seen_at < cutoff]
+        for key in expired_keys:
+            store.pop(key, None)
 
 
 def parse_doc_access_event(payload: dict[str, Any]) -> DocAccessEvent:
@@ -146,7 +172,7 @@ def _string_list(value: Any, field: str) -> list[str]:
 
 def _event_time(value: Any) -> datetime:
     if value is None:
-        return datetime.now(UTC)
+        return datetime.now(timezone.utc)
     if not isinstance(value, str) or not value.strip():
         raise InvalidNatsEventPayload("occurred_at must be an ISO datetime string")
     normalized = value.replace("Z", "+00:00")
@@ -155,5 +181,5 @@ def _event_time(value: Any) -> datetime:
     except ValueError as exc:
         raise InvalidNatsEventPayload("occurred_at must be an ISO datetime string") from exc
     if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)

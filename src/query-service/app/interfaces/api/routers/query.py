@@ -3,7 +3,7 @@ from fastapi.responses import StreamingResponse
 
 from app.application.ports import AuthenticatedUser
 from app.application.use_cases.query.orchestration import QueryOrchestrationUseCase
-from app.infrastructure.cache.rate_limiter import InMemoryRateLimiter
+from app.infrastructure.cache.rate_limiter import RateLimiterUnavailable
 from app.interfaces.api.dependencies import (
     get_current_user,
     get_orchestration_use_case,
@@ -20,14 +20,21 @@ async def query(
     request: QueryRequest,
     user: AuthenticatedUser = Depends(get_current_user),
     use_case: QueryOrchestrationUseCase = Depends(get_orchestration_use_case),
-    rate_limiter: InMemoryRateLimiter = Depends(get_rate_limiter),
+    rate_limiter=Depends(get_rate_limiter),
 ) -> StreamingResponse:
     if request.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="user_id must match authenticated user",
         )
-    if not rate_limiter.allow(user.id):
+    try:
+        allowed = await rate_limiter.allow(user.id)
+    except RateLimiterUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Rate limiter unavailable",
+        ) from exc
+    if not allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Rate limit exceeded. Max 20 requests/minute.",

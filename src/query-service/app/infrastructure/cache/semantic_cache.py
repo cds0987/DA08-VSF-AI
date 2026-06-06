@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import math
 import re
 
@@ -24,7 +24,7 @@ class InMemorySemanticCache:
         self._entries: list[SemanticCacheEntry] = []
 
     async def get(self, namespace: str, question: str) -> tuple[str, list[dict]] | None:
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         self._entries = [entry for entry in self._entries if entry.expires_at > now]
         vector = self._vectorize(question)
         for entry in self._entries:
@@ -42,7 +42,7 @@ class InMemorySemanticCache:
                 answer=answer,
                 sources=sources,
                 vector=self._vectorize(question),
-                expires_at=datetime.now(UTC) + timedelta(seconds=self._ttl),
+                expires_at=datetime.now(timezone.utc) + timedelta(seconds=self._ttl),
             )
         )
 
