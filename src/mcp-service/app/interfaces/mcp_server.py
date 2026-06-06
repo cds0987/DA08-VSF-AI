@@ -41,17 +41,31 @@ def build_mcp(settings: McpSettings | None = None) -> tuple[Any, SearchService]:
 
     host = os.getenv("MCP_HOST", MCP_DEFAULT_HOST)
     port = int(os.getenv("MCP_PORT", str(MCP_DEFAULT_PORT)))
-    mcp = FastMCP("mcp-service", host=host, port=port)
+    # stateless_http: bỏ yêu cầu session-handshake (initialize -> session id) để
+    # client JSON-RPC đơn giản (query-service) gọi tools/call trực tiếp.
+    # json_response: trả application/json thay vì SSE -> client parse response.json().
+    mcp = FastMCP(
+        "mcp-service",
+        host=host,
+        port=port,
+        stateless_http=True,
+        json_response=True,
+    )
 
     @mcp.tool()
     async def rag_search(
         query: str,
         document_ids: Optional[List[str]] = None,
         top_k: int = 5,
-    ) -> list[dict[str, Any]]:
-        """Search internal chunks; ACL filtering is handled outside this tool."""
+    ) -> dict[str, Any]:
+        """Search internal chunks; ACL filtering is handled outside this tool.
+
+        Trả {"results": [...]} (không phải bare list) để khớp contract của
+        query-service MCPJsonRpcClient (payload.get("results")). FastMCP serialize
+        dict này nguyên vẹn vào structuredContent.
+        """
 
         hits = await service.rag_search(query, document_ids=document_ids, top_k=top_k)
-        return [_hit_to_dict(hit) for hit in hits]
+        return {"results": [_hit_to_dict(hit) for hit in hits]}
 
     return mcp, service
