@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from json import JSONDecodeError
 
 from app.application.exceptions import (
     AccountLockedError,
@@ -102,7 +103,18 @@ async def _read_login_payload(request: Request) -> dict[str, str]:
             )
         return {"email": username, "password": password}
 
-    body = await request.json()
+    try:
+        body = await request.json()
+    except JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Malformed JSON body",
+        ) from exc
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="JSON body must be an object",
+        )
     email = str(body.get("email", "")).strip()
     password = str(body.get("password", ""))
     if not email or not password:
