@@ -13,7 +13,7 @@ Xem [`standalone/README.md`](./standalone/README.md). Có **2 lựa chọn compo
 | File | Khi nào dùng |
 |------|--------------|
 | [`standalone/docker-compose.standalone.yml`](./standalone/docker-compose.standalone.yml) | **Bootstrap**: Postgres + Qdrant chạy **in-VM** (khi hạ tầng managed chưa sẵn). |
-| [`standalone/docker-compose.cloud.yml`](./standalone/docker-compose.cloud.yml) | **End-state managed**: GCS (S3-interop) + Qdrant Cloud + Cloud SQL. Đã verify e2e — xem [`docs/e2e-cloud-ingest-search-test.md`](../../../docs/e2e-cloud-ingest-search-test.md). |
+| [`standalone/docker-compose.cloud.yml`](./standalone/docker-compose.cloud.yml) | **End-state managed**: GCS (S3-interop) + Qdrant Cloud + Cloud SQL. Đã verify e2e (ingest + search trên cloud thật). |
 
 Cả hai dùng chung `rag-worker.env` (copy từ [`standalone/rag-worker.env.example`](./standalone/rag-worker.env.example), **gitignored**, điền giá trị thật trên VM).
 

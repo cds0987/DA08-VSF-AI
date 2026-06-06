@@ -17,3 +17,7 @@ feedback-body.json
 notify-body.json
 src/mcp-service/tests/.tmp/
 src\rag-worker\deploy\standalone\docker-compose.standalone.yml
+# Test harness localtest — chỉ chạy local, KHÔNG push (giữ trên đĩa)
+docker-compose.localtest.yml
+infra/localtest/
+docs/e2e-cloud-ingest-search-test.md
