@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+import hmac
 from typing import Any, List, Optional
 
 from app.core.config import McpSettings, load_settings
@@ -12,6 +12,7 @@ from app.core.vectorstore import SearchHit
 MCP_DEFAULT_HOST = "0.0.0.0"
 MCP_DEFAULT_PORT = 8003
 MCP_PATH = "/mcp"
+MCP_INTERNAL_TOKEN_HEADER = "X-Internal-Token"
 
 
 def mcp_endpoint_url(host: str, port: int) -> str:
@@ -33,21 +34,62 @@ def _hit_to_dict(hit: SearchHit) -> dict[str, Any]:
     }
 
 
+class InternalTokenAuthMiddleware:
+    def __init__(self, app, *, token: str, header_name: str = MCP_INTERNAL_TOKEN_HEADER) -> None:
+        self.app = app
+        self._token = token
+        self._header_name = header_name.lower().encode("ascii")
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        provided = None
+        for key, value in scope.get("headers", []):
+            if key.lower() == self._header_name:
+                provided = value.decode("utf-8")
+                break
+
+        if provided is None or not hmac.compare_digest(provided, self._token):
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [(b"content-type", b"application/json")],
+                }
+            )
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": b'{"detail":"Not authenticated"}',
+                }
+            )
+            return
+
+        await self.app(scope, receive, send)
+
+
+def build_mcp_middleware(token: str) -> list[Any]:
+    token = (token or "").strip()
+    if not token:
+        return []
+
+    from starlette.middleware import Middleware
+
+    return [Middleware(InternalTokenAuthMiddleware, token=token)]
+
+
 def build_mcp(settings: McpSettings | None = None) -> tuple[Any, SearchService]:
     from mcp.server.fastmcp import FastMCP
 
     settings = settings or load_settings()
     service = build_search_service(settings)
 
-    host = os.getenv("MCP_HOST", MCP_DEFAULT_HOST)
-    port = int(os.getenv("MCP_PORT", str(MCP_DEFAULT_PORT)))
-    # stateless_http: bỏ yêu cầu session-handshake (initialize -> session id) để
-    # client JSON-RPC đơn giản (query-service) gọi tools/call trực tiếp.
-    # json_response: trả application/json thay vì SSE -> client parse response.json().
     mcp = FastMCP(
         "mcp-service",
-        host=host,
-        port=port,
+        host=settings.host,
+        port=settings.port,
         stateless_http=True,
         json_response=True,
     )
@@ -56,14 +98,9 @@ def build_mcp(settings: McpSettings | None = None) -> tuple[Any, SearchService]:
     async def rag_search(
         query: str,
         document_ids: Optional[List[str]] = None,
-        top_k: int = 5,
+        top_k: Optional[int] = None,
     ) -> dict[str, Any]:
-        """Search internal chunks; ACL filtering is handled outside this tool.
-
-        Trả {"results": [...]} (không phải bare list) để khớp contract của
-        query-service MCPJsonRpcClient (payload.get("results")). FastMCP serialize
-        dict này nguyên vẹn vào structuredContent.
-        """
+        """Search internal chunks, scoped by document_ids when provided."""
 
         hits = await service.rag_search(query, document_ids=document_ids, top_k=top_k)
         return {"results": [_hit_to_dict(hit) for hit in hits]}

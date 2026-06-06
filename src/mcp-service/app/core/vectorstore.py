@@ -72,16 +72,19 @@ class QdrantReader:
         self._index = self._contract.index_id
         self._meta = meta_collection_name(settings.collection)
         self._stamp_id = point_id(f"__contract__::{self._index}")
+        self._client = None
 
     # --- client helpers ---------------------------------------------------
     def _remote_client(self):
-        from qdrant_client import AsyncQdrantClient
+        if self._client is None:
+            from qdrant_client import AsyncQdrantClient
 
-        return AsyncQdrantClient(
-            url=self._settings.url or None,
-            api_key=self._settings.api_key or None,
-            **dict(self._settings.options),
-        )
+            self._client = AsyncQdrantClient(
+                url=self._settings.url or None,
+                api_key=self._settings.api_key or None,
+                **dict(self._settings.options),
+            )
+        return self._client
 
     def _local_client(self):
         from qdrant_client import QdrantClient
@@ -90,6 +93,27 @@ class QdrantReader:
         if "location" not in options and "path" not in options:
             options["location"] = ":memory:"
         return QdrantClient(**options)
+
+    async def aclose(self) -> None:
+        client = self._client
+        self._client = None
+        if client is not None:
+            await client.close()
+
+    @staticmethod
+    def _build_filter(document_ids: Sequence[str] | None):
+        if not document_ids:
+            return None
+        from qdrant_client import models
+
+        return models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="document_id",
+                    match=models.MatchAny(any=[str(document_id) for document_id in document_ids]),
+                )
+            ]
+        )
 
     # --- contract verify (fail-closed) ------------------------------------
     async def verify_contract(self, *, expect_data_collection: bool = True):
@@ -120,19 +144,16 @@ class QdrantReader:
 
     async def _fetch_remote(self):
         client = self._remote_client()
-        try:
-            data_exists = await client.collection_exists(self._index)
-            size = _vector_size(await client.get_collection(self._index)) if data_exists else None
-            stamp = None
-            if await client.collection_exists(self._meta):
-                records = await client.retrieve(
-                    collection_name=self._meta, ids=[self._stamp_id], with_payload=True
-                )
-                if records:
-                    stamp = records[0].payload
-            return data_exists, size, stamp
-        finally:
-            await client.close()
+        data_exists = await client.collection_exists(self._index)
+        size = _vector_size(await client.get_collection(self._index)) if data_exists else None
+        stamp = None
+        if await client.collection_exists(self._meta):
+            records = await client.retrieve(
+                collection_name=self._meta, ids=[self._stamp_id], with_payload=True
+            )
+            if records:
+                stamp = records[0].payload
+        return data_exists, size, stamp
 
     def _fetch_local(self):
         client = self._local_client()
@@ -153,36 +174,41 @@ class QdrantReader:
                 close()
 
     # --- search -----------------------------------------------------------
-    async def search(self, vector: Sequence[float], query_text: str, top_k: int) -> List[SearchHit]:
+    async def search(
+        self,
+        vector: Sequence[float],
+        query_text: str,
+        top_k: int,
+        document_ids: Sequence[str] | None = None,
+    ) -> List[SearchHit]:
         if self._settings.deployment == "remote":
-            return await self._search_remote(vector, top_k)
-        return await asyncio.to_thread(self._search_local, vector, top_k)
+            return await self._search_remote(vector, top_k, document_ids=document_ids)
+        return await asyncio.to_thread(self._search_local, vector, top_k, document_ids)
 
-    async def _search_remote(self, vector: Sequence[float], top_k: int) -> List[SearchHit]:
+    async def _search_remote(
+        self, vector: Sequence[float], top_k: int, document_ids: Sequence[str] | None = None
+    ) -> List[SearchHit]:
         client = self._remote_client()
-        try:
-            if not await client.collection_exists(self._index):
-                return []
-            res = await client.query_points(
-                collection_name=self._index,
-                query=list(vector),
-                limit=top_k,
-                with_payload=True,
-            )
-            return [_to_hit(p.payload, p.score) for p in res.points]
-        finally:
-            await client.close()
+        res = await client.query_points(
+            collection_name=self._index,
+            query=list(vector),
+            limit=top_k,
+            with_payload=True,
+            query_filter=self._build_filter(document_ids),
+        )
+        return [_to_hit(p.payload, p.score) for p in res.points]
 
-    def _search_local(self, vector: Sequence[float], top_k: int) -> List[SearchHit]:
+    def _search_local(
+        self, vector: Sequence[float], top_k: int, document_ids: Sequence[str] | None = None
+    ) -> List[SearchHit]:
         client = self._local_client()
         try:
-            if not client.collection_exists(self._index):
-                return []
             res = client.query_points(
                 collection_name=self._index,
                 query=list(vector),
                 limit=top_k,
                 with_payload=True,
+                query_filter=self._build_filter(document_ids),
             )
             return [_to_hit(p.payload, p.score) for p in res.points]
         finally:

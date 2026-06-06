@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-
 import pytest
 
 from app.core.config import McpSettings
@@ -23,8 +21,17 @@ class StubReader:
         self.hits = hits
         self.calls: list[dict] = []
 
-    async def search(self, vector, query_text: str, top_k: int) -> list[SearchHit]:
-        self.calls.append({"vector": list(vector), "query_text": query_text, "top_k": top_k})
+    async def search(
+        self, vector, query_text: str, top_k: int, document_ids=None
+    ) -> list[SearchHit]:
+        self.calls.append(
+            {
+                "vector": list(vector),
+                "query_text": query_text,
+                "top_k": top_k,
+                "document_ids": document_ids,
+            }
+        )
         return list(self.hits)
 
 
@@ -41,6 +48,11 @@ class StubReranker:
 
 def _settings() -> McpSettings:
     return McpSettings(
+        host="0.0.0.0",
+        port=8003,
+        log_level="INFO",
+        app_env="development",
+        internal_token="",
         provider="qdrant",
         collection="rag_chatbot",
         embed_model="offline",
@@ -64,29 +76,37 @@ def _settings() -> McpSettings:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "document_ids",
-    [
-        None,
-        [],
-        ["doc-1"] * 1000,
-    ],
-)
-async def test_rag_search_accepts_document_ids_edge_cases(
-    document_ids, caplog: pytest.LogCaptureFixture
-) -> None:
+@pytest.mark.parametrize("document_ids", [None, [], ["doc-1"] * 1000])
+async def test_rag_search_passes_document_ids_to_reader(document_ids) -> None:
     embedder = StubEmbedder()
     reader = StubReader([SearchHit(chunk_id="c1", score=0.9)])
     reranker = StubReranker()
     service = SearchService(_settings(), embedder, reader, reranker)
 
-    caplog.set_level(logging.INFO)
     hits = await service.rag_search("query text", document_ids=document_ids, top_k=2)
 
     assert [hit.chunk_id for hit in hits] == ["c1"]
     assert embedder.queries == ["query text"]
     assert reader.calls[0]["top_k"] == 20
+    assert reader.calls[0]["document_ids"] == document_ids
     assert reranker.calls[0]["top_k"] == 2
-    if document_ids is not None:
-        assert "MCP compatibility" in caplog.text
-        assert "TODO ACL" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_rag_search_uses_configured_rerank_top_k_when_tool_omits_top_k() -> None:
+    embedder = StubEmbedder()
+    reader = StubReader(
+        [
+            SearchHit(chunk_id="c1", score=0.9),
+            SearchHit(chunk_id="c2", score=0.8),
+            SearchHit(chunk_id="c3", score=0.7),
+            SearchHit(chunk_id="c4", score=0.6),
+        ]
+    )
+    reranker = StubReranker()
+    service = SearchService(_settings(), embedder, reader, reranker)
+
+    hits = await service.rag_search("query text", document_ids=["doc-1"], top_k=None)
+
+    assert [hit.chunk_id for hit in hits] == ["c1", "c2", "c3"]
+    assert reranker.calls[0]["top_k"] == 3

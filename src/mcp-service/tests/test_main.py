@@ -14,6 +14,12 @@ class StubContract:
 
 class StubSettings:
     deployment = "in_process"
+    host = "0.0.0.0"
+    port = 8003
+    log_level = "INFO"
+    app_env = "development"
+    internal_token = ""
+    auth_enabled = False
 
     def contract(self) -> StubContract:
         return StubContract()
@@ -22,38 +28,63 @@ class StubSettings:
 class StubMCP:
     def __init__(self) -> None:
         self.transport: str | None = None
+        self.run_kwargs: dict[str, object] = {}
 
-    def run(self, *, transport: str) -> None:
+    def run(self, *, transport: str, **kwargs) -> None:
         self.transport = transport
+        self.run_kwargs = kwargs
 
 
 class SuccessfulService:
+    def __init__(self) -> None:
+        self.verify_calls = 0
+        self.close_calls = 0
+
     async def verify_contract(self):
+        self.verify_calls += 1
         return None
+
+    async def aclose(self):
+        self.close_calls += 1
 
 
 class FailingService:
+    def __init__(self) -> None:
+        self.verify_calls = 0
+        self.close_calls = 0
+
     async def verify_contract(self):
+        self.verify_calls += 1
         raise VectorstoreContractError("collection missing")
+
+    async def aclose(self):
+        self.close_calls += 1
 
 
 def test_main_runs_streamable_http_after_contract_verify(monkeypatch) -> None:
     mcp = StubMCP()
+    service = SuccessfulService()
     monkeypatch.setattr(main_module, "load_settings", lambda: StubSettings())
-    monkeypatch.setattr(main_module, "build_mcp", lambda settings: (mcp, SuccessfulService()))
+    monkeypatch.setattr(main_module, "build_mcp", lambda settings: (mcp, service))
 
     exit_code = main_module.main()
 
     assert exit_code == 0
     assert mcp.transport == "streamable-http"
+    assert "middleware" in mcp.run_kwargs
+    assert service.verify_calls == 1
+    assert service.close_calls == 2
 
 
 def test_main_fails_closed_when_contract_verify_fails(monkeypatch) -> None:
     mcp = StubMCP()
+    service = FailingService()
     monkeypatch.setattr(main_module, "load_settings", lambda: StubSettings())
-    monkeypatch.setattr(main_module, "build_mcp", lambda settings: (mcp, FailingService()))
+    monkeypatch.setattr(main_module, "build_mcp", lambda settings: (mcp, service))
 
     exit_code = main_module.main()
 
     assert exit_code == 1
     assert mcp.transport is None
+    assert service.verify_calls == 1
+    assert service.close_calls == 1
