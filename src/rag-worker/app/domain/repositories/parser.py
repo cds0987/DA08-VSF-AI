@@ -20,3 +20,14 @@ class Parser(ABC):
         source_uri: str,
     ) -> ParsedArtifact:
         """Read a source document through guarded I/O and normalize it to markdown."""
+
+    def close(self) -> None:
+        """Release optional parser resources. Default no-op for stateless parsers."""
+
+    def startup_diagnostics(
+        self,
+        *,
+        source_bucket: str | None = None,
+    ) -> tuple[list[str], list[str]]:
+        """Return (reasons, warnings) discovered during startup. Default = no diagnostics."""
+        return [], []

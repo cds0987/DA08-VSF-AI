@@ -1,9 +1,81 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 import pytest
 
 from app.interfaces.api import main as main_module
 from app.interfaces.api.main import create_app
 from app.interfaces.api.runtime import HealthReport
+from app.infrastructure.external.local_parser import LocalFileParser
+from app.infrastructure.external.s3_parser import S3SourceParser
+
+
+RAG_WORKER_CONFIG = Path(__file__).resolve().parents[2] / "config.yaml"
+
+
+class _FakeVectorConfig:
+    provider = "qdrant"
+    deployment = "remote"
+
+    def index_id(self) -> str:
+        return "rag_chatbot__test__d256"
+
+    def contract(self):
+        class _Contract:
+            fingerprint = "test-fingerprint"
+
+        return _Contract()
+
+
+class _FakeVectors:
+    def __init__(self) -> None:
+        self.config = _FakeVectorConfig()
+
+    async def list_chunk_ids_by_document(self, document_id: str) -> list[str]:
+        return []
+
+
+class _FakeEngine:
+    def __init__(self) -> None:
+        self.vectors = _FakeVectors()
+
+
+def _configure_s3_pipeline_test(
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_module,
+    *,
+    startup_reasons: list[str] | None = None,
+    startup_warnings: list[str] | None = None,
+) -> None:
+    async def _noop_write_contract_stamp(*args, **kwargs) -> None:
+        return None
+
+    class _TestS3SourceParser(S3SourceParser):
+        def startup_diagnostics(
+            self,
+            *,
+            source_bucket: str | None = None,
+        ) -> tuple[list[str], list[str]]:
+            return list(startup_reasons or []), list(startup_warnings or [])
+
+    monkeypatch.setenv("PIPELINE_CONFIG", str(RAG_WORKER_CONFIG))
+    monkeypatch.setenv("PARSER_IMPL", "s3")
+    monkeypatch.setenv("VECTOR_DB_URL", "http://vector.test:6333")
+    monkeypatch.setattr(
+        runtime_module,
+        "resolve_parser",
+        lambda name, **kwargs: _TestS3SourceParser(LocalFileParser(max_workers=1)),
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "build_engine_from_config",
+        lambda *args, **kwargs: _FakeEngine(),
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "write_contract_stamp",
+        _noop_write_contract_stamp,
+    )
 
 
 def test_health_reports_unhealthy_when_running_degraded(
@@ -36,6 +108,48 @@ def test_production_startup_fails_closed_when_degraded(
     monkeypatch.delenv("QDRANT_URL", raising=False)
 
     with pytest.raises(RuntimeError, match="Production fail-closed"):
+        with TestClient(create_app()):
+            pass
+
+
+def test_health_reports_storage_preflight_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.interfaces.api import runtime as runtime_module
+
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AI_PROVIDER", "offline")
+    monkeypatch.setenv("S3_SOURCE_BUCKET", "docs-bucket")
+    _configure_s3_pipeline_test(
+        monkeypatch,
+        runtime_module,
+        startup_reasons=["Object storage preflight failed for bucket docs-bucket: 403"],
+    )
+
+    with TestClient(create_app()) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 503
+    assert "Object storage preflight failed for bucket docs-bucket: 403" in response.json()["reasons"]
+
+
+def test_production_startup_fails_closed_on_storage_preflight_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.interfaces.api import runtime as runtime_module
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("AI_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://user:pass@localhost:5432/rag")
+    monkeypatch.setenv("S3_SOURCE_BUCKET", "docs-bucket")
+    _configure_s3_pipeline_test(
+        monkeypatch,
+        runtime_module,
+        startup_reasons=["Object storage preflight failed for bucket docs-bucket: 403"],
+    )
+
+    with pytest.raises(RuntimeError, match="Object storage preflight failed"):
         with TestClient(create_app()):
             pass
 

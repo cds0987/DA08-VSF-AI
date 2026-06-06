@@ -3,7 +3,13 @@ from __future__ import annotations
 import pytest
 
 from app.infrastructure.external.local_parser import LocalFileParser
-from app.infrastructure.external.s3_parser import S3SourceParser, parse_s3_uri
+from app.infrastructure.external.s3_parser import (
+    DOCUMENT_SERVICE_UPLOAD_LIMIT_BYTES,
+    S3SourceParser,
+    collect_storage_startup_diagnostics,
+    current_remote_source_limit,
+    parse_s3_uri,
+)
 
 
 class _FakeBody:
@@ -40,6 +46,9 @@ class _FakeClient:
     def get_object(self, *, Bucket: str, Key: str) -> dict:
         self.get_calls += 1
         return {"Body": _FakeBody(self._data)}
+
+    def head_bucket(self, *, Bucket: str) -> dict:
+        return {"Bucket": Bucket}
 
 
 def _inner() -> LocalFileParser:
@@ -110,3 +119,53 @@ async def test_non_s3_uri_delegates_to_inner(tmp_path, monkeypatch) -> None:
         document_id="d", file_type="md", source_uri="local://a.md"
     )
     assert "local content here" in artifact.markdown
+
+
+def test_default_remote_limit_matches_upload_ceiling(monkeypatch) -> None:
+    monkeypatch.delenv("MAX_REMOTE_SOURCE_BYTES", raising=False)
+    monkeypatch.delenv("MAX_SOURCE_SIZE_BYTES", raising=False)
+
+    assert current_remote_source_limit() == DOCUMENT_SERVICE_UPLOAD_LIMIT_BYTES
+
+
+def test_storage_startup_diagnostics_warn_on_low_limit(monkeypatch) -> None:
+    monkeypatch.setenv("MAX_REMOTE_SOURCE_BYTES", str(10 * 1024 * 1024))
+    monkeypatch.setenv("S3_ENDPOINT_URL", "https://storage.googleapis.com")
+
+    reasons, warnings = collect_storage_startup_diagnostics()
+
+    assert reasons == []
+    assert any("MAX_REMOTE_SOURCE_BYTES" in warning for warning in warnings)
+
+
+def test_storage_startup_diagnostics_reports_bucket_probe_failure(monkeypatch) -> None:
+    monkeypatch.setenv("S3_ENDPOINT_URL", "https://storage.googleapis.com")
+
+    class _BoomClient:
+        def head_bucket(self, *, Bucket: str) -> dict:
+            raise RuntimeError("403 Forbidden")
+
+    reasons, warnings = collect_storage_startup_diagnostics(
+        client_factory=lambda: _BoomClient(),
+        source_bucket="docs-bucket",
+    )
+
+    assert warnings == []
+    assert reasons == [
+        "Object storage preflight failed for bucket docs-bucket: 403 Forbidden"
+    ]
+
+
+def test_s3_parser_exposes_startup_diagnostics(monkeypatch) -> None:
+    monkeypatch.setenv("S3_ENDPOINT_URL", "https://storage.googleapis.com")
+
+    class _BoomClient:
+        def head_bucket(self, *, Bucket: str) -> dict:
+            raise RuntimeError("boom")
+
+    parser = S3SourceParser(_inner(), client_factory=lambda: _BoomClient())
+
+    reasons, warnings = parser.startup_diagnostics(source_bucket="docs-bucket")
+
+    assert warnings == []
+    assert reasons == ["Object storage preflight failed for bucket docs-bucket: boom"]

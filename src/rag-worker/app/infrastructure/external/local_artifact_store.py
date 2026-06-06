@@ -10,7 +10,7 @@ from app.domain.repositories.artifact_store import ArtifactStore
 def _artifact_root() -> Path:
     raw = os.getenv(
         "ARTIFACT_ROOT",
-        str(Path("src/rag-service/.artifacts").resolve()),
+        str(Path("src/rag-worker/.artifacts").resolve()),
     )
     return Path(raw).resolve()
 
