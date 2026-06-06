@@ -64,6 +64,11 @@ def _has_real_provider() -> bool:
 
 @dataclass(frozen=True)
 class McpSettings:
+    host: str
+    port: int
+    log_level: str
+    app_env: str
+    internal_token: str
     provider: str
     collection: str
     embed_model: str
@@ -96,6 +101,10 @@ class McpSettings:
     def deployment(self) -> str:
         return "remote" if self.url else "in_process"
 
+    @property
+    def auth_enabled(self) -> bool:
+        return bool(self.internal_token.strip())
+
 
 def _resolved_embed_model(profile: dict) -> str:
     ai_mode = str(((profile.get("common") or {}).get("ai_mode") or "auto")).strip().lower()
@@ -110,6 +119,7 @@ def load_settings(path: str | os.PathLike[str] | None = None) -> McpSettings:
     raw = _resolve(yaml.safe_load(config_path.read_text(encoding="utf-8")) or {})
     profile = _active_profile(raw)
 
+    server = profile.get("server") or {}
     embedder = profile.get("embedder") or {}
     vector_store = profile.get("vector_store") or {}
     params = vector_store.get("params") or {}
@@ -135,6 +145,11 @@ def load_settings(path: str | os.PathLike[str] | None = None) -> McpSettings:
         return float(text) if text else default
 
     return McpSettings(
+        host=str(server.get("host") or "0.0.0.0").strip() or "0.0.0.0",
+        port=_int(server.get("port"), 8003),
+        log_level=str(server.get("log_level") or "INFO").strip() or "INFO",
+        app_env=str(server.get("app_env") or "development").strip().lower() or "development",
+        internal_token=str(server.get("internal_token") or "").strip(),
         provider=contract.provider,
         collection=contract.collection,
         embed_model=contract.embed_model,

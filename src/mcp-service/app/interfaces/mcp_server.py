@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hmac
-import os
 from typing import Any, List, Optional
 
 from app.core.config import McpSettings, load_settings
@@ -13,7 +12,6 @@ from app.core.vectorstore import SearchHit
 MCP_DEFAULT_HOST = "0.0.0.0"
 MCP_DEFAULT_PORT = 8003
 MCP_PATH = "/mcp"
-MCP_INTERNAL_TOKEN_ENV = "MCP_INTERNAL_TOKEN"
 MCP_INTERNAL_TOKEN_HEADER = "X-Internal-Token"
 
 
@@ -34,10 +32,6 @@ def _hit_to_dict(hit: SearchHit) -> dict[str, Any]:
         "source_gcs_uri": hit.source_gcs_uri,
         "markdown_gcs_uri": hit.markdown_gcs_uri,
     }
-
-
-def _configured_internal_token() -> str:
-    return (os.getenv(MCP_INTERNAL_TOKEN_ENV) or "").strip()
 
 
 class InternalTokenAuthMiddleware:
@@ -76,8 +70,8 @@ class InternalTokenAuthMiddleware:
         await self.app(scope, receive, send)
 
 
-def build_mcp_middleware() -> list[Any]:
-    token = _configured_internal_token()
+def build_mcp_middleware(token: str) -> list[Any]:
+    token = (token or "").strip()
     if not token:
         return []
 
@@ -92,12 +86,10 @@ def build_mcp(settings: McpSettings | None = None) -> tuple[Any, SearchService]:
     settings = settings or load_settings()
     service = build_search_service(settings)
 
-    host = os.getenv("MCP_HOST", MCP_DEFAULT_HOST)
-    port = int(os.getenv("MCP_PORT", str(MCP_DEFAULT_PORT)))
     mcp = FastMCP(
         "mcp-service",
-        host=host,
-        port=port,
+        host=settings.host,
+        port=settings.port,
         stateless_http=True,
         json_response=True,
     )

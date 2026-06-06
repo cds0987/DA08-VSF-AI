@@ -48,6 +48,11 @@ class StubReranker:
 
 def _settings() -> McpSettings:
     return McpSettings(
+        host="0.0.0.0",
+        port=8003,
+        log_level="INFO",
+        app_env="development",
+        internal_token="",
         provider="qdrant",
         collection="rag_chatbot",
         embed_model="offline",

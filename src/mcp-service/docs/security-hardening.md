@@ -51,11 +51,18 @@ Contract fail-closed va fingerprint stamp van duoc giu nguyen. Khong sua logic n
 
 ### Chua xu ly trong code nay
 
-1. Authentication/network hardening cho MCP endpoint.
-   Day la bai toan deploy, khong nam tron trong source `mcp-service`.
+1. Authentication o app layer cho MCP endpoint.
+   DAY LA KHAU CUA mcp-service, khong phai chi viec deploy. Hien tai service chua
+   tu xac thuc caller -> bat ky ai toi duoc port 8003 deu search duoc toan corpus.
+   Can them middleware kiem tra caller (shared-secret header hoac mTLS) de mcp tu
+   tu choi caller la. Xem muc "2. Auth o app layer + network" ben duoi.
 
-2. Payload index cho `document_id` tren Qdrant.
+2. Network hardening (NetworkPolicy / ClusterIP).
+   Day la lop phong thu thu 2 o tang deploy, bo sung cho auth chu khong thay the.
+
+3. Payload index cho `document_id` tren Qdrant.
    Nen duoc tao o producer (`rag-worker`) khi tao collection de filter nhanh hon.
+   mcp-service la reader read-only nen KHONG tu tao index (khong duoc ghi schema).
 
 ## Chi tiet tung muc
 
@@ -81,14 +88,52 @@ Luu y:
 
 - De duoc nhanh, can payload index `document_id` ben `rag-worker`.
 
-### 2. Auth/network
+### 2. Auth o app layer + network (defense in depth)
 
 Van de:
 
 - Endpoint bind `0.0.0.0:8003`.
 - Khong co token, mTLS, hay middleware auth.
 
-Khuyen nghi deploy:
+Phan dinh trach nhiem (quan trong):
+
+- "Chi cap quyen truy cap cho mot so ben" LA KHAU BAO MAT CUA mcp-service, khong
+  phai chi viec deploy. Day la authentication: xac thuc caller co phai ben duoc
+  phep khong. mcp-service co the va NEN tu enforce o app layer.
+- Khong duoc chi dua vao network (perimeter security). Neu attacker da vao trong
+  cluster (pod bi chiem, SSRF, lateral movement) thi NetworkPolicy co the bi vuot,
+  luc do mcp-service tran trui khong auth = search duoc toan corpus.
+- Nguyen tac: defense in depth. Auth (app layer) va NetworkPolicy (deploy) BO SUNG
+  cho nhau, khong thay the nhau.
+
+Phan lop kiem soat:
+
+| Loai | Cau hoi | Lam o dau |
+| --- | --- | --- |
+| Network (NetworkPolicy) | Goi tin tu pod nao toi duoc port? | Deploy / K8s |
+| Authentication | Caller co phai ben duoc phep khong? | mcp-service (app layer) |
+| Authorization theo document | User duoc xem doc nao? | query-service (co danh tinh user) |
+
+#### 2a. Authentication o app layer (KHAU CUA mcp-service)
+
+Hien chua lam trong code. Can them middleware tu choi caller la:
+
+- Toi thieu: shared-secret header. mcp doc secret tu env `MCP_INTERNAL_TOKEN`
+  (bom qua K8s Secret, KHONG hardcode), so voi header `X-Internal-Token` moi
+  request. Sai/thieu -> tra `401`, dung -> moi search.
+- Manh hon: mTLS, mcp chi chap nhan client cert do CA noi bo cap.
+
+Luong:
+
+```
+request -> kiem tra X-Internal-Token (hoac mTLS client cert)
+        -> so voi secret da cap -> sai thi 401, dung thi moi rag_search
+```
+
+Luu y: code chi DOC va so sanh secret; gia tri secret/cert van do deploy bom vao
+qua K8s Secret. Logic "caller co duoc phep khong" thi nam trong mcp-service.
+
+#### 2b. Network hardening (lop phong thu thu 2, o tang deploy)
 
 - Khong expose public.
 - Neu chay tren Kubernetes, chi dung `Service` type `ClusterIP`.
@@ -117,7 +162,9 @@ spec:
           port: 8003
 ```
 
-Neu khong kiem soat duoc network, co the them shared-secret header o ASGI layer. Viec nay chua lam trong thay doi hien tai.
+NetworkPolicy KHONG thay the auth o app layer (muc 2a). Du co network khoa chat
+van phai co auth de phong attacker da o trong cluster. Ca 2a va 2b deu chua lam
+trong thay doi hien tai.
 
 ### 3. Connection pooling
 
@@ -166,6 +213,9 @@ Ket luan:
 
 ## Viec tiep theo de xong hardening
 
-1. Them payload index `document_id` trong `rag-worker` khi tao collection.
-2. Khoa network cua `mcp-service` o tang deploy.
-3. Neu production can auth o application layer, bo sung middleware kiem tra header noi bo hoac mTLS.
+1. Them auth o app layer trong mcp-service (middleware shared-secret `MCP_INTERNAL_TOKEN`
+   hoac mTLS) -> KHAU CUA mcp-service, uu tien cao, xem muc 2a.
+2. Khoa network cua `mcp-service` o tang deploy (NetworkPolicy + ClusterIP) -> lop
+   phong thu thu 2, xem muc 2b.
+3. Them payload index `document_id` trong `rag-worker` khi tao collection (toi uu
+   hieu nang filter; mcp read-only nen khong tu lam).

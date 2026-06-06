@@ -7,6 +7,16 @@ profiles:
       timeout: 60
       max_retries: 5
 
+    # Runtime/auth của MCP endpoint. Đọc env qua ${...} y như các field khác,
+    # nên chỉ cần set biến môi trường (hoặc deploy/env/mcp-service.env) là đủ.
+    server:
+      host: ${MCP_HOST:-0.0.0.0}
+      port: ${MCP_PORT:-8003}
+      log_level: ${LOG_LEVEL:-INFO}
+      app_env: ${APP_ENV:-development}
+      # Shared-secret cho auth app-layer. Trống = auth TẮT (fail-open).
+      internal_token: ${MCP_INTERNAL_TOKEN:-}
+
     embedder:
       model: ${EMBED_MODEL:-text-embedding-3-small}
       base_url: ${EMBED_BASE_URL:-}

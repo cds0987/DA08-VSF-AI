@@ -14,6 +14,12 @@ class StubContract:
 
 class StubSettings:
     deployment = "in_process"
+    host = "0.0.0.0"
+    port = 8003
+    log_level = "INFO"
+    app_env = "development"
+    internal_token = ""
+    auth_enabled = False
 
     def contract(self) -> StubContract:
         return StubContract()

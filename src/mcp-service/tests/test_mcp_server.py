@@ -71,6 +71,11 @@ class StubService:
 
 def _settings() -> McpSettings:
     return McpSettings(
+        host="0.0.0.0",
+        port=8003,
+        log_level="INFO",
+        app_env="development",
+        internal_token="",
         provider="qdrant",
         collection="rag_chatbot",
         embed_model="offline",
@@ -128,8 +133,6 @@ def test_build_mcp_registers_rag_search_tool_and_query_service_shape(monkeypatch
     monkeypatch.setitem(sys.modules, "mcp.server", fake_server_module)
     monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", fake_fastmcp_module)
     monkeypatch.setattr("app.interfaces.mcp_server.build_search_service", lambda settings: stub_service)
-    monkeypatch.setenv("MCP_HOST", "0.0.0.0")
-    monkeypatch.setenv("MCP_PORT", "8003")
 
     mcp, service = build_mcp(_settings())
 
@@ -161,20 +164,17 @@ def test_build_mcp_registers_rag_search_tool_and_query_service_shape(monkeypatch
     }
 
 
-def test_build_mcp_middleware_enabled_when_internal_token_is_configured(monkeypatch) -> None:
-    monkeypatch.setenv("MCP_INTERNAL_TOKEN", "secret")
-
-    middleware = build_mcp_middleware()
+def test_build_mcp_middleware_enabled_when_internal_token_is_configured() -> None:
+    middleware = build_mcp_middleware("secret")
 
     assert len(middleware) == 1
     assert middleware[0].cls is InternalTokenAuthMiddleware
     assert middleware[0].kwargs["token"] == "secret"
 
 
-def test_build_mcp_middleware_disabled_without_internal_token(monkeypatch) -> None:
-    monkeypatch.delenv("MCP_INTERNAL_TOKEN", raising=False)
-
-    assert build_mcp_middleware() == []
+def test_build_mcp_middleware_disabled_without_internal_token() -> None:
+    assert build_mcp_middleware("") == []
+    assert build_mcp_middleware("   ") == []
 
 
 def test_internal_token_auth_middleware_rejects_missing_or_invalid_header() -> None:

@@ -4,15 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import sys
 
 from app.core.config import load_settings
 from app.core.contract import VectorstoreContractError
 from app.interfaces.mcp_server import (
-    MCP_DEFAULT_HOST,
-    MCP_DEFAULT_PORT,
-    MCP_INTERNAL_TOKEN_ENV,
     build_mcp,
     build_mcp_middleware,
     mcp_endpoint_url,
@@ -37,11 +33,11 @@ async def _verify_and_reset(service) -> None:
 
 
 def main() -> int:
+    settings = load_settings()
     logging.basicConfig(
-        level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
+        level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    settings = load_settings()
     contract = settings.contract()
     logger.info(
         "mcp_startup index=%s fingerprint=%s deployment=%s",
@@ -51,13 +47,9 @@ def main() -> int:
     )
     logger.info(
         "mcp_transport transport=streamable-http endpoint=%s",
-        mcp_endpoint_url(
-            os.getenv("MCP_HOST", MCP_DEFAULT_HOST),
-            int(os.getenv("MCP_PORT", str(MCP_DEFAULT_PORT))),
-        ),
+        mcp_endpoint_url(settings.host, settings.port),
     )
-    auth_enabled = bool((os.getenv(MCP_INTERNAL_TOKEN_ENV) or "").strip())
-    logger.info("mcp_auth mode=%s", "internal-token" if auth_enabled else "disabled")
+    logger.info("mcp_auth mode=%s", "internal-token" if settings.auth_enabled else "disabled")
 
     mcp, service = build_mcp(settings)
 
@@ -69,7 +61,7 @@ def main() -> int:
     logger.info("mcp_contract_verified index=%s", contract.index_id)
 
     try:
-        mcp.run(transport="streamable-http", middleware=build_mcp_middleware())
+        mcp.run(transport="streamable-http", middleware=build_mcp_middleware(settings.internal_token))
     finally:
         asyncio.run(_close_service(service))
     return 0
