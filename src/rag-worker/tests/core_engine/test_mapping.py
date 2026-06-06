@@ -7,7 +7,6 @@ from core_engine.config_schema import PipelineConfig
 from core_engine.engine import IngestInput
 from core_engine.mapping import WireContext, register, resolve
 from core_engine.ocr import ProviderImageTextExtractor
-from core_engine.rerank import LLMReranker
 
 
 def test_register_and_resolve_override() -> None:
@@ -46,7 +45,6 @@ def test_build_engine_from_config_wires_builtin_components() -> None:
             "common": {"ai_mode": "offline"},
             "embedder": {"model": "text-embedding-3-small", "dimension": 256},
             "captioner": {"impl": "none", "model": "gpt-4o-mini", "params": {}},
-            "reranker": {"impl": "llm", "model": "gpt-4o-mini", "params": {}},
             "parser": {"impl": "local", "params": {"max_workers": 2}},
             "chunker": {
                 "impl": "heading_sections",
@@ -60,31 +58,24 @@ def test_build_engine_from_config_wires_builtin_components() -> None:
                 "impl": "qdrant",
                 "params": {"collection": "rag_chatbot", "url": "", "api_key": ""},
             },
-            "retrieval": {
-                "top_k_candidates": 20,
-                "rerank_top_k": 3,
-                "rerank_threshold": 0.7,
-            },
         }
     )
 
     engine = build_engine_from_config(cfg, provider=OfflineProvider(256))
 
     assert engine.captioner is None
-    assert isinstance(engine.reranker, LLMReranker)
     assert engine.settings.embed_dimension == 256
 
 
 @pytest.mark.asyncio
-async def test_engine_from_config_string_params_can_search() -> None:
-    # Params số đến từ ${VAR} interpolation dưới dạng string (max_chars, passage_chars,
-    # chunker sizes). Engine phải ingest + search được, không vỡ "slice indices must be integers".
+async def test_engine_from_config_string_params_can_ingest() -> None:
+    # Params số đến từ ${VAR} interpolation dưới dạng string. Engine phải ingest được,
+    # không vỡ do các giá trị size/max_workers còn ở dạng chuỗi.
     cfg = PipelineConfig.model_validate(
         {
             "common": {"ai_mode": "offline"},
             "embedder": {"model": "m", "dimension": 256},
             "captioner": {"impl": "provider", "model": "m", "params": {"max_chars": "6000"}},
-            "reranker": {"impl": "llm", "model": "m", "params": {"passage_chars": "800"}},
             "parser": {"impl": "local", "params": {"max_workers": "2"}},
             "chunker": {
                 "impl": "heading_sections",
@@ -98,7 +89,6 @@ async def test_engine_from_config_string_params_can_search() -> None:
                 "impl": "qdrant",
                 "params": {"collection": "rag_chatbot", "url": "", "api_key": ""},
             },
-            "retrieval": {"top_k_candidates": 20, "rerank_top_k": 3, "rerank_threshold": 0.0},
         }
     )
 
@@ -112,5 +102,4 @@ async def test_engine_from_config_string_params_can_search() -> None:
         )
     )
     assert n > 0
-    results = await engine.search("hello world", top_k=3, rerank_threshold=0.0)
-    assert results
+    assert await engine.vectors.list_chunk_ids_by_document("d1")

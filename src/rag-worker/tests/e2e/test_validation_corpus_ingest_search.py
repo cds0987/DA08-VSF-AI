@@ -1,4 +1,4 @@
-"""E2E: real source files -> real LocalFileParser -> engine -> Qdrant :memory: -> search.
+"""E2E: real source files -> real LocalFileParser -> engine -> Qdrant :memory: -> payload.
 
 Bổ sung cho `test_inmemory_ingest_search.py` (chỉ ingest inline markdown): ở đây ta
 ingest **file thật** trên đĩa (`txt/md/html/docx/pdf`) qua **parser thật**
@@ -9,10 +9,8 @@ Corpus + golden query nằm trong `eval/validation/` và được lái hoàn to�
 `manifest.json` (thêm file + entry là đủ, không sửa code). Corpus cố tình chỉ gồm
 tài liệu DẠNG TEXT (không OCR) để suite xanh offline, không cần AI gateway.
 
-Offline provider dùng embedding hash (không ngữ nghĩa) + rerank lexical với
-`rerank_threshold=0.0`: bài test kiểm PLUMBING (file -> parse -> ingest -> search ->
-contract fields + đúng tài liệu top-hit), không kiểm chất lượng — chất lượng cần
-provider thật (xem README trong eval/validation).
+Offline provider dùng embedding hash (không ngữ nghĩa): bài test kiểm PLUMBING
+(file -> parse -> ingest -> payload contract + lineage), không kiểm chất lượng search.
 """
 
 from __future__ import annotations
@@ -27,6 +25,7 @@ from app.infrastructure.external.local_parser import LocalFileParser
 from core_engine import IngestInput, OfflineProvider, build_engine
 from core_engine.ai import get_ai_provider, reset_ai_provider
 from core_engine.vectorstore import VectorStoreConfig
+from tests.e2e._vector_helpers import payloads_for_document
 
 VALIDATION_DIR = Path(__file__).resolve().parents[2] / "eval" / "validation"
 MANIFEST_PATH = VALIDATION_DIR / "manifest.json"
@@ -66,11 +65,16 @@ def parser(monkeypatch: pytest.MonkeyPatch) -> LocalFileParser:
 
 async def _ingest_corpus(engine, parser: LocalFileParser, manifest: list[dict]) -> None:
     for entry in manifest:
-        artifact = await parser.parse(
-            document_id=entry["document_id"],
-            file_type=entry["file_type"],
-            source_uri=f"local://{entry['file']}",
-        )
+        try:
+            artifact = await parser.parse(
+                document_id=entry["document_id"],
+                file_type=entry["file_type"],
+                source_uri=f"local://{entry['file']}",
+            )
+        except ImportError as exc:
+            pytest.skip(
+                f"validation corpus requires optional parser dependency for {entry['file_type']}: {exc}"
+            )
         assert artifact.markdown.strip(), f"parser returned empty markdown for {entry['file']}"
         chunk_count = await engine.ingest(
             IngestInput(
@@ -87,7 +91,7 @@ async def _ingest_corpus(engine, parser: LocalFileParser, manifest: list[dict]) 
 
 
 @pytest.mark.asyncio
-async def test_validation_corpus_files_ingest_and_retrieve_top_hit(parser: LocalFileParser) -> None:
+async def test_validation_corpus_files_ingest_and_persist_payloads(parser: LocalFileParser) -> None:
     manifest = _load_manifest()
     engine = _build_inmemory_engine()
     assert engine.vectors.config.deployment == "in_process"
@@ -95,44 +99,10 @@ async def test_validation_corpus_files_ingest_and_retrieve_top_hit(parser: Local
     await _ingest_corpus(engine, parser, manifest)
 
     for entry in manifest:
-        correlation_id = f"val:query:{entry['document_id']}"
-        results = await engine.search(
-            entry["query"],
-            top_k=5,
-            rerank_threshold=0.0,
-            correlation_id=correlation_id,
-        )
-        assert results, f"no result for query={entry['query']!r}"
-
-        top = results[0]
-        # Đúng tài liệu được lái lên top-hit (lexical rerank trên corpus tách bạch từ vựng).
-        assert top.document_id == entry["document_id"], (
-            f"query {entry['query']!r} expected top doc {entry['document_id']!r}, "
-            f"got {top.document_id!r}"
-        )
-        # Contract fields đầy đủ + lineage truy được về nguồn/artifact.
-        assert top.correlation_id == correlation_id
-        assert top.display_name == entry["document_name"]
-        assert top.unit_id.startswith(f"{entry['document_id']}::p")
-        assert top.content
-        assert top.lineage.source_uri.endswith(entry["file"])
-        assert top.lineage.artifact_uri == f"artifact://{entry['document_id']}"
-        # Câu trả lời mong đợi thực sự nằm trong nội dung lấy ra.
-        joined = " ".join(r.content for r in results if r.document_id == entry["document_id"])
+        payloads = payloads_for_document(engine, entry["document_id"])
+        assert payloads, f"no payloads persisted for {entry['document_id']!r}"
+        assert all(payload["document_name"] == entry["document_name"] for payload in payloads)
+        assert all(payload["artifact_uri"] == f"artifact://{entry['document_id']}" for payload in payloads)
+        assert all(payload["source_uri"].endswith(entry["file"]) for payload in payloads)
+        joined = " ".join(payload["parent_text"] for payload in payloads)
         assert entry["expect_keyword"] in joined.lower()
-
-
-@pytest.mark.asyncio
-async def test_validation_corpus_no_answer_for_ungrounded_query(parser: LocalFileParser) -> None:
-    manifest = _load_manifest()
-    engine = _build_inmemory_engine()
-    await _ingest_corpus(engine, parser, manifest)
-
-    # Threshold > 1.0 => không kết quả nào vượt ngưỡng => no-answer (không bịa).
-    results = await engine.search(
-        "what is the quarterly revenue forecast for the marketing division",
-        top_k=5,
-        rerank_threshold=1.01,
-        correlation_id="val:no-answer",
-    )
-    assert results == []

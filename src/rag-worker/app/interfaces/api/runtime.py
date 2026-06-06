@@ -30,9 +30,7 @@ from core_engine.config_schema import PipelineConfig
 from core_engine.factory import (
     build_engine,
     caption_enabled_from_env,
-    rerank_provider_from_env,
 )
-from core_engine.rerank import NoopRerankerService
 from core_engine.logging_utils import configure_logging, log_event
 from core_engine.mapping import (
     build_ai_provider,
@@ -122,14 +120,6 @@ def validate_runtime_settings() -> None:
     settings = load_settings()
     if settings.embed_dimension <= 0:
         raise ValueError("EMBED_DIMENSION must be > 0")
-    if settings.top_k_candidates <= 0:
-        raise ValueError("SEARCH_TOP_K must be > 0")
-    if settings.rerank_top_k <= 0:
-        raise ValueError("RERANK_TOP_K must be > 0")
-    if settings.top_k_candidates < settings.rerank_top_k:
-        raise ValueError("SEARCH_TOP_K must be >= RERANK_TOP_K")
-    if not 0.0 <= settings.rerank_threshold <= 1.0:
-        raise ValueError("RERANK_THRESHOLD must be between 0 and 1")
     if settings.parent_max_words <= 0:
         raise ValueError("SECTION_MAX_WORDS must be > 0")
     if settings.child_max_words <= 0:
@@ -142,7 +132,6 @@ def validate_runtime_settings() -> None:
     validate_ingest_lease_settings()
     validate_parser_execution_settings()
     caption_enabled_from_env()
-    rerank_provider_from_env()
     if int(os.getenv("INGEST_WORKER_COUNT", "1")) <= 0:
         raise ValueError("INGEST_WORKER_COUNT must be > 0")
     if float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5")) <= 0:
@@ -175,7 +164,6 @@ def validate_ai_config(ai_settings: AISettings, settings: HaystackSettings) -> N
     for capability_name, capability in (
         ("embed", ai_settings.embed),
         ("caption", ai_settings.caption),
-        ("rerank", ai_settings.rerank),
         ("ocr", ai_settings.ocr or ai_settings.caption),
     ):
         if not capability.model.strip():
@@ -459,7 +447,6 @@ def bootstrap_runtime() -> RuntimeState:
     validate_ingest_lease_settings()
     validate_parser_execution_settings()
     caption_enabled_from_env()
-    rerank_provider_from_env()
     if int(os.getenv("INGEST_WORKER_COUNT", "1")) <= 0:
         raise ValueError("INGEST_WORKER_COUNT must be > 0")
     if float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5")) <= 0:
@@ -504,9 +491,6 @@ def bootstrap_runtime() -> RuntimeState:
             parent_max_words=settings.parent_max_words,
             child_max_words=settings.child_max_words,
             child_overlap_words=settings.child_overlap_words,
-            top_k_candidates=settings.top_k_candidates,
-            rerank_top_k=settings.rerank_top_k,
-            rerank_threshold=settings.rerank_threshold,
         )
         validate_ai_config(ai_settings, settings)
         validate_vector_config(vector_config)
@@ -547,20 +531,16 @@ def bootstrap_runtime() -> RuntimeState:
                 params=pipeline_cfg.parser.params,
                 image_text_extractor=ProviderImageTextExtractor(provider),
             )
-            # rag-worker = INGEST-ONLY: ép reranker = noop (không search nên không
-            # dựng LLM reranker vô ích). Rerank là việc của mcp-service.
             engine = build_engine_from_config(
                 pipeline_cfg,
                 provider=provider,
                 vector_config_override=vector_config,
-                reranker_override=NoopRerankerService(),
             )
         else:
             parser = build_parser(provider)
             engine = build_engine(
                 provider=provider,
                 vector_config=vector_config,
-                reranker=NoopRerankerService(),
             )
         vector_config = engine.vectors.config
         ingest_use_case = IngestDocumentUseCase(

@@ -17,12 +17,6 @@ from core_engine.contract import resolve_dimension
 from core_engine.embedding import ProviderEmbeddingService
 from core_engine.engine import HaystackRagEngine
 from core_engine.registry import Registry
-from core_engine.rerank import (
-    LLMReranker,
-    LexicalRerankerService,
-    NoopRerankerService,
-    Reranker,
-)
 from core_engine.vectorstore import VectorStoreConfig, build_vector_repository
 
 Factory = Callable[[Mapping[str, Any], "WireContext"], Any]
@@ -88,11 +82,6 @@ def build_ai_settings(cfg: PipelineConfig) -> AISettings:
         api_key=cfg.captioner.api_key or cfg.embedder.api_key,
         model=cfg.captioner.model,
     )
-    rerank = CapabilityConfig(
-        base_url=(cfg.reranker.base_url or caption.base_url) or None,
-        api_key=cfg.reranker.api_key or caption.api_key,
-        model=cfg.reranker.model,
-    )
     ocr_model = cfg.parser.ocr.model if cfg.parser.ocr is not None else ""
     ocr = CapabilityConfig(
         base_url=(
@@ -106,7 +95,6 @@ def build_ai_settings(cfg: PipelineConfig) -> AISettings:
     return AISettings(
         embed=embed,
         caption=caption,
-        rerank=rerank,
         ocr=ocr,
         embed_dimension=resolved_dim,
         max_retries=cfg.common.max_retries,
@@ -125,9 +113,6 @@ def to_settings(cfg: PipelineConfig, *, dim: int) -> HaystackSettings:
         parent_max_words=int(cfg.chunker.params.get("parent_max_words", 220)),
         child_max_words=int(cfg.chunker.params.get("child_max_words", 90)),
         child_overlap_words=int(cfg.chunker.params.get("child_overlap_words", 15)),
-        top_k_candidates=cfg.retrieval.top_k_candidates,
-        rerank_top_k=cfg.retrieval.rerank_top_k,
-        rerank_threshold=cfg.retrieval.rerank_threshold,
     )
 
 
@@ -154,7 +139,6 @@ def build_engine_from_config(
     *,
     provider: AIProvider | None = None,
     dim: int | None = None,
-    reranker_override: Reranker | object = UNSET,
     vector_config_override: VectorStoreConfig | None = None,
 ) -> HaystackRagEngine:
     provider = provider or build_ai_provider(cfg)
@@ -182,16 +166,10 @@ def build_engine_from_config(
         dim=resolved_dim,
         override=vector_config_override,
     )
-    reranker = (
-        resolve("reranker", cfg.reranker, ctx)
-        if reranker_override is UNSET
-        else reranker_override
-    )
     return HaystackRagEngine(
         settings=to_settings(cfg, dim=resolved_dim),
         embedder=ProviderEmbeddingService(provider, dimension=resolved_dim),
         vectors=build_vector_repository(vector_config),
-        reranker=reranker if reranker is not None else NoopRerankerService(),
         captioner=resolve("captioner", cfg.captioner, ctx),
         chunker=resolve("chunker", cfg.chunker, ctx),
     )
@@ -208,6 +186,3 @@ register(
 )
 register("captioner", "provider", lambda params, ctx: ProviderCaptioner(ctx.provider, **params))
 register("captioner", "none", lambda params, ctx: None)
-register("reranker", "llm", lambda params, ctx: LLMReranker(ctx.provider, **params))
-register("reranker", "lexical", lambda params, ctx: LexicalRerankerService())
-register("reranker", "none", lambda params, ctx: NoopRerankerService())

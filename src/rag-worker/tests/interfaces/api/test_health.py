@@ -181,18 +181,6 @@ def test_invalid_caption_enabled_value_fails_startup(
             pass
 
 
-def test_invalid_rerank_provider_value_fails_startup(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("APP_ENV", "development")
-    monkeypatch.setenv("AI_PROVIDER", "offline")
-    monkeypatch.setenv("RERANK_PROVIDER", "cross-encoder")
-
-    with pytest.raises(ValueError, match="RERANK_PROVIDER must be one of"):
-        with TestClient(create_app()):
-            pass
-
-
 def test_production_requires_durable_metadata_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

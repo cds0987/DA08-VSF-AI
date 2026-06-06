@@ -1,12 +1,11 @@
-"""E2E: inline-markdown -> engine thật (offline embed) -> Qdrant in-memory -> search.
+"""E2E: inline-markdown -> engine thật (offline embed) -> Qdrant in-memory -> vector payload.
 
 Chứng minh luồng MVP (single-replica + inline markdown + Qdrant `:memory:`) chạy
 end-to-end mà KHÔNG cần OpenAI / Qdrant remote / Postgres. Bổ sung cho các test
 stub ở tầng use-case/router: ở đây engine, embedder, vectorstore đều là đồ thật.
 
-Offline provider dùng embedding hash (không ngữ nghĩa) nên test chấm điểm theo
-rerank lexical với `caption=False` + `rerank_threshold=0.0` — đủ để kiểm plumbing
-(ingest -> upsert -> search -> rerank -> contract fields), không kiểm chất lượng.
+Offline provider dùng embedding hash (không ngữ nghĩa); suite này chỉ chứng minh
+plumbing ingest -> upsert -> payload/lineage, không kiểm search quality.
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ import pytest
 
 from core_engine import IngestInput, OfflineProvider, build_engine
 from core_engine.vectorstore import VectorStoreConfig
+from tests.e2e._vector_helpers import payloads_for_document
 
 
 def _build_inmemory_engine():
@@ -44,21 +44,12 @@ async def test_inline_markdown_ingests_to_qdrant_memory_and_is_searchable() -> N
     )
     assert chunk_count == 2
 
-    results = await engine.search(
-        "khởi động uvicorn", rerank_threshold=0.0, correlation_id="cid-e2e-1"
-    )
-
-    assert results, "search phải trả ít nhất 1 kết quả từ Qdrant in-memory"
-    top = results[0]
-    assert top.correlation_id == "cid-e2e-1"
-    assert top.document_id == "doc-mvp-1"
-    assert top.unit_id.startswith("doc-mvp-1::p")
-    assert top.display_name == "MVP Guide"
-    assert top.content
-    assert top.lineage.source_uri
-    assert top.lineage.artifact_uri
-    # Chunk khớp từ khóa truy vấn phải xếp trên chunk không liên quan.
-    assert "uvicorn" in top.content
+    payloads = payloads_for_document(engine, "doc-mvp-1")
+    assert len(payloads) == 2
+    assert all(payload["document_name"] == "MVP Guide" for payload in payloads)
+    assert all(payload["source_uri"] for payload in payloads)
+    assert all(payload["artifact_uri"] for payload in payloads)
+    assert any("uvicorn" in payload["parent_text"] for payload in payloads)
 
 
 @pytest.mark.asyncio
@@ -73,8 +64,7 @@ async def test_reingest_same_document_prunes_stale_chunks_in_memory() -> None:
             markdown="# Title\n" + "alpha " * 300,
         )
     )
-    before = await engine.search("alpha", rerank_threshold=0.0, top_k=10)
-    before_count = len([r for r in before if r.document_id == "doc-prune"])
+    before_count = len(payloads_for_document(engine, "doc-prune"))
     assert before_count > 1
 
     await engine.ingest(
@@ -85,16 +75,6 @@ async def test_reingest_same_document_prunes_stale_chunks_in_memory() -> None:
             markdown="# Title\nshort body only\n",
         )
     )
-    after = await engine.search("alpha", rerank_threshold=0.0, top_k=10)
-    after_count = len([r for r in after if r.document_id == "doc-prune"])
+    after_count = len(payloads_for_document(engine, "doc-prune"))
 
     assert after_count < before_count
-
-
-@pytest.mark.asyncio
-async def test_search_returns_empty_for_unknown_collection() -> None:
-    engine = _build_inmemory_engine()
-
-    results = await engine.search("không có gì được index", rerank_threshold=0.0)
-
-    assert results == []

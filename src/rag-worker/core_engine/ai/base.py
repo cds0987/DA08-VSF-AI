@@ -62,7 +62,7 @@ class VisionImage:
 class AISettings:
     embed: CapabilityConfig
     caption: CapabilityConfig
-    rerank: CapabilityConfig
+    rerank: Optional[CapabilityConfig] = None
     ocr: Optional[CapabilityConfig] = None   # None => kế thừa cấu hình caption
     embed_dimension: Optional[int] = None   # None => probe từ model (notebook cell 14)
     max_retries: int = 5
@@ -74,7 +74,7 @@ class AISettings:
         return {
             EMBED: self.embed,
             CAPTION: self.caption,
-            RERANK: self.rerank,
+            RERANK: self.rerank or self.caption,
             OCR: self.ocr or self.caption,
         }[capability]
 

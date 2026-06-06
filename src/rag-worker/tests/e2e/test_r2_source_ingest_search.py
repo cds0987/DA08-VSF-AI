@@ -1,4 +1,4 @@
-"""E2E (opt-in): an S3-compatible object source -> parser -> engine -> search.
+"""E2E (opt-in): an S3-compatible object source -> parser -> engine -> persisted payload.
 
 Prototype for the not-yet-ratified S3 change-detector (gap.md #17 / decision D1).
 Works against any store that speaks the S3 API — Google Cloud Storage (interop/XML
@@ -30,6 +30,7 @@ from app.infrastructure.external.local_parser import LocalFileParser
 from core_engine import IngestInput, OfflineProvider, build_engine
 from core_engine.ai import get_ai_provider, reset_ai_provider
 from core_engine.vectorstore import VectorStoreConfig
+from tests.e2e._vector_helpers import payloads_for_document
 
 VALIDATION_DIR = Path(__file__).resolve().parents[2] / "eval" / "validation"
 MANIFEST_PATH = VALIDATION_DIR / "manifest.json"
@@ -127,7 +128,7 @@ def test_r2_bucket_lists_the_uploaded_corpus() -> None:
 
 
 @pytest.mark.asyncio
-async def test_r2_objects_ingest_and_retrieve_top_hit(source_root: Path) -> None:
+async def test_r2_objects_ingest_and_persist_source_lineage(source_root: Path) -> None:
     manifest = _load_manifest()
     bucket = _bucket()
     prefix = _prefix()
@@ -166,17 +167,11 @@ async def test_r2_objects_ingest_and_retrieve_top_hit(source_root: Path) -> None
         parser.close()
 
     for entry in manifest:
-        correlation_id = f"r2:query:{entry['document_id']}"
-        results = await engine.search(
-            entry["query"], top_k=5, rerank_threshold=0.0, correlation_id=correlation_id
+        payloads = payloads_for_document(engine, entry["document_id"])
+        assert payloads, f"no payloads persisted for {entry['document_id']!r}"
+        assert all(
+            payload["source_uri"] == f"s3://{bucket}/{prefix}{entry['file']}"
+            for payload in payloads
         )
-        assert results, f"no result for query={entry['query']!r}"
-        top = results[0]
-        assert top.document_id == entry["document_id"], (
-            f"query {entry['query']!r} expected {entry['document_id']!r}, got {top.document_id!r}"
-        )
-        assert top.correlation_id == correlation_id
-        # Lineage points back at the R2 object, proving source provenance survives ingest.
-        assert top.lineage.source_uri == f"s3://{bucket}/{prefix}{entry['file']}"
-        joined = " ".join(r.content for r in results if r.document_id == entry["document_id"])
+        joined = " ".join(payload["parent_text"] for payload in payloads)
         assert entry["expect_keyword"] in joined.lower()

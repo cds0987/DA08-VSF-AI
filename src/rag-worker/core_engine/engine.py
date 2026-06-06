@@ -1,4 +1,4 @@
-"""HaystackRagEngine orchestrates ingest + search end-to-end."""
+"""HaystackRagEngine orchestrates ingest end-to-end."""
 
 from __future__ import annotations
 
@@ -11,8 +11,7 @@ from core_engine.caption import Captioner
 from core_engine.chunking import Chunker, SectionChunker
 from core_engine.config import HaystackSettings, load_settings
 from core_engine.logging_utils import Stopwatch, log_event
-from core_engine.rerank import Reranker
-from core_engine.types import EmbeddingService, SearchResult, VectorRepository
+from core_engine.types import EmbeddingService, VectorRepository
 from core_engine.vectorstore.types import VectorRecord
 
 
@@ -33,14 +32,12 @@ class HaystackRagEngine:
         settings: HaystackSettings,
         embedder: EmbeddingService,
         vectors: VectorRepository,
-        reranker: Reranker,
         captioner: Optional[Captioner] = None,
         chunker: Chunker | None = None,
     ):
         self.settings = settings or load_settings()
         self.embedder = embedder
         self.vectors = vectors
-        self.reranker = reranker
         self.captioner = captioner
         self.chunker = chunker or SectionChunker(
             parent_max_words=self.settings.parent_max_words,
@@ -149,67 +146,3 @@ class HaystackRagEngine:
             total_ms=total_sw.elapsed_ms(),
         )
         return len(chunk_ids)
-
-    async def search(
-        self,
-        query_text: str,
-        top_k: Optional[int] = None,
-        rerank_threshold: Optional[float] = None,
-        correlation_id: Optional[str] = None,
-        document_ids: Optional[List[str]] = None,
-    ) -> List[SearchResult]:
-        settings = self.settings
-        effective_top_k = top_k if top_k is not None else settings.rerank_top_k
-        threshold = (
-            rerank_threshold if rerank_threshold is not None else settings.rerank_threshold
-        )
-        request_correlation_id = correlation_id or str(uuid4())
-        total_sw = Stopwatch()
-        log_event(
-            self._logger,
-            logging.INFO,
-            "search_started",
-            stage="search",
-            correlation_id=request_correlation_id,
-            top_k=effective_top_k,
-            rerank_threshold=threshold,
-            document_id_count=len(document_ids) if document_ids is not None else None,
-        )
-
-        embed_sw = Stopwatch()
-        query_vector = await self.embedder.embed(query_text)
-        embed_ms = embed_sw.elapsed_ms()
-        vector_sw = Stopwatch()
-        # TODO(ACL): thread `document_ids` xuong hybrid_search de filter theo quyen
-        # (fail-secure: None => chi public / rong). Hien moi nhan o boundary; provider
-        # filter se lam o buoc ACL tiep theo.
-        candidates = await self.vectors.hybrid_search(
-            query_vector,
-            query_text,
-            top_k=settings.top_k_candidates,
-        )
-        vector_ms = vector_sw.elapsed_ms()
-        rerank_sw = Stopwatch()
-        results = await self.reranker.rerank(
-            query_text,
-            candidates,
-            top_k=effective_top_k,
-            threshold=threshold,
-        )
-        rerank_ms = rerank_sw.elapsed_ms()
-        for result in results:
-            result.correlation_id = request_correlation_id
-        log_event(
-            self._logger,
-            logging.INFO,
-            "search_completed",
-            stage="search",
-            correlation_id=request_correlation_id,
-            candidate_count=len(candidates),
-            result_count=len(results),
-            embed_ms=embed_ms,
-            vector_search_ms=vector_ms,
-            rerank_ms=rerank_ms,
-            total_ms=total_sw.elapsed_ms(),
-        )
-        return results

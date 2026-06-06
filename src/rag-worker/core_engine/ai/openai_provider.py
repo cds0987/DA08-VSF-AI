@@ -57,7 +57,7 @@ class OpenAIProvider(AIProvider):
 
     # --- config validation (fail-fast, embedding.md §4) -------------------- #
     def validate(self) -> None:
-        for name in (EMBED, "caption", "rerank", OCR):
+        for name in (EMBED, "caption", OCR):
             cfg = self._s.cap(name)
             if not cfg.model:
                 raise ValueError(f"AI config thiếu model cho capability '{name}'")

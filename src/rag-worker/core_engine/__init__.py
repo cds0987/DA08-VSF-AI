@@ -1,19 +1,18 @@
-"""core_engine — core working RAG của rag-service, dựng trên Haystack.
+"""core_engine — ingest core của rag-service, dựng trên Haystack.
 
 Kiến trúc module (severable, mỗi module một nhiệm vụ — MOSA / hexagonal):
 
     ai/          AI gateway — điểm vào DUY NHẤT cho mọi outbound AI call
-                 (embed · caption · rerank); OpenAI SDK trước, swap provider 1 chỗ.
+                 (embed · caption · ocr); OpenAI SDK trước, swap provider 1 chỗ.
     embedding/   port EmbeddingService qua provider
     chunking/    section split (đơn vị nghĩa, không token-chunk)
     caption/     ý-nghĩa-nén section qua provider
-    rerank/      Reranker (LLM qua gateway / lexical fallback)
     vectorstore/ port VectorRepository (provider-first: qdrant·chromadb·milvus)
-    engine.py    orchestrator (ingest + search), chỉ phụ thuộc port
+    engine.py    orchestrator ingest, chỉ phụ thuộc port
     factory.py   composition root — wire backend theo env (offline | OpenAI)
 
-Mọi capability lấy chung một AI provider singleton → ingest & query cùng
-provider/model/dimension (search.md §2). Đổi provider/backend = đổi wiring ở
+Mọi capability lấy chung một AI provider singleton → ingest cùng
+provider/model/dimension. Đổi provider/backend = đổi wiring ở
 factory + ai/, KHÔNG sửa engine/use-case.
 
     from core_engine import build_engine, IngestInput
@@ -21,7 +20,6 @@ factory + ai/, KHÔNG sửa engine/use-case.
     engine = build_engine()                  # auto theo env (offline nếu không có key)
     await engine.ingest(IngestInput(document_id="d1", document_name="Doc",
                                     file_type="md", markdown="# Title\nNội dung..."))
-    hits = await engine.search("câu hỏi")    # trả raw unit + lineage; access ở caller
 """
 
 from core_engine.config import HaystackSettings, load_settings
@@ -55,8 +53,6 @@ from core_engine.ai import (
 from core_engine.embedding import ProviderEmbeddingService
 from core_engine.types import (
     EmbeddingService,
-    SearchLineage,
-    SearchResult,
     VectorRepository,
 )
 from core_engine.vectorstore import (
@@ -73,12 +69,6 @@ from core_engine.vectorstore import (
 )
 from core_engine.caption import Captioner, ProviderCaptioner
 from core_engine.chunking import Chunker, SectionChunker
-from core_engine.rerank import (
-    Reranker,
-    LLMReranker,
-    LexicalRerankerService,
-    NoopRerankerService,
-)
 
 __all__ = [
     # composition
@@ -110,8 +100,6 @@ __all__ = [
     # ports / capabilities
     "EmbeddingService",
     "ProviderEmbeddingService",
-    "SearchLineage",
-    "SearchResult",
     "VectorRepository",
     "VectorRecord",
     "VectorStore",
@@ -127,8 +115,4 @@ __all__ = [
     "ProviderCaptioner",
     "Chunker",
     "SectionChunker",
-    "Reranker",
-    "LLMReranker",
-    "LexicalRerankerService",
-    "NoopRerankerService",
 ]
