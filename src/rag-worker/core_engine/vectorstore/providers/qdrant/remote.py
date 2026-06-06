@@ -11,7 +11,7 @@ from typing import Sequence
 
 from core_engine.vectorstore.providers.qdrant.base import QdrantBase, point_id
 
-from qdrant_client import AsyncQdrantClient
+from qdrant_client import AsyncQdrantClient, models
 
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.store import VectorStore
@@ -41,6 +41,14 @@ class QdrantRemoteProvider(QdrantBase):
                 await self._client.create_collection(
                     collection_name=self._collection,
                     vectors_config=self._vectors_config(),
+                )
+                # Filter theo document_id (dedup scroll + delete + scoped search) yêu cầu
+                # payload index keyword; Qdrant Cloud bật "indexing required for filtering"
+                # nên thiếu index -> 400. Tạo ngay lúc tạo collection (idempotent).
+                await self._client.create_payload_index(
+                    collection_name=self._collection,
+                    field_name="document_id",
+                    field_schema=models.PayloadSchemaType.KEYWORD,
                 )
             self._ready = True
 

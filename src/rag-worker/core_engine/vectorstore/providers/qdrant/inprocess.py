@@ -12,7 +12,7 @@ from typing import Sequence
 
 from core_engine.vectorstore.providers.qdrant.base import QdrantBase, point_id
 
-from qdrant_client import QdrantClient
+from qdrant_client import QdrantClient, models
 
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.store import VectorStore
@@ -46,6 +46,13 @@ class QdrantInProcessProvider(QdrantBase):
                     self._client.create_collection,
                     collection_name=self._collection,
                     vectors_config=self._vectors_config(),
+                )
+                # Payload index keyword cho document_id (filter dedup/delete/scoped search).
+                await asyncio.to_thread(
+                    self._client.create_payload_index,
+                    collection_name=self._collection,
+                    field_name="document_id",
+                    field_schema=models.PayloadSchemaType.KEYWORD,
                 )
             self._ready = True
 

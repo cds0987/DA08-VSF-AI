@@ -9,8 +9,8 @@ import sys
 from app.core.config import load_settings
 from app.core.contract import VectorstoreContractError
 from app.interfaces.mcp_server import (
+    InternalTokenAuthMiddleware,
     build_mcp,
-    build_mcp_middleware,
     mcp_endpoint_url,
 )
 
@@ -60,8 +60,19 @@ def main() -> int:
         return 1
     logger.info("mcp_contract_verified index=%s", contract.index_id)
 
+    # FastMCP.run() chỉ nhận (transport, mount_path) — không nhận middleware. Để gắn
+    # auth internal-token, dựng Starlette app từ streamable_http_app() rồi add_middleware,
+    # và tự serve bằng uvicorn.
+    import uvicorn
+
+    app = mcp.streamable_http_app()
+    token = (settings.internal_token or "").strip()
+    if token:
+        app.add_middleware(InternalTokenAuthMiddleware, token=token)
+
     try:
-        mcp.run(transport="streamable-http", middleware=build_mcp_middleware(settings.internal_token))
+        uvicorn.run(app, host=settings.host, port=settings.port,
+                    log_level=settings.log_level.lower())
     finally:
         asyncio.run(_close_service(service))
     return 0
