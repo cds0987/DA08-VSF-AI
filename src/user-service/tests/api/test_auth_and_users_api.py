@@ -1,6 +1,9 @@
+import os
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+
+os.environ.setdefault("JWT_SECRET_KEY", "test-user-service-secret")
 
 from app.application.exceptions import NotFoundError
 from app.domain.entities.user import User, UserRole
@@ -124,6 +127,18 @@ def test_login_returns_refresh_token() -> None:
         "refresh_token": "refresh-token",
         "token_type": "bearer",
     }
+
+
+def test_login_malformed_json_returns_422() -> None:
+    app.dependency_overrides[dependencies.get_login_use_case] = lambda: FakeLoginUseCase()
+
+    response = TestClient(app).post(
+        "/auth/login",
+        content="{bad json",
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 422
 
 
 def test_refresh_returns_rotated_refresh_token() -> None:

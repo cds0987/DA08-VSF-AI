@@ -64,7 +64,9 @@ class PostgresUserRepository(UserRepository):
             .limit(limit)
             .offset(offset),
         )
-        return [_to_entity(row) for row in result.scalars().all()], int(total_result.scalar_one())
+        return [_to_entity_required(row) for row in result.scalars().all()], int(
+            total_result.scalar_one(),
+        )
 
     async def set_active(self, user_id: str, is_active: bool) -> User | None:
         result = await self.session.execute(
@@ -106,7 +108,9 @@ class PostgresLoginStateRepository:
         result = await self.session.execute(
             select(UserModel).where(UserModel.id == _uuid(user_id)),
         )
-        model = result.scalar_one()
+        model = result.scalar_one_or_none()
+        if model is None:
+            return
         model.failed_login_count = failed_login_count
         model.locked_until = locked_until
         await self.session.commit()
@@ -115,7 +119,9 @@ class PostgresLoginStateRepository:
         result = await self.session.execute(
             select(UserModel).where(UserModel.id == _uuid(user_id)),
         )
-        model = result.scalar_one()
+        model = result.scalar_one_or_none()
+        if model is None:
+            return
         model.failed_login_count = 0
         model.locked_until = None
         await self.session.commit()
@@ -133,6 +139,13 @@ def _to_entity(model: UserModel | None) -> User | None:
         hashed_password=model.hashed_password,
         auth_provider=model.auth_provider,
     )
+
+
+def _to_entity_required(model: UserModel) -> User:
+    entity = _to_entity(model)
+    if entity is None:
+        raise RuntimeError("expected user row")
+    return entity
 
 
 def _uuid(value: str) -> UUID:

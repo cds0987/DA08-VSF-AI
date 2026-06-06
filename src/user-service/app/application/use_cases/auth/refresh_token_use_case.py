@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional, Protocol
+from uuid import UUID
 
 from app.application.exceptions import InactiveUserError, InvalidTokenError
 from app.application.security import PasswordHasher, TokenService
@@ -82,5 +83,9 @@ class RefreshTokenUseCase:
         parts = raw_token.split(".", 1)
         if len(parts) != 2 or not parts[0] or not parts[1]:
             raise InvalidTokenError()
+        try:
+            UUID(parts[0])
+        except ValueError as exc:
+            raise InvalidTokenError() from exc
         return parts[0], parts[1]
 

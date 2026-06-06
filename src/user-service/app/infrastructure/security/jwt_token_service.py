@@ -8,7 +8,7 @@ from app.domain.entities.user import User
 
 
 class JwtTokenService:
-    def __init__(self, secret_key: str, ttl_minutes: int = 480) -> None:
+    def __init__(self, secret_key: str, ttl_minutes: int = 15) -> None:
         self.secret_key = secret_key
         self.ttl_minutes = ttl_minutes
 
