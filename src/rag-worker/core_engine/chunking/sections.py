@@ -18,7 +18,7 @@ from typing import List, Tuple
 @dataclass
 class Section:
     section_title: str
-    page_number: int          # placeholder: thứ tự section (parser thật giữ page number)
+    section_index: int        # placeholder: thứ tự section, chưa phải page PDF thực
     parent_text: str          # full content -> LLM prompt
     children: List[str]       # sub-split để embed
 
@@ -31,7 +31,7 @@ def split_sections(
 ) -> List[Section]:
     blocks = _split_by_heading(markdown)
     sections: List[Section] = []
-    page = 1
+    section_index = 1
     for title, body in blocks:
         body = body.strip()
         if not body:
@@ -41,12 +41,12 @@ def split_sections(
             sections.append(
                 Section(
                     section_title=title or "(no heading)",
-                    page_number=page,
+                    section_index=section_index,
                     parent_text=parent_text,
                     children=children or [parent_text],
                 )
             )
-        page += 1
+        section_index += 1
     return sections
 
 
@@ -73,7 +73,35 @@ def _cap_words(text: str, max_words: int) -> List[str]:
     words = text.split()
     if len(words) <= max_words:
         return [text]
-    return [" ".join(words[i : i + max_words]) for i in range(0, len(words), max_words)]
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", text.strip()) if part.strip()]
+    if not sentences:
+        return [" ".join(words[i : i + max_words]) for i in range(0, len(words), max_words)]
+
+    chunks: List[str] = []
+    current: List[str] = []
+    current_count = 0
+    for sentence in sentences:
+        sentence_words = sentence.split()
+        sentence_count = len(sentence_words)
+        if sentence_count > max_words:
+            if current:
+                chunks.append(" ".join(current))
+                current = []
+                current_count = 0
+            chunks.extend(
+                " ".join(sentence_words[i : i + max_words])
+                for i in range(0, sentence_count, max_words)
+            )
+            continue
+        if current and current_count + sentence_count > max_words:
+            chunks.append(" ".join(current))
+            current = []
+            current_count = 0
+        current.append(sentence)
+        current_count += sentence_count
+    if current:
+        chunks.append(" ".join(current))
+    return chunks or [text]
 
 
 def _windows(text: str, size: int, overlap: int) -> List[str]:
@@ -81,4 +109,11 @@ def _windows(text: str, size: int, overlap: int) -> List[str]:
     if len(words) <= size:
         return [text]
     step = max(1, size - overlap)
-    return [" ".join(words[i : i + size]) for i in range(0, len(words), step)]
+    min_tail_words = max(1, int(size * 0.3))
+    windows: List[str] = []
+    for start in range(0, len(words), step):
+        remaining = len(words) - start
+        if windows and remaining < (min_tail_words + overlap):
+            break
+        windows.append(" ".join(words[start : start + size]))
+    return windows

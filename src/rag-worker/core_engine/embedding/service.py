@@ -10,6 +10,7 @@ Ingest caption-embed & search query-embed đi qua CÙNG service/provider/dimensi
 
 from __future__ import annotations
 
+import os
 from typing import List, Optional
 
 from core_engine.ai import AIProvider, get_ai_provider
@@ -20,6 +21,7 @@ class ProviderEmbeddingService(EmbeddingService):
     def __init__(self, provider: AIProvider | None = None, *, dimension: Optional[int] = None):
         self._provider = provider or get_ai_provider()
         self._dim = dimension
+        self._batch_size = max(1, int(os.getenv("EMBED_BATCH_SIZE", "100")))
 
     async def embed(self, text: str) -> List[float]:
         return (await self.embed_batch([text]))[0]
@@ -27,4 +29,8 @@ class ProviderEmbeddingService(EmbeddingService):
     async def embed_batch(self, texts: List[str]) -> List[List[float]]:
         if not texts:
             return []
-        return await self._provider.embed(texts, dimension=self._dim)
+        vectors: List[List[float]] = []
+        for start in range(0, len(texts), self._batch_size):
+            batch = texts[start : start + self._batch_size]
+            vectors.extend(await self._provider.embed(batch, dimension=self._dim))
+        return vectors

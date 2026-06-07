@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -175,6 +176,7 @@ class S3SourceParser(Parser):
         self._inner = inner
         self._client_factory = client_factory or _default_client_factory
         self._client: Any | None = None
+        self._client_lock = threading.Lock()
         self._max_bytes = max_bytes if max_bytes is not None else _max_remote_bytes()
         self._semaphore = asyncio.Semaphore(
             concurrency if concurrency is not None else _fetch_concurrency()
@@ -182,7 +184,9 @@ class S3SourceParser(Parser):
 
     def _get_client(self) -> Any:
         if self._client is None:
-            self._client = self._client_factory()
+            with self._client_lock:
+                if self._client is None:
+                    self._client = self._client_factory()
         return self._client
 
     async def parse(

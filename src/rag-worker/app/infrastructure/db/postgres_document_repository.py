@@ -85,7 +85,15 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
                 chunk_count=document.chunk_count,
                 error_message=document.error_message,
             )
-            session.merge(record)
+            session.add(record)
+            try:
+                session.flush()
+            except IntegrityError:
+                session.rollback()
+                existing = session.get(DocumentRecord, document.id)
+                if existing is None:
+                    raise
+                return self._to_domain(existing)
             return self._to_domain(record)
 
     async def get_by_id(self, document_id: str) -> Document | None:
@@ -293,12 +301,6 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
     def _claim_next_pending_sync(self, claim_id: str) -> IngestJob | None:
         now = datetime.now(UTC)
         with self._session() as session:
-            self._fail_jobs_exceeding_max_attempts(
-                session,
-                stale_before=None,
-                statuses=(IngestJobStatus.PENDING.value, IngestJobStatus.STALE.value),
-                now=now,
-            )
             stmt = (
                 select(IngestJobRecord)
                 .where(
@@ -310,6 +312,8 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
                 .order_by(IngestJobRecord.created_at.asc(), IngestJobRecord.id.asc())
                 .limit(1)
             )
+            if session.bind is not None and session.bind.dialect.name == "postgresql":
+                stmt = stmt.with_for_update(skip_locked=True)
             record = session.execute(stmt).scalars().first()
             if record is None:
                 return None
@@ -358,7 +362,10 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
             failed_count = self._fail_jobs_exceeding_max_attempts(
                 session,
                 stale_before=stale_before,
-                statuses=(IngestJobStatus.PROCESSING.value,),
+                statuses=(
+                    IngestJobStatus.PROCESSING.value,
+                    IngestJobStatus.STALE.value,
+                ),
                 now=now,
             )
             result = session.execute(

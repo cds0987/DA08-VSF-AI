@@ -396,6 +396,7 @@ class LocalFileParser(Parser):
             ocr_text = ""
             if page.images:
                 ocr_text = await self._image_text_extractor.extract(page.images)
+                page.images.clear()
             merged = "\n\n".join(
                 segment for segment in (page.text.strip(), ocr_text.strip()) if segment
             )

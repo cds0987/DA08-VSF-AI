@@ -61,6 +61,44 @@ async def test_postgres_document_repository_crud_roundtrip(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_postgres_document_repository_create_duplicate_returns_existing_without_overwrite(tmp_path) -> None:
+    database_path = tmp_path / "documents.db"
+    repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
+    created_at = datetime.now(UTC)
+
+    first = await repository.create(
+        Document(
+            id="doc-1",
+            name="Original",
+            file_type="md",
+            s3_key="local://doc-1",
+            status=DocumentStatus.COMPLETED,
+            created_at=created_at,
+            chunk_count=7,
+        )
+    )
+    second = await repository.create(
+        Document(
+            id="doc-1",
+            name="Overwritten",
+            file_type="pdf",
+            s3_key="local://other",
+            status=DocumentStatus.QUEUED,
+            created_at=created_at,
+            chunk_count=0,
+        )
+    )
+
+    assert first.name == "Original"
+    assert second.name == "Original"
+    stored = await repository.get_by_id("doc-1")
+    assert stored is not None
+    assert stored.status is DocumentStatus.COMPLETED
+    assert stored.chunk_count == 7
+
+
+@pytest.mark.asyncio
 async def test_postgres_document_repository_delete_cascades_jobs_and_logs(tmp_path) -> None:
     database_path = tmp_path / "documents.db"
     repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
@@ -289,6 +327,39 @@ async def test_postgres_document_repository_fails_stale_jobs_that_hit_max_attemp
     assert stored_doc.error_message == "exceeded max attempts"
     logs = await repository.list_job_logs("doc-1")
     assert logs[0].error_type == "MaxAttemptsExceeded"
+
+
+@pytest.mark.asyncio
+async def test_postgres_document_repository_does_not_fail_max_attempt_jobs_during_claim_poll(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("INGEST_MAX_ATTEMPTS", "2")
+    database_path = tmp_path / "documents.db"
+    repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
+    now = datetime.now(UTC)
+
+    await repository.enqueue(
+        IngestJob(
+            id="job-1",
+            document_id="doc-1",
+            document_name="Policy",
+            file_type="md",
+            source_uri="local://doc-1.md",
+            markdown="# Policy",
+            artifact_uri=None,
+            correlation_id="cid-1",
+            status=IngestJobStatus.STALE,
+            attempt=2,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    claimed = await repository.claim_next_pending("claim-1")
+
+    assert claimed is None
+    stored = await repository.get_job("job-1")
+    assert stored is not None
+    assert stored.status is IngestJobStatus.STALE
 
 
 @pytest.mark.asyncio

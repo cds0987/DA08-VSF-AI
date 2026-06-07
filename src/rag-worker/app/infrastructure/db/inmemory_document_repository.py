@@ -20,6 +20,9 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
         self._max_attempts = max(1, int(os.getenv("INGEST_MAX_ATTEMPTS", "5")))
 
     async def create(self, document: Document) -> Document:
+        existing = self._documents.get(document.id)
+        if existing is not None:
+            return existing
         self._documents[document.id] = document
         return document
 
@@ -110,9 +113,6 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
         return sorted(candidates, key=lambda item: (item.created_at, item.id))[0]
 
     async def claim_next_pending(self, claim_id: str) -> IngestJob | None:
-        await self._fail_jobs_exceeding_max_attempts(
-            statuses={IngestJobStatus.PENDING, IngestJobStatus.STALE}
-        )
         candidates = sorted(
             self._jobs.values(),
             key=lambda item: (item.created_at, item.id),
@@ -156,7 +156,7 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
 
     async def mark_stale_jobs(self, stale_before: datetime) -> int:
         failed = await self._fail_jobs_exceeding_max_attempts(
-            statuses={IngestJobStatus.PROCESSING},
+            statuses={IngestJobStatus.PROCESSING, IngestJobStatus.STALE},
             stale_before=stale_before,
         )
         marked = 0

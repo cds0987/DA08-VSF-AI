@@ -47,6 +47,17 @@ class SlowEngine(StubEngine):
         return 1
 
 
+class DeletingEngine(StubEngine):
+    def __init__(self, documents: InMemoryDocumentRepository) -> None:
+        super().__init__()
+        self._documents = documents
+
+    async def ingest(self, payload):
+        self.ingest_calls.append(payload)
+        await self._documents.delete(payload.document_id)
+        return 1
+
+
 class StubParser:
     def __init__(self) -> None:
         self.calls = []
@@ -133,6 +144,11 @@ class HeartbeatTrackingDocuments(InMemoryDocumentRepository):
     async def renew_claim(self, job_id: str, claim_id: str) -> bool:
         self.renew_calls += 1
         return await super().renew_claim(job_id, claim_id)
+
+
+class EnqueueFailingDocuments(InMemoryDocumentRepository):
+    async def enqueue(self, job: IngestJob) -> IngestJob:
+        raise RuntimeError("queue down")
 
 
 def test_ingest_use_case_enqueues_and_processes_markdown_job() -> None:
@@ -411,5 +427,100 @@ def test_enqueue_dedups_redelivered_document() -> None:
         assert second.id == first.id  # trả lại job đang chờ, không tạo mới
         active = [j for j in documents._jobs.values() if j.document_id == "doc-dup"]
         assert len(active) == 1
+
+    asyncio.run(scenario())
+
+
+def test_enqueue_skips_completed_document_redelivery() -> None:
+    async def scenario() -> None:
+        documents = InMemoryDocumentRepository()
+        use_case = IngestDocumentUseCase(
+            StubEngine(), documents, documents, StubParser(), StubArtifactStore()
+        )
+
+        await documents.create(
+            Document(
+                id="doc-done",
+                name="Done",
+                file_type="md",
+                s3_key="inline://doc-done",
+                status=DocumentStatus.COMPLETED,
+                created_at=datetime.now(UTC),
+                chunk_count=4,
+            )
+        )
+
+        job = await use_case.enqueue(
+            document_id="doc-done", document_name="Done", file_type="md", markdown="# A"
+        )
+
+        assert job.status is IngestJobStatus.COMPLETED
+        assert documents._jobs == {}
+
+    asyncio.run(scenario())
+
+
+def test_enqueue_cleans_up_document_when_job_enqueue_fails() -> None:
+    async def scenario() -> None:
+        documents = EnqueueFailingDocuments()
+        use_case = IngestDocumentUseCase(
+            StubEngine(), documents, documents, StubParser(), StubArtifactStore()
+        )
+
+        with pytest.raises(RuntimeError, match="queue down"):
+            await use_case.enqueue(
+                document_id="doc-fail-enqueue",
+                document_name="D",
+                file_type="md",
+                markdown="# A",
+            )
+
+        assert await use_case.get_document("doc-fail-enqueue") is None
+
+    asyncio.run(scenario())
+
+
+def test_ingest_use_case_times_out_long_running_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def scenario() -> None:
+        monkeypatch.setenv("INGEST_JOB_TIMEOUT_SECONDS", "0.01")
+        engine = SlowEngine()
+        documents = InMemoryDocumentRepository()
+        use_case = IngestDocumentUseCase(
+            engine, documents, documents, StubParser(), StubArtifactStore()
+        )
+
+        await use_case.enqueue(
+            document_id="doc-timeout",
+            document_name="Guide",
+            file_type="md",
+            markdown="# Title\nBody",
+        )
+        processed = await use_case.process_next_job()
+
+        assert processed is not None
+        assert processed.status is IngestJobStatus.FAILED
+        assert "TimeoutError" in (await documents.list_job_logs("doc-timeout"))[0].error_type
+
+    asyncio.run(scenario())
+
+
+def test_ingest_use_case_cleans_up_vectors_when_document_deleted_mid_ingest() -> None:
+    async def scenario() -> None:
+        documents = InMemoryDocumentRepository()
+        engine = DeletingEngine(documents)
+        use_case = IngestDocumentUseCase(
+            engine, documents, documents, StubParser(), StubArtifactStore()
+        )
+
+        await use_case.enqueue(
+            document_id="doc-delete-race",
+            document_name="Guide",
+            file_type="md",
+            markdown="# Title\nBody",
+        )
+        processed = await use_case.process_next_job()
+
+        assert processed is None
+        assert engine.vectors.deleted == ["doc-delete-race"]
 
     asyncio.run(scenario())
