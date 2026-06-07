@@ -3,7 +3,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Sequence
 
-from core_engine.types import SearchResult
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.types import VectorRecord
 
@@ -19,15 +18,6 @@ class VectorStoreProvider(ABC):
     @abstractmethod
     async def upsert_many(self, records: Sequence[VectorRecord]) -> None:
         """Insert hoac overwrite theo chunk_id."""
-
-    @abstractmethod
-    async def search(
-        self,
-        vector: Sequence[float],
-        query_text: str,
-        top_k: int = 20,
-    ) -> list[SearchResult]:
-        """Search thong nhat ra ngoai; backend ben trong co the dense-only."""
 
     @abstractmethod
     async def list_chunk_ids_by_document(self, document_id: str) -> list[str]:

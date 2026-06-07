@@ -21,7 +21,6 @@ except (ModuleNotFoundError, ImportError) as e:
 
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.store import VectorStore
-from core_engine.types import SearchResult
 from core_engine.vectorstore.types import VectorRecord
 
 
@@ -71,16 +70,6 @@ class MilvusRemoteProvider(MilvusBase):
                 collection_name=self.collection_name,
                 data=[self._row(r) for r in record_list],
             )
-
-    async def search(
-        self,
-        vector: Sequence[float],
-        query_text: str,
-        top_k: int = 20,
-    ) -> list[SearchResult]:
-        await self._ensure()
-        res = await self._client.search(**self._search_kwargs(vector, top_k))
-        return self._assemble(res[0] if res else [], top_k)
 
     async def list_chunk_ids_by_document(self, document_id: str) -> list[str]:
         await self._ensure()

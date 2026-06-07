@@ -1,17 +1,14 @@
 """Contract test DÙNG CHUNG cho mọi VectorRepository (conformance — MOSA §4).
 
 Ép MỌI provider (qdrant, chromadb, milvus, plugin bên thứ ba) có CÙNG semantics ở các bất
-biến backend-agnostic, chỉ qua port (upsert/hybrid_search/delete) — không đụng nội
-bộ implementation:
+biến backend-agnostic, chỉ qua port (upsert/list/delete) — không đụng nội bộ
+implementation. rag-worker = INGEST-ONLY: contract chỉ ghim mặt ghi (search là việc
+của mcp-service), nên nghiệm thu qua `list_chunk_ids_by_document`:
 
   1. dimension guard      — upsert sai dimension -> ValueError (migration, không config)
-  2. retrieve full content— search trả parent_text (full) cho LLM grounding
+  2. upsert ghi được      — chunk vừa upsert phải liệt kê được theo document
   3. idempotent           — re-upsert cùng chunk_id -> KHÔNG nhân đôi
   4. delete_by_document   — xóa gỡ hết vector của document
-
-Lưu ý: contract KHÔNG ghim chất lượng ranking hybrid-vs-dense (đó là *capability*
-khác nhau giữa backend, không phải bất biến contract). Cũng KHÔNG ghim access control:
-retrieval trả raw unit + lineage, filtering là việc của caller (search.md §6).
 
     from core_engine.tests._contract import assert_vector_repository_contract
     await assert_vector_repository_contract(lambda s: MyRepo(s), dim=64)
@@ -60,22 +57,19 @@ async def assert_vector_repository_contract(
         raised = True
     assert raised, "[contract] upsert sai dimension phải raise ValueError"
 
-    # 2. upsert + retrieve full content
+    # 2. upsert ghi được — liệt kê chunk theo document
     await repo.upsert("d-pw::p0::c0", pw_vec, _payload("d-pw", pw_text))
-    res = await repo.hybrid_search(pw_vec, "reset mật khẩu", top_k=10)
-    hit = [r for r in res if r.document_id == "d-pw"]
-    assert hit, "[contract] search phải tìm được document vừa upsert"
-    assert hit[0].parent_text, "[contract] phải trả parent_text (full content) cho LLM"
+    ids = await repo.list_chunk_ids_by_document("d-pw")
+    assert "d-pw::p0::c0" in ids, "[contract] chunk vừa upsert phải liệt kê được"
 
     # 3. idempotent — re-upsert cùng id không nhân đôi
     await repo.upsert("d-pw::p0::c0", pw_vec, _payload("d-pw", pw_text))
-    res2 = await repo.hybrid_search(pw_vec, "reset mật khẩu", top_k=10)
-    same_id = [r for r in res2 if r.chunk_id == "d-pw::p0::c0"]
-    assert len(same_id) <= 1, f"[contract] re-upsert nhân đôi chunk_id: {len(same_id)}"
+    ids2 = await repo.list_chunk_ids_by_document("d-pw")
+    same_id = [c for c in ids2 if c == "d-pw::p0::c0"]
+    assert len(same_id) == 1, f"[contract] re-upsert nhân đôi chunk_id: {len(same_id)}"
 
     # 4. delete_by_document gỡ hết vector
     await repo.upsert("d-sal::p0::c0", sal_vec, _payload("d-sal", sal_text))
     await repo.delete_by_document("d-pw")
-    after = await repo.hybrid_search(pw_vec, "reset mật khẩu", top_k=10)
-    assert all(r.document_id != "d-pw" for r in after), \
-        "[contract] delete_by_document phải gỡ hết vector của document"
+    after = await repo.list_chunk_ids_by_document("d-pw")
+    assert not after, "[contract] delete_by_document phải gỡ hết vector của document"

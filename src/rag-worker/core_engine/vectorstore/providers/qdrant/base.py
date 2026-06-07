@@ -17,7 +17,6 @@ except ModuleNotFoundError as e:
         "Provider 'qdrant' can qdrant-client. Cai: pip install qdrant-client"
     ) from e
 
-from core_engine.types import SearchLineage, SearchResult
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.provider import VectorStoreProvider
 from core_engine.vectorstore.types import VectorRecord
@@ -76,27 +75,6 @@ class QdrantBase(VectorStoreProvider):
     @staticmethod
     def _ids_selector(chunk_ids: Sequence[str]) -> "models.PointIdsList":
         return models.PointIdsList(points=[point_id(c) for c in chunk_ids])
-
-    @staticmethod
-    def _to_result(point) -> SearchResult:
-        m = point.payload or {}
-        return SearchResult(
-            unit_id=m.get("chunk_id", str(point.id)),
-            parent_id=m.get("parent_id", ""),
-            document_id=m.get("document_id", ""),
-            display_name=m.get("document_name", ""),
-            file_type=m.get("file_type", ""),
-            page_number=int(m.get("page_number", 0)),
-            caption=m.get("caption", m.get("child_text", "")),
-            content=m.get("parent_text", ""),
-            heading_path=list(m.get("heading_path", [])),
-            lineage=SearchLineage(
-                source_uri=m.get("source_uri", ""),
-                artifact_uri=m.get("artifact_uri", ""),
-            ),
-            score=float(point.score) if point.score is not None else 0.0,
-            rerank_score=float(m.get("rerank_score", 0.0)),
-        )
 
     @staticmethod
     def _existing_from_points(points) -> set[str]:
