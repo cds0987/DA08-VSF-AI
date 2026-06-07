@@ -118,6 +118,7 @@ def load_parser_execution_settings() -> ParserExecutionSettings:
 
 def validate_runtime_settings() -> None:
     settings = load_settings()
+    validate_ingest_runtime_limits()
     if settings.embed_dimension <= 0:
         raise ValueError("EMBED_DIMENSION must be > 0")
     if settings.parent_max_words <= 0:
@@ -132,6 +133,9 @@ def validate_runtime_settings() -> None:
     validate_ingest_lease_settings()
     validate_parser_execution_settings()
     caption_enabled_from_env()
+
+
+def validate_ingest_runtime_limits() -> None:
     if int(os.getenv("INGEST_WORKER_COUNT", "1")) <= 0:
         raise ValueError("INGEST_WORKER_COUNT must be > 0")
     if float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5")) <= 0:
@@ -452,11 +456,8 @@ def bootstrap_runtime() -> RuntimeState:
     validate_job_log_retention_settings()
     validate_ingest_lease_settings()
     validate_parser_execution_settings()
+    validate_ingest_runtime_limits()
     caption_enabled_from_env()
-    if int(os.getenv("INGEST_WORKER_COUNT", "1")) <= 0:
-        raise ValueError("INGEST_WORKER_COUNT must be > 0")
-    if float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5")) <= 0:
-        raise ValueError("INGEST_WORKER_POLL_INTERVAL_SECONDS must be > 0")
     database_url = os.getenv("DATABASE_URL", "").strip()
     validate_metadata_backend(app_env, database_url)
     metadata_backend = metadata_backend_name(database_url)

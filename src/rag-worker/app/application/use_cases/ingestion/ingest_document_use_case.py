@@ -40,7 +40,9 @@ class IngestDocumentUseCase:
         self._artifact_store = artifact_store
         self._logger = logging.getLogger(__name__)
         self._claim_heartbeat_interval_seconds = claim_heartbeat_interval_seconds
-        self._ingest_timeout_seconds = float(os.getenv("INGEST_JOB_TIMEOUT_SECONDS", "600"))
+        self._ingest_timeout_seconds = max(
+            0.001, float(os.getenv("INGEST_JOB_TIMEOUT_SECONDS", "600"))
+        )
 
     async def enqueue(
         self,
@@ -209,6 +211,11 @@ class IngestDocumentUseCase:
                 pass
         if await self._documents.get_by_id(job.document_id) is None:
             await self._engine.vectors.delete_by_document(job.document_id)
+            await self._jobs.fail_job(
+                job.id,
+                claim_id,
+                error_message="document deleted during ingest",
+            )
             return await self._jobs.get_job(job.id)
         completed = await self._jobs.complete_job(
             job.id,
