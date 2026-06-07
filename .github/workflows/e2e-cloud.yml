@@ -57,7 +57,13 @@ jobs:
           python-version: "3.13"
 
       - name: Install test client deps
-        run: python -m pip install --upgrade pip boto3 requests mcp
+        # boto3/requests/mcp cho ci_e2e; requirements của query-service để chạy
+        # CLIENT THẬT của nó (MCPStreamableHttpClient + Settings, kéo theo fastapi/
+        # pydantic/httpx...) ở bước query-search.
+        run: |
+          python -m pip install --upgrade pip
+          pip install boto3 requests mcp
+          pip install -r src/query-service/requirements.txt
 
       # init-db.sql KHÔNG được commit (gitignored) -> sinh ở runtime cho compose mount.
       - name: Generate infra/localtest/init-db.sql
@@ -144,6 +150,14 @@ jobs:
 
       - name: Search golden queries via MCP HTTP
         run: python infra/localtest/ci_e2e.py search
+
+      # Mắt xích query-service: dùng CHÍNH client production của query-service
+      # (MCPStreamableHttpClient) gọi rag_search của mcp -> nghiệm thu kết nối
+      # query-service -> mcp-service qua search trên corpus vừa ingest.
+      - name: Query-service -> MCP search connectivity (real query-service client)
+        env:
+          MCP_SERVICE_URL: http://localhost:8003
+        run: python infra/localtest/ci_e2e.py query-search
 
       - name: Stack logs on failure
         if: failure()
