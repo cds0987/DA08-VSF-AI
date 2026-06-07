@@ -86,6 +86,22 @@ def test_delete_ingest_router_deletes_document() -> None:
     assert stub.delete_calls == ["doc-9"]
 
 
+def test_delete_ingest_router_requires_api_key_when_configured(monkeypatch) -> None:
+    stub = StubIngestUseCase()
+    app.dependency_overrides[get_ingest_use_case] = lambda: stub
+    monkeypatch.setenv("INGEST_DELETE_API_KEY", "secret")
+
+    with TestClient(app) as client:
+        unauthorized = client.delete("/api/ingest/doc-9")
+        authorized = client.delete("/api/ingest/doc-9", headers={"X-API-Key": "secret"})
+
+    app.dependency_overrides.clear()
+    monkeypatch.delenv("INGEST_DELETE_API_KEY", raising=False)
+
+    assert unauthorized.status_code == 401
+    assert authorized.status_code == 204
+
+
 def test_get_ingest_router_returns_document_status() -> None:
     stub = StubIngestUseCase()
     stub.seed_document("doc-1")

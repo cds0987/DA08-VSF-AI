@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import HTTPException, Request, status
+import os
+
+from fastapi import Header, HTTPException, Request, status
 
 from app.application.use_cases.ingestion import IngestDocumentUseCase
 
@@ -13,3 +15,16 @@ def get_ingest_use_case(request: Request) -> IngestDocumentUseCase:
             detail="ingest use case is not configured",
         )
     return use_case
+
+
+def require_delete_api_key(
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> None:
+    required = os.getenv("INGEST_DELETE_API_KEY", "").strip()
+    if not required:
+        return
+    if x_api_key != required:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="missing or invalid delete API key",
+        )

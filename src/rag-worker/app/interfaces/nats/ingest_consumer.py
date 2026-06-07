@@ -19,6 +19,9 @@ from app.application.use_cases.ingestion import IngestDocumentUseCase
 from app.domain.entities.ingest_job import IngestJob, IngestJobStatus
 from app.infrastructure.external.s3_parser import S3_SOURCE_URI_SCHEMES
 
+MAX_DOCUMENT_ID_LENGTH = 255
+MAX_DOCUMENT_NAME_LENGTH = 512
+
 
 class BadPayloadError(ValueError):
     """Payload doc.ingest hỏng/thiếu field — POISON: term (không redeliver vô hạn).
@@ -74,10 +77,23 @@ class DocIngestConsumer:
         # (document-service hiện publish s3_key — xem docs/sync-doc-ingest-rag-worker.md §2.1).
         gcs_key = str(payload.get("gcs_key") or payload.get("s3_key") or "").strip()
         file_type = str(payload.get("file_type") or "").strip()
+        document_name = str(payload.get("document_name") or doc_id).strip() or doc_id
         if not doc_id or not gcs_key or not file_type:
             raise BadPayloadError(
                 "doc.ingest thiếu trường bắt buộc: cần doc_id, gcs_key (hoặc s3_key), file_type"
             )
+        if len(doc_id) > MAX_DOCUMENT_ID_LENGTH:
+            raise BadPayloadError(
+                f"doc.ingest doc_id vượt giới hạn {MAX_DOCUMENT_ID_LENGTH} ký tự"
+            )
+        if len(document_name) > MAX_DOCUMENT_NAME_LENGTH:
+            self._logger.warning(
+                "doc_ingest_document_name_truncated doc_id=%s original_length=%s max_length=%s",
+                doc_id,
+                len(document_name),
+                MAX_DOCUMENT_NAME_LENGTH,
+            )
+            document_name = document_name[:MAX_DOCUMENT_NAME_LENGTH]
 
         # gcs_key = địa chỉ object -> source_uri. Key trần (document-service) được ghép
         # s3://{default_bucket}/key; key đã có scheme thì giữ nguyên. PARSER_IMPL=s3 sẽ
@@ -86,7 +102,7 @@ class DocIngestConsumer:
         source_uri = normalize_source_uri(gcs_key, default_bucket=self._default_bucket)
         await self._ingest.enqueue(
             document_id=doc_id,
-            document_name=str(payload.get("document_name") or doc_id),
+            document_name=document_name,
             file_type=file_type,
             markdown=None,
             source_uri=source_uri,
@@ -188,7 +204,7 @@ async def start_doc_ingest_subscription(
     durable: str,
     logger: logging.Logger | None = None,
 ) -> Any:
-    """Subscribe doc.ingest; ack khi enqueue thành công, nak để JetStream gửi lại khi lỗi."""
+    """Subscribe doc.ingest; ack khi enqueue thành công, poison -> term, lỗi tạm -> nak."""
     log = logger or logging.getLogger(__name__)
 
     async def _cb(msg: Any) -> None:

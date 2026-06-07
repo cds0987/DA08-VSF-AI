@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import DateTime, Index, Integer, String, Text, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -42,6 +42,15 @@ class JobLogRecord(Base):
 
 class IngestJobRecord(Base):
     __tablename__ = "ingest_jobs"
+    __table_args__ = (
+        Index(
+            "ux_ingest_jobs_active_document_id",
+            "document_id",
+            unique=True,
+            sqlite_where=text("status IN ('PENDING','PROCESSING','STALE')"),
+            postgresql_where=text("status IN ('PENDING','PROCESSING','STALE')"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
     document_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)

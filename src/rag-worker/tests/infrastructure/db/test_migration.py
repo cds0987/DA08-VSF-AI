@@ -43,6 +43,55 @@ def test_migration_upgrade_creates_metadata_and_job_tables(tmp_path, monkeypatch
     assert "ix_ingest_jobs_document_id" in ingest_job_index_names
     assert "ix_ingest_jobs_status" in ingest_job_index_names
     assert "ix_ingest_jobs_claim_id" in ingest_job_index_names
+    assert "ux_ingest_jobs_active_document_id" in ingest_job_index_names
 
     command.downgrade(cfg, "base")
     assert "documents" not in sa.inspect(sa.create_engine(url)).get_table_names()
+
+
+def test_migration_upgrade_deduplicates_active_jobs_before_unique_index(tmp_path, monkeypatch) -> None:
+    url = f"sqlite:///{tmp_path / 'm_dupe.db'}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    cfg = _alembic_config(url)
+
+    command.upgrade(cfg, "0001_create_documents")
+
+    engine = sa.create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                """
+                INSERT INTO ingest_jobs (
+                    id, document_id, document_name, file_type, source_uri, markdown,
+                    artifact_uri, correlation_id, status, claim_id, attempt, chunk_count,
+                    error_message, created_at, updated_at
+                ) VALUES
+                    ('job-1', 'doc-1', 'Policy', 'md', 'local://doc-1', NULL, NULL, 'cid-1',
+                     'PENDING', NULL, 0, 0, NULL, '2026-06-01T00:00:00+00:00', '2026-06-01T00:00:00+00:00'),
+                    ('job-2', 'doc-1', 'Policy', 'md', 'local://doc-1', NULL, NULL, 'cid-2',
+                     'PROCESSING', 'claim-2', 1, 0, NULL, '2026-06-02T00:00:00+00:00', '2026-06-02T00:00:00+00:00')
+                """
+            )
+        )
+
+    command.upgrade(cfg, "head")
+
+    with engine.begin() as conn:
+        rows = conn.execute(
+            sa.text(
+                """
+                SELECT id, status, claim_id, error_message
+                FROM ingest_jobs
+                WHERE document_id = 'doc-1'
+                ORDER BY created_at ASC, id ASC
+                """
+            )
+        ).all()
+
+    assert rows[0] == ("job-1", "PENDING", None, None)
+    assert rows[1] == (
+        "job-2",
+        "FAILED",
+        None,
+        "superseded by migration before active-job unique index",
+    )

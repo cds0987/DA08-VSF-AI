@@ -229,7 +229,12 @@ class S3SourceParser(Parser):
         client = self._get_client()
         # Lớp 1: HEAD trước -> quá ngưỡng thì KHÔNG tải.
         head = client.head_object(Bucket=bucket, Key=key)
-        size = int(head.get("ContentLength", 0))
+        size_raw = head.get("ContentLength")
+        size = int(size_raw) if size_raw is not None else 0
+        if size <= 0:
+            raise ValueError(
+                f"S3 object {bucket}/{key} thiếu hoặc có ContentLength không hợp lệ; từ chối tải."
+            )
         if size > self._max_bytes:
             raise ValueError(
                 f"S3 object {bucket}/{key} = {size} bytes > "
