@@ -55,7 +55,10 @@ services:
     command: ["alembic", "upgrade", "head"]
     working_dir: /app
     environment:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/rag_db
+      # 1 biến Cloud SQL URL duy nhất. DEFAULT = production (Cloud SQL) -> rag-worker dev
+      # + DevOps phát triển song song trên CÙNG 1 DB. Luồng CI override RAG_DATABASE_URL
+      # = postgres local (isolated, không đụng Cloud SQL prod).
+      DATABASE_URL: ${RAG_DATABASE_URL:-postgresql+psycopg://postgres:***REDACTED-DB-PW***@34.87.63.152:5432/rag_db}
     depends_on:
       postgres:
         condition: service_healthy
@@ -72,7 +75,8 @@ services:
       EMBED_MODEL: text-embedding-3-small
       EMBED_DIMENSION: "1536"
       CAPTION_MODEL: gpt-4o-mini
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/rag_db
+      # DEFAULT = production Cloud SQL (1 URL chung dev/deploy); CI override -> postgres local.
+      DATABASE_URL: ${RAG_DATABASE_URL:-postgresql+psycopg://postgres:***REDACTED-DB-PW***@34.87.63.152:5432/rag_db}
       NATS_URL: nats://nats:4222
       NATS_JETSTREAM_ENABLED: "true"
       NATS_STREAM: DOCS
@@ -97,7 +101,8 @@ services:
       context: ./src/document-service
     environment:
       <<: *gcs-s3
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/doc_db
+      # DEFAULT = production Cloud SQL doc_db (asyncpg); CI override -> postgres local.
+      DATABASE_URL: ${DOC_DATABASE_URL:-postgresql+asyncpg://postgres:***REDACTED-DB-PW***@34.87.63.152:5432/doc_db}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in .env}
       JWT_ALGORITHM: HS256
       NATS_URL: nats://nats:4222

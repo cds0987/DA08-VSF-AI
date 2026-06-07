@@ -40,6 +40,10 @@ env:
   GCS_HMAC_KEY: ${{ secrets.GCS_HMAC_KEY }}
   GCS_HMAC_SECRET: ${{ secrets.GCS_HMAC_SECRET }}
   JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+  # Metadata DB: compose default = Cloud SQL (production). CI OVERRIDE -> postgres
+  # container local (isolated, runner không tới được Cloud SQL + không đụng prod).
+  RAG_DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/rag_db
+  DOC_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/doc_db
 
 jobs:
   e2e-cloud:

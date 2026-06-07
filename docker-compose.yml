@@ -68,12 +68,19 @@ services:
     working_dir: /app
     env_file:
       - ./deploy/env/rag-worker.env
+    # 1 biến Cloud SQL URL duy nhất cho cả deploy + dev/test (RAG_DATABASE_URL):
+    # default = Cloud SQL (deploy chạy ngay); DevOps/dev đặt RAG_DATABASE_URL trong
+    # .env để rag-worker + DevOps phát triển song song trên CÙNG 1 Cloud SQL.
+    environment:
+      DATABASE_URL: ${RAG_DATABASE_URL:-postgresql+psycopg://postgres:***REDACTED-DB-PW***@34.87.63.152:5432/rag_db}
     restart: "no"
 
   rag-worker:
     image: rag-worker:local
     env_file:
       - ./deploy/env/rag-worker.env
+    environment:
+      DATABASE_URL: ${RAG_DATABASE_URL:-postgresql+psycopg://postgres:***REDACTED-DB-PW***@34.87.63.152:5432/rag_db}
     depends_on:
       nats:
         condition: service_started
