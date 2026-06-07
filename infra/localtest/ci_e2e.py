@@ -4,9 +4,10 @@ trên hạ tầng cloud THẬT (GCS + Qdrant Cloud + OpenAI), rồi DỌN SẠCH
 Subcommands:
   upload   mint JWT admin, upload toàn bộ validation files qua document-service,
            ghi lại (doc_id, gcs_key) vào record file để cleanup.
-  verify   poll Qdrant tới khi có đủ points (ingest xong) hoặc timeout -> fail.
-  search   chạy golden queries qua MCP HTTP; sai -> exit non-zero.
-  cleanup  XÓA object đã upload trên GCS + XÓA mọi collection trên Qdrant Cloud.
+  verify       poll Qdrant tới khi có đủ points (ingest xong) hoặc timeout -> fail.
+  search       chạy golden queries qua MCP HTTP (SDK trần); sai -> exit non-zero.
+  query-search chạy golden queries qua CLIENT của query-service -> mcp; sai -> non-zero.
+  cleanup      XÓA object đã upload trên GCS + XÓA mọi collection trên Qdrant Cloud.
 
 Env cần có:
   DOC_URL (mặc định http://localhost:8002), MCP_URL (http://localhost:8003/mcp)
@@ -196,6 +197,46 @@ def cmd_search() -> int:
     return asyncio.run(run())
 
 
+def cmd_query_search() -> int:
+    """Nối query-service vào luồng: dùng CHÍNH client production của query-service
+    (MCPStreamableHttpClient) gọi rag_search của mcp-service trên corpus đã ingest.
+
+    Test này nghiệm thu mắt xích query-service -> mcp-service qua giao thức MCP
+    streamable-http + mapping payload thật của query-service (_search_result_from_payload),
+    chứ không phải gọi mcp bằng SDK trần như cmd_search.
+    """
+    import asyncio
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    qs_root = os.path.join(repo_root, "src", "query-service")
+    if qs_root not in sys.path:
+        sys.path.insert(0, qs_root)
+
+    # MCPStreamableHttpClient chỉ đọc mcp_service_url/timeout/internal_token từ Settings.
+    os.environ.setdefault("MCP_SERVICE_URL", os.environ.get("MCP_SERVICE_URL", "http://localhost:8003"))
+
+    from app.infrastructure.config import Settings
+    from app.infrastructure.external.mcp_client import MCPStreamableHttpClient
+
+    client = MCPStreamableHttpClient(Settings())
+
+    async def run() -> int:
+        passed = 0
+        for q, kw in GOLDEN:
+            results = await client.rag_search(q, document_ids=[], top_k=5)
+            blob = " ".join(
+                ((r.caption or "") + " " + (r.parent_text or "")) for r in results
+            ).lower()
+            ok = kw in blob
+            passed += ok
+            top = results[0].document_name if results else "-"
+            print(f"  {'OK ' if ok else 'MISS'} {q[:46]:46} -> {top}")
+        print(f"PASS {passed}/{len(GOLDEN)} (query-service -> mcp search)")
+        return 0 if passed == len(GOLDEN) else 1
+
+    return asyncio.run(run())
+
+
 def _psycopg_dsn(url: str) -> str:
     """SQLAlchemy URL (postgresql+psycopg:// | postgresql+asyncpg://) -> DSN thuần cho psycopg.connect."""
     return (
@@ -264,7 +305,13 @@ def cmd_cleanup() -> int:
 
 
 def main() -> int:
-    cmds = {"upload": cmd_upload, "verify": cmd_verify, "search": cmd_search, "cleanup": cmd_cleanup}
+    cmds = {
+        "upload": cmd_upload,
+        "verify": cmd_verify,
+        "search": cmd_search,
+        "query-search": cmd_query_search,
+        "cleanup": cmd_cleanup,
+    }
     if len(sys.argv) < 2 or sys.argv[1] not in cmds:
         raise SystemExit(f"usage: ci_e2e.py [{'|'.join(cmds)}]")
     return cmds[sys.argv[1]]()
