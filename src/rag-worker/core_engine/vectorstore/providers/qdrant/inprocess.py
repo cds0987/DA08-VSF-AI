@@ -8,6 +8,7 @@ Dùng khi `config.url` rỗng → chạy thẳng trong tiến trình qua `Qdrant
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Sequence
 
 from core_engine.vectorstore.providers.qdrant.base import QdrantBase, point_id
@@ -32,6 +33,7 @@ class QdrantInProcessProvider(QdrantBase):
         # QdrantClient local (:memory:/path) KHÔNG thread-safe; serialize mọi op
         # (chạy qua to_thread) để concurrent ingest/search không đụng numpy index.
         self._op_lock = asyncio.Lock()
+        self._upsert_batch = max(1, int(os.getenv("UPSERT_BATCH_SIZE", "256")))
 
     async def _ensure(self) -> None:
         if self._ready:
@@ -84,25 +86,33 @@ class QdrantInProcessProvider(QdrantBase):
         record_list = list(records)
         if record_list:
             async with self._op_lock:
-                await asyncio.to_thread(
-                    self._client.upsert,
-                    collection_name=self._collection,
-                    points=[self._point(r) for r in record_list],
-                )
+                points = [self._point(r) for r in record_list]
+                for index in range(0, len(points), self._upsert_batch):
+                    await asyncio.to_thread(
+                        self._client.upsert,
+                        collection_name=self._collection,
+                        points=points[index : index + self._upsert_batch],
+                    )
 
     async def list_chunk_ids_by_document(self, document_id: str) -> list[str]:
         await self._ensure()
-        async with self._op_lock:
-            res = await asyncio.to_thread(
-                self._client.scroll,
-                collection_name=self._collection,
-                scroll_filter=self._document_filter(document_id),
-                with_payload=True,
-                with_vectors=False,
-                limit=10000,
-            )
-        points = res[0] if isinstance(res, tuple) else res
-        return sorted(self._existing_from_points(points))
+        chunk_ids: set[str] = set()
+        offset = None
+        while True:
+            async with self._op_lock:
+                points, offset = await asyncio.to_thread(
+                    self._client.scroll,
+                    collection_name=self._collection,
+                    scroll_filter=self._document_filter(document_id),
+                    with_payload=True,
+                    with_vectors=False,
+                    limit=1000,
+                    offset=offset,
+                )
+            chunk_ids.update(self._existing_from_points(points))
+            if offset is None:
+                break
+        return sorted(chunk_ids)
 
     async def delete_many(self, chunk_ids: Sequence[str]) -> None:
         await self._ensure()

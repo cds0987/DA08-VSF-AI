@@ -6,9 +6,12 @@ from datetime import UTC, datetime
 import pytest
 
 from app.application.use_cases.ingestion import IngestDocumentUseCase
+from app.application.use_cases.ingestion.ingest_document_use_case import classify_ingest_error
 from app.domain.entities.document import Document, DocumentStatus
 from app.domain.entities.ingest_job import IngestJob, IngestJobStatus
 from app.infrastructure.db import InMemoryDocumentRepository
+from core_engine.ai import TransientAIError
+from core_engine.engine import ChunkLimitExceededError
 
 
 class StubVectors:
@@ -32,6 +35,11 @@ class StubEngine:
 class FailingEngine(StubEngine):
     async def ingest(self, payload):
         raise RuntimeError("embed failed")
+
+
+class TransientFailingEngine(StubEngine):
+    async def ingest(self, payload):
+        raise TransientAIError("rate limited")
 
 
 class ZeroChunkEngine(StubEngine):
@@ -94,6 +102,7 @@ class StubParser:
 class StubArtifactStore:
     def __init__(self) -> None:
         self.writes = {}
+        self.deleted: list[str] = []
 
     async def write_markdown(self, document_id: str, markdown: str) -> str:
         self.writes[document_id] = markdown
@@ -102,6 +111,10 @@ class StubArtifactStore:
     async def read_markdown(self, artifact_uri: str) -> str:
         document_id = artifact_uri.removeprefix("artifact://").removesuffix(".md")
         return self.writes[document_id]
+
+    async def delete_by_document(self, document_id: str) -> None:
+        self.deleted.append(document_id)
+        self.writes.pop(document_id, None)
 
 
 class LogFailingDocuments(InMemoryDocumentRepository):
@@ -155,6 +168,12 @@ class HeartbeatTrackingDocuments(InMemoryDocumentRepository):
     async def renew_claim(self, job_id: str, claim_id: str) -> bool:
         self.renew_calls += 1
         return await super().renew_claim(job_id, claim_id)
+
+
+class LeaseLosingDocuments(HeartbeatTrackingDocuments):
+    async def renew_claim(self, job_id: str, claim_id: str) -> bool:
+        self.renew_calls += 1
+        return False
 
 
 class EnqueueFailingDocuments(InMemoryDocumentRepository):
@@ -251,6 +270,7 @@ def test_ingest_use_case_deletes_document_vectors() -> None:
         await use_case.delete("doc-2")
 
         assert engine.vectors.deleted == ["doc-2"]
+        assert artifact_store.deleted == ["doc-2"]
         deleted = await use_case.get_document("doc-2")
         assert deleted is not None
         assert deleted.status is DocumentStatus.DELETED
@@ -445,6 +465,57 @@ def test_enqueue_dedups_redelivered_document() -> None:
     asyncio.run(scenario())
 
 
+def test_ingest_use_case_cancels_when_lease_is_lost() -> None:
+    async def scenario() -> None:
+        engine = SlowEngine()
+        documents = LeaseLosingDocuments()
+        use_case = IngestDocumentUseCase(
+            engine,
+            documents,
+            documents,
+            StubParser(),
+            StubArtifactStore(),
+            claim_heartbeat_interval_seconds=0.01,
+        )
+
+        await use_case.enqueue(
+            document_id="doc-lease-lost",
+            document_name="Guide",
+            file_type="md",
+            markdown="# Title\nBody",
+        )
+        processed = await use_case.process_next_job()
+
+        assert processed is not None
+        assert processed.status is IngestJobStatus.PROCESSING
+        assert documents.renew_calls >= 1
+
+    asyncio.run(scenario())
+
+
+def test_ingest_use_case_marks_transient_failures_for_reconcile() -> None:
+    async def scenario() -> None:
+        engine = TransientFailingEngine()
+        documents = InMemoryDocumentRepository()
+        use_case = IngestDocumentUseCase(
+            engine, documents, documents, StubParser(), StubArtifactStore()
+        )
+
+        await use_case.enqueue(
+            document_id="doc-transient",
+            document_name="Guide",
+            file_type="md",
+            markdown="# Title\nBody",
+        )
+        processed = await use_case.process_next_job()
+
+        assert processed is not None
+        assert processed.status is IngestJobStatus.FAILED
+        assert processed.error_class == "transient"
+
+    asyncio.run(scenario())
+
+
 def test_enqueue_skips_completed_document_redelivery() -> None:
     async def scenario() -> None:
         documents = InMemoryDocumentRepository()
@@ -622,3 +693,8 @@ def test_inmemory_repository_does_not_revive_deleted_document_status() -> None:
         assert stored.status is DocumentStatus.DELETED
 
     asyncio.run(scenario())
+
+
+def test_classify_ingest_error_distinguishes_transient_and_permanent() -> None:
+    assert classify_ingest_error(TransientAIError("retry")) == "transient"
+    assert classify_ingest_error(ChunkLimitExceededError("too many")) == "permanent"

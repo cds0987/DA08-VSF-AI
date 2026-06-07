@@ -17,6 +17,14 @@ from core_engine.types import EmbeddingService, VectorRepository
 from core_engine.vectorstore.types import VectorRecord
 
 
+class ChunkLimitExceededError(ValueError):
+    """Document expands into too many chunks for safe ingestion."""
+
+
+class CaptionFallbackThresholdExceededError(RuntimeError):
+    """Too many caption fallbacks indicate degraded AI quality for this document."""
+
+
 @dataclass
 class IngestInput:
     document_id: str
@@ -50,6 +58,11 @@ class HaystackRagEngine:
         self._caption_semaphore = asyncio.Semaphore(
             max(1, int(os.getenv("CAPTION_MAX_CONCURRENCY", "5")))
         )
+        self._max_chunks_per_doc = max(1, int(os.getenv("MAX_CHUNKS_PER_DOC", "50000")))
+        self._caption_fallback_threshold = min(
+            1.0,
+            max(0.0, float(os.getenv("CAPTION_FALLBACK_THRESHOLD", "0.3"))),
+        )
 
     async def ingest(self, doc: IngestInput) -> int:
         request_correlation_id = doc.correlation_id or str(uuid4())
@@ -70,24 +83,36 @@ class HaystackRagEngine:
         sections = self.chunker.split(doc.markdown)
         split_ms = split_sw.elapsed_ms()
         caption_ms = 0.0
+        caption_fallbacks = 0
+        total_children = sum(len(section.children) for section in sections)
 
         chunk_ids: List[str] = []
         embed_texts: List[str] = []
         payloads: List[dict] = []
         captions_by_index: dict[int, str] = {}
+        if total_children > self._max_chunks_per_doc:
+            raise ChunkLimitExceededError(
+                f"document {doc.document_id} produced {total_children} chunks > "
+                f"MAX_CHUNKS_PER_DOC ({self._max_chunks_per_doc})"
+            )
         if self.captioner is not None and sections:
-            async def _caption_one(index: int, text: str) -> tuple[int, str, float]:
+            async def _caption_one(index: int, text: str) -> tuple[int, str, bool]:
                 async with self._caption_semaphore:
-                    caption_sw = Stopwatch()
+                    if hasattr(self.captioner, "caption_with_metadata"):
+                        result = await self.captioner.caption_with_metadata(text)  # type: ignore[attr-defined]
+                        return index, result.text, result.used_fallback
                     caption = await self.captioner.caption(text)
-                    return index, caption, caption_sw.elapsed_ms()
+                    return index, caption, False
 
+            caption_sw = Stopwatch()
             caption_results = await asyncio.gather(
                 *[_caption_one(index, section.parent_text) for index, section in enumerate(sections)]
             )
-            for index, caption, elapsed_ms in caption_results:
+            caption_ms = caption_sw.elapsed_ms()
+            for index, caption, used_fallback in caption_results:
                 captions_by_index[index] = caption
-                caption_ms += elapsed_ms
+                if used_fallback:
+                    caption_fallbacks += 1
 
         for parent_index, section in enumerate(sections):
             parent_id = f"{doc.document_id}::p{parent_index}"
@@ -139,6 +164,13 @@ class HaystackRagEngine:
                 document_id=doc.document_id,
             )
             return 0
+        if self.captioner is not None and sections:
+            fallback_rate = float(caption_fallbacks) / float(len(sections))
+            if fallback_rate > self._caption_fallback_threshold:
+                raise CaptionFallbackThresholdExceededError(
+                    f"caption fallback rate {fallback_rate:.3f} exceeded threshold "
+                    f"{self._caption_fallback_threshold:.3f}"
+                )
 
         embed_sw = Stopwatch()
         vectors = await self.embedder.embed_batch(embed_texts)
@@ -164,6 +196,7 @@ class HaystackRagEngine:
             pruned_chunk_count=len(stale_chunk_ids),
             split_ms=split_ms,
             caption_ms=round(caption_ms, 3),
+            caption_fallback_count=caption_fallbacks,
             embed_ms=embed_ms,
             vector_write_ms=write_ms,
             total_ms=total_sw.elapsed_ms(),

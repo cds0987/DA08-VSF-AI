@@ -47,6 +47,8 @@ def test_migration_upgrade_creates_metadata_and_job_tables(tmp_path, monkeypatch
     assert "ix_ingest_jobs_unpublished_terminal" in ingest_job_index_names
     ingest_job_columns = {column["name"] for column in inspector.get_columns("ingest_jobs")}
     assert "status_published_at" in ingest_job_columns
+    assert "error_class" in ingest_job_columns
+    assert "reconcile_attempt" in ingest_job_columns
 
     command.downgrade(cfg, "base")
     assert "documents" not in sa.inspect(sa.create_engine(url)).get_table_names()
@@ -139,3 +141,61 @@ def test_migration_upgrade_adds_status_publish_tracking_column_and_index(tmp_pat
         ).one()
 
     assert row[0] is None
+
+
+def test_migration_upgrade_adds_failure_classification_columns(tmp_path, monkeypatch) -> None:
+    url = f"sqlite:///{tmp_path / 'm_classification.db'}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    cfg = _alembic_config(url)
+
+    command.upgrade(cfg, "0003_doc_status_outbox")
+    command.upgrade(cfg, "head")
+
+    inspector = sa.inspect(sa.create_engine(url))
+    columns = {column["name"] for column in inspector.get_columns("ingest_jobs")}
+    assert "error_class" in columns
+    assert "reconcile_attempt" in columns
+
+
+def test_migration_upgrade_fixes_active_job_partial_index_case(tmp_path, monkeypatch) -> None:
+    url = f"sqlite:///{tmp_path / 'm_active_index_case.db'}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    cfg = _alembic_config(url)
+
+    command.upgrade(cfg, "head")
+
+    engine = sa.create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                """
+                INSERT INTO ingest_jobs (
+                    id, document_id, document_name, file_type, source_uri, markdown,
+                    artifact_uri, correlation_id, status, claim_id, attempt, chunk_count,
+                    error_message, error_class, reconcile_attempt, created_at, updated_at,
+                    status_published_at
+                ) VALUES (
+                    'job-1', 'doc-1', 'Policy', 'md', 'local://doc-1', NULL, NULL, 'cid-1',
+                    'pending', NULL, 0, 0, NULL, NULL, 0,
+                    '2026-06-01T00:00:00+00:00', '2026-06-01T00:00:00+00:00', NULL
+                )
+                """
+            )
+        )
+        with pytest.raises(sa.exc.IntegrityError):
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO ingest_jobs (
+                        id, document_id, document_name, file_type, source_uri, markdown,
+                        artifact_uri, correlation_id, status, claim_id, attempt, chunk_count,
+                        error_message, error_class, reconcile_attempt, created_at, updated_at,
+                        status_published_at
+                    ) VALUES (
+                        'job-2', 'doc-1', 'Policy', 'md', 'local://doc-1', NULL, NULL, 'cid-2',
+                        'processing', 'claim-2', 1, 0, NULL, NULL, 0,
+                        '2026-06-01T00:00:01+00:00', '2026-06-01T00:00:01+00:00', NULL
+                    )
+                    """
+                )
+            )

@@ -13,6 +13,7 @@ from app.application.use_cases.ingestion.store_reconciler import (
     reconcile_store_once,
 )
 from app.domain.entities.document import Document, DocumentStatus
+from app.domain.entities.ingest_job import IngestJob, IngestJobStatus
 from app.domain.repositories.object_store_lister import StoredObject
 from app.infrastructure.db import InMemoryDocumentRepository
 
@@ -32,6 +33,9 @@ class _StubArtifactStore:
 
     async def read_markdown(self, artifact_uri: str) -> str:
         return ""
+
+    async def delete_by_document(self, document_id: str) -> None:
+        return None
 
 
 class _FakeLister:
@@ -131,3 +135,134 @@ async def test_reconcile_is_idempotent_across_multiple_sweeps() -> None:
 
     assert first == 1
     assert second == 0
+
+
+@pytest.mark.asyncio
+async def test_reconcile_reenqueues_old_transient_failed_document() -> None:
+    repository = InMemoryDocumentRepository()
+    now = datetime.now(UTC)
+    await repository.create(
+        Document(
+            id="failed-doc",
+            name="Failed",
+            file_type="pdf",
+            s3_key="s3://bucket/raw/failed-doc/file.pdf",
+            status=DocumentStatus.FAILED,
+            created_at=now,
+        )
+    )
+    await repository.enqueue(
+        IngestJob(
+            id="job-failed-1",
+            document_id="failed-doc",
+            document_name="Failed",
+            file_type="pdf",
+            source_uri="s3://bucket/raw/failed-doc/file.pdf",
+            markdown=None,
+            artifact_uri=None,
+            correlation_id="cid-failed-1",
+            status=IngestJobStatus.FAILED,
+            created_at=now - timedelta(hours=2),
+            updated_at=now - timedelta(hours=2),
+            error_message="provider down",
+            error_class="transient",
+            reconcile_attempt=1,
+        )
+    )
+    use_case = _use_case(repository)
+    lister = _FakeLister([StoredObject("raw/failed-doc/file.pdf", 10, now - timedelta(hours=1))])
+
+    enqueued = await reconcile_store_once(
+        lister,
+        use_case,
+        StoreReconcileSettings(
+            enabled=True,
+            interval_seconds=900,
+            min_age_seconds=60,
+            bucket="docs",
+            max_failed_reconcile_attempts=3,
+        ),
+        logging.getLogger("test"),
+    )
+
+    assert enqueued == 1
+    active = await repository.find_active_job("failed-doc")
+    assert active is not None
+    assert active.status is IngestJobStatus.PENDING
+    assert active.reconcile_attempt == 2
+
+
+@pytest.mark.asyncio
+async def test_reconcile_skips_permanent_or_capped_failed_document() -> None:
+    repository = InMemoryDocumentRepository()
+    now = datetime.now(UTC)
+    for doc_id in ("permanent-doc", "capped-doc"):
+        await repository.create(
+            Document(
+                id=doc_id,
+                name=doc_id,
+                file_type="pdf",
+                s3_key=f"s3://bucket/raw/{doc_id}/file.pdf",
+                status=DocumentStatus.FAILED,
+                created_at=now,
+            )
+        )
+    await repository.enqueue(
+        IngestJob(
+            id="job-permanent",
+            document_id="permanent-doc",
+            document_name="Permanent",
+            file_type="pdf",
+            source_uri="s3://bucket/raw/permanent-doc/file.pdf",
+            markdown=None,
+            artifact_uri=None,
+            correlation_id="cid-permanent",
+            status=IngestJobStatus.FAILED,
+            created_at=now - timedelta(hours=2),
+            updated_at=now - timedelta(hours=2),
+            error_message="bad request",
+            error_class="permanent",
+        )
+    )
+    await repository.enqueue(
+        IngestJob(
+            id="job-capped",
+            document_id="capped-doc",
+            document_name="Capped",
+            file_type="pdf",
+            source_uri="s3://bucket/raw/capped-doc/file.pdf",
+            markdown=None,
+            artifact_uri=None,
+            correlation_id="cid-capped",
+            status=IngestJobStatus.FAILED,
+            created_at=now - timedelta(hours=2),
+            updated_at=now - timedelta(hours=2),
+            error_message="provider down",
+            error_class="transient",
+            reconcile_attempt=3,
+        )
+    )
+    use_case = _use_case(repository)
+    lister = _FakeLister(
+        [
+            StoredObject("raw/permanent-doc/file.pdf", 10, now - timedelta(hours=1)),
+            StoredObject("raw/capped-doc/file.pdf", 10, now - timedelta(hours=1)),
+        ]
+    )
+
+    enqueued = await reconcile_store_once(
+        lister,
+        use_case,
+        StoreReconcileSettings(
+            enabled=True,
+            interval_seconds=900,
+            min_age_seconds=60,
+            bucket="docs",
+            max_failed_reconcile_attempts=3,
+        ),
+        logging.getLogger("test"),
+    )
+
+    assert enqueued == 0
+    assert await repository.find_active_job("permanent-doc") is None
+    assert await repository.find_active_job("capped-doc") is None

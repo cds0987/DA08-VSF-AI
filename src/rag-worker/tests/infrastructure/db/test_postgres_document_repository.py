@@ -193,6 +193,49 @@ async def test_postgres_document_repository_claims_and_completes_ingest_jobs(tmp
 
 
 @pytest.mark.asyncio
+async def test_postgres_document_repository_enforces_single_active_job_per_document(tmp_path) -> None:
+    database_path = tmp_path / "documents.db"
+    repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
+    now = datetime.now(UTC)
+
+    first = await repository.enqueue(
+        IngestJob(
+            id="job-1",
+            document_id="doc-1",
+            document_name="Policy",
+            file_type="md",
+            source_uri="local://doc-1.md",
+            markdown="# Policy",
+            artifact_uri=None,
+            correlation_id="cid-1",
+            status=IngestJobStatus.PENDING,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    second = await repository.enqueue(
+        IngestJob(
+            id="job-2",
+            document_id="doc-1",
+            document_name="Policy",
+            file_type="md",
+            source_uri="local://doc-1.md",
+            markdown="# Policy duplicate",
+            artifact_uri=None,
+            correlation_id="cid-2",
+            status=IngestJobStatus.PENDING,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    assert first.id == "job-1"
+    assert second.id == "job-1"
+    assert await repository.get_job("job-2") is None
+
+
+@pytest.mark.asyncio
 async def test_postgres_document_repository_renews_processing_claim(tmp_path) -> None:
     database_path = tmp_path / "documents.db"
     repository = PostgresDocumentRepository(f"sqlite:///{database_path}")

@@ -33,6 +33,16 @@ from pathlib import Path
 
 import pytest
 
+from app.domain.entities.document import DocumentStatus
+
+
+async def _document_removed(ingest_use_case, document_id: str) -> bool:
+    """True nếu document coi như đã xóa: hoặc không còn row, hoặc soft-delete (tombstone
+    status=DELETED — G7 giữ row để reconciler không hồi sinh). delete() KHÔNG hard-delete."""
+    doc = await ingest_use_case.get_document(document_id)
+    return doc is None or doc.status is DocumentStatus.DELETED
+
+
 # tests/e2e/ -> src/rag-worker ; manifest lái corpus (thêm file = thêm entry, ko sửa code)
 MANIFEST_PATH = Path(__file__).resolve().parents[2] / "eval" / "validation" / "manifest.json"
 
@@ -391,12 +401,12 @@ async def test_document_service_to_rag_worker_real_infra() -> None:
         await broker.publish_json(access_subject, {"doc_id": doc_id, "deleted": True})
         for _ in range(120):
             if (
-                await runtime.ingest_use_case.get_document(doc_id) is None
+                await _document_removed(runtime.ingest_use_case, doc_id)
                 and _qdrant_point_count(collection) == 0
             ):
                 break
             await asyncio.sleep(0.25)
-        assert await runtime.ingest_use_case.get_document(doc_id) is None
+        assert await _document_removed(runtime.ingest_use_case, doc_id)
         assert _qdrant_point_count(collection) == 0
     finally:
         worker.cancel()
@@ -556,13 +566,13 @@ async def test_full_corpus_ingest_delete_real_infra() -> None:
         for _ in range(240):
             gone = [
                 e for e in manifest
-                if await runtime.ingest_use_case.get_document(e["document_id"]) is None
+                if await _document_removed(runtime.ingest_use_case, e["document_id"])
             ]
             if len(gone) == len(manifest) and _qdrant_point_count(collection) == 0:
                 break
             await asyncio.sleep(0.25)
         for entry in manifest:
-            assert await runtime.ingest_use_case.get_document(entry["document_id"]) is None
+            assert await _document_removed(runtime.ingest_use_case, entry["document_id"])
         assert _qdrant_point_count(collection) == 0
     finally:
         worker.cancel()

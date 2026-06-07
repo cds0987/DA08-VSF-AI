@@ -116,6 +116,12 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
     async def get_job(self, job_id: str) -> IngestJob | None:
         return self._jobs.get(job_id)
 
+    async def get_latest_job_for_document(self, document_id: str) -> IngestJob | None:
+        jobs = [job for job in self._jobs.values() if job.document_id == document_id]
+        if not jobs:
+            return None
+        return sorted(jobs, key=lambda item: (item.updated_at, item.created_at, item.id))[-1]
+
     async def find_active_job(self, document_id: str) -> IngestJob | None:
         active = {
             IngestJobStatus.PENDING,
@@ -155,6 +161,8 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
                 attempt=job.attempt + 1,
                 chunk_count=job.chunk_count,
                 error_message=job.error_message,
+                error_class=job.error_class,
+                reconcile_attempt=job.reconcile_attempt,
                 created_at=job.created_at,
                 updated_at=datetime.now(UTC),
                 status_published_at=job.status_published_at,
@@ -219,6 +227,8 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
             attempt=job.attempt,
             chunk_count=chunk_count,
             error_message=None,
+            error_class=None,
+            reconcile_attempt=job.reconcile_attempt,
             created_at=job.created_at,
             updated_at=datetime.now(UTC),
             status_published_at=None,
@@ -244,6 +254,7 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
                 claim_id=None,
                 updated_at=now,
                 error_message="exceeded max attempts",
+                error_class="transient",
                 status_published_at=None,
             )
             document = self._documents.get(job.document_id)
@@ -273,6 +284,7 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
         claim_id: str,
         *,
         error_message: str,
+        error_class: str | None = None,
     ) -> bool:
         job = self._jobs.get(job_id)
         if job is None or job.claim_id != claim_id:
@@ -291,6 +303,8 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
             attempt=job.attempt,
             chunk_count=job.chunk_count,
             error_message=error_message,
+            error_class=error_class,
+            reconcile_attempt=job.reconcile_attempt,
             created_at=job.created_at,
             updated_at=datetime.now(UTC),
             status_published_at=None,
@@ -318,3 +332,19 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
         if job is None:
             return
         self._jobs[job_id] = replace(job, status_published_at=datetime.now(UTC))
+
+    async def count_by_status(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for job in self._jobs.values():
+            counts[job.status.value] = counts.get(job.status.value, 0) + 1
+        return counts
+
+    async def oldest_unpublished_terminal_age_seconds(self) -> float | None:
+        now = datetime.now(UTC)
+        terminal = {IngestJobStatus.COMPLETED, IngestJobStatus.FAILED}
+        ages = [
+            (now - job.updated_at).total_seconds()
+            for job in self._jobs.values()
+            if job.status in terminal and job.status_published_at is None
+        ]
+        return max(ages) if ages else None

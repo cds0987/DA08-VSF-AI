@@ -47,8 +47,8 @@ class IngestJobRecord(Base):
             "ux_ingest_jobs_active_document_id",
             "document_id",
             unique=True,
-            sqlite_where=text("status IN ('PENDING','PROCESSING','STALE')"),
-            postgresql_where=text("status IN ('PENDING','PROCESSING','STALE')"),
+            sqlite_where=text("status IN ('pending','processing','stale')"),
+            postgresql_where=text("status IN ('pending','processing','stale')"),
         ),
     )
 
@@ -65,6 +65,8 @@ class IngestJobRecord(Base):
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_class: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    reconcile_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
