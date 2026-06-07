@@ -54,13 +54,31 @@ services:
       - redis
     restart: unless-stopped
 
-  rag-worker:
+  # Migration one-shot: alembic upgrade head lên Cloud SQL TRƯỚC khi rag-worker chạy.
+  # Tách riêng (không nhét vào rag-worker startup) để khi scale nhiều worker không
+  # chạy đua DDL trên cùng DB, và migration lỗi -> fail-fast thay vì crash-loop.
+  # DB là Cloud SQL (external, luôn sẵn) nên không depends_on service nào; DevOps
+  # phải CREATE DATABASE rag_db sẵn + mở mạng VM -> Cloud SQL trước khi deploy.
+  # Build image ở đây (rag-worker:local); rag-worker tái dùng image, không build lại.
+  rag-migrate:
     build:
       context: ./src/rag-worker
+    image: rag-worker:local
+    command: ["alembic", "upgrade", "head"]
+    working_dir: /app
+    env_file:
+      - ./deploy/env/rag-worker.env
+    restart: "no"
+
+  rag-worker:
+    image: rag-worker:local
     env_file:
       - ./deploy/env/rag-worker.env
     depends_on:
-      - nats
+      nats:
+        condition: service_started
+      rag-migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
     volumes:
         - /home/tranhuugiahuynb/secrets/gcp-sa.json:/secrets/gcp-sa.json:ro
