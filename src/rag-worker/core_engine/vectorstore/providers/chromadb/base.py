@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 from typing import Any, Sequence
 
-from core_engine.types import SearchLineage, SearchResult
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.provider import VectorStoreProvider
 from core_engine.vectorstore.types import VectorRecord
@@ -76,40 +75,3 @@ class ChromaBase(VectorStoreProvider):
         if ids and isinstance(ids[0], list):
             return list(ids[0])
         return list(ids)
-
-    def _assemble(self, res: dict, top_k: int) -> list[SearchResult]:
-        metas = (res.get("metadatas") or [[]])[0]
-        dists = (res.get("distances") or [[]])[0]
-        docs = (res.get("documents") or [[]])[0]
-        ids = (res.get("ids") or [[]])[0]
-        out: list[SearchResult] = []
-        for i, raw_meta in enumerate(metas):
-            meta = self._decode_meta(raw_meta or {})
-            distance = dists[i] if i < len(dists) else None
-            document = docs[i] if i < len(docs) else ""
-            out.append(self._to_result(ids[i], meta, document, distance))
-            if len(out) >= top_k:
-                break
-        return out
-
-    @staticmethod
-    def _to_result(chunk_id: str, m: dict, document: str, distance) -> SearchResult:
-        # cosine distance -> similarity (1 - distance).
-        score = (1.0 - float(distance)) if distance is not None else 0.0
-        return SearchResult(
-            unit_id=m.get("chunk_id", chunk_id),
-            parent_id=m.get("parent_id", ""),
-            document_id=m.get("document_id", ""),
-            display_name=m.get("document_name", ""),
-            file_type=m.get("file_type", ""),
-            page_number=int(m.get("page_number", 0)),
-            caption=m.get("caption", m.get("child_text", document or "")),
-            content=m.get("parent_text", ""),
-            heading_path=list(m.get("heading_path", [])),
-            lineage=SearchLineage(
-                source_uri=m.get("source_uri", ""),
-                artifact_uri=m.get("artifact_uri", ""),
-            ),
-            score=score,
-            rerank_score=float(m.get("rerank_score", 0.0)),
-        )
