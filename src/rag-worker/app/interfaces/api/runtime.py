@@ -28,9 +28,11 @@ from app.domain.repositories.parser import Parser
 from app.infrastructure.db import InMemoryDocumentRepository
 from app.infrastructure.external.local_artifact_store import LocalArtifactStore
 from app.infrastructure.external.object_store_lister import S3ObjectStoreLister
+from app.infrastructure.external.s3_artifact_store import S3ArtifactStore
 from app.infrastructure.external.s3_parser import S3SourceParser
 from app.interfaces.api.composition import resolve_parser
 from core_engine.ai import AISettings, get_ai_provider, load_ai_settings, reset_ai_provider
+from core_engine.caption.captioner import caption_metrics_snapshot
 from core_engine.config import HaystackSettings, load_settings
 from core_engine.config_loader import load_config
 from core_engine.config_schema import PipelineConfig
@@ -64,6 +66,7 @@ class HealthReport:
     vector_deployment: str
     vector_index: str
     metadata_backend: str
+    metrics: dict[str, Any] = field(default_factory=dict)
     reasons: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -129,6 +132,9 @@ def load_store_reconcile_settings() -> StoreReconcileSettings:
         interval_seconds=int(os.getenv("STORE_RECONCILE_INTERVAL_SECONDS", "900")),
         min_age_seconds=int(os.getenv("STORE_RECONCILE_MIN_AGE_SECONDS", "600")),
         bucket=_source_bucket(),
+        max_failed_reconcile_attempts=int(
+            os.getenv("STORE_RECONCILE_MAX_FAILED_ATTEMPTS", "3")
+        ),
     )
 
 
@@ -167,16 +173,28 @@ def validate_runtime_settings() -> None:
 
 
 def validate_ingest_runtime_limits() -> None:
-    if int(os.getenv("INGEST_WORKER_COUNT", "1")) <= 0:
+    worker_count = int(os.getenv("INGEST_WORKER_COUNT", "1"))
+    if worker_count <= 0:
         raise ValueError("INGEST_WORKER_COUNT must be > 0")
+    if int(os.getenv("DB_POOL_SIZE", str(max(2, worker_count * 2)))) <= 0:
+        raise ValueError("DB_POOL_SIZE must be > 0")
+    if int(os.getenv("DB_MAX_OVERFLOW", str(max(1, worker_count)))) < 0:
+        raise ValueError("DB_MAX_OVERFLOW must be >= 0")
     if float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5")) <= 0:
         raise ValueError("INGEST_WORKER_POLL_INTERVAL_SECONDS must be > 0")
     if float(os.getenv("INGEST_JOB_TIMEOUT_SECONDS", "600")) <= 0:
         raise ValueError("INGEST_JOB_TIMEOUT_SECONDS must be > 0")
     if int(os.getenv("EMBED_BATCH_SIZE", "100")) <= 0:
         raise ValueError("EMBED_BATCH_SIZE must be > 0")
+    if int(os.getenv("UPSERT_BATCH_SIZE", "256")) <= 0:
+        raise ValueError("UPSERT_BATCH_SIZE must be > 0")
     if int(os.getenv("CAPTION_MAX_CONCURRENCY", "5")) <= 0:
         raise ValueError("CAPTION_MAX_CONCURRENCY must be > 0")
+    if int(os.getenv("MAX_CHUNKS_PER_DOC", "50000")) <= 0:
+        raise ValueError("MAX_CHUNKS_PER_DOC must be > 0")
+    threshold = float(os.getenv("CAPTION_FALLBACK_THRESHOLD", "0.3"))
+    if threshold < 0 or threshold > 1:
+        raise ValueError("CAPTION_FALLBACK_THRESHOLD must be between 0 and 1")
     sweep = load_doc_status_sweep_settings()
     if sweep.interval_seconds <= 0:
         raise ValueError("DOC_STATUS_SWEEP_INTERVAL_SECONDS must be > 0")
@@ -190,6 +208,8 @@ def validate_ingest_runtime_limits() -> None:
             raise ValueError("STORE_RECONCILE_INTERVAL_SECONDS must be > 0")
         if reconcile.min_age_seconds < 0:
             raise ValueError("STORE_RECONCILE_MIN_AGE_SECONDS must be >= 0")
+        if reconcile.max_failed_reconcile_attempts <= 0:
+            raise ValueError("STORE_RECONCILE_MAX_FAILED_ATTEMPTS must be > 0")
         if not reconcile.bucket.strip():
             raise ValueError("STORE_RECONCILE requires S3_SOURCE_BUCKET or R2_BUCKET")
 
@@ -499,7 +519,16 @@ def build_parser(provider: Any) -> Parser:
     )
 
 
-def build_artifact_store() -> ArtifactStore:
+def build_artifact_store(
+    *,
+    parser: Parser | None = None,
+    source_bucket: str | None = None,
+) -> ArtifactStore:
+    if source_bucket and isinstance(parser, S3SourceParser):
+        return S3ArtifactStore(
+            bucket=source_bucket,
+            client_factory=parser._client_factory,
+        )
     return LocalArtifactStore()
 
 
@@ -535,6 +564,22 @@ async def compute_health(runtime: RuntimeState) -> HealthReport:
         await asyncio.wait_for(runtime.document_repository.list_all(limit=1, offset=0), timeout=3.0)
     except Exception as exc:  # noqa: BLE001
         reasons.append(f"Metadata readiness probe failed: {exc}")
+    job_counts = await runtime.job_repository.count_by_status()
+    unpublished_lag = await runtime.job_repository.oldest_unpublished_terminal_age_seconds()
+    metrics = {
+        **caption_metrics_snapshot(),
+        "jobs_pending": float(job_counts.get("pending", 0)),
+        "jobs_processing": float(job_counts.get("processing", 0)),
+        "jobs_stale": float(job_counts.get("stale", 0)),
+        "jobs_failed": float(job_counts.get("failed", 0)),
+        "jobs_completed": float(job_counts.get("completed", 0)),
+        "queue_depth": float(
+            job_counts.get("pending", 0)
+            + job_counts.get("processing", 0)
+            + job_counts.get("stale", 0)
+        ),
+        "doc_status_sweep_lag_seconds": unpublished_lag or 0.0,
+    }
     return HealthReport(
         status="healthy" if not reasons else "unhealthy",
         app_env=os.getenv("APP_ENV", "development"),
@@ -543,6 +588,7 @@ async def compute_health(runtime: RuntimeState) -> HealthReport:
         vector_deployment=runtime.vector_config.deployment,
         vector_index=runtime.vector_config.index_id(),
         metadata_backend=metadata_backend_name(os.getenv("DATABASE_URL", "").strip()),
+        metrics=metrics,
         reasons=reasons,
     )
 
@@ -632,8 +678,11 @@ def bootstrap_runtime() -> RuntimeState:
     engine = None
     document_repository = build_document_repository()
     parser: Parser = build_parser(provider)
-    artifact_store = build_artifact_store()
     source_bucket = _source_bucket() or None
+    artifact_store = build_artifact_store(
+        parser=parser,
+        source_bucket=source_bucket,
+    )
     try:
         if pipeline_cfg is not None:
             parser = resolve_parser(
@@ -655,6 +704,10 @@ def bootstrap_runtime() -> RuntimeState:
                 provider=provider,
                 vector_config=vector_config,
             )
+        artifact_store = build_artifact_store(
+            parser=parser,
+            source_bucket=source_bucket,
+        )
         vector_config = engine.vectors.config
         ingest_use_case = IngestDocumentUseCase(
             engine,

@@ -47,6 +47,8 @@ def test_migration_upgrade_creates_metadata_and_job_tables(tmp_path, monkeypatch
     assert "ix_ingest_jobs_unpublished_terminal" in ingest_job_index_names
     ingest_job_columns = {column["name"] for column in inspector.get_columns("ingest_jobs")}
     assert "status_published_at" in ingest_job_columns
+    assert "error_class" in ingest_job_columns
+    assert "reconcile_attempt" in ingest_job_columns
 
     command.downgrade(cfg, "base")
     assert "documents" not in sa.inspect(sa.create_engine(url)).get_table_names()
@@ -139,3 +141,17 @@ def test_migration_upgrade_adds_status_publish_tracking_column_and_index(tmp_pat
         ).one()
 
     assert row[0] is None
+
+
+def test_migration_upgrade_adds_failure_classification_columns(tmp_path, monkeypatch) -> None:
+    url = f"sqlite:///{tmp_path / 'm_classification.db'}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    cfg = _alembic_config(url)
+
+    command.upgrade(cfg, "0003_doc_status_outbox")
+    command.upgrade(cfg, "head")
+
+    inspector = sa.inspect(sa.create_engine(url))
+    columns = {column["name"] for column in inspector.get_columns("ingest_jobs")}
+    assert "error_class" in columns
+    assert "reconcile_attempt" in columns

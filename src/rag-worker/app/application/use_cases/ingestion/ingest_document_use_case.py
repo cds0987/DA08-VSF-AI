@@ -7,6 +7,7 @@ import os
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from core_engine.ai import PermanentAIError, TransientAIError
 from app.domain.entities.document import Document, DocumentStatus
 from app.domain.entities.ingest_job import IngestJob, IngestJobStatus
 from app.domain.entities.job_log import JobLog
@@ -14,12 +15,37 @@ from app.domain.repositories.artifact_store import ArtifactStore
 from app.domain.repositories.document_repository import DocumentRepository
 from app.domain.repositories.ingest_job_repository import IngestJobRepository
 from app.domain.repositories.parser import Parser
-from core_engine.engine import HaystackRagEngine, IngestInput
+from core_engine.engine import (
+    CaptionFallbackThresholdExceededError,
+    ChunkLimitExceededError,
+    HaystackRagEngine,
+    IngestInput,
+)
 from core_engine.logging_utils import log_event
 
 
 class EmptyIngestResultError(ValueError):
     """Raised when parsing/indexing produces no retrievable content."""
+
+
+class LeaseLostError(RuntimeError):
+    """Raised when this worker loses the claim lease and must stop ingesting early."""
+
+
+def classify_ingest_error(exc: BaseException) -> str:
+    if isinstance(
+        exc,
+        (
+            TransientAIError,
+            CaptionFallbackThresholdExceededError,
+            TimeoutError,
+            asyncio.TimeoutError,
+        ),
+    ):
+        return "transient"
+    if isinstance(exc, (PermanentAIError, EmptyIngestResultError, ChunkLimitExceededError)):
+        return "permanent"
+    return "permanent"
 
 
 class IngestDocumentUseCase:
@@ -54,6 +80,7 @@ class IngestDocumentUseCase:
         source_uri: str | None = None,
         artifact_uri: str | None = None,
         correlation_id: str | None = None,
+        reconcile_attempt: int = 0,
     ) -> IngestJob:
         if not markdown and not source_uri:
             raise ValueError("ingest requires either markdown or source_uri")
@@ -144,6 +171,7 @@ class IngestDocumentUseCase:
             status=IngestJobStatus.PENDING,
             created_at=now,
             updated_at=now,
+            reconcile_attempt=reconcile_attempt,
         )
         try:
             await self._jobs.enqueue(job)
@@ -168,6 +196,7 @@ class IngestDocumentUseCase:
         if job is None:
             return None
         heartbeat_stop = asyncio.Event()
+        lease_lost = asyncio.Event()
         await self._documents.update_status(job.document_id, DocumentStatus.PROCESSING)
         await self._append_job_log(
             JobLog(
@@ -179,36 +208,77 @@ class IngestDocumentUseCase:
             )
         )
         heartbeat_task = asyncio.create_task(
-            self._maintain_claim_lease(job.id, claim_id, heartbeat_stop)
+            self._maintain_claim_lease(job.id, claim_id, heartbeat_stop, lease_lost)
         )
         try:
             markdown, source_uri, artifact_uri = await self._prepare_markdown(job)
-            chunk_count = await asyncio.wait_for(
-                self._engine.ingest(
-                    IngestInput(
-                        document_id=job.document_id,
-                        document_name=job.document_name,
-                        file_type=job.file_type,
-                        markdown=markdown,
-                        source_uri=source_uri,
-                        artifact_uri=artifact_uri,
-                        correlation_id=job.correlation_id,
-                    )
-                ),
-                timeout=self._ingest_timeout_seconds,
+            ingest_task = asyncio.create_task(
+                asyncio.wait_for(
+                    self._engine.ingest(
+                        IngestInput(
+                            document_id=job.document_id,
+                            document_name=job.document_name,
+                            file_type=job.file_type,
+                            markdown=markdown,
+                            source_uri=source_uri,
+                            artifact_uri=artifact_uri,
+                            correlation_id=job.correlation_id,
+                        )
+                    ),
+                    timeout=self._ingest_timeout_seconds,
+                )
             )
+            lease_task = asyncio.create_task(lease_lost.wait())
+            done, pending = await asyncio.wait(
+                {ingest_task, lease_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for pending_task in pending:
+                pending_task.cancel()
+            if lease_task in done and lease_lost.is_set():
+                ingest_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await ingest_task
+                raise LeaseLostError("ingest claim lease lost; cancelled in-flight ingest")
+            try:
+                chunk_count = await ingest_task
+            except asyncio.CancelledError as exc:
+                if lease_lost.is_set():
+                    raise LeaseLostError(
+                        "ingest claim lease lost; cancelled in-flight ingest"
+                    ) from exc
+                raise
             if chunk_count <= 0:
                 raise EmptyIngestResultError(
                     "ingest produced 0 chunks; source is empty or OCR is required"
                 )
+        except LeaseLostError:
+            return await self._jobs.get_job(job.id)
         except Exception as exc:
-            failed = await self._jobs.fail_job(job.id, claim_id, error_message=str(exc))
+            error_class = classify_ingest_error(exc)
+            failed = await self._jobs.fail_job(
+                job.id,
+                claim_id,
+                error_message=str(exc),
+                error_class=error_class,
+            )
             if failed:
                 await self._documents.update_status(
                     job.document_id,
                     DocumentStatus.FAILED,
                     error=str(exc),
                 )
+            log_event(
+                self._logger,
+                logging.WARNING,
+                "ingest_job_failed",
+                stage="ingest",
+                job_id=job.id,
+                document_id=job.document_id,
+                error_class=error_class,
+                error_type=exc.__class__.__name__,
+                error_message=str(exc),
+            )
             await self._append_job_log(
                 JobLog(
                     document_id=job.document_id,
@@ -220,10 +290,6 @@ class IngestDocumentUseCase:
                     created_at=datetime.now(UTC),
                 )
             )
-            # KHÔNG raise: fail_job đã đặt FAILED terminal (retry do stale-reaper lo khi
-            # worker CHẾT, không phải khi job lỗi). Trả job FAILED để worker publish
-            # doc.status:failed (nếu raise thì nhánh except của worker nuốt job -> mất
-            # status, contract vỡ). Job terminal nên không bị claim lại -> không busy-loop.
             return await self._jobs.get_job(job.id)
         finally:
             heartbeat_stop.set()
@@ -277,6 +343,7 @@ class IngestDocumentUseCase:
     async def delete(self, document_id: str) -> None:
         await self._documents.delete(document_id)
         await self._engine.vectors.delete_by_document(document_id)
+        await self._artifact_store.delete_by_document(document_id)
 
     async def get_document(self, document_id: str) -> Document | None:
         return await self._documents.get_by_id(document_id)
@@ -286,6 +353,9 @@ class IngestDocumentUseCase:
 
     async def get_job(self, job_id: str) -> IngestJob | None:
         return await self._jobs.get_job(job_id)
+
+    async def get_latest_job_for_document(self, document_id: str) -> IngestJob | None:
+        return await self._jobs.get_latest_job_for_document(document_id)
 
     async def _prepare_markdown(self, job: IngestJob) -> tuple[str, str, str]:
         if job.markdown:
@@ -312,6 +382,7 @@ class IngestDocumentUseCase:
         job_id: str,
         claim_id: str,
         stop_event: asyncio.Event,
+        lease_lost: asyncio.Event,
     ) -> None:
         if self._claim_heartbeat_interval_seconds <= 0:
             return
@@ -334,6 +405,7 @@ class IngestDocumentUseCase:
                     job_id=job_id,
                     claim_id=claim_id,
                 )
+                lease_lost.set()
                 return
 
     async def _append_job_log(self, entry: JobLog) -> None:

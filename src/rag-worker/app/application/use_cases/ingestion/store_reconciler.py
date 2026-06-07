@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from app.application.use_cases.ingestion.ingest_document_use_case import IngestDocumentUseCase
+from app.domain.entities.document import DocumentStatus
 from app.domain.repositories.object_store_lister import ObjectStoreLister
 from core_engine.logging_utils import log_event
 
@@ -18,6 +19,7 @@ class StoreReconcileSettings:
     interval_seconds: int = 900
     min_age_seconds: int = 600
     bucket: str = ""
+    max_failed_reconcile_attempts: int = 3
 
 
 def parse_object_key(key: str) -> tuple[str, str, str] | None:
@@ -51,8 +53,20 @@ async def reconcile_store_once(
             continue
         doc_id, document_name, file_type = parsed
         existing = await ingest_use_case.get_document(doc_id)
+        reconcile_attempt = 0
         if existing is not None:
-            continue
+            if existing.status is not DocumentStatus.FAILED:
+                continue
+            latest_job = await ingest_use_case.get_latest_job_for_document(doc_id)
+            if latest_job is None:
+                continue
+            if latest_job.error_class != "transient":
+                continue
+            if latest_job.reconcile_attempt >= settings.max_failed_reconcile_attempts:
+                continue
+            if (now - latest_job.updated_at).total_seconds() < settings.min_age_seconds:
+                continue
+            reconcile_attempt = latest_job.reconcile_attempt + 1
         await ingest_use_case.enqueue(
             document_id=doc_id,
             document_name=document_name,
@@ -60,6 +74,7 @@ async def reconcile_store_once(
             markdown=None,
             source_uri=f"s3://{settings.bucket}/{obj.key}",
             correlation_id=f"reconcile:{doc_id}",
+            reconcile_attempt=reconcile_attempt,
         )
         enqueued += 1
     log_event(

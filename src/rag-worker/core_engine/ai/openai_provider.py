@@ -17,6 +17,8 @@ from core_engine.ai.base import (
     CapabilityConfig,
     EMBED,
     OCR,
+    PermanentAIError,
+    TransientAIError,
     VisionImage,
     load_ai_settings,
     retry_async,
@@ -82,7 +84,10 @@ class OpenAIProvider(AIProvider):
             kwargs = {"model": cfg.model, "input": texts}
             if dim is not None:
                 kwargs["dimensions"] = dim   # text-embedding-3-* hỗ trợ; provider khác bỏ qua
-            return await client.embeddings.create(**kwargs)
+            try:
+                return await client.embeddings.create(**kwargs)
+            except Exception as exc:  # noqa: BLE001 - SDK-specific mapping stays in adapter
+                raise self._map_error(exc) from exc
 
         res = await retry_async(_call, max_retries=self._s.max_retries)
         # API trả theo `index` — sort lại để chắc chắn khớp thứ tự input.
@@ -106,12 +111,15 @@ class OpenAIProvider(AIProvider):
         messages.append({"role": "user", "content": user})
 
         async def _call():
-            return await client.chat.completions.create(
-                model=cfg.model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
+            try:
+                return await client.chat.completions.create(
+                    model=cfg.model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+            except Exception as exc:  # noqa: BLE001 - SDK-specific mapping stays in adapter
+                raise self._map_error(exc) from exc
 
         res = await retry_async(_call, max_retries=self._s.max_retries)
         return (res.choices[0].message.content or "").strip()
@@ -144,12 +152,15 @@ class OpenAIProvider(AIProvider):
         messages = [{"role": "user", "content": content}]
 
         async def _call():
-            return await client.chat.completions.create(
-                model=cfg.model,
-                messages=messages,
-                temperature=0.0,
-                max_tokens=max_tokens,
-            )
+            try:
+                return await client.chat.completions.create(
+                    model=cfg.model,
+                    messages=messages,
+                    temperature=0.0,
+                    max_tokens=max_tokens,
+                )
+            except Exception as exc:  # noqa: BLE001 - SDK-specific mapping stays in adapter
+                raise self._map_error(exc) from exc
 
         res = await retry_async(_call, max_retries=self._s.max_retries)
         return (res.choices[0].message.content or "").strip()
@@ -158,3 +169,45 @@ class OpenAIProvider(AIProvider):
         """Probe dimension thật từ embed model (notebook cell 14)."""
         vec = (await self.embed(["probe"]))[0]
         return len(vec)
+
+    @staticmethod
+    def _map_error(exc: Exception) -> Exception:
+        try:
+            from openai import (
+                APIConnectionError,
+                APITimeoutError,
+                AuthenticationError,
+                BadRequestError,
+                ConflictError,
+                InternalServerError,
+                NotFoundError,
+                PermissionDeniedError,
+                RateLimitError,
+                UnprocessableEntityError,
+            )
+        except ModuleNotFoundError:
+            return exc
+
+        if isinstance(
+            exc,
+            (
+                RateLimitError,
+                APITimeoutError,
+                APIConnectionError,
+                InternalServerError,
+                ConflictError,
+            ),
+        ):
+            return TransientAIError(str(exc))
+        if isinstance(
+            exc,
+            (
+                AuthenticationError,
+                BadRequestError,
+                NotFoundError,
+                PermissionDeniedError,
+                UnprocessableEntityError,
+            ),
+        ):
+            return PermanentAIError(str(exc))
+        return exc

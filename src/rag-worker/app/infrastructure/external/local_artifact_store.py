@@ -54,3 +54,7 @@ class LocalArtifactStore(ArtifactStore):
     async def read_markdown(self, artifact_uri: str) -> str:
         path = _resolve_artifact_path(artifact_uri)
         return await asyncio.to_thread(_read, path)
+
+    async def delete_by_document(self, document_id: str) -> None:
+        path = _artifact_path(document_id)
+        await asyncio.to_thread(path.unlink, missing_ok=True)

@@ -46,7 +46,19 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
     """
 
     def __init__(self, database_url: str):
-        self._engine = create_engine(database_url, future=True)
+        worker_count = max(1, int(os.getenv("INGEST_WORKER_COUNT", "1")))
+        pool_size = max(worker_count * 2, int(os.getenv("DB_POOL_SIZE", str(worker_count * 2))))
+        max_overflow = max(
+            worker_count,
+            int(os.getenv("DB_MAX_OVERFLOW", str(worker_count))),
+        )
+        self._engine = create_engine(
+            database_url,
+            future=True,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            pool_pre_ping=True,
+        )
         self._session_factory = sessionmaker(self._engine, expire_on_commit=False)
         self._max_attempts = max(1, int(os.getenv("INGEST_MAX_ATTEMPTS", "5")))
 
@@ -285,6 +297,8 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
                 attempt=job.attempt,
                 chunk_count=job.chunk_count,
                 error_message=job.error_message,
+                error_class=job.error_class,
+                reconcile_attempt=job.reconcile_attempt,
                 created_at=job.created_at,
                 updated_at=job.updated_at,
                 status_published_at=job.status_published_at,
@@ -309,6 +323,20 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
             if record is None:
                 return None
             return self._to_job(record)
+
+    async def get_latest_job_for_document(self, document_id: str) -> IngestJob | None:
+        return await asyncio.to_thread(self._get_latest_job_for_document_sync, document_id)
+
+    def _get_latest_job_for_document_sync(self, document_id: str) -> IngestJob | None:
+        with self._session() as session:
+            stmt = (
+                select(IngestJobRecord)
+                .where(IngestJobRecord.document_id == document_id)
+                .order_by(IngestJobRecord.updated_at.desc(), IngestJobRecord.id.desc())
+                .limit(1)
+            )
+            record = session.execute(stmt).scalars().first()
+            return self._to_job(record) if record is not None else None
 
     async def find_active_job(self, document_id: str) -> IngestJob | None:
         return await asyncio.to_thread(self._find_active_job_sync, document_id)
@@ -431,6 +459,7 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
                     chunk_count=chunk_count,
                     updated_at=datetime.now(UTC),
                     error_message=None,
+                    error_class=None,
                     status_published_at=None,
                 )
             )
@@ -442,12 +471,19 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
         claim_id: str,
         *,
         error_message: str,
+        error_class: str | None = None,
     ) -> bool:
         return await asyncio.to_thread(
-            self._fail_job_sync, job_id, claim_id, error_message
+            self._fail_job_sync, job_id, claim_id, error_message, error_class
         )
 
-    def _fail_job_sync(self, job_id: str, claim_id: str, error_message: str) -> bool:
+    def _fail_job_sync(
+        self,
+        job_id: str,
+        claim_id: str,
+        error_message: str,
+        error_class: str | None,
+    ) -> bool:
         with self._session() as session:
             result = session.execute(
                 update(IngestJobRecord)
@@ -460,6 +496,7 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
                     status=IngestJobStatus.FAILED.value,
                     updated_at=datetime.now(UTC),
                     error_message=error_message,
+                    error_class=error_class,
                     status_published_at=None,
                 )
             )
@@ -512,6 +549,38 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
                 return
             record.status_published_at = datetime.now(UTC)
 
+    async def count_by_status(self) -> dict[str, int]:
+        return await asyncio.to_thread(self._count_by_status_sync)
+
+    def _count_by_status_sync(self) -> dict[str, int]:
+        with self._session() as session:
+            rows = session.execute(select(IngestJobRecord.status)).scalars().all()
+        counts: dict[str, int] = {}
+        for status in rows:
+            counts[status] = counts.get(status, 0) + 1
+        return counts
+
+    async def oldest_unpublished_terminal_age_seconds(self) -> float | None:
+        return await asyncio.to_thread(self._oldest_unpublished_terminal_age_seconds_sync)
+
+    def _oldest_unpublished_terminal_age_seconds_sync(self) -> float | None:
+        with self._session() as session:
+            updated_at = session.execute(
+                select(IngestJobRecord.updated_at)
+                .where(
+                    IngestJobRecord.status.in_(
+                        [IngestJobStatus.COMPLETED.value, IngestJobStatus.FAILED.value]
+                    ),
+                    IngestJobRecord.status_published_at.is_(None),
+                )
+                .order_by(IngestJobRecord.updated_at.asc())
+                .limit(1)
+            ).scalars().first()
+        aware = _as_aware_utc(updated_at)
+        if aware is None:
+            return None
+        return max(0.0, (datetime.now(UTC) - aware).total_seconds())
+
     def _to_job(self, record: IngestJobRecord) -> IngestJob:
         return IngestJob(
             id=record.id,
@@ -527,6 +596,8 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
             attempt=record.attempt,
             chunk_count=record.chunk_count,
             error_message=record.error_message,
+            error_class=record.error_class,
+            reconcile_attempt=record.reconcile_attempt,
             created_at=_as_aware_utc(record.created_at),
             updated_at=_as_aware_utc(record.updated_at),
             status_published_at=_as_aware_utc(record.status_published_at),
@@ -570,6 +641,7 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
             job.claim_id = None
             job.updated_at = now
             job.error_message = _MAX_ATTEMPTS_EXCEEDED_ERROR
+            job.error_class = "transient"
             job.status_published_at = None
             document = session.get(DocumentRecord, job.document_id)
             if document is not None:

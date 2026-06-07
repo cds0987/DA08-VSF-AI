@@ -11,3 +11,7 @@ class ArtifactStore(ABC):
     @abstractmethod
     async def read_markdown(self, artifact_uri: str) -> str:
         """Load canonical markdown artifact from storage."""
+
+    @abstractmethod
+    async def delete_by_document(self, document_id: str) -> None:
+        """Delete persisted artifacts for one document, if any."""
