@@ -240,7 +240,10 @@ def test_ingest_use_case_deletes_document_vectors() -> None:
         await use_case.delete("doc-2")
 
         assert engine.vectors.deleted == ["doc-2"]
-        assert await use_case.get_document("doc-2") is None
+        deleted = await use_case.get_document("doc-2")
+        assert deleted is not None
+        assert deleted.status is DocumentStatus.DELETED
+        assert await use_case.list_documents() == []
         assert len(documents._jobs) == 0
         assert documents._job_logs == []
 
@@ -523,5 +526,62 @@ def test_ingest_use_case_cleans_up_vectors_when_document_deleted_mid_ingest() ->
         assert processed is None
         assert engine.vectors.deleted == ["doc-delete-race"]
         assert documents._jobs == {}
+        tombstone = await use_case.get_document("doc-delete-race")
+        assert tombstone is not None
+        assert tombstone.status is DocumentStatus.DELETED
+
+    asyncio.run(scenario())
+
+
+def test_enqueue_skips_deleted_document() -> None:
+    async def scenario() -> None:
+        documents = InMemoryDocumentRepository()
+        use_case = IngestDocumentUseCase(
+            StubEngine(), documents, documents, StubParser(), StubArtifactStore()
+        )
+        await documents.create(
+            Document(
+                id="doc-gone",
+                name="Gone",
+                file_type="md",
+                s3_key="inline://doc-gone",
+                status=DocumentStatus.DELETED,
+                created_at=datetime.now(UTC),
+            )
+        )
+
+        job = await use_case.enqueue(
+            document_id="doc-gone",
+            document_name="Gone",
+            file_type="md",
+            markdown="# A",
+        )
+
+        assert job.status is IngestJobStatus.FAILED
+        assert job.error_message == "document deleted"
+        assert documents._jobs == {}
+
+    asyncio.run(scenario())
+
+
+def test_inmemory_repository_does_not_revive_deleted_document_status() -> None:
+    async def scenario() -> None:
+        documents = InMemoryDocumentRepository()
+        await documents.create(
+            Document(
+                id="doc-gone",
+                name="Gone",
+                file_type="md",
+                s3_key="inline://doc-gone",
+                status=DocumentStatus.DELETED,
+                created_at=datetime.now(UTC),
+            )
+        )
+
+        await documents.update_status("doc-gone", DocumentStatus.PROCESSING)
+
+        stored = await documents.get_by_id("doc-gone")
+        assert stored is not None
+        assert stored.status is DocumentStatus.DELETED
 
     asyncio.run(scenario())
