@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app.domain.entities.document import DocumentStatus
 from app.interfaces.api.dependencies import get_ingest_use_case
 from app.interfaces.api.main import app
 
@@ -61,7 +62,7 @@ class StubIngestUseCase:
             name = payload["document_name"]
             file_type = payload["file_type"]
             s3_key = payload["source_uri"]
-            status = type("Status", (), {"value": payload["status"]})()
+            status = DocumentStatus(payload["status"])
             chunk_count = payload["chunk_count"]
             created_at = payload["created_at"]
             error_message = payload["error_message"]

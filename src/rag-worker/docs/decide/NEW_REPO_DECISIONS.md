@@ -21,6 +21,15 @@
 **Cần xác nhận:** nguồn event cụ thể · SLO freshness · có multi-instance ngay không.
 → [technique/ingestion.md](./technique/ingestion.md) §1 · [scaling.md](./technique/scaling.md) §6
 
+**Implementation note (2026-06-07, chưa ratify):**
+- Repo hiện đã có **scanner safety-net tối thiểu** ở rag-worker: `STORE_RECONCILE_ENABLED`
+  quét trực tiếp bucket `raw/<doc_id>/<file>` qua S3-compatible listing, so với bảng
+  `documents`, rồi enqueue lại doc chưa từng được biết.
+- `documents` trở thành **sổ đăng ký**; `status=deleted` là tombstone soft-delete để scanner
+  không hồi sinh doc đã xóa.
+- `doc.status` vì thế được chấp nhận là **best-effort optimization**, không còn là nguồn duy nhất
+  đảm bảo eventual ingest. Outbox vẫn là hướng nâng cấp riêng nếu cần handshake tức thời/chắc chắn.
+
 ---
 
 ### D2. Parser = stateless service (Option 2) + stack MarkItDown + OCR/vision

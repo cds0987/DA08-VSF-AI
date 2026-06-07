@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from app.application.use_cases.ingestion import IngestDocumentUseCase
+from app.domain.entities.document import DocumentStatus
 from app.interfaces.api.dependencies import get_ingest_use_case, require_delete_api_key
 from app.interfaces.api.schemas.ingest import (
     DocumentResponse,
@@ -19,7 +20,7 @@ async def get_document(
     use_case: IngestDocumentUseCase = Depends(get_ingest_use_case),
 ) -> DocumentResponse:
     document = await use_case.get_document(document_id)
-    if document is None or document.status.value == "deleted":
+    if document is None or document.status is DocumentStatus.DELETED:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
     return DocumentResponse(
         document_id=document.id,
