@@ -46,14 +46,6 @@ class Settings(BaseModel):
     s3_secret_access_key: str | None = getenv("S3_SECRET_ACCESS_KEY")
     s3_region: str = getenv("S3_REGION", "auto")
 
-    # storage_backend: gcs (prod) | s3 (local/e2e qua MinIO, R2, GCS S3-interop, AWS)
-    storage_backend: str = getenv("STORAGE_BACKEND", "gcs").strip().lower()
-    s3_bucket: str = getenv("S3_BUCKET", getenv("S3_SOURCE_BUCKET", "documents"))
-    s3_endpoint_url: str | None = getenv("S3_ENDPOINT_URL")
-    s3_access_key_id: str | None = getenv("S3_ACCESS_KEY_ID")
-    s3_secret_access_key: str | None = getenv("S3_SECRET_ACCESS_KEY")
-    s3_region: str = getenv("S3_REGION", "auto")
-
     def __init__(self, **data: object) -> None:
         super().__init__(**data)
         _validate_jwt_secret(self.jwt_secret_key)
