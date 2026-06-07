@@ -98,6 +98,29 @@ class IngestDocumentUseCase:
                 updated_at=existing_document.created_at,
                 chunk_count=existing_document.chunk_count,
             )
+        if existing_document is not None and existing_document.status is DocumentStatus.DELETED:
+            log_event(
+                self._logger,
+                logging.INFO,
+                "ingest_enqueue_skipped_deleted",
+                stage="queue",
+                document_id=document_id,
+                correlation_id=request_correlation_id,
+            )
+            return IngestJob(
+                id=f"deleted:{document_id}",
+                document_id=document_id,
+                document_name=existing_document.name,
+                file_type=existing_document.file_type,
+                source_uri=source_uri,
+                markdown=markdown,
+                artifact_uri=artifact_uri,
+                correlation_id=request_correlation_id,
+                status=IngestJobStatus.FAILED,
+                created_at=existing_document.created_at,
+                updated_at=existing_document.created_at,
+                error_message="document deleted",
+            )
         now = datetime.now(UTC)
         await self._documents.create(
             Document(
@@ -126,7 +149,7 @@ class IngestDocumentUseCase:
             await self._jobs.enqueue(job)
         except Exception:
             with contextlib.suppress(Exception):
-                await self._documents.delete(document_id)
+                await self._documents.purge(document_id)
             raise
         await self._append_job_log(
             JobLog(
@@ -209,7 +232,8 @@ class IngestDocumentUseCase:
                 await heartbeat_task
             except asyncio.CancelledError:
                 pass
-        if await self._documents.get_by_id(job.document_id) is None:
+        document = await self._documents.get_by_id(job.document_id)
+        if document is None or document.status is DocumentStatus.DELETED:
             await self._engine.vectors.delete_by_document(job.document_id)
             await self._jobs.fail_job(
                 job.id,

@@ -113,6 +113,7 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
         with self._session() as session:
             stmt = (
                 select(DocumentRecord)
+                .where(DocumentRecord.status != DocumentStatus.DELETED.value)
                 .order_by(DocumentRecord.created_at.desc(), DocumentRecord.id.desc())
                 .offset(offset)
                 .limit(limit)
@@ -138,6 +139,11 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
             record = session.get(DocumentRecord, document_id)
             if record is None:
                 raise KeyError(f"document not found: {document_id}")
+            if (
+                record.status == DocumentStatus.DELETED.value
+                and status is not DocumentStatus.DELETED
+            ):
+                return
             record.status = status.value
             if error is not None:
                 record.error_message = error
@@ -148,6 +154,22 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
         await asyncio.to_thread(self._delete_sync, document_id)
 
     def _delete_sync(self, document_id: str) -> None:
+        with self._session() as session:
+            session.execute(
+                delete(JobLogRecord).where(JobLogRecord.document_id == document_id)
+            )
+            session.execute(
+                delete(IngestJobRecord).where(IngestJobRecord.document_id == document_id)
+            )
+            record = session.get(DocumentRecord, document_id)
+            if record is not None:
+                record.status = DocumentStatus.DELETED.value
+                record.error_message = None
+
+    async def purge(self, document_id: str) -> None:
+        await asyncio.to_thread(self._purge_sync, document_id)
+
+    def _purge_sync(self, document_id: str) -> None:
         with self._session() as session:
             session.execute(
                 delete(JobLogRecord).where(JobLogRecord.document_id == document_id)

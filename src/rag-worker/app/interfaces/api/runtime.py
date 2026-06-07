@@ -16,12 +16,19 @@ from fastapi import FastAPI
 from sqlalchemy.engine import make_url
 
 from app.application.use_cases.ingestion import IngestDocumentUseCase
+from app.application.use_cases.ingestion import (
+    StoreReconcileSettings,
+    run_store_reconciler,
+)
 from app.domain.repositories.artifact_store import ArtifactStore
 from app.domain.repositories.document_repository import DocumentRepository
 from app.domain.repositories.ingest_job_repository import IngestJobRepository
+from app.domain.repositories.object_store_lister import ObjectStoreLister
 from app.domain.repositories.parser import Parser
 from app.infrastructure.db import InMemoryDocumentRepository
 from app.infrastructure.external.local_artifact_store import LocalArtifactStore
+from app.infrastructure.external.object_store_lister import S3ObjectStoreLister
+from app.infrastructure.external.s3_parser import S3SourceParser
 from app.interfaces.api.composition import resolve_parser
 from core_engine.ai import AISettings, get_ai_provider, load_ai_settings, reset_ai_provider
 from core_engine.config import HaystackSettings, load_settings
@@ -116,6 +123,15 @@ def load_parser_execution_settings() -> ParserExecutionSettings:
     )
 
 
+def load_store_reconcile_settings() -> StoreReconcileSettings:
+    return StoreReconcileSettings(
+        enabled=_is_truthy(os.getenv("STORE_RECONCILE_ENABLED", "0")),
+        interval_seconds=int(os.getenv("STORE_RECONCILE_INTERVAL_SECONDS", "900")),
+        min_age_seconds=int(os.getenv("STORE_RECONCILE_MIN_AGE_SECONDS", "600")),
+        bucket=_source_bucket(),
+    )
+
+
 def validate_runtime_settings() -> None:
     settings = load_settings()
     validate_ingest_runtime_limits()
@@ -146,6 +162,14 @@ def validate_ingest_runtime_limits() -> None:
         raise ValueError("EMBED_BATCH_SIZE must be > 0")
     if int(os.getenv("CAPTION_MAX_CONCURRENCY", "5")) <= 0:
         raise ValueError("CAPTION_MAX_CONCURRENCY must be > 0")
+    reconcile = load_store_reconcile_settings()
+    if reconcile.enabled:
+        if reconcile.interval_seconds <= 0:
+            raise ValueError("STORE_RECONCILE_INTERVAL_SECONDS must be > 0")
+        if reconcile.min_age_seconds < 0:
+            raise ValueError("STORE_RECONCILE_MIN_AGE_SECONDS must be >= 0")
+        if not reconcile.bucket.strip():
+            raise ValueError("STORE_RECONCILE requires S3_SOURCE_BUCKET or R2_BUCKET")
 
 
 def validate_vector_config(
@@ -350,6 +374,17 @@ async def run_stale_job_reaper(
                 error=str(exc),
             )
         await asyncio.sleep(settings.reaper_interval_seconds)
+
+
+def build_object_store_lister(runtime: RuntimeState) -> ObjectStoreLister:
+    if runtime.source_bucket is None or not runtime.source_bucket.strip():
+        raise ValueError("source bucket is required to build object store lister")
+    if not isinstance(runtime.parser, S3SourceParser):
+        raise ValueError("store reconciler requires an S3-backed parser")
+    return S3ObjectStoreLister(
+        bucket=runtime.source_bucket,
+        client_factory=runtime.parser._client_factory,
+    )
 
 
 async def run_ingest_worker(
@@ -773,6 +808,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     retention_settings = load_job_log_retention_settings()
     lease_settings = load_ingest_lease_settings()
+    reconcile_settings = load_store_reconcile_settings()
     prune_task = asyncio.create_task(
         run_job_log_pruner(runtime.document_repository, retention_settings, logger)
     )
@@ -815,6 +851,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
             for index in range(worker_count)
         ]
+    reconciler_task = None
+    if (
+        reconcile_settings.enabled
+        and runtime.source_bucket
+        and runtime.ingest_use_case is not None
+        and isinstance(runtime.parser, S3SourceParser)
+    ):
+        lister = build_object_store_lister(runtime)
+        reconciler_task = asyncio.create_task(
+            run_store_reconciler(
+                lister,
+                runtime.ingest_use_case,
+                reconcile_settings,
+                logger,
+            )
+        )
     app.state.nats_broker = nats_broker
     app.state.nats_subscription = nats_subscription
     app.state.nats_access_subscription = nats_access_subscription
@@ -824,11 +876,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.job_log_prune_task = prune_task
     app.state.ingest_job_reaper_task = stale_reaper_task
     app.state.ingest_worker_tasks = worker_tasks
+    app.state.store_reconciler_task = reconciler_task
     try:
         yield
     finally:
         prune_task.cancel()
         stale_reaper_task.cancel()
+        if reconciler_task is not None:
+            reconciler_task.cancel()
         for task in worker_tasks:
             task.cancel()
         try:
@@ -849,6 +904,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ingest_job_reaper_stopped",
                 stage="worker",
             )
+        if reconciler_task is not None:
+            try:
+                await reconciler_task
+            except asyncio.CancelledError:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "store_reconciler_stopped",
+                    stage="reconcile",
+                )
         for task in worker_tasks:
             try:
                 await task

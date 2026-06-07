@@ -30,7 +30,11 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
         return self._documents.get(document_id)
 
     async def list_all(self, limit: int = 50, offset: int = 0) -> List[Document]:
-        documents = list(self._documents.values())
+        documents = [
+            document
+            for document in self._documents.values()
+            if document.status is not DocumentStatus.DELETED
+        ]
         return documents[offset : offset + limit]
 
     async def update_status(
@@ -41,6 +45,8 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
     ) -> None:
         document = self._documents.get(document_id)
         if document is None:
+            return
+        if document.status is DocumentStatus.DELETED and status is not DocumentStatus.DELETED:
             return
         next_error = document.error_message
         if error is not None:
@@ -60,6 +66,19 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
         self._documents[document_id] = replace(document, chunk_count=chunk_count)
 
     async def delete(self, document_id: str) -> None:
+        document = self._documents.get(document_id)
+        if document is not None:
+            self._documents[document_id] = replace(
+                document,
+                status=DocumentStatus.DELETED,
+                error_message=None,
+            )
+        self._job_logs = [entry for entry in self._job_logs if entry.document_id != document_id]
+        self._jobs = {
+            job_id: job for job_id, job in self._jobs.items() if job.document_id != document_id
+        }
+
+    async def purge(self, document_id: str) -> None:
         self._documents.pop(document_id, None)
         self._job_logs = [entry for entry in self._job_logs if entry.document_id != document_id]
         self._jobs = {

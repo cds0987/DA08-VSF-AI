@@ -47,7 +47,9 @@ class StubIngestUseCase:
 
     async def delete(self, document_id: str) -> None:
         self.delete_calls.append(document_id)
-        self.documents.pop(document_id, None)
+        payload = self.documents.get(document_id)
+        if payload is not None:
+            payload["status"] = "deleted"
 
     async def get_document(self, document_id: str):
         payload = self.documents.get(document_id)
@@ -114,6 +116,20 @@ def test_get_ingest_router_returns_document_status() -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "queued"
+
+
+def test_get_ingest_router_hides_deleted_document() -> None:
+    stub = StubIngestUseCase()
+    stub.seed_document("doc-1")
+    stub.documents["doc-1"]["status"] = "deleted"
+    app.dependency_overrides[get_ingest_use_case] = lambda: stub
+
+    with TestClient(app) as client:
+        response = client.get("/api/ingest/doc-1")
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 404
 
 
 def test_list_ingest_router_returns_documents() -> None:

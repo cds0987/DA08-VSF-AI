@@ -57,7 +57,10 @@ async def test_postgres_document_repository_crud_roundtrip(tmp_path) -> None:
     assert [document.id for document in documents] == ["doc-1"]
 
     await repository.delete("doc-1")
-    assert await repository.get_by_id("doc-1") is None
+    deleted = await repository.get_by_id("doc-1")
+    assert deleted is not None
+    assert deleted.status is DocumentStatus.DELETED
+    assert await repository.list_all() == []
 
 
 @pytest.mark.asyncio
@@ -142,9 +145,12 @@ async def test_postgres_document_repository_delete_cascades_jobs_and_logs(tmp_pa
 
     await repository.delete("doc-1")
 
-    assert await repository.get_by_id("doc-1") is None
+    deleted = await repository.get_by_id("doc-1")
+    assert deleted is not None
+    assert deleted.status is DocumentStatus.DELETED
     assert await repository.get_job("job-1") is None
     assert await repository.list_job_logs("doc-1") == []
+    assert await repository.list_all() == []
 
 
 @pytest.mark.asyncio
@@ -390,6 +396,31 @@ async def test_postgres_document_repository_preserves_error_until_completion(tmp
     completed = await repository.get_by_id("doc-1")
     assert completed is not None
     assert completed.error_message is None
+
+
+@pytest.mark.asyncio
+async def test_postgres_document_repository_does_not_leave_deleted_tombstone(tmp_path) -> None:
+    database_path = tmp_path / "documents.db"
+    repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
+    now = datetime.now(UTC)
+
+    await repository.create(
+        Document(
+            id="doc-1",
+            name="Policy",
+            file_type="md",
+            s3_key="local://doc-1",
+            status=DocumentStatus.DELETED,
+            created_at=now,
+        )
+    )
+
+    await repository.update_status("doc-1", DocumentStatus.PROCESSING)
+
+    stored = await repository.get_by_id("doc-1")
+    assert stored is not None
+    assert stored.status is DocumentStatus.DELETED
 
 
 @pytest.mark.asyncio
