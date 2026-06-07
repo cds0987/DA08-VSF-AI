@@ -397,6 +397,11 @@ async def test_document_service_to_rag_worker_real_infra() -> None:
         # Vector THẬT đã nằm trong Qdrant.
         assert _qdrant_point_count(collection) > 0
 
+        # Khẳng định doc đang LIVE trước khi xóa: chứng minh delete sau đây THỰC SỰ chuyển
+        # trạng thái (chống pass-giả khi backend bền còn tombstone DELETED cũ + id cố định).
+        live_doc = await runtime.ingest_use_case.get_document(doc_id)
+        assert live_doc is not None and live_doc.status is not DocumentStatus.DELETED
+
         # 3) document-service publish doc.access(deleted=true) -> rag-worker xóa Qdrant + metadata thật.
         await broker.publish_json(access_subject, {"doc_id": doc_id, "deleted": True})
         for _ in range(120):
@@ -556,6 +561,12 @@ async def test_full_corpus_ingest_delete_real_infra() -> None:
 
         # Vector THẬT của cả corpus nằm trong Qdrant.
         assert _qdrant_point_count(collection) >= len(manifest)
+
+        # Khẳng định mọi doc đang LIVE trước khi xóa: chứng minh delete THỰC SỰ chuyển trạng
+        # thái (chống pass-giả khi backend bền còn tombstone DELETED cũ + id manifest cố định).
+        for entry in manifest:
+            live_doc = await runtime.ingest_use_case.get_document(entry["document_id"])
+            assert live_doc is not None and live_doc.status is not DocumentStatus.DELETED
 
         # 3) document-service publish doc.access(deleted=true) cho TỪNG file -> xóa sạch.
         for entry in manifest:
