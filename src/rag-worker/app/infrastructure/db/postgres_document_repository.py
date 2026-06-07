@@ -287,6 +287,7 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
                 error_message=job.error_message,
                 created_at=job.created_at,
                 updated_at=job.updated_at,
+                status_published_at=job.status_published_at,
             )
             session.add(record)
             try:
@@ -430,6 +431,7 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
                     chunk_count=chunk_count,
                     updated_at=datetime.now(UTC),
                     error_message=None,
+                    status_published_at=None,
                 )
             )
             return (result.rowcount or 0) == 1
@@ -458,9 +460,57 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
                     status=IngestJobStatus.FAILED.value,
                     updated_at=datetime.now(UTC),
                     error_message=error_message,
+                    status_published_at=None,
                 )
             )
             return (result.rowcount or 0) == 1
+
+    async def list_pending_status_publications(
+        self,
+        limit: int,
+        *,
+        older_than: datetime | None = None,
+    ) -> list[IngestJob]:
+        return await asyncio.to_thread(
+            self._list_pending_status_publications_sync,
+            limit,
+            older_than,
+        )
+
+    def _list_pending_status_publications_sync(
+        self,
+        limit: int,
+        older_than: datetime | None,
+    ) -> list[IngestJob]:
+        with self._session() as session:
+            stmt = (
+                select(IngestJobRecord)
+                .where(
+                    IngestJobRecord.status.in_(
+                        [
+                            IngestJobStatus.COMPLETED.value,
+                            IngestJobStatus.FAILED.value,
+                        ]
+                    ),
+                    IngestJobRecord.status_published_at.is_(None),
+                )
+                .order_by(IngestJobRecord.updated_at.asc(), IngestJobRecord.id.asc())
+                .limit(limit)
+            )
+            if older_than is not None:
+                stmt = stmt.where(IngestJobRecord.updated_at >= older_than)
+            records = session.execute(stmt).scalars().all()
+            return [self._to_job(record) for record in records]
+
+    async def mark_status_published(self, job_id: str) -> None:
+        await asyncio.to_thread(self._mark_status_published_sync, job_id)
+
+    def _mark_status_published_sync(self, job_id: str) -> None:
+        with self._session() as session:
+            record = session.get(IngestJobRecord, job_id)
+            if record is None:
+                return
+            record.status_published_at = datetime.now(UTC)
 
     def _to_job(self, record: IngestJobRecord) -> IngestJob:
         return IngestJob(
@@ -479,6 +529,7 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
             error_message=record.error_message,
             created_at=_as_aware_utc(record.created_at),
             updated_at=_as_aware_utc(record.updated_at),
+            status_published_at=_as_aware_utc(record.status_published_at),
         )
 
     def _find_active_job_record(
@@ -519,6 +570,7 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
             job.claim_id = None
             job.updated_at = now
             job.error_message = _MAX_ATTEMPTS_EXCEEDED_ERROR
+            job.status_published_at = None
             document = session.get(DocumentRecord, job.document_id)
             if document is not None:
                 document.status = DocumentStatus.FAILED.value

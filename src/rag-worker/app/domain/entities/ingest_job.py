@@ -30,3 +30,4 @@ class IngestJob:
     attempt: int = 0
     chunk_count: int = 0
     error_message: str | None = None
+    status_published_at: datetime | None = None

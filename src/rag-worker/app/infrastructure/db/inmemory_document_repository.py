@@ -157,6 +157,7 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
                 error_message=job.error_message,
                 created_at=job.created_at,
                 updated_at=datetime.now(UTC),
+                status_published_at=job.status_published_at,
             )
             self._jobs[job.id] = updated
             return updated
@@ -220,6 +221,7 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
             error_message=None,
             created_at=job.created_at,
             updated_at=datetime.now(UTC),
+            status_published_at=None,
         )
         return True
 
@@ -242,6 +244,7 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
                 claim_id=None,
                 updated_at=now,
                 error_message="exceeded max attempts",
+                status_published_at=None,
             )
             document = self._documents.get(job.document_id)
             if document is not None:
@@ -290,5 +293,28 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
             error_message=error_message,
             created_at=job.created_at,
             updated_at=datetime.now(UTC),
+            status_published_at=None,
         )
         return True
+
+    async def list_pending_status_publications(
+        self,
+        limit: int,
+        *,
+        older_than: datetime | None = None,
+    ) -> list[IngestJob]:
+        terminal = {IngestJobStatus.COMPLETED, IngestJobStatus.FAILED}
+        jobs = [
+            job
+            for job in self._jobs.values()
+            if job.status in terminal and job.status_published_at is None
+        ]
+        if older_than is not None:
+            jobs = [job for job in jobs if job.updated_at >= older_than]
+        return sorted(jobs, key=lambda item: (item.updated_at, item.id))[:limit]
+
+    async def mark_status_published(self, job_id: str) -> None:
+        job = self._jobs.get(job_id)
+        if job is None:
+            return
+        self._jobs[job_id] = replace(job, status_published_at=datetime.now(UTC))

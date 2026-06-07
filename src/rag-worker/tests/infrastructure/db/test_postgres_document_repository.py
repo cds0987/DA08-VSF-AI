@@ -189,6 +189,7 @@ async def test_postgres_document_repository_claims_and_completes_ingest_jobs(tmp
     assert stored is not None
     assert stored.status is IngestJobStatus.COMPLETED
     assert stored.chunk_count == 4
+    assert stored.status_published_at is None
 
 
 @pytest.mark.asyncio
@@ -327,6 +328,7 @@ async def test_postgres_document_repository_fails_stale_jobs_that_hit_max_attemp
     assert stored_job is not None
     assert stored_job.status is IngestJobStatus.FAILED
     assert stored_job.error_message == "exceeded max attempts"
+    assert stored_job.status_published_at is None
     stored_doc = await repository.get_by_id("doc-1")
     assert stored_doc is not None
     assert stored_doc.status is DocumentStatus.FAILED
@@ -465,3 +467,100 @@ async def test_postgres_document_repository_prunes_old_job_logs(tmp_path) -> Non
     assert pruned == 1
     logs = await repository.list_job_logs("doc-1")
     assert [entry.correlation_id for entry in logs] == ["cid-new"]
+
+
+@pytest.mark.asyncio
+async def test_postgres_document_repository_lists_unpublished_terminal_jobs_in_order(tmp_path) -> None:
+    database_path = tmp_path / "documents.db"
+    repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
+
+    old = datetime(2026, 1, 1, tzinfo=UTC)
+    new = datetime(2026, 1, 2, tzinfo=UTC)
+    await repository.enqueue(
+        IngestJob(
+            id="job-1",
+            document_id="doc-1",
+            document_name="Policy",
+            file_type="md",
+            source_uri="local://doc-1.md",
+            markdown="# Policy",
+            artifact_uri=None,
+            correlation_id="cid-1",
+            status=IngestJobStatus.COMPLETED,
+            created_at=old,
+            updated_at=old,
+        )
+    )
+    await repository.enqueue(
+        IngestJob(
+            id="job-2",
+            document_id="doc-2",
+            document_name="Guide",
+            file_type="md",
+            source_uri="local://doc-2.md",
+            markdown="# Guide",
+            artifact_uri=None,
+            correlation_id="cid-2",
+            status=IngestJobStatus.FAILED,
+            created_at=new,
+            updated_at=new,
+        )
+    )
+    await repository.enqueue(
+        IngestJob(
+            id="job-3",
+            document_id="doc-3",
+            document_name="Skip",
+            file_type="md",
+            source_uri="local://doc-3.md",
+            markdown="# Skip",
+            artifact_uri=None,
+            correlation_id="cid-3",
+            status=IngestJobStatus.PROCESSING,
+            created_at=new,
+            updated_at=new,
+        )
+    )
+    await repository.mark_status_published("job-2")
+
+    pending = await repository.list_pending_status_publications(
+        10,
+        older_than=datetime(2025, 12, 31, tzinfo=UTC),
+    )
+
+    assert [job.id for job in pending] == ["job-1"]
+
+
+@pytest.mark.asyncio
+async def test_postgres_document_repository_marks_status_published_idempotently(tmp_path) -> None:
+    database_path = tmp_path / "documents.db"
+    repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
+    now = datetime.now(UTC)
+
+    await repository.enqueue(
+        IngestJob(
+            id="job-1",
+            document_id="doc-1",
+            document_name="Policy",
+            file_type="md",
+            source_uri="local://doc-1.md",
+            markdown="# Policy",
+            artifact_uri=None,
+            correlation_id="cid-1",
+            status=IngestJobStatus.COMPLETED,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    await repository.mark_status_published("job-1")
+    first = await repository.get_job("job-1")
+    assert first is not None
+    assert first.status_published_at is not None
+
+    await repository.mark_status_published("job-1")
+    second = await repository.get_job("job-1")
+    assert second is not None
+    assert second.status_published_at is not None

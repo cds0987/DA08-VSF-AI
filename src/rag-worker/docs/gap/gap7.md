@@ -35,7 +35,7 @@ Status: **OPEN**
 | G7-5 | **P1** | Captioning tuần tự — N LLM calls sequential trong hot path | `engine.py:77` | OPEN |
 | G7-6 | **P1** | S3 client cache không thread-safe — lazy init trong `to_thread` | `s3_parser.py:183-186` | OPEN |
 | G7-7 | **P1** | `_fail_jobs_exceeding_max_attempts` chạy mỗi `claim_next_pending` | `postgres_document_repository.py:296-301` | OPEN |
-| G7-8 | **P1** | `doc.status` publish fail swallowed — downstream không biết job xong | `ingest_consumer.py:191-196` | CLOSED via retry + store reconciler |
+| G7-8 | **P1** | `doc.status` publish fail swallowed — downstream không biết job xong | `ingest_consumer.py:191-196` | CLOSED via doc.status outbox sweep |
 | G7-9 | **P2** | `SELECT` không dùng `FOR UPDATE SKIP LOCKED` — N workers wasted round-trips | `postgres_document_repository.py:302-313` | OPEN |
 | G7-10 | **P2** | `_cap_words` cắt giữa câu — embedding chunk cụt | `sections.py:72-76` | OPEN |
 | G7-11 | **P2** | `page_number` trong vector payload là section index, không phải page PDF | `sections.py:47-49` | OPEN |
@@ -301,9 +301,10 @@ for attempt in range(3):
         await asyncio.sleep(0.5 * (2 ** attempt))
 ```
 
-**Fix dài hạn (outbox pattern):** Lưu pending publish vào bảng `outbox` trong
-cùng transaction với `complete_job`; background task đọc outbox và publish + xóa.
-Đảm bảo exactly-once delivery kể cả khi rag-worker restart.
+**Fix đã chọn (outbox-lite):** thêm cờ bền `status_published_at` trên `ingest_jobs`.
+Worker publish inline như cũ; publish OK thì mark timestamp. Publish trượt hoặc job terminal
+được set ở reaper/max-attempts thì background sweep quét mọi job `COMPLETED/FAILED` chưa mark
+và publish lại. Cơ chế này đảm bảo **at-least-once** qua restart mà không cần bảng outbox riêng.
 
 ---
 
@@ -450,7 +451,7 @@ G7-4  (ingest timeout)         → sửa + validate INGEST_JOB_TIMEOUT_SECONDS
 G7-6  (S3 client thread-safe)  → sửa __init__
 G7-5  (captioning parallel)    → sửa asyncio.gather + semaphore
 G7-7  (fail_exceeding tách)    → sửa + chuyển vào stale reaper
-G7-8  (doc.status retry)       → sửa publisher + test
+G7-8  (doc.status outbox-lite) → sửa publisher/repo/runtime + test
 G7-9  (SKIP LOCKED)            → sửa query
 G7-10 (cap_words sentence)     → sửa + test
 G7-11 (page_number rename)     → đổi tên field trước, fix sau
@@ -554,9 +555,8 @@ bỏ qua khi phát hiện đã xóa.
 job đó. Document → FAILED trong DB nhưng document-service không nhận `doc.status:failed` →
 client treo "processing" cho đến timeout/poll thủ công.
 
-**Fix:** reaper path khi set FAILED phải emit doc.status. Hoặc (sạch hơn) tách publisher
-khỏi worker return: background task quét job vừa chuyển terminal (outbox — trùng hướng G7-8
-fix dài hạn) và publish. G7-8 + G7-16 nên fix chung bằng outbox.
+**Fix:** dùng cùng cơ chế `status_published_at` + background sweep như G7-8. Reaper chỉ cần
+set job `FAILED` và để `status_published_at = NULL`; sweep sẽ nhặt lại rồi publish `doc.status:failed`.
 
 ## G7-17 — Re-ingest ra rỗng KHÔNG prune vector cũ → orphan (P2)
 
@@ -595,7 +595,7 @@ window trước, hoặc dừng khi phần còn lại đã nằm trọn trong win
 | G7-13 | **P0** | Redeliver sau COMPLETED vẫn re-ingest (G7-3 fix chưa đủ) | `ingest_document_use_case.py:59-96` |
 | G7-14 | **P1** | `embed_batch` không chia batch → doc lớn fail | `engine.py:121` + `embedding/service.py:27` |
 | G7-15 | **P1** | `doc.access delete` đua ingest → vector sống lại | `ingest_consumer.py:150` + `engine.py:128` |
-| G7-16 | **P1** | Job FAILED qua reaper không publish doc.status | `postgres_document_repository.py:471` + `runtime.py:369` | CLOSED via store reconciler |
+| G7-16 | **P1** | Job FAILED qua reaper không publish doc.status | `postgres_document_repository.py:471` + `runtime.py:369` | CLOSED via doc.status outbox sweep |
 | G7-17 | **P2** | Re-ingest rỗng không prune vector cũ | `engine.py:108-117` |
 | G7-18 | **P2** | `_windows` sinh cửa sổ cuối cụt | `sections.py:79-84` |
 
