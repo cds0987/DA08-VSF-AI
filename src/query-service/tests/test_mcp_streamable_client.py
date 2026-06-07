@@ -12,8 +12,9 @@ from app.interfaces.api.dependencies import get_mcp_client
 class FakeHttpClient:
     instances: list["FakeHttpClient"] = []
 
-    def __init__(self, *, timeout: int) -> None:
+    def __init__(self, *, timeout: int, headers: dict | None = None) -> None:
         self.timeout = timeout
+        self.headers = headers or {}
         self.closed = False
         self.__class__.instances.append(self)
 
@@ -90,14 +91,18 @@ def fake_streamable_http_client(url: str, *, http_client):
     return FakeTransportContext(url, http_client=http_client)
 
 
-@pytest.mark.asyncio
-async def test_mcp_streamable_client_uses_sdk_session_and_maps_results(monkeypatch):
+def install_fake_mcp_sdk(monkeypatch) -> None:
     FakeHttpClient.instances = []
     FakeTransportContext.calls = []
     FakeClientSession.instances = []
     monkeypatch.setattr(mcp_module.httpx, "AsyncClient", FakeHttpClient)
     monkeypatch.setattr(mcp_module, "streamable_http_client", fake_streamable_http_client)
     monkeypatch.setattr(mcp_module, "ClientSession", FakeClientSession)
+
+
+@pytest.mark.asyncio
+async def test_mcp_streamable_client_uses_sdk_session_and_maps_results(monkeypatch):
+    install_fake_mcp_sdk(monkeypatch)
     client = MCPStreamableHttpClient(
         Settings(_env_file=None, mcp_service_url="http://mcp-service:8003", mcp_timeout_seconds=7)
     )
@@ -123,6 +128,34 @@ async def test_mcp_streamable_client_uses_sdk_session_and_maps_results(monkeypat
     assert rag_results[0].parent_text == "Policy text"
     assert rag_results[0].source_gcs_uri == "gs://docs/policy.pdf"
     assert rag_results[0].markdown_gcs_uri == "gs://docs/policy.md"
+
+
+@pytest.mark.asyncio
+async def test_mcp_streamable_client_sends_internal_token_header_when_configured(monkeypatch):
+    install_fake_mcp_sdk(monkeypatch)
+    client = MCPStreamableHttpClient(
+        Settings(
+            _env_file=None,
+            mcp_service_url="http://mcp-service:8003",
+            mcp_internal_token="shared-secret",
+        )
+    )
+
+    await client.list_tools()
+
+    assert FakeHttpClient.instances[0].headers["X-Internal-Token"] == "shared-secret"
+
+
+@pytest.mark.asyncio
+async def test_mcp_streamable_client_omits_internal_token_header_when_not_configured(monkeypatch):
+    install_fake_mcp_sdk(monkeypatch)
+    client = MCPStreamableHttpClient(
+        Settings(_env_file=None, mcp_service_url="http://mcp-service:8003", mcp_internal_token="")
+    )
+
+    await client.list_tools()
+
+    assert "X-Internal-Token" not in FakeHttpClient.instances[0].headers
 
 
 def test_dependencies_select_streamable_client_for_real_and_legacy_mcp_modes(monkeypatch):
