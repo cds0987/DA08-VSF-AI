@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
 from sqlalchemy import create_engine, delete, select, update
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.domain.entities.document import Document, DocumentStatus
@@ -14,6 +16,13 @@ from app.domain.entities.job_log import JobLog
 from app.domain.repositories.document_repository import DocumentRepository
 from app.domain.repositories.ingest_job_repository import IngestJobRepository
 from app.infrastructure.db.models import Base, DocumentRecord, IngestJobRecord, JobLogRecord
+
+_ACTIVE_INGEST_JOB_STATUSES = (
+    IngestJobStatus.PENDING.value,
+    IngestJobStatus.PROCESSING.value,
+    IngestJobStatus.STALE.value,
+)
+_MAX_ATTEMPTS_EXCEEDED_ERROR = "exceeded max attempts"
 
 
 def _as_aware_utc(value: datetime | None) -> datetime | None:
@@ -39,6 +48,7 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
     def __init__(self, database_url: str):
         self._engine = create_engine(database_url, future=True)
         self._session_factory = sessionmaker(self._engine, expire_on_commit=False)
+        self._max_attempts = max(1, int(os.getenv("INGEST_MAX_ATTEMPTS", "5")))
 
     @property
     def engine(self) -> Engine:
@@ -121,16 +131,23 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
             if record is None:
                 raise KeyError(f"document not found: {document_id}")
             record.status = status.value
-            record.error_message = error
+            if error is not None:
+                record.error_message = error
+            elif status is DocumentStatus.COMPLETED:
+                record.error_message = None
 
     async def delete(self, document_id: str) -> None:
         await asyncio.to_thread(self._delete_sync, document_id)
 
     def _delete_sync(self, document_id: str) -> None:
         with self._session() as session:
-            record = session.get(DocumentRecord, document_id)
-            if record is not None:
-                session.delete(record)
+            session.execute(
+                delete(JobLogRecord).where(JobLogRecord.document_id == document_id)
+            )
+            session.execute(
+                delete(IngestJobRecord).where(IngestJobRecord.document_id == document_id)
+            )
+            session.execute(delete(DocumentRecord).where(DocumentRecord.id == document_id))
 
     async def update_chunk_count(self, document_id: str, chunk_count: int) -> None:
         await asyncio.to_thread(self._update_chunk_count_sync, document_id, chunk_count)
@@ -241,7 +258,15 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
                 created_at=job.created_at,
                 updated_at=job.updated_at,
             )
-            session.merge(record)
+            session.add(record)
+            try:
+                session.flush()
+            except IntegrityError:
+                session.rollback()
+                existing = self._find_active_job_record(session, job.document_id)
+                if existing is None:
+                    raise
+                return self._to_job(existing)
             return self._to_job(record)
 
     async def get_job(self, job_id: str) -> IngestJob | None:
@@ -259,22 +284,7 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
 
     def _find_active_job_sync(self, document_id: str) -> IngestJob | None:
         with self._session() as session:
-            stmt = (
-                select(IngestJobRecord)
-                .where(
-                    IngestJobRecord.document_id == document_id,
-                    IngestJobRecord.status.in_(
-                        [
-                            IngestJobStatus.PENDING.value,
-                            IngestJobStatus.PROCESSING.value,
-                            IngestJobStatus.STALE.value,
-                        ]
-                    ),
-                )
-                .order_by(IngestJobRecord.created_at.asc(), IngestJobRecord.id.asc())
-                .limit(1)
-            )
-            record = session.execute(stmt).scalars().first()
+            record = self._find_active_job_record(session, document_id)
             return self._to_job(record) if record is not None else None
 
     async def claim_next_pending(self, claim_id: str) -> IngestJob | None:
@@ -283,12 +293,19 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
     def _claim_next_pending_sync(self, claim_id: str) -> IngestJob | None:
         now = datetime.now(UTC)
         with self._session() as session:
+            self._fail_jobs_exceeding_max_attempts(
+                session,
+                stale_before=None,
+                statuses=(IngestJobStatus.PENDING.value, IngestJobStatus.STALE.value),
+                now=now,
+            )
             stmt = (
                 select(IngestJobRecord)
                 .where(
                     IngestJobRecord.status.in_(
                         [IngestJobStatus.PENDING.value, IngestJobStatus.STALE.value]
-                    )
+                    ),
+                    IngestJobRecord.attempt < self._max_attempts,
                 )
                 .order_by(IngestJobRecord.created_at.asc(), IngestJobRecord.id.asc())
                 .limit(1)
@@ -309,7 +326,6 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
                     claim_id=claim_id,
                     attempt=record.attempt + 1,
                     updated_at=now,
-                    error_message=None,
                 )
             )
             if (result.rowcount or 0) != 1:
@@ -338,19 +354,27 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
 
     def _mark_stale_jobs_sync(self, stale_before: datetime) -> int:
         with self._session() as session:
+            now = datetime.now(UTC)
+            failed_count = self._fail_jobs_exceeding_max_attempts(
+                session,
+                stale_before=stale_before,
+                statuses=(IngestJobStatus.PROCESSING.value,),
+                now=now,
+            )
             result = session.execute(
                 update(IngestJobRecord)
                 .where(
                     IngestJobRecord.status == IngestJobStatus.PROCESSING.value,
                     IngestJobRecord.updated_at < stale_before,
+                    IngestJobRecord.attempt < self._max_attempts,
                 )
                 .values(
                     status=IngestJobStatus.STALE.value,
                     claim_id=None,
-                    updated_at=datetime.now(UTC),
+                    updated_at=now,
                 )
             )
-            return int(result.rowcount or 0)
+            return failed_count + int(result.rowcount or 0)
 
     async def complete_job(
         self,
@@ -427,3 +451,59 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
             created_at=_as_aware_utc(record.created_at),
             updated_at=_as_aware_utc(record.updated_at),
         )
+
+    def _find_active_job_record(
+        self,
+        session: Session,
+        document_id: str,
+    ) -> IngestJobRecord | None:
+        stmt = (
+            select(IngestJobRecord)
+            .where(
+                IngestJobRecord.document_id == document_id,
+                IngestJobRecord.status.in_(_ACTIVE_INGEST_JOB_STATUSES),
+            )
+            .order_by(IngestJobRecord.created_at.asc(), IngestJobRecord.id.asc())
+            .limit(1)
+        )
+        return session.execute(stmt).scalars().first()
+
+    def _fail_jobs_exceeding_max_attempts(
+        self,
+        session: Session,
+        *,
+        stale_before: datetime | None,
+        statuses: tuple[str, ...],
+        now: datetime,
+    ) -> int:
+        stmt = select(IngestJobRecord).where(
+            IngestJobRecord.status.in_(statuses),
+            IngestJobRecord.attempt >= self._max_attempts,
+        )
+        if stale_before is not None:
+            stmt = stmt.where(IngestJobRecord.updated_at < stale_before)
+        jobs = session.execute(stmt).scalars().all()
+        if not jobs:
+            return 0
+        for job in jobs:
+            job.status = IngestJobStatus.FAILED.value
+            job.claim_id = None
+            job.updated_at = now
+            job.error_message = _MAX_ATTEMPTS_EXCEEDED_ERROR
+            document = session.get(DocumentRecord, job.document_id)
+            if document is not None:
+                document.status = DocumentStatus.FAILED.value
+                document.error_message = _MAX_ATTEMPTS_EXCEEDED_ERROR
+            session.add(
+                JobLogRecord(
+                    document_id=job.document_id,
+                    correlation_id=job.correlation_id,
+                    stage="ingest",
+                    status=DocumentStatus.FAILED.value,
+                    error_type="MaxAttemptsExceeded",
+                    error_message=_MAX_ATTEMPTS_EXCEEDED_ERROR,
+                    created_at=now,
+                )
+            )
+        session.flush()
+        return len(jobs)

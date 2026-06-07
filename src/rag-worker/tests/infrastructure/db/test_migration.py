@@ -43,6 +43,7 @@ def test_migration_upgrade_creates_metadata_and_job_tables(tmp_path, monkeypatch
     assert "ix_ingest_jobs_document_id" in ingest_job_index_names
     assert "ix_ingest_jobs_status" in ingest_job_index_names
     assert "ix_ingest_jobs_claim_id" in ingest_job_index_names
+    assert "ux_ingest_jobs_active_document_id" in ingest_job_index_names
 
     command.downgrade(cfg, "base")
     assert "documents" not in sa.inspect(sa.create_engine(url)).get_table_names()

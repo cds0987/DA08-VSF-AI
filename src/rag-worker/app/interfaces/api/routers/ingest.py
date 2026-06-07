@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from app.application.use_cases.ingestion import IngestDocumentUseCase
-from app.interfaces.api.dependencies import get_ingest_use_case
+from app.interfaces.api.dependencies import get_ingest_use_case, require_delete_api_key
 from app.interfaces.api.schemas.ingest import (
     DocumentResponse,
     IngestJobResponse,
@@ -77,6 +77,7 @@ async def list_documents(
 @router.delete("/ingest/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
     document_id: str,
+    _: None = Depends(require_delete_api_key),
     use_case: IngestDocumentUseCase = Depends(get_ingest_use_case),
 ) -> Response:
     await use_case.delete(document_id)

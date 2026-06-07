@@ -107,6 +107,18 @@ async def test_hard_caps_when_head_lies_about_size(tmp_path, monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
+async def test_rejects_missing_or_zero_content_length(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("SOURCE_ROOT", str(tmp_path))
+    client = _FakeClient(b"hello", head_size=0)
+    parser = S3SourceParser(_inner(), client_factory=lambda: client, max_bytes=100)
+
+    with pytest.raises(ValueError, match="ContentLength"):
+        await parser.parse(document_id="d1", file_type="md", source_uri="s3://b/k.md")
+
+    assert client.get_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_non_s3_uri_delegates_to_inner(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("SOURCE_ROOT", str(tmp_path))
     (tmp_path / "a.md").write_text("# H\nlocal content here", encoding="utf-8")
