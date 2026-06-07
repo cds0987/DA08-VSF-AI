@@ -58,6 +58,17 @@ class DeletingEngine(StubEngine):
         return 1
 
 
+class TombstoningEngine(StubEngine):
+    def __init__(self, documents: InMemoryDocumentRepository) -> None:
+        super().__init__()
+        self._documents = documents
+
+    async def ingest(self, payload):
+        self.ingest_calls.append(payload)
+        await self._documents.update_status(payload.document_id, DocumentStatus.DELETED)
+        return 1
+
+
 class StubParser:
     def __init__(self) -> None:
         self.calls = []
@@ -529,6 +540,32 @@ def test_ingest_use_case_cleans_up_vectors_when_document_deleted_mid_ingest() ->
         tombstone = await use_case.get_document("doc-delete-race")
         assert tombstone is not None
         assert tombstone.status is DocumentStatus.DELETED
+
+    asyncio.run(scenario())
+
+
+def test_ingest_use_case_marks_deleted_race_job_as_already_published() -> None:
+    async def scenario() -> None:
+        documents = InMemoryDocumentRepository()
+        engine = TombstoningEngine(documents)
+        use_case = IngestDocumentUseCase(
+            engine, documents, documents, StubParser(), StubArtifactStore()
+        )
+
+        await use_case.enqueue(
+            document_id="doc-delete-tombstone",
+            document_name="Guide",
+            file_type="md",
+            markdown="# Title\nBody",
+        )
+        processed = await use_case.process_next_job()
+
+        assert processed is not None
+        assert processed.status is IngestJobStatus.FAILED
+        assert processed.error_message == "document deleted during ingest"
+        assert processed.status_published_at is not None
+        pending = await documents.list_pending_status_publications(10)
+        assert pending == []
 
     asyncio.run(scenario())
 

@@ -235,11 +235,24 @@ class IngestDocumentUseCase:
         document = await self._documents.get_by_id(job.document_id)
         if document is None or document.status is DocumentStatus.DELETED:
             await self._engine.vectors.delete_by_document(job.document_id)
-            await self._jobs.fail_job(
+            failed = await self._jobs.fail_job(
                 job.id,
                 claim_id,
                 error_message="document deleted during ingest",
             )
+            if failed:
+                try:
+                    await self._jobs.mark_status_published(job.id)
+                except Exception as exc:  # noqa: BLE001 - deleted doc should not block cleanup
+                    log_event(
+                        self._logger,
+                        logging.WARNING,
+                        "ingest_deleted_document_mark_published_failed",
+                        stage="ingest",
+                        job_id=job.id,
+                        document_id=job.document_id,
+                        error=str(exc),
+                    )
             return await self._jobs.get_job(job.id)
         completed = await self._jobs.complete_job(
             job.id,
