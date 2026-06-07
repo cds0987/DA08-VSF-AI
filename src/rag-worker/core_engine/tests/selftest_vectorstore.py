@@ -19,8 +19,6 @@ from typing import List
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from core_engine.types import SearchResult
-
 from core_engine import IngestInput, OfflineProvider, build_engine
 from core_engine.tests._contract import assert_vector_repository_contract
 from core_engine.text_utils import hash_embed
@@ -87,11 +85,6 @@ async def test_pluggable_provider() -> None:
         async def insert_many(self, records) -> None: ...
 
         async def upsert_many(self, records) -> None: ...
-
-        async def search(
-            self, vector, query_text, top_k=20
-        ) -> List[SearchResult]:
-            return []
 
         async def list_chunk_ids_by_document(self, document_id) -> List[str]:
             return []
@@ -180,7 +173,7 @@ async def test_engine_uses_selected_provider() -> None:
 
 async def test_unified_interface_methods() -> None:
     if not _has_qdrant():
-        print("  8. facade insert/upsert/search/delete: SKIP (chua cai qdrant-client)")
+        print("  8. facade insert/upsert/list/delete: SKIP (chua cai qdrant-client)")
         return
     repo = build_vector_store(_cfg())
 
@@ -207,21 +200,17 @@ async def test_unified_interface_methods() -> None:
     assert dup_raised, "insert trung id phai fail"
 
     await repo.upsert_many([VectorRecord(chunk_id="d2::p0::c1", vector=vector, payload=payload)])
-    res = await repo.search(vector, "reset mật khẩu", top_k=10)
-    assert any(r.document_id == "d2" for r in res), "search qua facade phai tim duoc doc"
+    ids = await repo.list_chunk_ids_by_document("d2")
+    assert "d2::p0::c1" in ids, "upsert qua facade phai ghi duoc chunk"
 
     await repo.delete("d2::p0::c1")
-    after_delete = await repo.search(vector, "reset mật khẩu", top_k=10)
-    assert all(r.chunk_id != "d2::p0::c1" for r in after_delete), (
-        "delete theo chunk_id phai go dung record"
-    )
+    after_delete = await repo.list_chunk_ids_by_document("d2")
+    assert "d2::p0::c1" not in after_delete, "delete theo chunk_id phai go dung record"
 
     await repo.delete_by_document("d2")
-    after_doc_delete = await repo.search(vector, "reset mật khẩu", top_k=10)
-    assert all(r.document_id != "d2" for r in after_doc_delete), (
-        "delete_by_document phai go het record"
-    )
-    print("  8. facade async thong nhat insert/upsert/search/delete/delete_by_document: OK")
+    after_doc_delete = await repo.list_chunk_ids_by_document("d2")
+    assert not after_doc_delete, "delete_by_document phai go het record"
+    print("  8. facade async thong nhat insert/upsert/list/delete/delete_by_document: OK")
 
 
 async def test_contract_qdrant_in_process() -> None:

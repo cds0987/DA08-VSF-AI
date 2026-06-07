@@ -26,7 +26,6 @@ except ModuleNotFoundError as e:
 
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.store import VectorStore
-from core_engine.types import SearchResult
 from core_engine.vectorstore.types import VectorRecord
 
 
@@ -61,20 +60,6 @@ class ChromaInProcessProvider(ChromaBase):
         if record_list:
             args = self._add_args(record_list)
             await asyncio.to_thread(lambda: self._collection.upsert(**args))
-
-    async def search(
-        self,
-        vector: Sequence[float],
-        query_text: str,
-        top_k: int = 20,
-    ) -> list[SearchResult]:
-        res = await asyncio.to_thread(
-            self._collection.query,
-            query_embeddings=[list(vector)],
-            n_results=top_k,
-            include=["metadatas", "distances", "documents"],
-        )
-        return self._assemble(res, top_k)
 
     async def list_chunk_ids_by_document(self, document_id: str) -> list[str]:
         existing = await asyncio.to_thread(

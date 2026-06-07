@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Mapping, Sequence
 
-from core_engine.types import SearchResult, VectorRepository
+from core_engine.types import VectorRepository
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.provider import VectorStoreProvider
 from core_engine.vectorstore.types import VectorRecord
@@ -32,22 +32,6 @@ class VectorStore(VectorRepository):
 
     async def upsert_many(self, records: Sequence[VectorRecord]) -> None:
         await self._provider.upsert_many(records)
-
-    async def search(
-        self,
-        vector: Sequence[float],
-        query_text: str,
-        top_k: int = 20,
-    ) -> list[SearchResult]:
-        return await self._provider.search(vector, query_text, top_k=top_k)
-
-    async def hybrid_search(
-        self,
-        vector: list[float],
-        query_text: str,
-        top_k: int = 20,
-    ) -> list[SearchResult]:
-        return await self.search(vector, query_text, top_k=top_k)
 
     async def list_chunk_ids_by_document(self, document_id: str) -> list[str]:
         return await self._provider.list_chunk_ids_by_document(document_id)

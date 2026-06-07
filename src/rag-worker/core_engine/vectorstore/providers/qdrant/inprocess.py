@@ -17,7 +17,6 @@ from qdrant_client import QdrantClient, models
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.store import VectorStore
 from core_engine.vectorstore.types import VectorRecord
-from core_engine.types import SearchResult
 
 
 class QdrantInProcessProvider(QdrantBase):
@@ -90,23 +89,6 @@ class QdrantInProcessProvider(QdrantBase):
                     collection_name=self._collection,
                     points=[self._point(r) for r in record_list],
                 )
-
-    async def search(
-        self,
-        vector: Sequence[float],
-        query_text: str,
-        top_k: int = 20,
-    ) -> list[SearchResult]:
-        await self._ensure()
-        async with self._op_lock:
-            res = await asyncio.to_thread(
-                self._client.query_points,
-                collection_name=self._collection,
-                query=list(vector),
-                limit=top_k,
-                with_payload=True,
-            )
-        return [self._to_result(point) for point in res.points]
 
     async def list_chunk_ids_by_document(self, document_id: str) -> list[str]:
         await self._ensure()

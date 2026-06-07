@@ -25,7 +25,6 @@ except ModuleNotFoundError as e:
 
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.store import VectorStore
-from core_engine.types import SearchResult
 from core_engine.vectorstore.types import VectorRecord
 
 
@@ -72,20 +71,6 @@ class ChromaRemoteProvider(ChromaBase):
         if record_list:
             collection = await self._ensure()
             await collection.upsert(**self._add_args(record_list))
-
-    async def search(
-        self,
-        vector: Sequence[float],
-        query_text: str,
-        top_k: int = 20,
-    ) -> list[SearchResult]:
-        collection = await self._ensure()
-        res = await collection.query(
-            query_embeddings=[list(vector)],
-            n_results=top_k,
-            include=["metadatas", "distances", "documents"],
-        )
-        return self._assemble(res, top_k)
 
     async def list_chunk_ids_by_document(self, document_id: str) -> list[str]:
         collection = await self._ensure()
