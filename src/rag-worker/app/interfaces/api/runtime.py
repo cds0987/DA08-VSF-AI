@@ -132,6 +132,21 @@ def load_store_reconcile_settings() -> StoreReconcileSettings:
     )
 
 
+@dataclass(frozen=True)
+class DocStatusSweepSettings:
+    interval_seconds: float = 30.0
+    batch: int = 100
+    lookback_seconds: int = 86_400
+
+
+def load_doc_status_sweep_settings() -> DocStatusSweepSettings:
+    return DocStatusSweepSettings(
+        interval_seconds=float(os.getenv("DOC_STATUS_SWEEP_INTERVAL_SECONDS", "30")),
+        batch=int(os.getenv("DOC_STATUS_SWEEP_BATCH", "100")),
+        lookback_seconds=int(os.getenv("DOC_STATUS_SWEEP_LOOKBACK_SECONDS", "86400")),
+    )
+
+
 def validate_runtime_settings() -> None:
     settings = load_settings()
     validate_ingest_runtime_limits()
@@ -162,6 +177,13 @@ def validate_ingest_runtime_limits() -> None:
         raise ValueError("EMBED_BATCH_SIZE must be > 0")
     if int(os.getenv("CAPTION_MAX_CONCURRENCY", "5")) <= 0:
         raise ValueError("CAPTION_MAX_CONCURRENCY must be > 0")
+    sweep = load_doc_status_sweep_settings()
+    if sweep.interval_seconds <= 0:
+        raise ValueError("DOC_STATUS_SWEEP_INTERVAL_SECONDS must be > 0")
+    if sweep.batch <= 0:
+        raise ValueError("DOC_STATUS_SWEEP_BATCH must be > 0")
+    if sweep.lookback_seconds < 0:
+        raise ValueError("DOC_STATUS_SWEEP_LOOKBACK_SECONDS must be >= 0")
     reconcile = load_store_reconcile_settings()
     if reconcile.enabled:
         if reconcile.interval_seconds <= 0:
@@ -376,6 +398,33 @@ async def run_stale_job_reaper(
         await asyncio.sleep(settings.reaper_interval_seconds)
 
 
+async def run_doc_status_publisher_sweep(
+    job_repository: IngestJobRepository,
+    publisher: Any,
+    settings: DocStatusSweepSettings,
+    logger: logging.Logger,
+) -> None:
+    while True:
+        try:
+            cutoff = datetime.now(UTC) - timedelta(seconds=settings.lookback_seconds)
+            jobs = await job_repository.list_pending_status_publications(
+                settings.batch,
+                older_than=cutoff,
+            )
+            for job in jobs:
+                if await publisher.publish_for_job(job):
+                    await job_repository.mark_status_published(job.id)
+        except Exception as exc:  # noqa: BLE001 - maintenance task must stay alive
+            log_event(
+                logger,
+                logging.WARNING,
+                "doc_status_sweep_failed",
+                stage="status",
+                error=str(exc),
+            )
+        await asyncio.sleep(settings.interval_seconds)
+
+
 def build_object_store_lister(runtime: RuntimeState) -> ObjectStoreLister:
     if runtime.source_bucket is None or not runtime.source_bucket.strip():
         raise ValueError("source bucket is required to build object store lister")
@@ -393,6 +442,7 @@ async def run_ingest_worker(
     poll_interval_seconds: float,
     logger: logging.Logger,
     on_job_finished: Any | None = None,
+    job_repository: IngestJobRepository | None = None,
 ) -> None:
     while True:
         try:
@@ -412,7 +462,21 @@ async def run_ingest_worker(
                 )
                 # Publish doc.status qua NATS (no-op nếu không bật NATS).
                 if on_job_finished is not None:
-                    await on_job_finished(job)
+                    published = await on_job_finished(job)
+                    if published and job_repository is not None:
+                        try:
+                            await job_repository.mark_status_published(job.id)
+                        except Exception as exc:  # noqa: BLE001 - sweep will retry later
+                            log_event(
+                                logger,
+                                logging.WARNING,
+                                "doc_status_mark_published_failed",
+                                stage="status",
+                                worker=name,
+                                job_id=job.id,
+                                document_id=job.document_id,
+                                error=str(exc),
+                            )
         except Exception as exc:  # noqa: BLE001 - worker must stay alive and keep polling
             log_event(
                 logger,
@@ -808,6 +872,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     retention_settings = load_job_log_retention_settings()
     lease_settings = load_ingest_lease_settings()
+    status_sweep_settings = load_doc_status_sweep_settings()
     reconcile_settings = load_store_reconcile_settings()
     prune_task = asyncio.create_task(
         run_job_log_pruner(runtime.document_repository, retention_settings, logger)
@@ -847,10 +912,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     worker_poll_interval,
                     logger,
                     on_job_finished,
+                    runtime.job_repository,
                 )
             )
             for index in range(worker_count)
         ]
+    status_sweep_task = None
+    if status_publisher is not None:
+        status_sweep_task = asyncio.create_task(
+            run_doc_status_publisher_sweep(
+                runtime.job_repository,
+                status_publisher,
+                status_sweep_settings,
+                logger,
+            )
+        )
     reconciler_task = None
     if (
         reconcile_settings.enabled
@@ -887,12 +963,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.job_log_prune_task = prune_task
     app.state.ingest_job_reaper_task = stale_reaper_task
     app.state.ingest_worker_tasks = worker_tasks
+    app.state.doc_status_sweep_task = status_sweep_task
     app.state.store_reconciler_task = reconciler_task
     try:
         yield
     finally:
         prune_task.cancel()
         stale_reaper_task.cancel()
+        if status_sweep_task is not None:
+            status_sweep_task.cancel()
         if reconciler_task is not None:
             reconciler_task.cancel()
         for task in worker_tasks:
@@ -915,6 +994,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ingest_job_reaper_stopped",
                 stage="worker",
             )
+        if status_sweep_task is not None:
+            try:
+                await status_sweep_task
+            except asyncio.CancelledError:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "doc_status_sweep_stopped",
+                    stage="status",
+                )
         if reconciler_task is not None:
             try:
                 await reconciler_task

@@ -27,8 +27,12 @@
   `documents`, rồi enqueue lại doc chưa từng được biết.
 - `documents` trở thành **sổ đăng ký**; `status=deleted` là tombstone soft-delete để scanner
   không hồi sinh doc đã xóa.
-- `doc.status` vì thế được chấp nhận là **best-effort optimization**, không còn là nguồn duy nhất
-  đảm bảo eventual ingest. Outbox vẫn là hướng nâng cấp riêng nếu cần handshake tức thời/chắc chắn.
+- `doc.status` không còn là best-effort thuần: rag-worker giữ cờ bền
+  `ingest_jobs.status_published_at` và có background sweep retry, nên đảm bảo
+  **at-least-once** cho trạng thái terminal (`indexed`/`failed`) kể cả sau restart.
+- Store reconciler và doc-status sweep xử lý hai lỗ khác nhau:
+  reconciler đóng lỗ **no-row**, còn `status_published_at` + sweep đóng lỗ
+  **có-row terminal nhưng mất tín hiệu**.
 
 ---
 

@@ -55,3 +55,16 @@ class IngestJobRepository(ABC):
         error_message: str,
     ) -> bool:
         """Mark a claimed job failed. Return False if claim no longer owns the job."""
+
+    @abstractmethod
+    async def list_pending_status_publications(
+        self,
+        limit: int,
+        *,
+        older_than: datetime | None = None,
+    ) -> list[IngestJob]:
+        """Return terminal jobs whose doc.status has not been published yet."""
+
+    @abstractmethod
+    async def mark_status_published(self, job_id: str) -> None:
+        """Mark a terminal job's doc.status as successfully published."""
