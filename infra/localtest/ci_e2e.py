@@ -120,35 +120,52 @@ def cmd_upload() -> int:
     return 0 if ok == len(files) else 1
 
 
-def _data_points() -> int:
+def _distinct_doc_ids() -> set[str]:
+    """Đếm document_id RIÊNG BIỆT đã có vector (mỗi doc ingest xong = có >=1 chunk).
+    Dùng cái này thay vì tổng points: points = số chunk, 1 doc nhiều chunk -> ngưỡng
+    theo points đạt sớm khi doc chậm (pdf/pptx vision OCR) chưa xong -> search MISS.
+    """
     cols = [c["name"] for c in _qdrant("GET", "/collections")["result"]["collections"]]
-    total = 0
+    ids: set[str] = set()
     for c in cols:
         if c.endswith("__meta"):
             continue
-        total += _qdrant("GET", f"/collections/{c}")["result"].get("points_count", 0) or 0
-    return total
+        offset = None
+        while True:
+            body: dict = {"limit": 256, "with_payload": ["document_id"], "with_vector": False}
+            if offset is not None:
+                body["offset"] = offset
+            res = _qdrant("POST", f"/collections/{c}/points/scroll", body)["result"]
+            for p in res.get("points", []):
+                did = (p.get("payload") or {}).get("document_id")
+                if did:
+                    ids.add(did)
+            offset = res.get("next_page_offset")
+            if not offset:
+                break
+    return ids
 
 
 def cmd_verify() -> int:
     with open(_record_path(), encoding="utf-8") as fh:
-        expected = len(json.load(fh)["docs"])
-    timeout = int(os.environ.get("VERIFY_TIMEOUT", "240"))
+        expected = {d["doc_id"] for d in json.load(fh)["docs"]}
+    timeout = int(os.environ.get("VERIFY_TIMEOUT", "360"))
     deadline = time.time() + timeout
     last = -1
     while time.time() < deadline:
         try:
-            pts = _data_points()
+            ids = _distinct_doc_ids()
         except Exception as e:  # noqa: BLE001 - transient cloud errors
-            print("  verify poll err:", str(e)[:120]); pts = last
-        if pts != last:
-            print(f"  qdrant points: {pts} (cần >= {expected})")
-            last = pts
-        if pts >= expected:
-            print(f"INGEST OK: {pts} points >= {expected} docs")
+            print("  verify poll err:", str(e)[:120]); time.sleep(5); continue
+        if len(ids) != last:
+            missing = sorted(expected - ids)
+            print(f"  ingested docs: {len(ids)}/{len(expected)}; còn thiếu: {len(missing)}")
+            last = len(ids)
+        if expected <= ids:
+            print(f"INGEST OK: tất cả {len(expected)} doc đã có vector")
             return 0
         time.sleep(5)
-    print(f"VERIFY TIMEOUT: chỉ {last} points sau {timeout}s (cần >= {expected})")
+    print(f"VERIFY TIMEOUT sau {timeout}s: mới {last}/{len(expected)} doc có vector")
     return 1
 
 
