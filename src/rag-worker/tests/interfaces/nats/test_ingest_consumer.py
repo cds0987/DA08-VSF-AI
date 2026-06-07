@@ -119,6 +119,35 @@ async def test_handle_accepts_s3_key_fallback() -> None:
 
 
 @pytest.mark.asyncio
+async def test_handle_truncates_long_document_name() -> None:
+    use_case = FakeIngestUseCase()
+    consumer = DocIngestConsumer(use_case)
+    raw = json.dumps(
+        {
+            "doc_id": "d1",
+            "gcs_key": "s3://bucket/x.pdf",
+            "file_type": "pdf",
+            "document_name": "x" * 700,
+        }
+    ).encode()
+
+    await consumer.handle(raw)
+
+    assert len(use_case.calls[0]["document_name"]) == 512
+
+
+@pytest.mark.asyncio
+async def test_handle_rejects_too_long_doc_id() -> None:
+    consumer = DocIngestConsumer(FakeIngestUseCase())
+    raw = json.dumps(
+        {"doc_id": "d" * 256, "gcs_key": "s3://bucket/x.pdf", "file_type": "pdf"}
+    ).encode()
+
+    with pytest.raises(ValueError, match="doc_id"):
+        await consumer.handle(raw)
+
+
+@pytest.mark.asyncio
 async def test_handle_prefixes_bare_key_with_default_bucket() -> None:
     # document-service publish key TRẦN (raw/<id>/<file>) -> consumer ghép s3://bucket/key
     # để S3SourceParser nhận ra và tự tải; nếu không sẽ rơi vào parser local rồi fail.

@@ -225,6 +225,8 @@ def test_ingest_use_case_deletes_document_vectors() -> None:
 
         assert engine.vectors.deleted == ["doc-2"]
         assert await use_case.get_document("doc-2") is None
+        assert len(documents._jobs) == 0
+        assert documents._job_logs == []
 
     asyncio.run(scenario())
 

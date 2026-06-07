@@ -61,6 +61,55 @@ async def test_postgres_document_repository_crud_roundtrip(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_postgres_document_repository_delete_cascades_jobs_and_logs(tmp_path) -> None:
+    database_path = tmp_path / "documents.db"
+    repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
+    now = datetime.now(UTC)
+
+    await repository.create(
+        Document(
+            id="doc-1",
+            name="Policy",
+            file_type="md",
+            s3_key="local://doc-1",
+            status=DocumentStatus.QUEUED,
+            created_at=now,
+        )
+    )
+    await repository.enqueue(
+        IngestJob(
+            id="job-1",
+            document_id="doc-1",
+            document_name="Policy",
+            file_type="md",
+            source_uri="local://doc-1.md",
+            markdown="# Policy",
+            artifact_uri=None,
+            correlation_id="cid-1",
+            status=IngestJobStatus.PENDING,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    await repository.append_job_log(
+        JobLog(
+            document_id="doc-1",
+            correlation_id="cid-1",
+            stage="queue",
+            status="pending",
+            created_at=now,
+        )
+    )
+
+    await repository.delete("doc-1")
+
+    assert await repository.get_by_id("doc-1") is None
+    assert await repository.get_job("job-1") is None
+    assert await repository.list_job_logs("doc-1") == []
+
+
+@pytest.mark.asyncio
 async def test_postgres_document_repository_claims_and_completes_ingest_jobs(tmp_path) -> None:
     database_path = tmp_path / "documents.db"
     repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
@@ -189,6 +238,87 @@ async def test_postgres_document_repository_marks_timed_out_jobs_stale(tmp_path)
     assert stored is not None
     assert stored.status is IngestJobStatus.STALE
     assert stored.claim_id is None
+
+
+@pytest.mark.asyncio
+async def test_postgres_document_repository_fails_stale_jobs_that_hit_max_attempts(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("INGEST_MAX_ATTEMPTS", "2")
+    database_path = tmp_path / "documents.db"
+    repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
+    old = datetime(2024, 1, 1, tzinfo=UTC)
+
+    await repository.create(
+        Document(
+            id="doc-1",
+            name="Policy",
+            file_type="md",
+            s3_key="local://doc-1",
+            status=DocumentStatus.PROCESSING,
+            created_at=old,
+        )
+    )
+    await repository.enqueue(
+        IngestJob(
+            id="job-1",
+            document_id="doc-1",
+            document_name="Policy",
+            file_type="md",
+            source_uri="local://doc-1.md",
+            markdown="# Policy",
+            artifact_uri=None,
+            correlation_id="cid-1",
+            status=IngestJobStatus.PROCESSING,
+            claim_id="claim-old",
+            attempt=2,
+            created_at=old,
+            updated_at=old,
+        )
+    )
+
+    marked = await repository.mark_stale_jobs(datetime(2025, 1, 1, tzinfo=UTC))
+
+    assert marked == 1
+    stored_job = await repository.get_job("job-1")
+    assert stored_job is not None
+    assert stored_job.status is IngestJobStatus.FAILED
+    assert stored_job.error_message == "exceeded max attempts"
+    stored_doc = await repository.get_by_id("doc-1")
+    assert stored_doc is not None
+    assert stored_doc.status is DocumentStatus.FAILED
+    assert stored_doc.error_message == "exceeded max attempts"
+    logs = await repository.list_job_logs("doc-1")
+    assert logs[0].error_type == "MaxAttemptsExceeded"
+
+
+@pytest.mark.asyncio
+async def test_postgres_document_repository_preserves_error_until_completion(tmp_path) -> None:
+    database_path = tmp_path / "documents.db"
+    repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
+    now = datetime.now(UTC)
+
+    await repository.create(
+        Document(
+            id="doc-1",
+            name="Policy",
+            file_type="md",
+            s3_key="local://doc-1",
+            status=DocumentStatus.FAILED,
+            created_at=now,
+            error_message="previous failure",
+        )
+    )
+
+    await repository.update_status("doc-1", DocumentStatus.PROCESSING)
+    processing = await repository.get_by_id("doc-1")
+    assert processing is not None
+    assert processing.error_message == "previous failure"
+
+    await repository.update_status("doc-1", DocumentStatus.COMPLETED)
+    completed = await repository.get_by_id("doc-1")
+    assert completed is not None
+    assert completed.error_message is None
 
 
 @pytest.mark.asyncio

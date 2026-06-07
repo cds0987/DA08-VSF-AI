@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
+import re
 from pathlib import Path
 
 from app.domain.repositories.artifact_store import ArtifactStore
@@ -16,7 +18,9 @@ def _artifact_root() -> Path:
 
 
 def _artifact_path(document_id: str) -> Path:
-    safe = document_id.replace("/", "_").replace("\\", "_")
+    safe = document_id.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,120}", safe):
+        safe = f"doc-{hashlib.sha256(document_id.encode('utf-8')).hexdigest()}"
     return _artifact_root() / f"{safe}.md"
 
 
