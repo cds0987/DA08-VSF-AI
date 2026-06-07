@@ -1,0 +1,31 @@
+# ─────────────────────────────────────────────────────────────────────────
+# OVERRIDE: chạy luồng localtest nhưng metadata DB = Cloud SQL THẬT (thay postgres
+# local) — để VERIFY khả năng tích hợp Cloud SQL trước khi đưa service lên GCP.
+# KHÔNG dùng cho CI GitHub (runner thường không tới được Cloud SQL). Chạy tay trên
+# máy/VM có mạng tới 34.87.63.152:5432.
+#
+# Chạy:
+#   docker compose -f docker-compose.localtest.yml -f docker-compose.cloudsql.yml up -d --build
+#
+# Dọn data test trên Cloud SQL sau khi xong (đi kèm cleanup GCS + Qdrant):
+#   RAG_DATABASE_URL=$env:RAG_DATABASE_URL DOC_DATABASE_URL=$env:DOC_DATABASE_URL \
+#     python infra/localtest/ci_e2e.py cleanup
+#
+# Yêu cầu .env (ngoài secrets GCS/Qdrant/OpenAI sẵn có):
+#   RAG_DATABASE_URL=postgresql+psycopg://postgres:<pass>@34.87.63.152:5432/rag_db
+#   DOC_DATABASE_URL=postgresql+asyncpg://postgres:<pass>@34.87.63.152:5432/doc_db
+# DB rag_db/doc_db PHẢI tồn tại sẵn trên Cloud SQL (alembic chỉ tạo bảng, không tạo DB).
+# postgres local vẫn khởi động (override chỉ đổi DATABASE_URL) nhưng KHÔNG service nào dùng.
+# ─────────────────────────────────────────────────────────────────────────
+services:
+  rag-migrate:
+    environment:
+      DATABASE_URL: ${RAG_DATABASE_URL:?set RAG_DATABASE_URL=Cloud SQL rag_db}
+
+  rag-worker:
+    environment:
+      DATABASE_URL: ${RAG_DATABASE_URL:?set RAG_DATABASE_URL=Cloud SQL rag_db}
+
+  document-service:
+    environment:
+      DATABASE_URL: ${DOC_DATABASE_URL:?set DOC_DATABASE_URL=Cloud SQL doc_db}
