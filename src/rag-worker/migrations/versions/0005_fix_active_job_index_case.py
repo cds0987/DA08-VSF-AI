@@ -1,0 +1,50 @@
+"""fix active ingest job index predicate case
+
+Revision ID: 0005_fix_active_job_index_case
+Revises: 0004_ingest_failure_classification
+Create Date: 2026-06-07
+"""
+
+from typing import Sequence, Union
+
+import sqlalchemy as sa
+from alembic import op
+
+revision: str = "0005_fix_active_job_index_case"
+down_revision: Union[str, None] = "0004_ingest_failure_classification"
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    op.drop_index("ux_ingest_jobs_active_document_id", table_name="ingest_jobs")
+    dialect = op.get_bind().dialect.name
+    where = sa.text("status IN ('pending','processing','stale')")
+    kwargs = {"unique": True}
+    if dialect == "postgresql":
+        kwargs["postgresql_where"] = where
+    elif dialect == "sqlite":
+        kwargs["sqlite_where"] = where
+    op.create_index(
+        "ux_ingest_jobs_active_document_id",
+        "ingest_jobs",
+        ["document_id"],
+        **kwargs,
+    )
+
+
+def downgrade() -> None:
+    op.drop_index("ux_ingest_jobs_active_document_id", table_name="ingest_jobs")
+    dialect = op.get_bind().dialect.name
+    where = sa.text("status IN ('PENDING','PROCESSING','STALE')")
+    kwargs = {"unique": True}
+    if dialect == "postgresql":
+        kwargs["postgresql_where"] = where
+    elif dialect == "sqlite":
+        kwargs["sqlite_where"] = where
+    op.create_index(
+        "ux_ingest_jobs_active_document_id",
+        "ingest_jobs",
+        ["document_id"],
+        **kwargs,
+    )

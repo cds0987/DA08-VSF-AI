@@ -84,11 +84,17 @@ class HaystackRagEngine:
         split_ms = split_sw.elapsed_ms()
         caption_ms = 0.0
         caption_fallbacks = 0
+        total_children = sum(len(section.children) for section in sections)
 
         chunk_ids: List[str] = []
         embed_texts: List[str] = []
         payloads: List[dict] = []
         captions_by_index: dict[int, str] = {}
+        if total_children > self._max_chunks_per_doc:
+            raise ChunkLimitExceededError(
+                f"document {doc.document_id} produced {total_children} chunks > "
+                f"MAX_CHUNKS_PER_DOC ({self._max_chunks_per_doc})"
+            )
         if self.captioner is not None and sections:
             async def _caption_one(index: int, text: str) -> tuple[int, str, bool]:
                 async with self._caption_semaphore:
@@ -158,11 +164,6 @@ class HaystackRagEngine:
                 document_id=doc.document_id,
             )
             return 0
-        if len(chunk_ids) > self._max_chunks_per_doc:
-            raise ChunkLimitExceededError(
-                f"document {doc.document_id} produced {len(chunk_ids)} chunks > "
-                f"MAX_CHUNKS_PER_DOC ({self._max_chunks_per_doc})"
-            )
         if self.captioner is not None and sections:
             fallback_rate = float(caption_fallbacks) / float(len(sections))
             if fallback_rate > self._caption_fallback_threshold:

@@ -5,7 +5,7 @@ import os
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
-from sqlalchemy import create_engine, delete, select, update
+from sqlalchemy import create_engine, delete, func, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -554,11 +554,12 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
 
     def _count_by_status_sync(self) -> dict[str, int]:
         with self._session() as session:
-            rows = session.execute(select(IngestJobRecord.status)).scalars().all()
-        counts: dict[str, int] = {}
-        for status in rows:
-            counts[status] = counts.get(status, 0) + 1
-        return counts
+            rows = session.execute(
+                select(IngestJobRecord.status, func.count())
+                .group_by(IngestJobRecord.status)
+                .order_by(IngestJobRecord.status.asc())
+            ).all()
+        return {status: int(count) for status, count in rows}
 
     async def oldest_unpublished_terminal_age_seconds(self) -> float | None:
         return await asyncio.to_thread(self._oldest_unpublished_terminal_age_seconds_sync)

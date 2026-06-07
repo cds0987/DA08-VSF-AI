@@ -47,8 +47,8 @@ class IngestJobRecord(Base):
             "ux_ingest_jobs_active_document_id",
             "document_id",
             unique=True,
-            sqlite_where=text("status IN ('PENDING','PROCESSING','STALE')"),
-            postgresql_where=text("status IN ('PENDING','PROCESSING','STALE')"),
+            sqlite_where=text("status IN ('pending','processing','stale')"),
+            postgresql_where=text("status IN ('pending','processing','stale')"),
         ),
     )
 
