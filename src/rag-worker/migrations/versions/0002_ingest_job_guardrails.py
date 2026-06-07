@@ -19,7 +19,9 @@ _DUPLICATE_ACTIVE_JOB_ERROR = "superseded by migration before active-job unique 
 
 
 def _fail_duplicate_active_jobs() -> None:
-    op.execute(
+    # op.execute() KHÔNG nhận bind params (đối số thứ 2 là execution_options) -> dùng
+    # connection.execute() để truyền tham số an toàn, tránh nội suy chuỗi vào SQL.
+    op.get_bind().execute(
         sa.text(
             """
             WITH ranked AS (
