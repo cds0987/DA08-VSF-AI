@@ -7,6 +7,7 @@ Dùng khi `config.url` có giá trị (Qdrant Cloud hoặc self-hosted server). 
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Sequence
 
 from core_engine.vectorstore.providers.qdrant.base import QdrantBase, point_id
@@ -29,6 +30,7 @@ class QdrantRemoteProvider(QdrantBase):
         )
         self._ready = False
         self._lock = asyncio.Lock()
+        self._upsert_batch = max(1, int(os.getenv("UPSERT_BATCH_SIZE", "256")))
 
     async def _ensure(self) -> None:
         if self._ready:
@@ -76,22 +78,30 @@ class QdrantRemoteProvider(QdrantBase):
         await self._ensure()
         record_list = list(records)
         if record_list:
-            await self._client.upsert(
-                collection_name=self._collection,
-                points=[self._point(r) for r in record_list],
-            )
+            points = [self._point(r) for r in record_list]
+            for index in range(0, len(points), self._upsert_batch):
+                await self._client.upsert(
+                    collection_name=self._collection,
+                    points=points[index : index + self._upsert_batch],
+                )
 
     async def list_chunk_ids_by_document(self, document_id: str) -> list[str]:
         await self._ensure()
-        res = await self._client.scroll(
-            collection_name=self._collection,
-            scroll_filter=self._document_filter(document_id),
-            with_payload=True,
-            with_vectors=False,
-            limit=10000,
-        )
-        points = res[0] if isinstance(res, tuple) else res
-        return sorted(self._existing_from_points(points))
+        chunk_ids: set[str] = set()
+        offset = None
+        while True:
+            points, offset = await self._client.scroll(
+                collection_name=self._collection,
+                scroll_filter=self._document_filter(document_id),
+                with_payload=True,
+                with_vectors=False,
+                limit=1000,
+                offset=offset,
+            )
+            chunk_ids.update(self._existing_from_points(points))
+            if offset is None:
+                break
+        return sorted(chunk_ids)
 
     async def delete_many(self, chunk_ids: Sequence[str]) -> None:
         await self._ensure()

@@ -58,6 +58,18 @@ class VisionImage:
     mime_type: str
 
 
+class AIError(Exception):
+    """Base domain error for outbound AI calls."""
+
+
+class TransientAIError(AIError):
+    """Retryable provider/network/rate-limit failure."""
+
+
+class PermanentAIError(AIError):
+    """Non-retryable request/config/model failure."""
+
+
 @dataclass(frozen=True)
 class AISettings:
     embed: CapabilityConfig
@@ -190,7 +202,7 @@ async def retry_async(fn, *, max_retries: int, base_delay: float = 0.5):
     while True:
         try:
             return await fn()
-        except Exception:  # noqa: BLE001 — phân loại transient để ngoài (gateway/DLQ)
+        except TransientAIError:
             attempt += 1
             if attempt > max_retries:
                 raise

@@ -6,12 +6,15 @@ from typing import Optional
 
 from core_engine.ai.base import (
     AIProvider,
+    AIError,
     AISettings,
     CAPTION,
     EMBED,
     OCR,
+    PermanentAIError,
     RERANK,
     RERANK_QUERY_MARKER,
+    TransientAIError,
     CapabilityConfig,
     VisionImage,
     load_ai_settings,
@@ -70,6 +73,7 @@ def __getattr__(name: str):
 
 __all__ = [
     "AIProvider",
+    "AIError",
     "AISettings",
     "CapabilityConfig",
     "VisionImage",
@@ -83,6 +87,8 @@ __all__ = [
     "build_provider",
     "OpenAIProvider",
     "OfflineProvider",
+    "PermanentAIError",
+    "TransientAIError",
     "get_ai_provider",
     "set_ai_provider",
     "reset_ai_provider",

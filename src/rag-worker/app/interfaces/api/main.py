@@ -5,12 +5,12 @@ import time
 from collections import deque
 
 from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.interfaces.api.routers import ingest
 from app.interfaces.api.runtime import compute_health, lifespan
 
-_HEALTH_PATHS = frozenset({"/livez", "/readyz", "/health"})
+_HEALTH_PATHS = frozenset({"/livez", "/readyz", "/health", "/healthz", "/metrics"})
 _BODYLESS_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
@@ -104,6 +104,23 @@ def create_app() -> FastAPI:
         report = await compute_health(app.state.runtime)
         status_code = 200 if report.status == "healthy" else 503
         return JSONResponse(status_code=status_code, content=report.to_dict())
+
+    @app.get("/healthz")
+    async def healthz():
+        report = await compute_health(app.state.runtime)
+        status_code = 200 if report.status == "healthy" else 503
+        return JSONResponse(status_code=status_code, content=report.to_dict())
+
+    @app.get("/metrics")
+    async def metrics():
+        report = await compute_health(app.state.runtime)
+        lines = []
+        for key, value in sorted(report.metrics.items()):
+            metric = f"rag_worker_{key}"
+            lines.append(f"# TYPE {metric} gauge")
+            lines.append(f"{metric} {float(value)}")
+        lines.append(f'rag_worker_healthy {1.0 if report.status == "healthy" else 0.0}')
+        return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
     return app
 

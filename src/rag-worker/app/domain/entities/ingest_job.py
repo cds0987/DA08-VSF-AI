@@ -30,4 +30,6 @@ class IngestJob:
     attempt: int = 0
     chunk_count: int = 0
     error_message: str | None = None
+    error_class: str | None = None
+    reconcile_attempt: int = 0
     status_published_at: datetime | None = None

@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 
 from core_engine.config import HaystackSettings
-from core_engine.engine import HaystackRagEngine, IngestInput
+from core_engine.engine import (
+    CaptionFallbackThresholdExceededError,
+    ChunkLimitExceededError,
+    HaystackRagEngine,
+    IngestInput,
+)
 
 
 class _StubEmbedder:
@@ -40,6 +45,11 @@ class _StubVectors:
 class _StubCaptioner:
     async def caption(self, text: str) -> str:
         return f"caption:{text.split()[0]}"
+
+
+class _FallbackCaptioner:
+    async def caption_with_metadata(self, text: str):
+        return type("CaptionResult", (), {"text": text[:10], "used_fallback": True})()
 
 
 @pytest.mark.asyncio
@@ -87,3 +97,46 @@ async def test_engine_prunes_existing_vectors_when_ingest_has_no_chunks() -> Non
 
     assert chunk_count == 0
     assert vectors.deleted_batches == [["doc-1::p0::c0", "doc-1::p0::c1"]]
+
+
+@pytest.mark.asyncio
+async def test_engine_rejects_document_exceeding_chunk_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAX_CHUNKS_PER_DOC", "1")
+    vectors = _StubVectors()
+    engine = HaystackRagEngine(
+        HaystackSettings(embed_dimension=3, parent_max_words=100, child_max_words=4, child_overlap_words=1),
+        _StubEmbedder(),
+        vectors,
+    )
+
+    with pytest.raises(ChunkLimitExceededError):
+        await engine.ingest(
+            IngestInput(
+                document_id="doc-1",
+                document_name="Doc",
+                file_type="md",
+                markdown="# Title\none two three four five six seven eight nine ten",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_engine_fails_when_caption_fallback_rate_exceeds_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CAPTION_FALLBACK_THRESHOLD", "0.1")
+    vectors = _StubVectors()
+    engine = HaystackRagEngine(
+        HaystackSettings(embed_dimension=3, parent_max_words=100, child_max_words=4, child_overlap_words=1),
+        _StubEmbedder(),
+        vectors,
+        captioner=_FallbackCaptioner(),
+    )
+
+    with pytest.raises(CaptionFallbackThresholdExceededError):
+        await engine.ingest(
+            IngestInput(
+                document_id="doc-1",
+                document_name="Doc",
+                file_type="md",
+                markdown="# Title\none two three four five six seven eight nine ten",
+            )
+        )
