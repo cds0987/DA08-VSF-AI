@@ -34,6 +34,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # CẢNH BÁO: downgrade khôi phục predicate chữ HOA — đây là bản LỖI (status thực tế
+    # lưu lowercase 'pending'/'processing'/'stale' nên index phủ 0 row → mất dedup active-job).
+    # Giữ đúng ngữ nghĩa alembic (revert về schema trước 0005); chỉ dùng khi rollback toàn bộ.
     op.drop_index("ux_ingest_jobs_active_document_id", table_name="ingest_jobs")
     dialect = op.get_bind().dialect.name
     where = sa.text("status IN ('PENDING','PROCESSING','STALE')")
