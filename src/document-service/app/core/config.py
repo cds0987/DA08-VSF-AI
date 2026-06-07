@@ -28,6 +28,23 @@ class Settings(BaseModel):
     }
     gcs_bucket: str = getenv("GCS_BUCKET", "rag-chatbot-docs")
     gcp_project_id: str | None = getenv("GCP_PROJECT_ID")
+    allowed_origins: str = getenv(
+        "CORS_ORIGINS", "http://localhost:3000,http://localhost:3001"
+    )
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [
+            origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()
+        ]
+
+    # storage_backend: gcs (prod) | s3 (local/e2e qua MinIO, R2, GCS S3-interop, AWS)
+    storage_backend: str = getenv("STORAGE_BACKEND", "gcs").strip().lower()
+    s3_bucket: str = getenv("S3_BUCKET", getenv("S3_SOURCE_BUCKET", "documents"))
+    s3_endpoint_url: str | None = getenv("S3_ENDPOINT_URL")
+    s3_access_key_id: str | None = getenv("S3_ACCESS_KEY_ID")
+    s3_secret_access_key: str | None = getenv("S3_SECRET_ACCESS_KEY")
+    s3_region: str = getenv("S3_REGION", "auto")
 
     # storage_backend: gcs (prod) | s3 (local/e2e qua MinIO, R2, GCS S3-interop, AWS)
     storage_backend: str = getenv("STORAGE_BACKEND", "gcs").strip().lower()

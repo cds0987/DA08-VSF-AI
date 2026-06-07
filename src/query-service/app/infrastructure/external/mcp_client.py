@@ -12,6 +12,8 @@ from app.infrastructure.config import Settings
 streamable_http_client = None
 ClientSession = None
 
+MCP_INTERNAL_TOKEN_HEADER = "X-Internal-Token"
+
 
 @dataclass(frozen=True)
 class ToolCallRecord:
@@ -201,6 +203,7 @@ class MCPStreamableHttpClient:
     def __init__(self, settings: Settings) -> None:
         self._endpoint_url = _mcp_endpoint_url(settings.mcp_service_url)
         self._timeout_seconds = settings.mcp_timeout_seconds
+        self._internal_token = (settings.mcp_internal_token or "").strip()
 
     async def list_tools(self) -> list[str]:
         async with self._session() as session:
@@ -257,13 +260,14 @@ class MCPStreamableHttpClient:
         return _call_tool_result_payload(result)
 
     def _session(self):
-        return _McpSessionContext(self._endpoint_url, self._timeout_seconds)
+        return _McpSessionContext(self._endpoint_url, self._timeout_seconds, self._internal_token)
 
 
 class _McpSessionContext:
-    def __init__(self, endpoint_url: str, timeout_seconds: int) -> None:
+    def __init__(self, endpoint_url: str, timeout_seconds: int, internal_token: str = "") -> None:
         self._endpoint_url = endpoint_url
         self._timeout_seconds = timeout_seconds
+        self._internal_token = internal_token
         self._http_client = None
         self._transport_cm = None
         self._session_cm = None
@@ -271,7 +275,10 @@ class _McpSessionContext:
 
     async def __aenter__(self):
         session_cls, transport_factory = _sdk_objects()
-        self._http_client = httpx.AsyncClient(timeout=self._timeout_seconds)
+        headers = {}
+        if self._internal_token:
+            headers[MCP_INTERNAL_TOKEN_HEADER] = self._internal_token
+        self._http_client = httpx.AsyncClient(timeout=self._timeout_seconds, headers=headers)
         self._transport_cm = transport_factory(self._endpoint_url, http_client=self._http_client)
         read_stream, write_stream, _ = await self._transport_cm.__aenter__()
         self._session_cm = session_cls(read_stream, write_stream)
