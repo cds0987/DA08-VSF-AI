@@ -867,6 +867,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 logger,
             )
         )
+    elif reconcile_settings.enabled:
+        log_event(
+            logger,
+            logging.WARNING,
+            "store_reconciler_not_started",
+            stage="startup",
+            enabled=True,
+            has_source_bucket=bool(runtime.source_bucket),
+            has_ingest_use_case=runtime.ingest_use_case is not None,
+            parser_type=runtime.parser.__class__.__name__,
+        )
     app.state.nats_broker = nats_broker
     app.state.nats_subscription = nats_subscription
     app.state.nats_access_subscription = nats_access_subscription
