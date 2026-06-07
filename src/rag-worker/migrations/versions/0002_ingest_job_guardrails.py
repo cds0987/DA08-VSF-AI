@@ -15,8 +15,41 @@ down_revision: Union[str, None] = "0001_create_documents"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+_DUPLICATE_ACTIVE_JOB_ERROR = "superseded by migration before active-job unique index"
+
+
+def _fail_duplicate_active_jobs() -> None:
+    op.execute(
+        sa.text(
+            """
+            WITH ranked AS (
+                SELECT
+                    id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY document_id
+                        ORDER BY created_at ASC, id ASC
+                    ) AS rn
+                FROM ingest_jobs
+                WHERE status IN ('PENDING', 'PROCESSING', 'STALE')
+            )
+            UPDATE ingest_jobs
+            SET
+                status = 'FAILED',
+                claim_id = NULL,
+                error_message = :error_message
+            WHERE id IN (
+                SELECT id
+                FROM ranked
+                WHERE rn > 1
+            )
+            """
+        ),
+        {"error_message": _DUPLICATE_ACTIVE_JOB_ERROR},
+    )
+
 
 def upgrade() -> None:
+    _fail_duplicate_active_jobs()
     dialect = op.get_bind().dialect.name
     where = sa.text("status IN ('PENDING','PROCESSING','STALE')")
     kwargs = {"unique": True}

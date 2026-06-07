@@ -233,7 +233,7 @@ class S3SourceParser(Parser):
         size = int(size_raw) if size_raw is not None else 0
         if size <= 0:
             raise ValueError(
-                f"S3 object {bucket}/{key} thiáº¿u hoáº·c cÃ³ ContentLength khÃ´ng há»£p lá»‡; tá»« chá»‘i táº£i."
+                f"S3 object {bucket}/{key} thiếu hoặc có ContentLength không hợp lệ; từ chối tải."
             )
         if size > self._max_bytes:
             raise ValueError(
