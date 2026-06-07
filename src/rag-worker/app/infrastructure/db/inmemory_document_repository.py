@@ -20,6 +20,9 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
         self._max_attempts = max(1, int(os.getenv("INGEST_MAX_ATTEMPTS", "5")))
 
     async def create(self, document: Document) -> Document:
+        existing = self._documents.get(document.id)
+        if existing is not None:
+            return existing
         self._documents[document.id] = document
         return document
 
@@ -27,7 +30,11 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
         return self._documents.get(document_id)
 
     async def list_all(self, limit: int = 50, offset: int = 0) -> List[Document]:
-        documents = list(self._documents.values())
+        documents = [
+            document
+            for document in self._documents.values()
+            if document.status is not DocumentStatus.DELETED
+        ]
         return documents[offset : offset + limit]
 
     async def update_status(
@@ -38,6 +45,8 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
     ) -> None:
         document = self._documents.get(document_id)
         if document is None:
+            return
+        if document.status is DocumentStatus.DELETED and status is not DocumentStatus.DELETED:
             return
         next_error = document.error_message
         if error is not None:
@@ -57,6 +66,19 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
         self._documents[document_id] = replace(document, chunk_count=chunk_count)
 
     async def delete(self, document_id: str) -> None:
+        document = self._documents.get(document_id)
+        if document is not None:
+            self._documents[document_id] = replace(
+                document,
+                status=DocumentStatus.DELETED,
+                error_message=None,
+            )
+        self._job_logs = [entry for entry in self._job_logs if entry.document_id != document_id]
+        self._jobs = {
+            job_id: job for job_id, job in self._jobs.items() if job.document_id != document_id
+        }
+
+    async def purge(self, document_id: str) -> None:
         self._documents.pop(document_id, None)
         self._job_logs = [entry for entry in self._job_logs if entry.document_id != document_id]
         self._jobs = {
@@ -110,9 +132,6 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
         return sorted(candidates, key=lambda item: (item.created_at, item.id))[0]
 
     async def claim_next_pending(self, claim_id: str) -> IngestJob | None:
-        await self._fail_jobs_exceeding_max_attempts(
-            statuses={IngestJobStatus.PENDING, IngestJobStatus.STALE}
-        )
         candidates = sorted(
             self._jobs.values(),
             key=lambda item: (item.created_at, item.id),
@@ -138,6 +157,7 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
                 error_message=job.error_message,
                 created_at=job.created_at,
                 updated_at=datetime.now(UTC),
+                status_published_at=job.status_published_at,
             )
             self._jobs[job.id] = updated
             return updated
@@ -156,7 +176,7 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
 
     async def mark_stale_jobs(self, stale_before: datetime) -> int:
         failed = await self._fail_jobs_exceeding_max_attempts(
-            statuses={IngestJobStatus.PROCESSING},
+            statuses={IngestJobStatus.PROCESSING, IngestJobStatus.STALE},
             stale_before=stale_before,
         )
         marked = 0
@@ -201,6 +221,7 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
             error_message=None,
             created_at=job.created_at,
             updated_at=datetime.now(UTC),
+            status_published_at=None,
         )
         return True
 
@@ -223,6 +244,7 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
                 claim_id=None,
                 updated_at=now,
                 error_message="exceeded max attempts",
+                status_published_at=None,
             )
             document = self._documents.get(job.document_id)
             if document is not None:
@@ -271,5 +293,28 @@ class InMemoryDocumentRepository(DocumentRepository, IngestJobRepository):
             error_message=error_message,
             created_at=job.created_at,
             updated_at=datetime.now(UTC),
+            status_published_at=None,
         )
         return True
+
+    async def list_pending_status_publications(
+        self,
+        limit: int,
+        *,
+        older_than: datetime | None = None,
+    ) -> list[IngestJob]:
+        terminal = {IngestJobStatus.COMPLETED, IngestJobStatus.FAILED}
+        jobs = [
+            job
+            for job in self._jobs.values()
+            if job.status in terminal and job.status_published_at is None
+        ]
+        if older_than is not None:
+            jobs = [job for job in jobs if job.updated_at >= older_than]
+        return sorted(jobs, key=lambda item: (item.updated_at, item.id))[:limit]
+
+    async def mark_status_published(self, job_id: str) -> None:
+        job = self._jobs.get(job_id)
+        if job is None:
+            return
+        self._jobs[job_id] = replace(job, status_published_at=datetime.now(UTC))

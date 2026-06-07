@@ -210,8 +210,10 @@ async def test_status_publisher_publishes_only_terminal() -> None:
     broker = FakeBroker()
     publisher = DocStatusPublisher(broker, subject="doc.status")
 
-    await publisher.publish_for_job(_job(IngestJobStatus.COMPLETED, chunk_count=3))
-    await publisher.publish_for_job(_job(IngestJobStatus.PROCESSING))  # bị bỏ qua
+    assert (
+        await publisher.publish_for_job(_job(IngestJobStatus.COMPLETED, chunk_count=3))
+    ) is True
+    assert await publisher.publish_for_job(_job(IngestJobStatus.PROCESSING)) is True
 
     assert broker.published == [("doc.status", {"doc_id": "doc-1", "status": "indexed", "chunk_count": 3})]
 
@@ -221,7 +223,7 @@ async def test_status_publisher_publishes_failed() -> None:
     broker = FakeBroker()
     publisher = DocStatusPublisher(broker, subject="doc.status")
 
-    await publisher.publish_for_job(_job(IngestJobStatus.FAILED, error="boom"))
+    assert await publisher.publish_for_job(_job(IngestJobStatus.FAILED, error="boom")) is True
 
     assert broker.published == [("doc.status", {"doc_id": "doc-1", "status": "failed", "error": "boom"})]
 
@@ -233,8 +235,28 @@ async def test_status_publisher_swallows_broker_error() -> None:
             raise RuntimeError("nats down")
 
     publisher = DocStatusPublisher(FailingBroker(), subject="doc.status")
-    # Publish lỗi không được làm sập worker -> không raise (best-effort, chỉ log).
-    await publisher.publish_for_job(_job(IngestJobStatus.COMPLETED, chunk_count=1))
+    assert await publisher.publish_for_job(_job(IngestJobStatus.COMPLETED, chunk_count=1)) is False
+
+
+@pytest.mark.asyncio
+async def test_status_publisher_retries_before_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"count": 0}
+
+    async def _no_sleep(delay: float) -> None:
+        return None
+
+    class FlakyBroker:
+        async def publish_json(self, subject, payload):
+            calls["count"] += 1
+            if calls["count"] < 3:
+                raise RuntimeError("nats down")
+
+    monkeypatch.setattr("app.interfaces.nats.ingest_consumer.asyncio.sleep", _no_sleep)
+    publisher = DocStatusPublisher(FlakyBroker(), subject="doc.status")
+
+    assert await publisher.publish_for_job(_job(IngestJobStatus.COMPLETED, chunk_count=1)) is True
+
+    assert calls["count"] == 3
 
 
 # --- subscription cb: ack / nak / term ------------------------------------- #

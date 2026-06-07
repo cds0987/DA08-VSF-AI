@@ -85,7 +85,15 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
                 chunk_count=document.chunk_count,
                 error_message=document.error_message,
             )
-            session.merge(record)
+            session.add(record)
+            try:
+                session.flush()
+            except IntegrityError:
+                session.rollback()
+                existing = session.get(DocumentRecord, document.id)
+                if existing is None:
+                    raise
+                return self._to_domain(existing)
             return self._to_domain(record)
 
     async def get_by_id(self, document_id: str) -> Document | None:
@@ -105,6 +113,7 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
         with self._session() as session:
             stmt = (
                 select(DocumentRecord)
+                .where(DocumentRecord.status != DocumentStatus.DELETED.value)
                 .order_by(DocumentRecord.created_at.desc(), DocumentRecord.id.desc())
                 .offset(offset)
                 .limit(limit)
@@ -130,6 +139,11 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
             record = session.get(DocumentRecord, document_id)
             if record is None:
                 raise KeyError(f"document not found: {document_id}")
+            if (
+                record.status == DocumentStatus.DELETED.value
+                and status is not DocumentStatus.DELETED
+            ):
+                return
             record.status = status.value
             if error is not None:
                 record.error_message = error
@@ -140,6 +154,22 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
         await asyncio.to_thread(self._delete_sync, document_id)
 
     def _delete_sync(self, document_id: str) -> None:
+        with self._session() as session:
+            session.execute(
+                delete(JobLogRecord).where(JobLogRecord.document_id == document_id)
+            )
+            session.execute(
+                delete(IngestJobRecord).where(IngestJobRecord.document_id == document_id)
+            )
+            record = session.get(DocumentRecord, document_id)
+            if record is not None:
+                record.status = DocumentStatus.DELETED.value
+                record.error_message = None
+
+    async def purge(self, document_id: str) -> None:
+        await asyncio.to_thread(self._purge_sync, document_id)
+
+    def _purge_sync(self, document_id: str) -> None:
         with self._session() as session:
             session.execute(
                 delete(JobLogRecord).where(JobLogRecord.document_id == document_id)
@@ -257,6 +287,7 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
                 error_message=job.error_message,
                 created_at=job.created_at,
                 updated_at=job.updated_at,
+                status_published_at=job.status_published_at,
             )
             session.add(record)
             try:
@@ -293,12 +324,6 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
     def _claim_next_pending_sync(self, claim_id: str) -> IngestJob | None:
         now = datetime.now(UTC)
         with self._session() as session:
-            self._fail_jobs_exceeding_max_attempts(
-                session,
-                stale_before=None,
-                statuses=(IngestJobStatus.PENDING.value, IngestJobStatus.STALE.value),
-                now=now,
-            )
             stmt = (
                 select(IngestJobRecord)
                 .where(
@@ -310,6 +335,8 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
                 .order_by(IngestJobRecord.created_at.asc(), IngestJobRecord.id.asc())
                 .limit(1)
             )
+            if session.bind is not None and session.bind.dialect.name == "postgresql":
+                stmt = stmt.with_for_update(skip_locked=True)
             record = session.execute(stmt).scalars().first()
             if record is None:
                 return None
@@ -358,7 +385,10 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
             failed_count = self._fail_jobs_exceeding_max_attempts(
                 session,
                 stale_before=stale_before,
-                statuses=(IngestJobStatus.PROCESSING.value,),
+                statuses=(
+                    IngestJobStatus.PROCESSING.value,
+                    IngestJobStatus.STALE.value,
+                ),
                 now=now,
             )
             result = session.execute(
@@ -401,6 +431,7 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
                     chunk_count=chunk_count,
                     updated_at=datetime.now(UTC),
                     error_message=None,
+                    status_published_at=None,
                 )
             )
             return (result.rowcount or 0) == 1
@@ -429,9 +460,57 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
                     status=IngestJobStatus.FAILED.value,
                     updated_at=datetime.now(UTC),
                     error_message=error_message,
+                    status_published_at=None,
                 )
             )
             return (result.rowcount or 0) == 1
+
+    async def list_pending_status_publications(
+        self,
+        limit: int,
+        *,
+        older_than: datetime | None = None,
+    ) -> list[IngestJob]:
+        return await asyncio.to_thread(
+            self._list_pending_status_publications_sync,
+            limit,
+            older_than,
+        )
+
+    def _list_pending_status_publications_sync(
+        self,
+        limit: int,
+        older_than: datetime | None,
+    ) -> list[IngestJob]:
+        with self._session() as session:
+            stmt = (
+                select(IngestJobRecord)
+                .where(
+                    IngestJobRecord.status.in_(
+                        [
+                            IngestJobStatus.COMPLETED.value,
+                            IngestJobStatus.FAILED.value,
+                        ]
+                    ),
+                    IngestJobRecord.status_published_at.is_(None),
+                )
+                .order_by(IngestJobRecord.updated_at.asc(), IngestJobRecord.id.asc())
+                .limit(limit)
+            )
+            if older_than is not None:
+                stmt = stmt.where(IngestJobRecord.updated_at >= older_than)
+            records = session.execute(stmt).scalars().all()
+            return [self._to_job(record) for record in records]
+
+    async def mark_status_published(self, job_id: str) -> None:
+        await asyncio.to_thread(self._mark_status_published_sync, job_id)
+
+    def _mark_status_published_sync(self, job_id: str) -> None:
+        with self._session() as session:
+            record = session.get(IngestJobRecord, job_id)
+            if record is None:
+                return
+            record.status_published_at = datetime.now(UTC)
 
     def _to_job(self, record: IngestJobRecord) -> IngestJob:
         return IngestJob(
@@ -450,6 +529,7 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
             error_message=record.error_message,
             created_at=_as_aware_utc(record.created_at),
             updated_at=_as_aware_utc(record.updated_at),
+            status_published_at=_as_aware_utc(record.status_published_at),
         )
 
     def _find_active_job_record(
@@ -490,6 +570,7 @@ class PostgresDocumentRepository(DocumentRepository, IngestJobRepository):
             job.claim_id = None
             job.updated_at = now
             job.error_message = _MAX_ATTEMPTS_EXCEEDED_ERROR
+            job.status_published_at = None
             document = session.get(DocumentRecord, job.document_id)
             if document is not None:
                 document.status = DocumentStatus.FAILED.value

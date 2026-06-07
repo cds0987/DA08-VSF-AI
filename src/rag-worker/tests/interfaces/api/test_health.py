@@ -284,6 +284,44 @@ def test_invalid_job_log_retention_days_fail_startup(
             pass
 
 
+def test_invalid_ingest_timeout_fails_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AI_PROVIDER", "offline")
+    monkeypatch.setenv("INGEST_JOB_TIMEOUT_SECONDS", "0")
+
+    with pytest.raises(ValueError, match="INGEST_JOB_TIMEOUT_SECONDS must be > 0"):
+        with TestClient(create_app()):
+            pass
+
+
+def test_invalid_embed_batch_size_fails_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AI_PROVIDER", "offline")
+    monkeypatch.setenv("EMBED_BATCH_SIZE", "0")
+
+    with pytest.raises(ValueError, match="EMBED_BATCH_SIZE must be > 0"):
+        with TestClient(create_app()):
+            pass
+
+
+def test_invalid_ingest_timeout_fails_startup_with_pipeline_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AI_PROVIDER", "offline")
+    monkeypatch.setenv("PIPELINE_CONFIG", str(RAG_WORKER_CONFIG))
+    monkeypatch.setenv("VECTOR_DB_URL", "http://localhost:6333")
+    monkeypatch.setenv("INGEST_JOB_TIMEOUT_SECONDS", "0")
+
+    with pytest.raises(ValueError, match="INGEST_JOB_TIMEOUT_SECONDS must be > 0"):
+        with TestClient(create_app()):
+            pass
+
+
 def test_readiness_recomputes_live_health_on_each_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

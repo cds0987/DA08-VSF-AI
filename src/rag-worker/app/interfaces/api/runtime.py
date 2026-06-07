@@ -16,12 +16,19 @@ from fastapi import FastAPI
 from sqlalchemy.engine import make_url
 
 from app.application.use_cases.ingestion import IngestDocumentUseCase
+from app.application.use_cases.ingestion import (
+    StoreReconcileSettings,
+    run_store_reconciler,
+)
 from app.domain.repositories.artifact_store import ArtifactStore
 from app.domain.repositories.document_repository import DocumentRepository
 from app.domain.repositories.ingest_job_repository import IngestJobRepository
+from app.domain.repositories.object_store_lister import ObjectStoreLister
 from app.domain.repositories.parser import Parser
 from app.infrastructure.db import InMemoryDocumentRepository
 from app.infrastructure.external.local_artifact_store import LocalArtifactStore
+from app.infrastructure.external.object_store_lister import S3ObjectStoreLister
+from app.infrastructure.external.s3_parser import S3SourceParser
 from app.interfaces.api.composition import resolve_parser
 from core_engine.ai import AISettings, get_ai_provider, load_ai_settings, reset_ai_provider
 from core_engine.config import HaystackSettings, load_settings
@@ -116,8 +123,33 @@ def load_parser_execution_settings() -> ParserExecutionSettings:
     )
 
 
+def load_store_reconcile_settings() -> StoreReconcileSettings:
+    return StoreReconcileSettings(
+        enabled=_is_truthy(os.getenv("STORE_RECONCILE_ENABLED", "0")),
+        interval_seconds=int(os.getenv("STORE_RECONCILE_INTERVAL_SECONDS", "900")),
+        min_age_seconds=int(os.getenv("STORE_RECONCILE_MIN_AGE_SECONDS", "600")),
+        bucket=_source_bucket(),
+    )
+
+
+@dataclass(frozen=True)
+class DocStatusSweepSettings:
+    interval_seconds: float = 30.0
+    batch: int = 100
+    lookback_seconds: int = 86_400
+
+
+def load_doc_status_sweep_settings() -> DocStatusSweepSettings:
+    return DocStatusSweepSettings(
+        interval_seconds=float(os.getenv("DOC_STATUS_SWEEP_INTERVAL_SECONDS", "30")),
+        batch=int(os.getenv("DOC_STATUS_SWEEP_BATCH", "100")),
+        lookback_seconds=int(os.getenv("DOC_STATUS_SWEEP_LOOKBACK_SECONDS", "86400")),
+    )
+
+
 def validate_runtime_settings() -> None:
     settings = load_settings()
+    validate_ingest_runtime_limits()
     if settings.embed_dimension <= 0:
         raise ValueError("EMBED_DIMENSION must be > 0")
     if settings.parent_max_words <= 0:
@@ -132,10 +164,34 @@ def validate_runtime_settings() -> None:
     validate_ingest_lease_settings()
     validate_parser_execution_settings()
     caption_enabled_from_env()
+
+
+def validate_ingest_runtime_limits() -> None:
     if int(os.getenv("INGEST_WORKER_COUNT", "1")) <= 0:
         raise ValueError("INGEST_WORKER_COUNT must be > 0")
     if float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5")) <= 0:
         raise ValueError("INGEST_WORKER_POLL_INTERVAL_SECONDS must be > 0")
+    if float(os.getenv("INGEST_JOB_TIMEOUT_SECONDS", "600")) <= 0:
+        raise ValueError("INGEST_JOB_TIMEOUT_SECONDS must be > 0")
+    if int(os.getenv("EMBED_BATCH_SIZE", "100")) <= 0:
+        raise ValueError("EMBED_BATCH_SIZE must be > 0")
+    if int(os.getenv("CAPTION_MAX_CONCURRENCY", "5")) <= 0:
+        raise ValueError("CAPTION_MAX_CONCURRENCY must be > 0")
+    sweep = load_doc_status_sweep_settings()
+    if sweep.interval_seconds <= 0:
+        raise ValueError("DOC_STATUS_SWEEP_INTERVAL_SECONDS must be > 0")
+    if sweep.batch <= 0:
+        raise ValueError("DOC_STATUS_SWEEP_BATCH must be > 0")
+    if sweep.lookback_seconds < 0:
+        raise ValueError("DOC_STATUS_SWEEP_LOOKBACK_SECONDS must be >= 0")
+    reconcile = load_store_reconcile_settings()
+    if reconcile.enabled:
+        if reconcile.interval_seconds <= 0:
+            raise ValueError("STORE_RECONCILE_INTERVAL_SECONDS must be > 0")
+        if reconcile.min_age_seconds < 0:
+            raise ValueError("STORE_RECONCILE_MIN_AGE_SECONDS must be >= 0")
+        if not reconcile.bucket.strip():
+            raise ValueError("STORE_RECONCILE requires S3_SOURCE_BUCKET or R2_BUCKET")
 
 
 def validate_vector_config(
@@ -342,12 +398,51 @@ async def run_stale_job_reaper(
         await asyncio.sleep(settings.reaper_interval_seconds)
 
 
+async def run_doc_status_publisher_sweep(
+    job_repository: IngestJobRepository,
+    publisher: Any,
+    settings: DocStatusSweepSettings,
+    logger: logging.Logger,
+) -> None:
+    while True:
+        try:
+            cutoff = datetime.now(UTC) - timedelta(seconds=settings.lookback_seconds)
+            jobs = await job_repository.list_pending_status_publications(
+                settings.batch,
+                older_than=cutoff,
+            )
+            for job in jobs:
+                if await publisher.publish_for_job(job):
+                    await job_repository.mark_status_published(job.id)
+        except Exception as exc:  # noqa: BLE001 - maintenance task must stay alive
+            log_event(
+                logger,
+                logging.WARNING,
+                "doc_status_sweep_failed",
+                stage="status",
+                error=str(exc),
+            )
+        await asyncio.sleep(settings.interval_seconds)
+
+
+def build_object_store_lister(runtime: RuntimeState) -> ObjectStoreLister:
+    if runtime.source_bucket is None or not runtime.source_bucket.strip():
+        raise ValueError("source bucket is required to build object store lister")
+    if not isinstance(runtime.parser, S3SourceParser):
+        raise ValueError("store reconciler requires an S3-backed parser")
+    return S3ObjectStoreLister(
+        bucket=runtime.source_bucket,
+        client_factory=runtime.parser._client_factory,
+    )
+
+
 async def run_ingest_worker(
     name: str,
     ingest_use_case: IngestDocumentUseCase,
     poll_interval_seconds: float,
     logger: logging.Logger,
     on_job_finished: Any | None = None,
+    job_repository: IngestJobRepository | None = None,
 ) -> None:
     while True:
         try:
@@ -367,7 +462,21 @@ async def run_ingest_worker(
                 )
                 # Publish doc.status qua NATS (no-op nếu không bật NATS).
                 if on_job_finished is not None:
-                    await on_job_finished(job)
+                    published = await on_job_finished(job)
+                    if published and job_repository is not None:
+                        try:
+                            await job_repository.mark_status_published(job.id)
+                        except Exception as exc:  # noqa: BLE001 - sweep will retry later
+                            log_event(
+                                logger,
+                                logging.WARNING,
+                                "doc_status_mark_published_failed",
+                                stage="status",
+                                worker=name,
+                                job_id=job.id,
+                                document_id=job.document_id,
+                                error=str(exc),
+                            )
         except Exception as exc:  # noqa: BLE001 - worker must stay alive and keep polling
             log_event(
                 logger,
@@ -446,11 +555,8 @@ def bootstrap_runtime() -> RuntimeState:
     validate_job_log_retention_settings()
     validate_ingest_lease_settings()
     validate_parser_execution_settings()
+    validate_ingest_runtime_limits()
     caption_enabled_from_env()
-    if int(os.getenv("INGEST_WORKER_COUNT", "1")) <= 0:
-        raise ValueError("INGEST_WORKER_COUNT must be > 0")
-    if float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5")) <= 0:
-        raise ValueError("INGEST_WORKER_POLL_INTERVAL_SECONDS must be > 0")
     database_url = os.getenv("DATABASE_URL", "").strip()
     validate_metadata_backend(app_env, database_url)
     metadata_backend = metadata_backend_name(database_url)
@@ -766,6 +872,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     retention_settings = load_job_log_retention_settings()
     lease_settings = load_ingest_lease_settings()
+    status_sweep_settings = load_doc_status_sweep_settings()
+    reconcile_settings = load_store_reconcile_settings()
     prune_task = asyncio.create_task(
         run_job_log_pruner(runtime.document_repository, retention_settings, logger)
     )
@@ -804,10 +912,48 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     worker_poll_interval,
                     logger,
                     on_job_finished,
+                    runtime.job_repository,
                 )
             )
             for index in range(worker_count)
         ]
+    status_sweep_task = None
+    if status_publisher is not None:
+        status_sweep_task = asyncio.create_task(
+            run_doc_status_publisher_sweep(
+                runtime.job_repository,
+                status_publisher,
+                status_sweep_settings,
+                logger,
+            )
+        )
+    reconciler_task = None
+    if (
+        reconcile_settings.enabled
+        and runtime.source_bucket
+        and runtime.ingest_use_case is not None
+        and isinstance(runtime.parser, S3SourceParser)
+    ):
+        lister = build_object_store_lister(runtime)
+        reconciler_task = asyncio.create_task(
+            run_store_reconciler(
+                lister,
+                runtime.ingest_use_case,
+                reconcile_settings,
+                logger,
+            )
+        )
+    elif reconcile_settings.enabled:
+        log_event(
+            logger,
+            logging.WARNING,
+            "store_reconciler_not_started",
+            stage="startup",
+            enabled=True,
+            has_source_bucket=bool(runtime.source_bucket),
+            has_ingest_use_case=runtime.ingest_use_case is not None,
+            parser_type=runtime.parser.__class__.__name__,
+        )
     app.state.nats_broker = nats_broker
     app.state.nats_subscription = nats_subscription
     app.state.nats_access_subscription = nats_access_subscription
@@ -817,11 +963,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.job_log_prune_task = prune_task
     app.state.ingest_job_reaper_task = stale_reaper_task
     app.state.ingest_worker_tasks = worker_tasks
+    app.state.doc_status_sweep_task = status_sweep_task
+    app.state.store_reconciler_task = reconciler_task
     try:
         yield
     finally:
         prune_task.cancel()
         stale_reaper_task.cancel()
+        if status_sweep_task is not None:
+            status_sweep_task.cancel()
+        if reconciler_task is not None:
+            reconciler_task.cancel()
         for task in worker_tasks:
             task.cancel()
         try:
@@ -842,6 +994,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ingest_job_reaper_stopped",
                 stage="worker",
             )
+        if status_sweep_task is not None:
+            try:
+                await status_sweep_task
+            except asyncio.CancelledError:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "doc_status_sweep_stopped",
+                    stage="status",
+                )
+        if reconciler_task is not None:
+            try:
+                await reconciler_task
+            except asyncio.CancelledError:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "store_reconciler_stopped",
+                    stage="reconcile",
+                )
         for task in worker_tasks:
             try:
                 await task

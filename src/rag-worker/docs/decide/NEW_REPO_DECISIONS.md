@@ -21,6 +21,19 @@
 **Cần xác nhận:** nguồn event cụ thể · SLO freshness · có multi-instance ngay không.
 → [technique/ingestion.md](./technique/ingestion.md) §1 · [scaling.md](./technique/scaling.md) §6
 
+**Implementation note (2026-06-07, chưa ratify):**
+- Repo hiện đã có **scanner safety-net tối thiểu** ở rag-worker: `STORE_RECONCILE_ENABLED`
+  quét trực tiếp bucket `raw/<doc_id>/<file>` qua S3-compatible listing, so với bảng
+  `documents`, rồi enqueue lại doc chưa từng được biết.
+- `documents` trở thành **sổ đăng ký**; `status=deleted` là tombstone soft-delete để scanner
+  không hồi sinh doc đã xóa.
+- `doc.status` không còn là best-effort thuần: rag-worker giữ cờ bền
+  `ingest_jobs.status_published_at` và có background sweep retry, nên đảm bảo
+  **at-least-once** cho trạng thái terminal (`indexed`/`failed`) kể cả sau restart.
+- Store reconciler và doc-status sweep xử lý hai lỗ khác nhau:
+  reconciler đóng lỗ **no-row**, còn `status_published_at` + sweep đóng lỗ
+  **có-row terminal nhưng mất tín hiệu**.
+
 ---
 
 ### D2. Parser = stateless service (Option 2) + stack MarkItDown + OCR/vision

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import logging
+import os
 from typing import List, Optional
 from uuid import uuid4
 
@@ -45,6 +47,9 @@ class HaystackRagEngine:
             child_overlap_words=self.settings.child_overlap_words,
         )
         self._logger = logging.getLogger(__name__)
+        self._caption_semaphore = asyncio.Semaphore(
+            max(1, int(os.getenv("CAPTION_MAX_CONCURRENCY", "5")))
+        )
 
     async def ingest(self, doc: IngestInput) -> int:
         request_correlation_id = doc.correlation_id or str(uuid4())
@@ -69,15 +74,31 @@ class HaystackRagEngine:
         chunk_ids: List[str] = []
         embed_texts: List[str] = []
         payloads: List[dict] = []
+        captions_by_index: dict[int, str] = {}
+        if self.captioner is not None and sections:
+            async def _caption_one(index: int, text: str) -> tuple[int, str, float]:
+                async with self._caption_semaphore:
+                    caption_sw = Stopwatch()
+                    caption = await self.captioner.caption(text)
+                    return index, caption, caption_sw.elapsed_ms()
+
+            caption_results = await asyncio.gather(
+                *[_caption_one(index, section.parent_text) for index, section in enumerate(sections)]
+            )
+            for index, caption, elapsed_ms in caption_results:
+                captions_by_index[index] = caption
+                caption_ms += elapsed_ms
+
         for parent_index, section in enumerate(sections):
             parent_id = f"{doc.document_id}::p{parent_index}"
             heading_path = [section.section_title] if section.section_title else []
 
             if self.captioner is not None:
-                caption_sw = Stopwatch()
-                caption = await self.captioner.caption(section.parent_text)
-                caption_ms += caption_sw.elapsed_ms()
-                units = [(f"{parent_id}::c0", caption, caption, section.parent_text)]
+                caption = captions_by_index[parent_index]
+                units = [
+                    (f"{parent_id}::c{child_index}", caption, caption, child)
+                    for child_index, child in enumerate(section.children)
+                ]
             else:
                 units = [
                     (f"{parent_id}::c{child_index}", child, child, child)
@@ -96,7 +117,7 @@ class HaystackRagEngine:
                         "document_id": doc.document_id,
                         "document_name": doc.document_name,
                         "file_type": doc.file_type,
-                        "page_number": section.page_number,
+                        "page_number": section.section_index,
                         "section_title": section.section_title,
                         "heading_path": heading_path,
                         "caption": caption,
@@ -105,7 +126,10 @@ class HaystackRagEngine:
                     }
                 )
 
+        existing_chunk_ids = set(await self.vectors.list_chunk_ids_by_document(doc.document_id))
         if not chunk_ids:
+            if existing_chunk_ids:
+                await self.vectors.delete_many(sorted(existing_chunk_ids))
             log_event(
                 self._logger,
                 logging.INFO,
@@ -116,7 +140,6 @@ class HaystackRagEngine:
             )
             return 0
 
-        existing_chunk_ids = set(await self.vectors.list_chunk_ids_by_document(doc.document_id))
         embed_sw = Stopwatch()
         vectors = await self.embedder.embed_batch(embed_texts)
         embed_ms = embed_sw.elapsed_ms()

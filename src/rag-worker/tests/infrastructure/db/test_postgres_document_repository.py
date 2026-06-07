@@ -57,7 +57,48 @@ async def test_postgres_document_repository_crud_roundtrip(tmp_path) -> None:
     assert [document.id for document in documents] == ["doc-1"]
 
     await repository.delete("doc-1")
-    assert await repository.get_by_id("doc-1") is None
+    deleted = await repository.get_by_id("doc-1")
+    assert deleted is not None
+    assert deleted.status is DocumentStatus.DELETED
+    assert await repository.list_all() == []
+
+
+@pytest.mark.asyncio
+async def test_postgres_document_repository_create_duplicate_returns_existing_without_overwrite(tmp_path) -> None:
+    database_path = tmp_path / "documents.db"
+    repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
+    created_at = datetime.now(UTC)
+
+    first = await repository.create(
+        Document(
+            id="doc-1",
+            name="Original",
+            file_type="md",
+            s3_key="local://doc-1",
+            status=DocumentStatus.COMPLETED,
+            created_at=created_at,
+            chunk_count=7,
+        )
+    )
+    second = await repository.create(
+        Document(
+            id="doc-1",
+            name="Overwritten",
+            file_type="pdf",
+            s3_key="local://other",
+            status=DocumentStatus.QUEUED,
+            created_at=created_at,
+            chunk_count=0,
+        )
+    )
+
+    assert first.name == "Original"
+    assert second.name == "Original"
+    stored = await repository.get_by_id("doc-1")
+    assert stored is not None
+    assert stored.status is DocumentStatus.COMPLETED
+    assert stored.chunk_count == 7
 
 
 @pytest.mark.asyncio
@@ -104,9 +145,12 @@ async def test_postgres_document_repository_delete_cascades_jobs_and_logs(tmp_pa
 
     await repository.delete("doc-1")
 
-    assert await repository.get_by_id("doc-1") is None
+    deleted = await repository.get_by_id("doc-1")
+    assert deleted is not None
+    assert deleted.status is DocumentStatus.DELETED
     assert await repository.get_job("job-1") is None
     assert await repository.list_job_logs("doc-1") == []
+    assert await repository.list_all() == []
 
 
 @pytest.mark.asyncio
@@ -145,6 +189,7 @@ async def test_postgres_document_repository_claims_and_completes_ingest_jobs(tmp
     assert stored is not None
     assert stored.status is IngestJobStatus.COMPLETED
     assert stored.chunk_count == 4
+    assert stored.status_published_at is None
 
 
 @pytest.mark.asyncio
@@ -283,12 +328,46 @@ async def test_postgres_document_repository_fails_stale_jobs_that_hit_max_attemp
     assert stored_job is not None
     assert stored_job.status is IngestJobStatus.FAILED
     assert stored_job.error_message == "exceeded max attempts"
+    assert stored_job.status_published_at is None
     stored_doc = await repository.get_by_id("doc-1")
     assert stored_doc is not None
     assert stored_doc.status is DocumentStatus.FAILED
     assert stored_doc.error_message == "exceeded max attempts"
     logs = await repository.list_job_logs("doc-1")
     assert logs[0].error_type == "MaxAttemptsExceeded"
+
+
+@pytest.mark.asyncio
+async def test_postgres_document_repository_does_not_fail_max_attempt_jobs_during_claim_poll(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("INGEST_MAX_ATTEMPTS", "2")
+    database_path = tmp_path / "documents.db"
+    repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
+    now = datetime.now(UTC)
+
+    await repository.enqueue(
+        IngestJob(
+            id="job-1",
+            document_id="doc-1",
+            document_name="Policy",
+            file_type="md",
+            source_uri="local://doc-1.md",
+            markdown="# Policy",
+            artifact_uri=None,
+            correlation_id="cid-1",
+            status=IngestJobStatus.STALE,
+            attempt=2,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    claimed = await repository.claim_next_pending("claim-1")
+
+    assert claimed is None
+    stored = await repository.get_job("job-1")
+    assert stored is not None
+    assert stored.status is IngestJobStatus.STALE
 
 
 @pytest.mark.asyncio
@@ -319,6 +398,31 @@ async def test_postgres_document_repository_preserves_error_until_completion(tmp
     completed = await repository.get_by_id("doc-1")
     assert completed is not None
     assert completed.error_message is None
+
+
+@pytest.mark.asyncio
+async def test_postgres_document_repository_does_not_leave_deleted_tombstone(tmp_path) -> None:
+    database_path = tmp_path / "documents.db"
+    repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
+    now = datetime.now(UTC)
+
+    await repository.create(
+        Document(
+            id="doc-1",
+            name="Policy",
+            file_type="md",
+            s3_key="local://doc-1",
+            status=DocumentStatus.DELETED,
+            created_at=now,
+        )
+    )
+
+    await repository.update_status("doc-1", DocumentStatus.PROCESSING)
+
+    stored = await repository.get_by_id("doc-1")
+    assert stored is not None
+    assert stored.status is DocumentStatus.DELETED
 
 
 @pytest.mark.asyncio
@@ -363,3 +467,100 @@ async def test_postgres_document_repository_prunes_old_job_logs(tmp_path) -> Non
     assert pruned == 1
     logs = await repository.list_job_logs("doc-1")
     assert [entry.correlation_id for entry in logs] == ["cid-new"]
+
+
+@pytest.mark.asyncio
+async def test_postgres_document_repository_lists_unpublished_terminal_jobs_in_order(tmp_path) -> None:
+    database_path = tmp_path / "documents.db"
+    repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
+
+    old = datetime(2026, 1, 1, tzinfo=UTC)
+    new = datetime(2026, 1, 2, tzinfo=UTC)
+    await repository.enqueue(
+        IngestJob(
+            id="job-1",
+            document_id="doc-1",
+            document_name="Policy",
+            file_type="md",
+            source_uri="local://doc-1.md",
+            markdown="# Policy",
+            artifact_uri=None,
+            correlation_id="cid-1",
+            status=IngestJobStatus.COMPLETED,
+            created_at=old,
+            updated_at=old,
+        )
+    )
+    await repository.enqueue(
+        IngestJob(
+            id="job-2",
+            document_id="doc-2",
+            document_name="Guide",
+            file_type="md",
+            source_uri="local://doc-2.md",
+            markdown="# Guide",
+            artifact_uri=None,
+            correlation_id="cid-2",
+            status=IngestJobStatus.FAILED,
+            created_at=new,
+            updated_at=new,
+        )
+    )
+    await repository.enqueue(
+        IngestJob(
+            id="job-3",
+            document_id="doc-3",
+            document_name="Skip",
+            file_type="md",
+            source_uri="local://doc-3.md",
+            markdown="# Skip",
+            artifact_uri=None,
+            correlation_id="cid-3",
+            status=IngestJobStatus.PROCESSING,
+            created_at=new,
+            updated_at=new,
+        )
+    )
+    await repository.mark_status_published("job-2")
+
+    pending = await repository.list_pending_status_publications(
+        10,
+        older_than=datetime(2025, 12, 31, tzinfo=UTC),
+    )
+
+    assert [job.id for job in pending] == ["job-1"]
+
+
+@pytest.mark.asyncio
+async def test_postgres_document_repository_marks_status_published_idempotently(tmp_path) -> None:
+    database_path = tmp_path / "documents.db"
+    repository = PostgresDocumentRepository(f"sqlite:///{database_path}")
+    repository.create_schema()
+    now = datetime.now(UTC)
+
+    await repository.enqueue(
+        IngestJob(
+            id="job-1",
+            document_id="doc-1",
+            document_name="Policy",
+            file_type="md",
+            source_uri="local://doc-1.md",
+            markdown="# Policy",
+            artifact_uri=None,
+            correlation_id="cid-1",
+            status=IngestJobStatus.COMPLETED,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    await repository.mark_status_published("job-1")
+    first = await repository.get_job("job-1")
+    assert first is not None
+    assert first.status_published_at is not None
+
+    await repository.mark_status_published("job-1")
+    second = await repository.get_job("job-1")
+    assert second is not None
+    assert second.status_published_at is not None

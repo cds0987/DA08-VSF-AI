@@ -9,7 +9,11 @@ class DocumentRepository(ABC):
 
     @abstractmethod
     async def create(self, document: Document) -> Document:
-        """Create or overwrite document metadata keyed by deterministic document_id."""
+        """Create document metadata keyed by deterministic document_id.
+
+        Existing rows, including DELETED tombstones, are returned unchanged. Re-ingest with the
+        same document_id is intentionally not supported.
+        """
 
     @abstractmethod
     async def get_by_id(self, document_id: str) -> Optional[Document]:
@@ -30,6 +34,10 @@ class DocumentRepository(ABC):
     @abstractmethod
     async def delete(self, document_id: str) -> None:
         """Soft delete document."""
+
+    @abstractmethod
+    async def purge(self, document_id: str) -> None:
+        """Hard delete document metadata for internal rollback/cleanup only."""
 
     @abstractmethod
     async def append_job_log(self, entry: JobLog) -> JobLog:
