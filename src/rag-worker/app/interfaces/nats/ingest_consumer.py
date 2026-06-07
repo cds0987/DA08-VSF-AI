@@ -11,6 +11,7 @@ Consumer/publisher KHÔNG biết NATS SDK — chỉ nhận bytes / dict + một 
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -186,14 +187,19 @@ class DocStatusPublisher:
         message = build_doc_status(job)
         if message is None:
             return
-        try:
-            await self._broker.publish_json(self._subject, message)
-        except Exception as exc:  # noqa: BLE001 - publish status ko được làm sập worker
-            self._logger.warning(
-                "doc_status_publish_failed doc_id=%s error=%s",
-                job.document_id,
-                exc,
-            )
+        for attempt in range(3):
+            try:
+                await self._broker.publish_json(self._subject, message)
+                return
+            except Exception as exc:  # noqa: BLE001 - publish status ko được làm sập worker
+                if attempt == 2:
+                    self._logger.error(
+                        "doc_status_publish_failed_terminal doc_id=%s error=%s",
+                        job.document_id,
+                        exc,
+                    )
+                    return
+                await asyncio.sleep(0.5 * (2**attempt))
 
 
 async def start_doc_ingest_subscription(

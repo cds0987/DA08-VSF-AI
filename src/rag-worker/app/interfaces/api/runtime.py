@@ -136,6 +136,12 @@ def validate_runtime_settings() -> None:
         raise ValueError("INGEST_WORKER_COUNT must be > 0")
     if float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5")) <= 0:
         raise ValueError("INGEST_WORKER_POLL_INTERVAL_SECONDS must be > 0")
+    if float(os.getenv("INGEST_JOB_TIMEOUT_SECONDS", "600")) <= 0:
+        raise ValueError("INGEST_JOB_TIMEOUT_SECONDS must be > 0")
+    if int(os.getenv("EMBED_BATCH_SIZE", "100")) <= 0:
+        raise ValueError("EMBED_BATCH_SIZE must be > 0")
+    if int(os.getenv("CAPTION_MAX_CONCURRENCY", "5")) <= 0:
+        raise ValueError("CAPTION_MAX_CONCURRENCY must be > 0")
 
 
 def validate_vector_config(

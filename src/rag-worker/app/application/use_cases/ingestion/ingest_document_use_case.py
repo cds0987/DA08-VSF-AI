@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import os
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -38,6 +40,7 @@ class IngestDocumentUseCase:
         self._artifact_store = artifact_store
         self._logger = logging.getLogger(__name__)
         self._claim_heartbeat_interval_seconds = claim_heartbeat_interval_seconds
+        self._ingest_timeout_seconds = float(os.getenv("INGEST_JOB_TIMEOUT_SECONDS", "600"))
 
     async def enqueue(
         self,
@@ -69,6 +72,30 @@ class IngestDocumentUseCase:
                 existing_status=existing.status.value,
             )
             return existing
+        existing_document = await self._documents.get_by_id(document_id)
+        if existing_document is not None and existing_document.status is DocumentStatus.COMPLETED:
+            log_event(
+                self._logger,
+                logging.INFO,
+                "ingest_enqueue_skipped_completed",
+                stage="queue",
+                document_id=document_id,
+                correlation_id=request_correlation_id,
+            )
+            return IngestJob(
+                id=f"completed:{document_id}",
+                document_id=document_id,
+                document_name=existing_document.name,
+                file_type=existing_document.file_type,
+                source_uri=source_uri,
+                markdown=markdown,
+                artifact_uri=artifact_uri,
+                correlation_id=request_correlation_id,
+                status=IngestJobStatus.COMPLETED,
+                created_at=existing_document.created_at,
+                updated_at=existing_document.created_at,
+                chunk_count=existing_document.chunk_count,
+            )
         now = datetime.now(UTC)
         await self._documents.create(
             Document(
@@ -93,7 +120,12 @@ class IngestDocumentUseCase:
             created_at=now,
             updated_at=now,
         )
-        await self._jobs.enqueue(job)
+        try:
+            await self._jobs.enqueue(job)
+        except Exception:
+            with contextlib.suppress(Exception):
+                await self._documents.delete(document_id)
+            raise
         await self._append_job_log(
             JobLog(
                 document_id=document_id,
@@ -126,16 +158,19 @@ class IngestDocumentUseCase:
         )
         try:
             markdown, source_uri, artifact_uri = await self._prepare_markdown(job)
-            chunk_count = await self._engine.ingest(
-                IngestInput(
-                    document_id=job.document_id,
-                    document_name=job.document_name,
-                    file_type=job.file_type,
-                    markdown=markdown,
-                    source_uri=source_uri,
-                    artifact_uri=artifact_uri,
-                    correlation_id=job.correlation_id,
-                )
+            chunk_count = await asyncio.wait_for(
+                self._engine.ingest(
+                    IngestInput(
+                        document_id=job.document_id,
+                        document_name=job.document_name,
+                        file_type=job.file_type,
+                        markdown=markdown,
+                        source_uri=source_uri,
+                        artifact_uri=artifact_uri,
+                        correlation_id=job.correlation_id,
+                    )
+                ),
+                timeout=self._ingest_timeout_seconds,
             )
             if chunk_count <= 0:
                 raise EmptyIngestResultError(
@@ -172,6 +207,9 @@ class IngestDocumentUseCase:
                 await heartbeat_task
             except asyncio.CancelledError:
                 pass
+        if await self._documents.get_by_id(job.document_id) is None:
+            await self._engine.vectors.delete_by_document(job.document_id)
+            return await self._jobs.get_job(job.id)
         completed = await self._jobs.complete_job(
             job.id,
             claim_id,
@@ -193,8 +231,8 @@ class IngestDocumentUseCase:
         return await self._jobs.get_job(job.id)
 
     async def delete(self, document_id: str) -> None:
-        await self._engine.vectors.delete_by_document(document_id)
         await self._documents.delete(document_id)
+        await self._engine.vectors.delete_by_document(document_id)
 
     async def get_document(self, document_id: str) -> Document | None:
         return await self._documents.get_by_id(document_id)
