@@ -522,5 +522,6 @@ def test_ingest_use_case_cleans_up_vectors_when_document_deleted_mid_ingest() ->
 
         assert processed is None
         assert engine.vectors.deleted == ["doc-delete-race"]
+        assert documents._jobs == {}
 
     asyncio.run(scenario())
