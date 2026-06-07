@@ -206,7 +206,9 @@ def test_local_file_parser_routes_image_through_ai_gateway_extractor(
 
     class FakeExtractor:
         async def extract(self, images):
-            captured["images"] = images
+            # Snapshot tại thời điểm gọi: parser chủ động clear page.images sau OCR
+            # (G7-12 giải phóng RAM) nên không giữ reference sống để assert.
+            captured["images"] = list(images)
             return "# Scanned\nrecognized text"
 
     async def scenario() -> None:
