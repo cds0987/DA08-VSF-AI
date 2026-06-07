@@ -196,6 +196,48 @@ def cmd_search() -> int:
     return asyncio.run(run())
 
 
+def _psycopg_dsn(url: str) -> str:
+    """SQLAlchemy URL (postgresql+psycopg:// | postgresql+asyncpg://) -> DSN thuần cho psycopg.connect."""
+    return (
+        url.replace("postgresql+psycopg://", "postgresql://")
+        .replace("postgresql+asyncpg://", "postgresql://")
+    )
+
+
+def _db_cleanup(doc_ids: list[str]) -> None:
+    """Dọn data test trên Cloud SQL theo đúng doc_id đã tạo (không nuke cả bảng).
+
+    Guard bằng env: không set RAG_DATABASE_URL/DOC_DATABASE_URL -> no-op (CI dùng
+    postgres local throwaway không cần dọn vì `down -v` xóa hết). Chỉ chạy khi test
+    trỏ Cloud SQL THẬT (verify tích hợp Cloud SQL) -> phải dọn để không lẫn data.
+    """
+    rag_url = os.environ.get("RAG_DATABASE_URL")
+    doc_url = os.environ.get("DOC_DATABASE_URL")
+    if not rag_url and not doc_url:
+        print("DB: no RAG_DATABASE_URL/DOC_DATABASE_URL, skip (postgres local sẽ bị down -v)")
+        return
+    if not doc_ids:
+        print("DB: record rỗng, skip")
+        return
+    try:
+        import psycopg
+    except ImportError:
+        print("DB: thiếu psycopg, skip (pip install 'psycopg[binary]')")
+        return
+    if rag_url:
+        with psycopg.connect(_psycopg_dsn(rag_url)) as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM job_logs WHERE document_id::text = ANY(%s)", (doc_ids,))
+            cur.execute("DELETE FROM ingest_jobs WHERE document_id::text = ANY(%s)", (doc_ids,))
+            cur.execute("DELETE FROM documents WHERE id::text = ANY(%s)", (doc_ids,))
+            conn.commit()
+        print(f"rag_db: cleaned {len(doc_ids)} docs (documents/ingest_jobs/job_logs)")
+    if doc_url:
+        with psycopg.connect(_psycopg_dsn(doc_url)) as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM doc_svc.documents WHERE id::text = ANY(%s)", (doc_ids,))
+            conn.commit()
+        print(f"doc_db: cleaned {len(doc_ids)} docs (doc_svc.documents)")
+
+
 def cmd_cleanup() -> int:
     # 1. GCS: xóa đúng object đã upload (ghi trong record).
     try:
@@ -216,6 +258,8 @@ def cmd_cleanup() -> int:
     for col in cols:
         _qdrant("DELETE", f"/collections/{col}")
     print(f"Qdrant: deleted collections {cols}")
+    # 3. Cloud SQL: dọn data test (no-op nếu test dùng postgres local).
+    _db_cleanup([d["doc_id"] for d in docs])
     return 0
 
 
