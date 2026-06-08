@@ -18,7 +18,9 @@ x-gcs: &gcs-s3
 x-qdrant: &qdrant-cloud
   VECTOR_DB_PROVIDER: qdrant
   VECTOR_DB_URL: ${QDRANT_URL:?set QDRANT_URL in .env}
-  VECTOR_DB_API_KEY: ${QDRANT_API_KEY:?set QDRANT_API_KEY in .env}
+  VECTOR_DB_API_KEY: ${QDRANT_API_KEY:-}
+  # Qdrant sau nginx Basic Auth (http) -> user:pass; rỗng nếu dùng Qdrant Cloud api-key.
+  VECTOR_DB_BASIC_AUTH: ${VECTOR_DB_BASIC_AUTH:-}
   VECTOR_COLLECTION: rag_chatbot
 
 services:

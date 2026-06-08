@@ -130,6 +130,7 @@ def to_vector_store_config(
         dimension=dim,
         url=str(cfg.vector_store.params.get("url", "")),
         api_key=str(cfg.vector_store.params.get("api_key", "")),
+        basic_auth=str(cfg.vector_store.params.get("basic_auth", "")),
     )
 
 

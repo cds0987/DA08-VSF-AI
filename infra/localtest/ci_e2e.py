@@ -84,7 +84,16 @@ def _s3_client():
 def _qdrant(method: str, path: str, body: dict | None = None) -> dict:
     url = _env("QDRANT_URL").rstrip("/") + path
     data = json.dumps(body).encode() if body is not None else None
-    headers = {"api-key": _env("QDRANT_API_KEY")}
+    headers: dict[str, str] = {}
+    api_key = os.environ.get("QDRANT_API_KEY", "").strip()
+    if api_key:
+        headers["api-key"] = api_key
+    # Qdrant sau nginx Basic Auth (http) -> Authorization: Basic; song song api-key.
+    basic = (
+        os.environ.get("VECTOR_DB_BASIC_AUTH") or os.environ.get("QDRANT_BASIC_AUTH") or ""
+    ).strip()
+    if ":" in basic:
+        headers["Authorization"] = "Basic " + base64.b64encode(basic.encode()).decode()
     if data:
         headers["Content-Type"] = "application/json"
     rq = urllib.request.Request(url, data=data, method=method, headers=headers)

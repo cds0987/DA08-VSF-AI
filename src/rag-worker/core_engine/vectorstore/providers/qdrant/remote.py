@@ -22,12 +22,7 @@ from core_engine.vectorstore.types import VectorRecord
 class QdrantRemoteProvider(QdrantBase):
     def __init__(self, config: VectorStoreConfig | None = None):
         super().__init__(config)
-        options = dict(self.config.options)
-        self._client = AsyncQdrantClient(
-            url=self.config.url or None,
-            api_key=self.config.api_key or None,
-            **options,
-        )
+        self._client = AsyncQdrantClient(**self.config.remote_client_kwargs())
         self._ready = False
         self._lock = asyncio.Lock()
         self._upsert_batch = max(1, int(os.getenv("UPSERT_BATCH_SIZE", "256")))
