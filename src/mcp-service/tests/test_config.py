@@ -23,4 +23,6 @@ def test_load_settings_offline_defaults(monkeypatch) -> None:
     assert settings.contract().index_id == "rag_chatbot__offline__d256"
     assert settings.contract().fingerprint == "88048119fce054e3"
     assert settings.tool_spec("rag_search").enabled is True
+    assert settings.tool_spec("rag_search").params["embedder"]["model"] == "text-embedding-3-small"
     assert settings.tool_spec("hr_query").enabled is False
+    assert settings.tool_spec("hr_query").params["params"]["database_url"] == ""

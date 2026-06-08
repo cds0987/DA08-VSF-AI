@@ -124,6 +124,7 @@ def test_mcp_endpoint_url_uses_streamable_http_path() -> None:
 
 def test_build_mcp_registers_rag_search_tool_and_query_service_shape(monkeypatch) -> None:
     stub_service = StubService()
+    built_with: list[McpSettings] = []
 
     fake_mcp_module = types.ModuleType("mcp")
     fake_server_module = types.ModuleType("mcp.server")
@@ -132,17 +133,75 @@ def test_build_mcp_registers_rag_search_tool_and_query_service_shape(monkeypatch
     monkeypatch.setitem(sys.modules, "mcp", fake_mcp_module)
     monkeypatch.setitem(sys.modules, "mcp.server", fake_server_module)
     monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", fake_fastmcp_module)
-    monkeypatch.setattr("app.tools.rag_search.build_search_service", lambda settings: stub_service)
+    monkeypatch.setattr(
+        "app.tools.rag_search.build_search_service",
+        lambda settings: built_with.append(settings) or stub_service,
+    )
 
-    mcp, tools = build_mcp(_settings())
+    settings = _settings()
+    settings = McpSettings(
+        **{
+            **settings.__dict__,
+            "tools_profile": {
+                "rag_search": {
+                    "embedder": {
+                        "base_url": "https://embed.example",
+                        "api_key": "embed-key",
+                        "dimension": "1024",
+                    },
+                    "vector_store": {
+                        "impl": "qdrant",
+                        "params": {
+                            "collection": "team_docs",
+                            "url": "https://qdrant.example",
+                            "api_key": "vector-key",
+                            "timeout": "15",
+                        },
+                    },
+                    "vectorstore_contract": {
+                        "provider": "qdrant",
+                        "collection": "team_docs",
+                        "embed_model": "text-embedding-3-large",
+                    },
+                    "reranker": {
+                        "impl": "llm",
+                        "model": "rerank-model",
+                        "base_url": "https://rerank.example",
+                        "api_key": "rerank-key",
+                        "timeout_seconds": "45",
+                        "params": {
+                            "batch_size": "4",
+                            "passage_chars": "600",
+                        },
+                    },
+                    "retrieval": {
+                        "top_k_candidates": "12",
+                        "rerank_top_k": "5",
+                        "rerank_threshold": "0.4",
+                    },
+                }
+            },
+        }
+    )
 
-    assert len(tools) == 1
-    assert tools[0].name == "rag_search"
+    mcp, tools = build_mcp(settings)
+
+    rag_tool = next(tool for tool in tools if tool.name == "rag_search")
+    assert rag_tool.name == "rag_search"
     assert mcp.host == "0.0.0.0"
     assert mcp.port == 8003
     assert mcp.stateless_http is True
     assert mcp.json_response is True
     assert "rag_search" in mcp.tools
+    assert built_with[0].collection == "team_docs"
+    assert built_with[0].embed_model == "text-embedding-3-large"
+    assert built_with[0].dimension == 1024
+    assert built_with[0].url == "https://qdrant.example"
+    assert built_with[0].embed_base_url == "https://embed.example"
+    assert built_with[0].rerank_impl == "llm"
+    assert built_with[0].top_k_candidates == 12
+    assert built_with[0].rerank_top_k == 5
+    assert built_with[0].rerank_threshold == 0.4
 
     result = asyncio.run(mcp.tools["rag_search"]("leave policy", ["doc-1"], None))
 

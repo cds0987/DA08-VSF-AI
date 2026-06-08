@@ -1,4 +1,4 @@
-"""Entry point for mcp-service with fail-closed contract verification."""
+"""Entry point for mcp-service with fail-closed tool verification."""
 
 from __future__ import annotations
 
@@ -42,12 +42,13 @@ def main() -> int:
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    contract = settings.contract()
+    mcp, tools = build_mcp(settings)
+    tool_names = [tool.name for tool in tools]
+
     logger.info(
-        "mcp_startup index=%s fingerprint=%s deployment=%s",
-        contract.index_id,
-        contract.fingerprint,
-        settings.deployment,
+        "mcp_startup tool_count=%d tools=%s",
+        len(tool_names),
+        ",".join(tool_names),
     )
     logger.info(
         "mcp_transport transport=streamable-http endpoint=%s",
@@ -55,14 +56,16 @@ def main() -> int:
     )
     logger.info("mcp_auth mode=%s", "internal-token" if settings.auth_enabled else "disabled")
 
-    mcp, tools = build_mcp(settings)
-
     try:
         asyncio.run(_verify_and_reset(tools))
     except VectorstoreContractError as exc:
         logger.error("mcp_contract_verify_failed: %s", exc)
         return 1
-    logger.info("mcp_contract_verified index=%s", contract.index_id)
+    logger.info(
+        "mcp_startup_verified tool_count=%d tools=%s",
+        len(tool_names),
+        ",".join(tool_names),
+    )
 
     # FastMCP.run() chỉ nhận (transport, mount_path) — không nhận middleware. Để gắn
     # auth internal-token, dựng Starlette app từ streamable_http_app() rồi add_middleware,

@@ -1,4 +1,4 @@
-"""Expose rag_search over MCP Streamable HTTP."""
+"""Expose configured MCP tools over Streamable HTTP."""
 
 from __future__ import annotations
 
