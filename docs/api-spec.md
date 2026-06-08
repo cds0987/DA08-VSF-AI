@@ -337,6 +337,81 @@ Response 503:  { "status": "degraded", "degraded_reasons": ["rag_worker unreacha
 |---------|------|---------|-------|
 | `hr.employee_profile.updated` | Publish (HR Service) / Subscribe (Query Service) | `{ event_id, event_version, occurred_at, user_id, account_type, department, employment_status }` | HR Service publish khi employee profile, department hoặc employment status thay đổi. Query Service upsert projection `user_access_profile` để ACL pre-filter theo `account_type + department + user_id`. |
 
+## HR Service — Internal API (employee + leave request MVP)
+
+> HR Service deploy như backend service thật nhưng internal only. `user-service.role` chỉ là app role (`admin|user`); quyền duyệt nghỉ phép MVP dùng `employees.manager_user_id` và `leave_requests.approver_user_id`.
+
+### `GET /internal/hr/me`
+
+```
+Request:
+  Authorization: Bearer <token or service-token>
+
+Response 200:
+  {
+    "user_id": "uuid",
+    "employee_code": "E001",
+    "department": "Engineering",
+    "job_title": "Engineering Manager",
+    "manager_user_id": "uuid|null",
+    "employment_status": "active"
+  }
+```
+
+### `POST /internal/hr/leave-requests`
+
+```
+Request:
+  Body: { "leave_type": "annual", "start_date": "2026-06-20", "end_date": "2026-06-21", "reason": "Family" }
+
+Response 201:
+  { "id": "uuid", "status": "pending", "approver_user_id": "manager-user-id" }
+```
+
+> AI/Agent flow: nếu user nói "tạo đơn nghỉ", Query Service phải hỏi/hiển thị draft và chờ user xác nhận. Sau khi user confirm mới gọi HR Service tạo đơn. HR Service tự set `approver_user_id = employees.manager_user_id`.
+
+### `GET /internal/hr/leave-requests/pending-approval`
+
+```
+Response 200:
+  {
+    "items": [
+      {
+        "id": "uuid",
+        "requester_user_id": "uuid",
+        "requester_name": "Nguyen Van A",
+        "leave_type": "annual",
+        "start_date": "2026-06-20",
+        "end_date": "2026-06-21",
+        "days_count": 2,
+        "reason": "Family",
+        "status": "pending",
+        "approver_user_id": "current-user-id"
+      }
+    ]
+  }
+```
+
+### `POST /internal/hr/leave-requests/{id}/approve`
+
+```
+Request:
+  Body: { "comment": "OK" }
+
+Response 200:
+  { "id": "uuid", "status": "approved" }
+```
+
+### `POST /internal/hr/leave-requests/{id}/reject`
+
+```
+Request:
+  Body: { "reason": "Insufficient handover" }
+
+Response 200:
+  { "id": "uuid", "status": "rejected" }
+```
+
 ---
 
 ## Pydantic Schemas (tham khảo thêm)

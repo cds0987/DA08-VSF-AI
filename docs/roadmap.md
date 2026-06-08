@@ -28,7 +28,8 @@ Không chỉ là một chatbot — mà là **hệ thống quản lý tri thức 
 - Auth: đăng nhập bằng email/password **hoặc Microsoft Account (SSO)**, phân quyền Admin / End User
 - Upload tài liệu (PDF, DOCX, TXT, XLSX, CSV, PPTX, Markdown) → tự động xử lý và index
 - Giao diện chat: hỏi câu hỏi → bot trả lời + trích dẫn nguồn tài liệu
-- Admin duyệt/từ chối tài liệu trước khi đưa vào knowledge base
+- Admin upload/xóa tài liệu, theo dõi trạng thái ingestion; không có bước duyệt tài liệu trong MVP
+- HR Service: hỏi HR cá nhân, AI tạo draft đơn nghỉ phép, user xác nhận, sếp trực tiếp duyệt
 - Guardrails: chặn prompt injection, lọc off-topic, redact PII trong output
 - Semantic Cache: cache câu hỏi tương tự (Redis TTL 1h), tiết kiệm ~60% OpenAI API cost
 - Deploy lên GCP: GCE + Docker Compose, Cloud SQL, Cloud Storage, HTTPS qua Nginx
@@ -53,6 +54,7 @@ _Q&A Chatbot_
 - [ ] Semantic Cache hoạt động — câu hỏi tương tự (cosine similarity > 0.95) trả kết quả từ cache Redis, không gọi OpenAI
 - [ ] Hỏi câu hỏi → bot trả lời streaming qua **SSE** (`POST /query`, chữ xuất hiện dần, không đợi toàn bộ)
 - [ ] Mỗi câu trả lời kèm nguồn: tên tài liệu + số trang + đoạn văn bản được trích dẫn
+- [ ] Sources/citations được lưu trong `query_svc.messages.sources` theo từng assistant message; reload lịch sử hội thoại vẫn hiện đúng source
 - [ ] Click vào nguồn → mở document viewer, nhảy đến đúng trang, highlight đúng đoạn text đó
 - [ ] Không có tài liệu liên quan → bot trả về "Không tìm thấy thông tin" — không bịa
 - [ ] Multi-turn: dùng Summary Buffer — LLM tóm tắt các turns cũ thành 1 đoạn ngắn, giữ nguyên 5 turns gần nhất verbatim → câu hỏi sau luôn hiểu đủ ngữ cảnh mà không tốn quá nhiều token
@@ -60,11 +62,16 @@ _Q&A Chatbot_
 _HR Personal Q&A_
 - [ ] Hỏi ngày nghỉ còn lại / trạng thái đơn nghỉ phép → bot trả lời đúng từ mock data
 - [ ] Không thể xem HR data của người khác (filter `user_id` đúng)
+- [ ] AI tạo draft đơn nghỉ phép, hỏi lại thông tin thiếu, chỉ nộp sau khi user xác nhận
+- [ ] HR Service tạo `leave_requests(status=pending)` và gán `approver_user_id = employees.manager_user_id`
+- [ ] Sếp trực tiếp thấy "Đơn cần duyệt" khi có pending requests trỏ về mình; approve/reject đúng quyền bằng `approver_user_id`
+- [ ] Không tạo Word/PDF; DB record trong `hr_svc.leave_requests` là đơn chính thức
 
 _MCP Tool Service_
-- [ ] mcp-service chạy như MCP server riêng (port 8003), expose 2 tool: `rag_search`, `hr_query`
+- [ ] mcp-service chạy như MCP server riêng (port 8003), expose 3 tool: `rag_search`, `hr_query`, `create_leave_request`
 - [ ] Query Service agent là MCP client — liệt kê + gọi tool qua MCP; inject `document_ids`/`user_id` (không để LLM tự điền)
 - [ ] `rag_search` self-contained: NATS rag.search → rerank BGE-Reranker → Top-3; `hr_query` gọi HR Service nội bộ và không sở hữu HR data
+- [ ] `create_leave_request` chỉ chạy sau user confirmation; Query Service lưu draft tạm bằng Redis `pending_action:{user_id}` TTL ~10 phút
 
 _Admin Dashboard + Analytics (FE — Admin app `frontend/admin`)_
 - [ ] Xem danh sách tài liệu + trạng thái ingestion (queued / processing / indexed / failed)

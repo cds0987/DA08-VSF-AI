@@ -279,11 +279,31 @@ class LeaveBalanceDTO:
 
 @dataclass
 class LeaveRequestDTO:
+    id: str
     leave_type: str                     # 'annual' | 'sick' | 'personal'
     start_date: str                     # 'YYYY-MM-DD'
     end_date: str                       # 'YYYY-MM-DD'
     days_count: int
-    status: str                         # 'pending' | 'approved' | 'rejected'
+    status: str                         # 'pending' | 'approved' | 'rejected' | 'cancelled'
+    approver_user_id: Optional[str] = None
+    rejected_reason: Optional[str] = None
+
+@dataclass
+class EmployeeProfileDTO:
+    user_id: str
+    employee_code: str
+    department: str
+    job_title: str
+    manager_user_id: Optional[str]
+    employment_status: str
+
+@dataclass
+class CreateLeaveRequestInput:
+    user_id: str                        # do Query Service inject từ JWT
+    leave_type: str
+    start_date: str                     # 'YYYY-MM-DD'
+    end_date: str
+    reason: str
 
 @dataclass
 class PayrollDTO:
@@ -305,6 +325,8 @@ class HrQueryResult:
 > `hr_query(HrQueryInput) -> HrQueryResult` (output typed — tùy `intent` mà field tương ứng được set,
 > kèm `summary` để LLM dùng trực tiếp). Query Service là MCP client; tham số nhạy cảm (`document_ids`, `user_id`)
 > do client inject, không tin LLM.
+> **Leave request MVP**: AI có thể giúp tạo draft đơn nghỉ phép, nhưng chỉ gọi tool tạo đơn sau khi user xác nhận.
+> Tool tạo đơn gọi HR Service, HR Service set `status='pending'` và `approver_user_id = employees.manager_user_id`.
 
 ```python
 # src/mcp-service/app/domain/repositories/hr_client.py — gọi HR Service nội bộ
@@ -323,6 +345,15 @@ class HrClient(ABC):
     @abstractmethod
     async def get_leave_requests(self, user_id: str) -> List[LeaveRequestDTO]:
         """Danh sách đơn nghỉ phép + trạng thái (hr_svc.leave_requests)."""
+
+    @abstractmethod
+    async def create_leave_request(self, data: CreateLeaveRequestInput) -> LeaveRequestDTO:
+        """Tạo đơn nghỉ phép sau khi user đã confirm draft.
+
+        HR Service resolve sếp trực tiếp bằng `employees.manager_user_id`,
+        set `leave_requests.approver_user_id`, `status='pending'`.
+        Không dùng `user-service.role` làm quyền duyệt nghiệp vụ.
+        """
 
     @abstractmethod
     async def get_payroll(self, user_id: str) -> List[PayrollDTO]:

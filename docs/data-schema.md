@@ -208,6 +208,8 @@ CREATE TABLE hr_svc.employees (
     employee_code     VARCHAR(50) UNIQUE,
     company_email     VARCHAR(255) UNIQUE NOT NULL,
     department        VARCHAR(100) NOT NULL,
+    job_title         VARCHAR(150),
+    manager_user_id   UUID,                      -- logical reference to direct manager's user_id
     employment_status VARCHAR(20) NOT NULL DEFAULT 'active',
     created_at        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     updated_at        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
@@ -215,6 +217,7 @@ CREATE TABLE hr_svc.employees (
 
 CREATE INDEX idx_employees_user ON hr_svc.employees(user_id);
 CREATE INDEX idx_employees_department ON hr_svc.employees(department);
+CREATE INDEX idx_employees_manager ON hr_svc.employees(manager_user_id);
 
 CREATE TABLE hr_svc.leave_balance (
     user_id             UUID PRIMARY KEY,
@@ -226,18 +229,26 @@ CREATE TABLE hr_svc.leave_balance (
 );
 
 CREATE TABLE hr_svc.leave_requests (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id     UUID NOT NULL,
-    leave_type  VARCHAR(20) NOT NULL,    -- 'annual' | 'sick' | 'personal'
-    start_date  DATE NOT NULL,
-    end_date    DATE NOT NULL,
-    days_count  INTEGER NOT NULL,
-    status      VARCHAR(20) NOT NULL,   -- 'pending' | 'approved' | 'rejected'
-    reason      TEXT,
-    created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id              UUID NOT NULL,
+    employee_id          UUID REFERENCES hr_svc.employees(id),
+    leave_type           VARCHAR(20) NOT NULL,    -- 'annual' | 'sick' | 'personal'
+    start_date           DATE NOT NULL,
+    end_date             DATE NOT NULL,
+    days_count           INTEGER NOT NULL,
+    status               VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending|approved|rejected|cancelled
+    reason               TEXT,
+    approver_user_id     UUID NOT NULL,           -- MVP: sếp trực tiếp = employees.manager_user_id
+    approved_at          TIMESTAMP WITH TIME ZONE,
+    rejected_at          TIMESTAMP WITH TIME ZONE,
+    rejected_reason      TEXT,
+    created_at           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_leave_req_user ON hr_svc.leave_requests(user_id);
+CREATE INDEX idx_leave_req_status ON hr_svc.leave_requests(status);
+CREATE INDEX idx_leave_req_approver ON hr_svc.leave_requests(approver_user_id, status);
 
 CREATE TABLE hr_svc.payroll_summary (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),

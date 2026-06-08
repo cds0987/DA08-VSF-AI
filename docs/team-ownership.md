@@ -139,6 +139,11 @@ src/frontend/chat/
 ```
 → Gọi **Query Service** (chat/SSE/notifications) + `GET /documents/{id}/file` (presigned, để xem citation).
 
+**Leave request UI trong Chat app:**
+- `LeaveRequestDraft`: hiển thị draft đơn nghỉ phép do AI trích xuất; user phải bấm/nhắn xác nhận thì mới nộp.
+- `LeaveApprovalPanel`: chỉ hiện khi API pending approval trả về đơn có `approver_user_id = current_user_id`.
+- Người duyệt không dựa vào `user-service.role`; cùng một user app, ai là sếp trực tiếp của đơn nào thì thấy đơn đó.
+
 #### `src/frontend/admin/` — App Admin (container `nuxt-admin` :3001)
 ```
 src/frontend/admin/
@@ -275,6 +280,8 @@ src/hr-service/app/
 - Sở hữu `hr_db.hr_svc.*`: employee profile, department, employment_status, leave balance, leave requests, payroll summary.
 - Publish `hr.employee_profile.updated` khi `account_type`, department hoặc employment status thay đổi để Query Service cập nhật `query_svc.user_access_profile`.
 - Personal HR data chỉ trả cho `account_type=internal` và employee `active`; external account không có HR personal access.
+- MVP leave request: tạo đơn trong `hr_svc.leave_requests` sau khi user confirm draft; set `status='pending'`, `approver_user_id = employees.manager_user_id`. DB record là đơn chính thức, không tạo Word/PDF.
+- Approve/reject: chỉ user có `leave_requests.approver_user_id = current_user_id AND status='pending'` được duyệt. Không dùng `user-service.role` làm quyền duyệt nghiệp vụ.
 - MCP Service gọi HR Service qua internal HTTP/gRPC cho tool `hr_query`; Query Service không đọc trực tiếp `hr_db`.
 
 #### NATS Subject Contract & Config (Backend Dev làm chủ)
@@ -360,7 +367,7 @@ src/rag-worker/app/
 ```
 src/mcp-service/app/
 ├── interfaces/
-│   └── mcp_server.py                         ← Khai báo + expose 2 tool qua MCP: rag_search, hr_query
+│   └── mcp_server.py                         ← Khai báo + expose 3 tool qua MCP: rag_search, hr_query, create_leave_request
 ├── application/
 │   └── tools/
 │       ├── rag_search.py                     ← (query rewrite) → NATS rag.search (Top-5) → rerank → Top-3 SearchResult
@@ -439,11 +446,13 @@ src/query-service/app/
 4. **LlamaIndex FunctionCallingAgent** (MCP client) liệt kê tool từ **mcp-service** → LLM tự chọn tool:
    - `rag_search`: MCP tool ở mcp-service → (query rewrite) → NATS `rag.search` → RRF → Top-5 → rerank → Top-3
    - `hr_query`: MCP tool ở mcp-service → gọi HR Service filter `user_id`
+   - `create_leave_request`: chỉ gọi sau khi user confirm draft; Query Service inject `user_id`, HR Service tự resolve `approver_user_id`
    - **Bảo mật:** Query Service **tự inject** `document_ids = allowed_doc_ids` (từ bước 2) và `user_id = current_user` vào lời gọi tool — KHÔNG để LLM tự điền (tránh vượt quyền).
-5. Build prompt: system prompt + summary + recent messages + retrieved context
-6. Gọi OpenAI GPT-4o mini streaming: yield từng token → gửi SSE `data: {"token":"..."}`, kết thúc gửi `data: {"done":true,"sources":[...]}`
-7. Lưu message: `conv_repo.save_message(user_id, "user", question)` + `save_message(user_id, "assistant", full_answer)`
-8. Summary buffer: nếu conversation > 10 turns → gọi LLM compress → `conv_repo.update_summary()`
+5. Leave request confirm flow: nếu intent là tạo đơn nghỉ phép, AI trích xuất fields, hỏi lại thông tin thiếu, lưu draft vào Redis `pending_action:{user_id}` TTL ~10 phút, và chỉ gọi `create_leave_request` khi user trả lời xác nhận.
+6. Build prompt: system prompt + summary + recent messages + retrieved context
+7. Gọi OpenAI GPT-4o mini streaming: yield từng token → gửi SSE `data: {"token":"..."}`, kết thúc gửi `data: {"done":true,"sources":[...]}`
+8. Lưu message: `conv_repo.save_message(user_id, "user", question)` + `save_message(user_id, "assistant", full_answer, sources=...)`
+9. Summary buffer: nếu conversation > 10 turns → gọi LLM compress → `conv_repo.update_summary()`
 
 *Failure Handling:*
 - **MCP call (query-service → mcp-service)**: Circuit Breaker (`pybreaker`, fail_max=5, reset_timeout=30s) trong `mcp_client.py` — Circuit Open → trả 503 ngay
