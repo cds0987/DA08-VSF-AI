@@ -62,9 +62,10 @@ def can_access_document(
     if classification == "public":
         return True
     if classification == "internal":
-        # User Service verifies active users before issuing usable tokens; this service checks locally.
-        return True
+        return user.account_type == "internal"
     if classification == "secret":
+        if user.account_type != "internal":
+            return False
         department = user.department.strip()
         if not department:
             return False
