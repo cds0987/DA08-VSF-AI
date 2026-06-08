@@ -59,7 +59,18 @@ class FakeClientSession:
     async def list_tools(self):
         return SimpleNamespace(
             tools=[
-                SimpleNamespace(name="rag_search"),
+                SimpleNamespace(
+                    name="rag_search",
+                    description="Search internal docs",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"},
+                            "document_ids": {"type": "array"},
+                            "top_k": {"type": "integer"},
+                        },
+                    },
+                ),
             ]
         )
 
@@ -107,14 +118,32 @@ async def test_mcp_streamable_client_uses_sdk_session_and_maps_results(monkeypat
         Settings(_env_file=None, mcp_service_url="http://mcp-service:8003", mcp_timeout_seconds=7)
     )
 
+    specs = await client.list_tool_specs()
     tools = await client.list_tools()
+    payload = await client.call_tool(
+        "rag_search",
+        {"query": "policy question", "document_ids": ["doc-1"], "top_k": 3},
+    )
     rag_results = await client.rag_search("policy question", ["doc-1"], top_k=3)
 
+    assert specs[0].name == "rag_search"
+    assert specs[0].description == "Search internal docs"
     assert tools == ["rag_search"]
     assert FakeTransportContext.calls[0]["url"] == "http://mcp-service:8003/mcp"
     assert FakeHttpClient.instances[0].timeout == 7
     assert FakeClientSession.instances[0].initialized is True
-    assert FakeClientSession.instances[1].tool_calls == [
+    assert payload["results"][0]["chunk_id"] == "chunk-1"
+    assert FakeClientSession.instances[2].tool_calls == [
+        {
+            "name": "rag_search",
+            "arguments": {
+                "query": "policy question",
+                "document_ids": ["doc-1"],
+                "top_k": 3,
+            },
+        }
+    ]
+    assert FakeClientSession.instances[3].tool_calls == [
         {
             "name": "rag_search",
             "arguments": {

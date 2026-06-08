@@ -63,6 +63,16 @@ def _has_real_provider() -> bool:
 
 
 @dataclass(frozen=True)
+class ToolSpec:
+    enabled: bool
+    # `enabled` có được khai tường minh trong config không. False = không có key
+    # `enabled` cho tool này → build_mcp áp default theo nguồn tool (built-in vs
+    # entry-point bên thứ ba).
+    enabled_explicit: bool = False
+    params: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class McpSettings:
     host: str
     port: int
@@ -90,6 +100,7 @@ class McpSettings:
     basic_auth: str = ""
     timeout: int | None = None
     options: Mapping[str, Any] = field(default_factory=dict)
+    tools_profile: Mapping[str, Any] = field(default_factory=dict)
 
     def contract(self) -> ResolvedVectorstoreContract:
         return resolve_vectorstore_contract(
@@ -107,10 +118,21 @@ class McpSettings:
     def auth_enabled(self) -> bool:
         return bool(self.internal_token.strip())
 
+    def tool_spec(self, name: str) -> ToolSpec:
+        node = self.tools_profile.get(name) or {}
+        enabled_explicit = "enabled" in node
+        enabled_raw = str(node.get("enabled", "1")).strip().lower()
+        params = {key: value for key, value in node.items() if key != "enabled"}
+        return ToolSpec(
+            enabled=enabled_raw in {"1", "true", "yes", "on"},
+            enabled_explicit=enabled_explicit,
+            params=params,
+        )
 
-def _resolved_embed_model(profile: dict) -> str:
-    ai_mode = str(((profile.get("common") or {}).get("ai_mode") or "auto")).strip().lower()
-    declared = str((profile.get("embedder") or {}).get("model") or "text-embedding-3-small")
+
+def _resolved_embed_model(common: dict, embedder: dict) -> str:
+    ai_mode = str((common.get("ai_mode") or "auto")).strip().lower()
+    declared = str(embedder.get("model") or "text-embedding-3-small")
     if ai_mode == "offline" or (ai_mode == "auto" and not _has_real_provider()):
         return "offline"
     return declared
@@ -122,15 +144,19 @@ def load_settings(path: str | os.PathLike[str] | None = None) -> McpSettings:
     profile = _active_profile(raw)
 
     server = profile.get("server") or {}
-    embedder = profile.get("embedder") or {}
-    vector_store = profile.get("vector_store") or {}
+    common = profile.get("common") or {}
+    # Mọi config của tool rag_search nest trong section `rag_search`; fallback về
+    # top-level để tương thích ngược config cũ.
+    rag_search_cfg = profile.get("rag_search") or {}
+    embedder = rag_search_cfg.get("embedder") or profile.get("embedder") or {}
+    vector_store = rag_search_cfg.get("vector_store") or profile.get("vector_store") or {}
     params = vector_store.get("params") or {}
-    reranker = profile.get("reranker") or {}
-    retrieval = profile.get("retrieval") or {}
+    reranker = rag_search_cfg.get("reranker") or profile.get("reranker") or {}
+    retrieval = rag_search_cfg.get("retrieval") or profile.get("retrieval") or {}
 
     dim_raw = str(embedder.get("dimension") or "").strip()
     override = int(dim_raw) if dim_raw else None
-    embed_model = _resolved_embed_model(profile)
+    embed_model = _resolved_embed_model(common, embedder)
     contract = resolve_vectorstore_contract(
         provider=str(vector_store.get("impl") or "qdrant"),
         collection=str(params.get("collection") or "rag_chatbot"),
@@ -172,4 +198,5 @@ def load_settings(path: str | os.PathLike[str] | None = None) -> McpSettings:
         top_k_candidates=_int(retrieval.get("top_k_candidates"), 20),
         rerank_top_k=_int(retrieval.get("rerank_top_k"), 3),
         rerank_threshold=_float(retrieval.get("rerank_threshold"), 0.7),
+        tools_profile=profile,
     )

@@ -1,7 +1,7 @@
 # Tích hợp `rag_search`: query-service ↔ mcp-service
 
 > Phạm vi: nối **query-service (MCP client)** với **mcp-service (MCP tool server)** cho tool `rag_search`.
-> `hr_query` **tạm gác** — không nằm trong tài liệu này.
+> `hr_query` **đang bắt đầu làm** ở mcp-service (chưa có kế hoạch cụ thể) — không nằm trong tài liệu này.
 > Trạng thái hiện tại: 🟡 **phía mcp-service đã xong** (LLM reranker + endpoint + fail-closed, commit `56489bd`/`78943f3`; e2e CI rag-worker→mcp **xanh**, xem mục 11). Còn lại nằm ở **query-service** (real MCP client + đổi field `s3`→`gcs`).
 
 ---
@@ -210,7 +210,7 @@ Field tên `*_gcs_uri` nhưng **value bên trong vẫn `s3://...`**. Vô hại c
 
 ## 10. Ngoài phạm vi (ghi để khỏi quên)
 
-- `hr_query` (tool HR: leave_balance / leave_requests / payroll) — **tạm gác**, làm sau.
+- `hr_query` (tool HR: leave_balance / leave_requests / payroll) — **đang bắt đầu làm** ở mcp-service, chưa có kế hoạch cụ thể.
 - Hybrid search (vector + BM25 RRF) — mcp-service v1 hiện chỉ vector + rerank.
 
 > **Reranker**: chốt dùng **LLM đánh giá lại** (mục 5.5) — đây là việc IN-SCOPE, không phải để sau.
