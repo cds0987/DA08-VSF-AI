@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("qdrant_client")
-
-from core_engine.vectorstore.providers.qdrant.remote import _normalize_remote_url
+from core_engine.vectorstore.config import VectorStoreConfig, normalize_remote_qdrant_url
 
 
 @pytest.mark.parametrize(
@@ -33,4 +31,22 @@ from core_engine.vectorstore.providers.qdrant.remote import _normalize_remote_ur
     ],
 )
 def test_normalize_remote_url(raw: str, expected: str) -> None:
-    assert _normalize_remote_url(raw) == expected
+    assert normalize_remote_qdrant_url(raw) == expected
+
+
+def test_remote_client_kwargs_normalizes_url_and_sets_timeout() -> None:
+    cfg = VectorStoreConfig(
+        url="https://qdrant.example.run.app",
+        api_key="secret",
+    )
+    kwargs = cfg.remote_client_kwargs()
+    assert kwargs["url"] == "https://qdrant.example.run.app:443"
+    assert kwargs["api_key"] == "secret"
+    assert kwargs["timeout"] == 30
+
+
+def test_remote_client_kwargs_timeout_env_override(monkeypatch) -> None:
+    monkeypatch.setenv("QDRANT_TIMEOUT", "75")
+    kwargs = VectorStoreConfig(url="https://q.run.app").remote_client_kwargs()
+    assert kwargs["timeout"] == 75
+    assert kwargs["api_key"] is None

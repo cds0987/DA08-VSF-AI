@@ -5,12 +5,14 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
+from urllib.parse import urlparse, urlunparse
 
 from core_engine.contract import ResolvedVectorstoreContract, index_id, resolve_vectorstore_contract
 
 DEFAULT_PROVIDER = "qdrant"
 DEFAULT_COLLECTION = "rag_chatbot"
 DEFAULT_EMBED_MODEL = "text-embedding-3-small"
+DEFAULT_REMOTE_TIMEOUT = 30
 
 
 def _env(*names: str) -> str:
@@ -19,6 +21,20 @@ def _env(*names: str) -> str:
         if value:
             return value
     return ""
+
+
+def normalize_remote_qdrant_url(url: str) -> str:
+    """Qdrant Cloud Run expose HTTPS qua 443; URL https thiếu port -> qdrant-client
+    mặc định rớt về :6333 -> ConnectTimeout. Chèn :443 cho URL https không port
+    (idempotent); http self-hosted có port giữ nguyên."""
+    if not url:
+        return url
+    parsed = urlparse(url)
+    if not parsed.scheme or parsed.port is not None or not parsed.hostname:
+        return url
+    if parsed.scheme == "https":
+        return urlunparse(parsed._replace(netloc=f"{parsed.hostname}:443"))
+    return url
 
 
 @dataclass(frozen=True)
@@ -45,6 +61,20 @@ class VectorStoreConfig:
 
     def index_id(self) -> str:
         return index_id(self.collection, self.embed_model, self.dimension)
+
+    def remote_client_kwargs(self) -> dict[str, Any]:
+        """kwargs cho AsyncQdrantClient/QdrantClient remote: URL chuẩn hoá port 443
+        + timeout nới (env QDRANT_TIMEOUT) cho Cloud Run cold start, gộp options.
+        Mọi nơi dựng remote client PHẢI dùng cái này để tránh lệch cấu hình."""
+        kwargs: dict[str, Any] = dict(self.options)
+        kwargs.setdefault(
+            "timeout", int(os.getenv("QDRANT_TIMEOUT", str(DEFAULT_REMOTE_TIMEOUT)))
+        )
+        return {
+            "url": normalize_remote_qdrant_url(self.url) or None,
+            "api_key": self.api_key or None,
+            **kwargs,
+        }
 
     def contract(self) -> ResolvedVectorstoreContract:
         return resolve_vectorstore_contract(

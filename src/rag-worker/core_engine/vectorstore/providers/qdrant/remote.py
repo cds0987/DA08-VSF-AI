@@ -9,24 +9,10 @@ from __future__ import annotations
 import asyncio
 import os
 from typing import Sequence
-from urllib.parse import urlparse, urlunparse
 
 from core_engine.vectorstore.providers.qdrant.base import QdrantBase, point_id
 
 from qdrant_client import AsyncQdrantClient, models
-
-
-def _normalize_remote_url(url: str) -> str:
-    """Qdrant Cloud Run expose HTTPS qua 443; URL không port -> qdrant-client mặc
-    định rớt về 6333 (sai). Thêm :443 cho URL https thiếu port (idempotent)."""
-    if not url:
-        return url
-    parsed = urlparse(url)
-    if not parsed.scheme or parsed.port is not None or not parsed.hostname:
-        return url
-    if parsed.scheme == "https":
-        return urlunparse(parsed._replace(netloc=f"{parsed.hostname}:443"))
-    return url
 
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.store import VectorStore
@@ -36,15 +22,7 @@ from core_engine.vectorstore.types import VectorRecord
 class QdrantRemoteProvider(QdrantBase):
     def __init__(self, config: VectorStoreConfig | None = None):
         super().__init__(config)
-        options = dict(self.config.options)
-        # Qdrant Cloud Run (region xa + cold start) -> connect/TLS có thể >5s mặc định
-        # của httpx, làm startup stamp-write timeout & crash app. Nới timeout (env override).
-        options.setdefault("timeout", int(os.getenv("QDRANT_TIMEOUT", "30")))
-        self._client = AsyncQdrantClient(
-            url=_normalize_remote_url(self.config.url) or None,
-            api_key=self.config.api_key or None,
-            **options,
-        )
+        self._client = AsyncQdrantClient(**self.config.remote_client_kwargs())
         self._ready = False
         self._lock = asyncio.Lock()
         self._upsert_batch = max(1, int(os.getenv("UPSERT_BATCH_SIZE", "256")))

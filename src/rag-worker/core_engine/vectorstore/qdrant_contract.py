@@ -44,11 +44,7 @@ async def write_contract_stamp(
     vectors_config = models.VectorParams(size=1, distance=models.Distance.COSINE)
 
     if vector_config.deployment == "remote":
-        client = AsyncQdrantClient(
-            url=vector_config.url or None,
-            api_key=vector_config.api_key or None,
-            **dict(vector_config.options),
-        )
+        client = AsyncQdrantClient(**vector_config.remote_client_kwargs())
         if not await client.collection_exists(collection_name):
             await client.create_collection(
                 collection_name=collection_name,
@@ -159,11 +155,7 @@ async def verify_contract_or_raise(
     stamp_id = point_id(f"__contract__::{contract.index_id}")
 
     if vector_config.deployment == "remote":
-        client = AsyncQdrantClient(
-            url=vector_config.url or None,
-            api_key=vector_config.api_key or None,
-            **dict(vector_config.options),
-        )
+        client = AsyncQdrantClient(**vector_config.remote_client_kwargs())
         try:
             data_exists = await client.collection_exists(data_collection)
             vector_size = (
