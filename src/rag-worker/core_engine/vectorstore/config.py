@@ -79,20 +79,9 @@ class VectorStoreConfig:
         """kwargs cho AsyncQdrantClient/QdrantClient remote: URL chuẩn hoá port 443
         + timeout nới (env QDRANT_TIMEOUT) cho Cloud Run cold start, gộp options.
         Mọi nơi dựng remote client PHẢI dùng cái này để tránh lệch cấu hình."""
-        kwargs: dict[str, Any] = dict(self.options)
-        kwargs.setdefault(
-            "timeout", int(os.getenv("QDRANT_TIMEOUT", str(DEFAULT_REMOTE_TIMEOUT)))
-        )
-        header = basic_auth_header(self.basic_auth)
-        if header:
-            headers = dict(kwargs.get("headers") or {})
-            headers.setdefault("Authorization", header)
-            kwargs["headers"] = headers
-        return {
-            "url": normalize_remote_qdrant_url(self.url) or None,
-            "api_key": self.api_key or None,
-            **kwargs,
-        }
+        from core_engine.vectorstore.connection import build_remote_client_kwargs
+
+        return build_remote_client_kwargs(self)
 
     def contract(self) -> ResolvedVectorstoreContract:
         return resolve_vectorstore_contract(
