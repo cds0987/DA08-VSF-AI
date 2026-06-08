@@ -5,5 +5,6 @@ from dataclasses import dataclass
 class CurrentUser:
     id: str
     role: str
+    account_type: str
     department: str = ""
 
