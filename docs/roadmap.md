@@ -64,7 +64,7 @@ _HR Personal Q&A_
 _MCP Tool Service_
 - [ ] mcp-service chạy như MCP server riêng (port 8003), expose 2 tool: `rag_search`, `hr_query`
 - [ ] Query Service agent là MCP client — liệt kê + gọi tool qua MCP; inject `document_ids`/`user_id` (không để LLM tự điền)
-- [ ] `rag_search` self-contained: NATS rag.search → rerank BGE-Reranker → Top-3; `hr_query` đọc `mcp_db.hr_mock`
+- [ ] `rag_search` self-contained: NATS rag.search → rerank BGE-Reranker → Top-3; `hr_query` gọi HR Service nội bộ và không sở hữu HR data
 
 _Admin Dashboard + Analytics (FE — Admin app `frontend/admin`)_
 - [ ] Xem danh sách tài liệu + trạng thái ingestion (queued / processing / indexed / failed)
@@ -90,7 +90,7 @@ _Feedback & Observability_
 - [ ] Langfuse trace hoạt động: xem được latency, token cost, retrieved chunks
 
 _Cloud Deployment_
-- [ ] Toàn bộ stack chạy ổn định trên GCP GCE bằng Docker Compose (12 containers: nginx, nuxt-chat, nuxt-admin, user-service, document-service, query-service, rag-worker, mcp-service, nats [JetStream], Qdrant, Redis, Langfuse :3100 — PostgreSQL = GCP Cloud SQL external; frontend/base là Nuxt layer build-time)
+- [ ] Toàn bộ stack chạy ổn định trên GCP GCE bằng Docker Compose (13 containers: nginx, nuxt-chat, nuxt-admin, user-service, document-service, query-service, rag-worker, mcp-service, hr-service, nats [JetStream], Qdrant, Redis, Langfuse :3100 — PostgreSQL = GCP Cloud SQL external; frontend/base là Nuxt layer build-time)
 - [ ] Cloud SQL PostgreSQL thay thế local DB — data không mất khi restart
 - [ ] File upload lưu vào Cloud Storage (GCS), không lưu local
 - [ ] Qdrant self-hosted trên GCP, có persistent volume

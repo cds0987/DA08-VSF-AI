@@ -72,11 +72,12 @@ cp src/document-service/.env.example  src/document-service/.env
 cp src/query-service/.env.example   src/query-service/.env
 cp src/rag-worker/.env.example      src/rag-worker/.env
 cp src/mcp-service/.env.example     src/mcp-service/.env
+cp src/hr-service/.env.example      src/hr-service/.env
 ```
 
 Xem đầy đủ nội dung từng file và hướng dẫn lấy API keys tại **[docs/env-setup.md](env-setup.md)**.
 
-> **Quan trọng:** `JWT_SECRET_KEY` phải giống nhau ở cả 5 services. Generate bằng `openssl rand -hex 32` rồi điền vào cả 5 file `.env`.
+> **Quan trọng:** `JWT_SECRET_KEY` phải giống nhau ở các service cần verify JWT. Generate bằng `openssl rand -hex 32` rồi điền vào `.env` tương ứng. JWT cần có `user_id`, `role`, `account_type`.
 >
 > **NATS URL:** Tất cả services kết nối NATS qua `NATS_URL=nats://nats:4222` (Docker network) hoặc `nats://localhost:4222` (local dev).
 
@@ -89,7 +90,7 @@ Xem đầy đủ nội dung từng file và hướng dẫn lấy API keys tại 
 **Local dev:** Có thể dùng PostgreSQL Docker để test nhanh mà không cần Cloud SQL:
 
 ```bash
-# PostgreSQL local — tạo 5 databases riêng như production
+# PostgreSQL local — tạo 6 databases riêng như production
 docker run -d \
   --name rag-postgres \
   -e POSTGRES_USER=user \
@@ -98,12 +99,13 @@ docker run -d \
   -p 5432:5432 \
   postgres:15
 
-# Tạo 5 databases
+# Tạo 6 databases
 docker exec -it rag-postgres psql -U user -c "
   CREATE DATABASE user_db;
   CREATE DATABASE doc_db;
   CREATE DATABASE query_db;
   CREATE DATABASE mcp_db;
+  CREATE DATABASE hr_db;
   CREATE DATABASE langfuse_db;
 "
 
@@ -126,8 +128,9 @@ Tạo tables bằng Alembic (mỗi service có `alembic/` riêng):
 ```bash
 cd src/user-service    && alembic upgrade head   # user_db
 cd ../document-service  && alembic upgrade head   # doc_db
-cd ../query-service    && alembic upgrade head   # query_db (conversations, messages, document_access)
-cd ../mcp-service      && alembic upgrade head   # mcp_db (hr_mock)
+cd ../query-service    && alembic upgrade head   # query_db (conversations, messages, document_access, user_access_profile)
+cd ../mcp-service      && alembic upgrade head   # mcp_db (tool metadata/config nếu cần)
+cd ../hr-service       && alembic upgrade head   # hr_db (employee profile + HR mock data)
 ```
 
 > RAG Worker **không có** migration — không dùng PostgreSQL (chỉ Qdrant + Cloud Storage (GCS) + NATS).
@@ -137,7 +140,7 @@ cd ../mcp-service      && alembic upgrade head   # mcp_db (hr_mock)
 
 ## 5. Chạy services local
 
-Mỗi service chạy trên port riêng. Mở 6 terminal (hoặc dùng Docker Compose — Section 8):
+Mỗi service chạy trên port riêng. Mở 7 terminal (hoặc dùng Docker Compose — Section 8):
 
 ```bash
 # Terminal 0 — NATS (cần chạy trước)
@@ -167,6 +170,11 @@ python app/main.py
 cd src/mcp-service
 venv\Scripts\activate
 python app/main.py        # khởi MCP server (Streamable HTTP/SSE) :8003
+
+# Terminal 6 — HR Service (port 8004, internal only)
+cd src/hr-service
+venv\Scripts\activate
+uvicorn app.interfaces.api.main:app --reload --port 8004
 ```
 
 API docs tự động:
@@ -174,6 +182,7 @@ API docs tự động:
 - Document Service: http://localhost:8002/docs
 - Query Service: http://localhost:8001/docs
 - MCP Service: http://localhost:8003 (MCP endpoint — không phải OpenAPI /docs)
+- HR Service: http://localhost:8004/docs (internal only)
 - NATS Monitoring: http://localhost:8222
 
 ---
@@ -239,7 +248,7 @@ pytest --cov=app tests/
 
 ## 8. Docker Compose — Chạy toàn bộ stack
 
-Thay vì chạy 3 terminal riêng, dùng Docker Compose để start tất cả cùng lúc:
+Thay vì chạy từng terminal/service riêng, dùng Docker Compose để start tất cả cùng lúc:
 
 ```bash
 # Build + start tất cả services
@@ -266,13 +275,14 @@ Services sau khi `docker compose up`:
 | document-service | 8002 | Document management (Admin only) |
 | query-service | 8001 | User chat / LLM Orchestration (MCP client) — SSE `/query` + `/notifications` |
 | rag-worker | — | NATS Worker — ingestion pipeline (no HTTP port) |
-| mcp-service | 8003 | MCP server — tool `rag_search`, `hr_query` (dùng chung cho mọi agent) |
+| mcp-service | 8003 | MCP server — tool `rag_search`, `hr_query` (tool gateway, không sở hữu HR data) |
+| hr-service | 8004 | Employee profile + HR data API (internal only) |
 | nats | 4222 / 8222 | Message broker — JetStream enabled (4222: client, 8222: monitoring UI) |
 | qdrant | 6333 | Vector database |
 | redis | 6379 | JWT blacklist + rate limiting + semantic cache |
 | langfuse | 3100 | LLM observability dashboard (IT/DevOps only) |
 
-> **PostgreSQL:** Không có container — dùng **GCP Cloud SQL db-g1-small** với 5 databases riêng: `user_db`, `doc_db`, `query_db`, `mcp_db`, `langfuse_db`. Mỗi service kết nối đến database của mình qua cùng 1 Cloud SQL IP.
+> **PostgreSQL:** Không có container — dùng **GCP Cloud SQL db-g1-small** với 6 databases riêng: `user_db`, `doc_db`, `query_db`, `mcp_db`, `hr_db`, `langfuse_db`. Mỗi service kết nối đến database của mình qua cùng 1 Cloud SQL IP.
 
 ---
 
@@ -283,7 +293,7 @@ Services sau khi `docker compose up`:
 | `Connection refused 5432` | PostgreSQL chưa chạy | Chạy lại docker run postgres |
 | `Connection refused 6333` | Qdrant chưa chạy | Chạy lại docker run qdrant |
 | `Connection refused 6379` | Redis chưa chạy | Chạy lại docker run redis |
-| `Invalid signature` (JWT) | `JWT_SECRET_KEY` không khớp giữa services | Kiểm tra `.env` của tất cả 5 services phải dùng cùng key |
+| `Invalid signature` (JWT) | `JWT_SECRET_KEY` không khớp giữa services | Kiểm tra `.env` của các service verify JWT phải dùng cùng key |
 | `Invalid API Key` | `.env` chưa điền đúng | Kiểm tra lại `.env` |
 | `ModuleNotFoundError` | Chưa activate venv đúng service | `cd <service-folder> && venv\Scripts\activate` |
 | `QDRANT_URL not set` | Thiếu env var | Kiểm tra `src/rag-worker/.env` |

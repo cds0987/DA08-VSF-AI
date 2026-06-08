@@ -144,20 +144,40 @@ src/mcp-service/                    ← Container 5: MCP Tool Service (:8003)
 │   ├── application/
 │   │   └── tools/
 │   │       ├── rag_search.py       # (rewrite) → NATS rag.search → rerank → Top-3
-│   │       └── hr_query.py         # query mcp_db.hr_mock filter user_id
+│   │       └── hr_query.py         # call HR Service, filter by current user_id
 │   ├── infrastructure/
+│   │   ├── clients/
+│   │   │   └── hr_client.py                # internal client to HR Service
 │   │   ├── db/
-│   │   │   ├── models.py                   # hr_mock.* (mcp_db)
-│   │   │   └── postgres_hr_repository.py
+│   │   │   └── models.py                   # tool metadata/config only, if needed
 │   │   ├── nats_rag_client.py      # NATS request-reply rag.search → RAG Worker
 │   │   └── bge_reranker_client.py  # BGE-Reranker-v2-m3 (loaded inline, Top-5→Top-3)
 │   ├── interfaces/
 │   │   └── mcp_server.py           # Expose tool qua MCP (Streamable HTTP/SSE)
 │   └── main.py                     # MCP server :8003
 
+src/hr-service/                     ← Container 6: HR Service (:8004, internal only)
+├── app/
+│   ├── domain/
+│   │   ├── entities/
+│   │   │   └── employee.py         # EmployeeProfile, Department, HR records
+│   │   └── repositories/
+│   │       └── employee_repository.py
+│   ├── application/
+│   │   └── services/
+│   │       └── employee_profile_service.py  # publish hr.employee_profile.updated
+│   ├── infrastructure/
+│   │   ├── db/
+│   │   │   └── models.py           # hr_svc.* (hr_db)
+│   │   └── nats_publisher.py       # NATS event publisher
+│   ├── interfaces/
+│   │   └── api/
+│   │       └── routes.py           # internal HR data endpoints
+│   └── main.py                     # FastAPI :8004
+
 src/frontend/base/                  ← Nuxt Layer dùng chung (useAuth + useApi + middleware/auth + design system) — build-time, KHÔNG container
-src/frontend/chat/                  ← Container 6: Chat app End User (:3000) — /login gọi POST /auth/login (user + admin) → Query Service
-src/frontend/admin/                 ← Container 7: Admin console (:3001) — /login gọi POST /auth/admin/login (admin only) → Document + User /users + metrics
+src/frontend/chat/                  ← Container 7: Chat app End User (:3000) — /login gọi POST /auth/login (user + admin) → Query Service
+src/frontend/admin/                 ← Container 8: Admin console (:3001) — /login gọi POST /auth/admin/login (admin only) → Document + User /users + metrics
 ```
 
 ---

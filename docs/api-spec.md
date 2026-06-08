@@ -6,6 +6,8 @@ Danh sách đầy đủ endpoint của các services. Frontend Dev dùng file n�
 > - User Service: `http://localhost:8000`
 > - Document Service: `http://localhost:8002` _(Admin only)_
 > - Query Service: `http://localhost:8001`
+> - MCP Service: `http://localhost:8003` _(internal MCP tool gateway)_
+> - HR Service: `http://localhost:8004` _(internal only)_
 > - RAG Worker: không expose HTTP — giao tiếp qua NATS :4222 _(internal)_
 >
 > **Auth header** (trừ `/auth/login` và `/auth/admin/login`): `Authorization: Bearer <jwt_token>`
@@ -48,7 +50,7 @@ Response 423:  { "detail": "Account locked. Try again after 15 minutes." }
 ```
 Request:  Authorization: Bearer <token>
 
-Response 200:  { "id": "uuid", "email": "string", "role": "user" | "admin", "department": "string" }
+Response 200:  { "id": "uuid", "email": "string", "role": "user" | "admin", "account_type": "internal" | "external", "department": "string" }
 Response 401:  { "detail": "Not authenticated" }
 ```
 
@@ -85,7 +87,7 @@ Response 200:
   {
     "items": [
       { "id": "uuid", "email": "string", "role": "user" | "admin",
-        "department": "string", "is_active": true }
+        "account_type": "internal" | "external", "department": "string", "is_active": true }
     ],
     "total": 12
   }
@@ -196,7 +198,7 @@ Request:
 Response 200 (SSE):
   data: {"token": "Theo "}
   data: {"token": "chính sách..."}
-  data: {"done": true, "sources": [{"document_name": "string", "caption": "string", "heading_path": ["string"], "score": 0.85, "source_gcs_uri": "gs://..."}], "session_id": "uuid"}
+  data: {"done": true, "sources": [{"document_id": "uuid", "document_name": "string", "caption": "string", "heading_path": ["string"], "score": 0.85, "source_gcs_uri": "gs://..."}], "session_id": "uuid"}
 
 Response 429:  { "detail": "Rate limit exceeded. Max 20 requests/minute." }
 ```
@@ -251,8 +253,19 @@ Response 200:  { "id": "uuid", "is_read": true }
 ```
 Query params: ?limit=20&offset=0
 Response 200:
-  { "messages": [{ "role": "user" | "assistant", "content": "string", "created_at": "iso8601" }] }
+  {
+    "messages": [
+      {
+        "role": "user" | "assistant",
+        "content": "string",
+        "sources": [{"document_id": "uuid", "document_name": "string", "caption": "string", "heading_path": ["string"], "score": 0.85, "source_gcs_uri": "gs://..."}],
+        "created_at": "iso8601"
+      }
+    ]
+  }
 ```
+
+> `sources` chỉ có ý nghĩa với assistant message. User message hoặc câu trả lời không dùng tài liệu nội bộ có thể trả `sources: []`.
 
 ### `DELETE /conversations`
 
@@ -316,11 +329,22 @@ Response 503:  { "status": "degraded", "degraded_reasons": ["rag_worker unreacha
 
 ---
 
+## HR Service → Query Service — NATS Event (Employee access projection)
+
+> HR Service là source of truth cho employee profile/department. Query Service **không gọi trực tiếp HR Service** trong hot path chat; thay vào đó giữ projection `query_svc.user_access_profile` được cập nhật bằng JetStream durable consumer.
+
+| Subject | Type | Payload | Mô tả |
+|---------|------|---------|-------|
+| `hr.employee_profile.updated` | Publish (HR Service) / Subscribe (Query Service) | `{ event_id, event_version, occurred_at, user_id, account_type, department, employment_status }` | HR Service publish khi employee profile, department hoặc employment status thay đổi. Query Service upsert projection `user_access_profile` để ACL pre-filter theo `account_type + department + user_id`. |
+
+---
+
 ## Pydantic Schemas (tham khảo thêm)
 
 ```python
 # query-service/interfaces/api/schemas/query.py
 class Source(BaseModel):
+    document_id: Optional[str] = None
     document_name: str
     caption: str
     heading_path: List[str]
@@ -356,6 +380,7 @@ class UserItem(BaseModel):
     id: str
     email: str
     role: str               # "user" | "admin"
+    account_type: str       # "internal" | "external"
     department: str
     is_active: bool
 

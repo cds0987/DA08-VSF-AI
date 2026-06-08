@@ -1,6 +1,6 @@
 # Data Schema — RAG Chatbot
 
-Mỗi service kết nối đến **database riêng** trên cùng 1 GCP Cloud SQL db-g1-small: `user_db`, `doc_db`, `query_db`, `mcp_db`, `langfuse_db`.
+Mỗi service kết nối đến **database riêng** trên cùng 1 GCP Cloud SQL db-g1-small: `user_db`, `doc_db`, `query_db`, `mcp_db`, `hr_db`, `langfuse_db`.
 
 > **Convention chung:**
 > - `id`: `UUID PRIMARY KEY DEFAULT gen_random_uuid()`
@@ -30,8 +30,9 @@ CREATE TABLE user_svc.users (
     hashed_password     VARCHAR(255),                                -- NULL nếu đăng nhập qua Microsoft SSO
     auth_provider       VARCHAR(20) NOT NULL DEFAULT 'local',        -- 'local' | 'microsoft'
     role                VARCHAR(20) NOT NULL DEFAULT 'user',         -- 'admin' | 'user'
+    account_type        VARCHAR(20) NOT NULL DEFAULT 'internal',     -- 'internal' | 'external'
     is_active           BOOLEAN NOT NULL DEFAULT true,
-    department          VARCHAR(100) NOT NULL DEFAULT '',            -- dùng cho Secret filter Phase 2
+    department          VARCHAR(100) NOT NULL DEFAULT '',            -- Phase 1 snapshot. Source of truth production: hr_db.hr_svc.employees.department
     failed_login_count  INTEGER NOT NULL DEFAULT 0,
     locked_until        TIMESTAMP WITH TIME ZONE,
     created_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
@@ -39,6 +40,7 @@ CREATE TABLE user_svc.users (
 );
 
 CREATE INDEX idx_users_email ON user_svc.users(email);
+CREATE INDEX idx_users_account_type ON user_svc.users(account_type);
 
 CREATE TABLE user_svc.refresh_tokens (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -87,7 +89,7 @@ CREATE TABLE query_svc.messages (
     user_id         UUID NOT NULL,
     role            VARCHAR(20) NOT NULL,        -- 'user' | 'assistant'
     content         TEXT NOT NULL,
-    sources         JSONB,                       -- [{document_name, page_number, score, chunk_text}]
+    sources         JSONB,                       -- assistant only: [{document_id, document_name, caption, heading_path, score, source_gcs_uri}]
     latency_ms      INTEGER,
     feedback        SMALLINT,                    -- 1 | -1 | NULL
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
@@ -107,6 +109,21 @@ CREATE TABLE query_svc.document_access (
 );
 
 CREATE INDEX idx_doc_access_classification ON query_svc.document_access(classification);
+
+-- Projection hồ sơ truy cập user, cập nhật từ HR Service qua event NATS
+-- `hr.employee_profile.updated`. Query Service dùng bảng này để lọc tài liệu
+-- theo account_type/department/employment_status mà không gọi trực tiếp HR Service
+-- trên hot path chat.
+CREATE TABLE query_svc.user_access_profile (
+    user_id           UUID PRIMARY KEY,
+    account_type      VARCHAR(20) NOT NULL,       -- internal | external
+    department        VARCHAR(100),
+    employment_status VARCHAR(20) NOT NULL,       -- active | inactive | terminated | contractor
+    updated_at        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_user_access_department ON query_svc.user_access_profile(department);
+CREATE INDEX idx_user_access_account_type ON query_svc.user_access_profile(account_type);
 
 -- Notification Center: lưu thông báo để xem lại + đếm chưa đọc (badge).
 -- notify_subscriber ghi 1 bản ghi/user khi đẩy event SSE; FE đọc qua GET /notifications/history.
@@ -173,12 +190,33 @@ CREATE INDEX idx_audit_actor ON doc_svc.audit_logs(actor_id, created_at DESC);
 
 ---
 
-## HR Mock Data — Schema `hr_mock` (trong `mcp_db` — MCP Tool Service)
+## HR Service — Database `hr_db`, Schema `hr_svc`
 
-> Mock data cho Feature 5b (Personal HR Q&A). Tool **`hr_query`** của **mcp-service** query trực tiếp — đặt trong `mcp_db` để giữ database-per-service (tool nào sở hữu data của tool đó; Query Service gọi qua MCP chứ không đụng DB này). Filter bắt buộc `WHERE user_id = :current_user_id` (user_id do MCP client inject từ JWT).
+> HR Service sở hữu employee profile, department và mock HR data cho Feature 5b (Personal HR Q&A). Tool **`hr_query`** của **mcp-service** gọi HR Service bằng internal HTTP/gRPC; Query Service không đụng trực tiếp DB này. Filter bắt buộc `WHERE user_id = :current_user_id` (user_id do MCP client inject từ JWT). `external` accounts không có HR personal data.
 
 ```sql
-CREATE TABLE hr_mock.leave_balance (
+CREATE TABLE hr_svc.departments (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code        VARCHAR(50) UNIQUE NOT NULL,
+    name        VARCHAR(255) NOT NULL,
+    created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
+CREATE TABLE hr_svc.employees (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id           UUID UNIQUE NOT NULL,       -- logical reference to user_db.user_svc.users.id
+    employee_code     VARCHAR(50) UNIQUE,
+    company_email     VARCHAR(255) UNIQUE NOT NULL,
+    department        VARCHAR(100) NOT NULL,
+    employment_status VARCHAR(20) NOT NULL DEFAULT 'active',
+    created_at        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_employees_user ON hr_svc.employees(user_id);
+CREATE INDEX idx_employees_department ON hr_svc.employees(department);
+
+CREATE TABLE hr_svc.leave_balance (
     user_id             UUID PRIMARY KEY,
     annual_leave_total  INTEGER NOT NULL DEFAULT 12,
     annual_leave_used   INTEGER NOT NULL DEFAULT 0,
@@ -187,7 +225,7 @@ CREATE TABLE hr_mock.leave_balance (
     updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
-CREATE TABLE hr_mock.leave_requests (
+CREATE TABLE hr_svc.leave_requests (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     UUID NOT NULL,
     leave_type  VARCHAR(20) NOT NULL,    -- 'annual' | 'sick' | 'personal'
@@ -199,9 +237,9 @@ CREATE TABLE hr_mock.leave_requests (
     created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_leave_req_user ON hr_mock.leave_requests(user_id);
+CREATE INDEX idx_leave_req_user ON hr_svc.leave_requests(user_id);
 
-CREATE TABLE hr_mock.payroll_summary (
+CREATE TABLE hr_svc.payroll_summary (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id      UUID NOT NULL,
     period       VARCHAR(7) NOT NULL,        -- 'YYYY-MM' vd: '2026-05'
@@ -212,7 +250,7 @@ CREATE TABLE hr_mock.payroll_summary (
     UNIQUE(user_id, period)
 );
 
-CREATE INDEX idx_payroll_user ON hr_mock.payroll_summary(user_id, period DESC);
+CREATE INDEX idx_payroll_user ON hr_svc.payroll_summary(user_id, period DESC);
 ```
 
 ---
