@@ -37,6 +37,9 @@ class QdrantRemoteProvider(QdrantBase):
     def __init__(self, config: VectorStoreConfig | None = None):
         super().__init__(config)
         options = dict(self.config.options)
+        # Qdrant Cloud Run (region xa + cold start) -> connect/TLS có thể >5s mặc định
+        # của httpx, làm startup stamp-write timeout & crash app. Nới timeout (env override).
+        options.setdefault("timeout", int(os.getenv("QDRANT_TIMEOUT", "30")))
         self._client = AsyncQdrantClient(
             url=_normalize_remote_url(self.config.url) or None,
             api_key=self.config.api_key or None,

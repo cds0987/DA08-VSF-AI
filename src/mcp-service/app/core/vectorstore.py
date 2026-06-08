@@ -91,12 +91,18 @@ class QdrantReader:
     # --- client helpers ---------------------------------------------------
     def _remote_client(self):
         if self._client is None:
+            import os
+
             from qdrant_client import AsyncQdrantClient
 
+            options = dict(self._settings.options)
+            # Qdrant Cloud Run (region xa + cold start) -> connect/TLS có thể vượt
+            # timeout mặc định httpx. Nới timeout (env override) cho verify/search.
+            options.setdefault("timeout", int(os.getenv("QDRANT_TIMEOUT", "30")))
             self._client = AsyncQdrantClient(
                 url=_normalize_remote_url(self._settings.url) or None,
                 api_key=self._settings.api_key or None,
-                **dict(self._settings.options),
+                **options,
             )
         return self._client
 
