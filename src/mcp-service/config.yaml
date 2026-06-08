@@ -19,9 +19,10 @@ profiles:
       internal_token: ${MCP_INTERNAL_TOKEN:-}
 
     # ── Cấp TOOL: mọi config thuộc tool nào thì nest hẳn vào tool đó ──────
-    # mcp-service = SEARCH-ONLY (không captioner/parser/chunker — đó là việc của
-    # rag-worker). Tool rag_search sở hữu toàn bộ config của nó: embedder (embed
-    # query) + vector_store + vectorstore_contract + reranker + retrieval.
+    # mcp-service = SEARCH-ONLY. Tool rag_search sở hữu toàn bộ config của nó:
+    # embedder (embed query) + vector_store + vectorstore_contract + reranker +
+    # retrieval. CI parity (check_vectorstore_contract) tự lift contract keys từ
+    # subtree này để so fingerprint với rag-worker.
     rag_search:
       enabled: ${TOOL_RAG_SEARCH_ENABLED:-1}
       embedder:

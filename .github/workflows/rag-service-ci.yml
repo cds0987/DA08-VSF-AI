@@ -15,20 +15,22 @@ jobs:
   # Xem docs/search-split-vectorstore-contract.md §7.2.
   contract:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: src/rag-worker
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: src/rag-worker/requirements.txt
-      - name: Install dependencies
-        run: python -m pip install --upgrade pip && pip install -r requirements.txt
-      - name: Check vectorstore contract parity (rag-worker vs mcp-service)
-        run: python scripts/check_vectorstore_contract.py config.yaml ../mcp-service/config.yaml
+      # mcp-service nest config tool-local (embedder dưới `rag_search`) nên loader
+      # rag-worker không đọc được config mcp. Parity tính bất đối xứng: script PHÍA
+      # mcp-service dùng loader của mỗi service cho phía của nó. Cần cả 2 bộ deps.
+      - name: Install dependencies (rag-worker + mcp-service)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r src/rag-worker/requirements.txt
+          pip install -r src/mcp-service/requirements.txt
+      - name: Check vectorstore contract parity (mcp-service consumer vs rag-worker producer)
+        run: python src/mcp-service/scripts/check_vectorstore_contract.py
 
   test:
     runs-on: ubuntu-latest
