@@ -22,6 +22,7 @@ from core_engine.engine import (
     IngestInput,
 )
 from core_engine.logging_utils import log_event
+from core_engine.vectorstore.providers.qdrant.base import is_qdrant_collection_missing_error
 
 
 class EmptyIngestResultError(ValueError):
@@ -42,6 +43,8 @@ def classify_ingest_error(exc: BaseException) -> str:
             asyncio.TimeoutError,
         ),
     ):
+        return "transient"
+    if is_qdrant_collection_missing_error(exc):
         return "transient"
     if isinstance(exc, (PermanentAIError, EmptyIngestResultError, ChunkLimitExceededError)):
         return "permanent"

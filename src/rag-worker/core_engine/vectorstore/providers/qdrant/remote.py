@@ -8,9 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Awaitable, Callable
 from typing import Sequence
 
-from core_engine.vectorstore.providers.qdrant.base import QdrantBase, point_id
+from core_engine.vectorstore.providers.qdrant.base import (
+    QdrantBase,
+    is_qdrant_collection_missing_error,
+    point_id,
+)
 
 from qdrant_client import AsyncQdrantClient, models
 
@@ -48,71 +53,104 @@ class QdrantRemoteProvider(QdrantBase):
                 )
             self._ready = True
 
+    async def _retry_on_missing_collection(
+        self,
+        op: Callable[[], Awaitable[object]],
+    ) -> object:
+        try:
+            return await op()
+        except Exception as exc:
+            if not is_qdrant_collection_missing_error(exc):
+                raise
+            self._ready = False
+            await self._ensure()
+            return await op()
+
     async def insert_many(self, records: Sequence[VectorRecord]) -> None:
-        await self._ensure()
         record_list = list(records)
         if not record_list:
             return
-        points = await self._client.retrieve(
-            collection_name=self._collection,
-            ids=[point_id(r.chunk_id) for r in record_list],
-            with_payload=True,
-            with_vectors=False,
-        )
-        existing = self._existing_from_points(points)
-        if existing:
-            raise ValueError(
-                f"Chunk id da ton tai, insert khong duoc overwrite: {sorted(existing)[0]}"
+
+        async def op() -> None:
+            await self._ensure()
+            points = await self._client.retrieve(
+                collection_name=self._collection,
+                ids=[point_id(r.chunk_id) for r in record_list],
+                with_payload=True,
+                with_vectors=False,
             )
-        await self._client.upsert(
-            collection_name=self._collection,
-            points=[self._point(r) for r in record_list],
-        )
+            existing = self._existing_from_points(points)
+            if existing:
+                raise ValueError(
+                    f"Chunk id da ton tai, insert khong duoc overwrite: {sorted(existing)[0]}"
+                )
+            await self._client.upsert(
+                collection_name=self._collection,
+                points=[self._point(r) for r in record_list],
+            )
+
+        await self._retry_on_missing_collection(op)
 
     async def upsert_many(self, records: Sequence[VectorRecord]) -> None:
-        await self._ensure()
         record_list = list(records)
-        if record_list:
-            points = [self._point(r) for r in record_list]
+        if not record_list:
+            return
+        points = [self._point(r) for r in record_list]
+
+        async def op() -> None:
+            await self._ensure()
             for index in range(0, len(points), self._upsert_batch):
                 await self._client.upsert(
                     collection_name=self._collection,
                     points=points[index : index + self._upsert_batch],
                 )
 
+        await self._retry_on_missing_collection(op)
+
     async def list_chunk_ids_by_document(self, document_id: str) -> list[str]:
-        await self._ensure()
-        chunk_ids: set[str] = set()
-        offset = None
-        while True:
-            points, offset = await self._client.scroll(
-                collection_name=self._collection,
-                scroll_filter=self._document_filter(document_id),
-                with_payload=True,
-                with_vectors=False,
-                limit=1000,
-                offset=offset,
-            )
-            chunk_ids.update(self._existing_from_points(points))
-            if offset is None:
-                break
-        return sorted(chunk_ids)
+        async def op() -> list[str]:
+            await self._ensure()
+            chunk_ids: set[str] = set()
+            offset = None
+            while True:
+                points, offset = await self._client.scroll(
+                    collection_name=self._collection,
+                    scroll_filter=self._document_filter(document_id),
+                    with_payload=True,
+                    with_vectors=False,
+                    limit=1000,
+                    offset=offset,
+                )
+                chunk_ids.update(self._existing_from_points(points))
+                if offset is None:
+                    break
+            return sorted(chunk_ids)
+
+        return await self._retry_on_missing_collection(op)
 
     async def delete_many(self, chunk_ids: Sequence[str]) -> None:
-        await self._ensure()
         ids = list(chunk_ids)
-        if ids:
+        if not ids:
+            return
+
+        async def op() -> None:
+            await self._ensure()
             await self._client.delete(
                 collection_name=self._collection,
                 points_selector=self._ids_selector(ids),
             )
 
+        await self._retry_on_missing_collection(op)
+
     async def delete_by_document(self, document_id: str) -> None:
-        await self._ensure()
-        await self._client.delete(
-            collection_name=self._collection,
-            points_selector=self._delete_by_document_selector(document_id),
-        )
+        async def op() -> None:
+            await self._ensure()
+            await self._client.delete(
+                collection_name=self._collection,
+                points_selector=self._delete_by_document_selector(document_id),
+            )
+
+        await self._retry_on_missing_collection(op)
 
 
 class QdrantRemoteRepository(VectorStore):

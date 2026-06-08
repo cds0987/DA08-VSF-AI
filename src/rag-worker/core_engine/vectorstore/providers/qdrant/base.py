@@ -12,6 +12,7 @@ from typing import Sequence
 
 try:
     from qdrant_client import models
+    from qdrant_client.http.exceptions import UnexpectedResponse
 except ModuleNotFoundError as e:
     raise ModuleNotFoundError(
         "Provider 'qdrant' can qdrant-client. Cai: pip install qdrant-client"
@@ -26,6 +27,23 @@ _QDRANT_NS = uuid.UUID("6ba7b811-9dad-11d1-80b4-00c04fd430c8")
 
 def point_id(chunk_id: str) -> str:
     return str(uuid.uuid5(_QDRANT_NS, chunk_id))
+
+
+def is_qdrant_collection_missing_error(exc: BaseException) -> bool:
+    if not isinstance(exc, UnexpectedResponse):
+        return False
+    if getattr(exc, "status_code", None) != 404:
+        return False
+    text = " ".join(
+        str(part)
+        for part in (
+            getattr(exc, "reason_phrase", ""),
+            getattr(exc, "content", ""),
+            exc,
+        )
+        if part
+    ).lower()
+    return "collection" in text and ("doesn't exist" in text or "does not exist" in text)
 
 
 class QdrantBase(VectorStoreProvider):

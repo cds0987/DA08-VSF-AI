@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, datetime
 
 import pytest
+from qdrant_client.http.exceptions import UnexpectedResponse
 
 from app.application.use_cases.ingestion import IngestDocumentUseCase
 from app.application.use_cases.ingestion.ingest_document_use_case import classify_ingest_error
@@ -697,4 +698,15 @@ def test_inmemory_repository_does_not_revive_deleted_document_status() -> None:
 
 def test_classify_ingest_error_distinguishes_transient_and_permanent() -> None:
     assert classify_ingest_error(TransientAIError("retry")) == "transient"
+    assert (
+        classify_ingest_error(
+            UnexpectedResponse(
+                status_code=404,
+                reason_phrase="Not Found",
+                content="Collection `rag_chatbot__offline__d256` doesn't exist!",
+                headers={},
+            )
+        )
+        == "transient"
+    )
     assert classify_ingest_error(ChunkLimitExceededError("too many")) == "permanent"
