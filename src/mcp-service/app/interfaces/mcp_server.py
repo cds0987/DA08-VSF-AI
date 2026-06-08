@@ -7,7 +7,12 @@ from typing import Any
 
 from app.core.config import McpSettings, load_settings
 import app.tools  # noqa: F401
-from app.tools.base import McpTool, available_tools, resolve_tool
+from app.tools.base import (
+    McpTool,
+    available_tools,
+    is_entry_point_tool,
+    resolve_tool,
+)
 
 MCP_DEFAULT_HOST = "0.0.0.0"
 MCP_DEFAULT_PORT = 8003
@@ -80,7 +85,14 @@ def build_mcp(settings: McpSettings | None = None) -> tuple[Any, list[McpTool]]:
     tools: list[McpTool] = []
     for name in available_tools():
         spec = settings.tool_spec(name)
-        if not spec.enabled:
+        if spec.enabled_explicit:
+            enabled = spec.enabled
+        else:
+            # Không khai `enabled` trong config: built-in mặc định BẬT; tool đến từ
+            # entry-point bên thứ ba mặc định TẮT (phải khai tường minh mới chạy) —
+            # tránh footgun tool ngoài tự kích hoạt.
+            enabled = not is_entry_point_tool(name)
+        if not enabled:
             continue
         tool = resolve_tool(name, settings=settings, params=spec.params)
         tool.register(mcp)

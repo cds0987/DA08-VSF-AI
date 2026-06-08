@@ -3,7 +3,7 @@
 Scope: `src/rag-worker` — engine ingest, job queue, DB repository, S3 parser, chunker.
 Grounding: deep code review tại `nguyendev` HEAD (2026-06-07) — đọc từ entrypoint → worker
 → engine → DB adapter → NATS consumer → test suite.
-Status: **OPEN**
+Status: **CLOSED** (2026-06-07) — G7-1..G7-18 đã fix; xem mục *Tổng kết triển khai* cuối file.
 
 ---
 
@@ -677,3 +677,63 @@ job-lifecycle/transport/infra — **không** đụng retrieval semantics, eval g
 - **Migration có version** (checklist #15): G7 hiện **không gap nào cần schema mới**; nếu fix
   dài hạn G7-2 (transaction) hay G7-8 (bảng outbox) cần bảng/index → viết alembic migration
   idempotent + rollback note, KHÔNG `CREATE` ad-hoc trong code.
+
+---
+
+# Tổng kết triển khai (CLOSED — 2026-06-07)
+
+> Toàn bộ G7-1..G7-18 đã fix qua 7 commit trên `nguyendev`
+> (`f94893f` → `1b5e761`). CI xanh (Lint+Test + e2e-cloud). PR #35 → `develop`.
+> G7-8 + G7-16 đóng **đúng cơ chế** bằng doc.status outbox sweep (không phải chỉ reconciler).
+
+## Bảng gap → fix → commit
+
+| ID | Mức | Cách fix | Commit | Trạng thái |
+|----|-----|----------|--------|-----------|
+| G7-1 | P0 | Map đủ children: `to_embed=caption`, `bm25_text=child` | f94893f | ✅ CLOSED |
+| G7-2 | P0 | Cleanup khi enqueue fail (sau đổi sang `purge()` hard-delete) | f94893f / 716938b | ✅ CLOSED |
+| G7-3 | P0 | `add`+`flush`+bắt `IntegrityError` → trả existing, không overwrite | f94893f | ✅ CLOSED |
+| G7-4 | P1 | `asyncio.wait_for` + `INGEST_JOB_TIMEOUT_SECONDS` + validate | f94893f / b8a5eec | ✅ CLOSED |
+| G7-5 | P1 | `asyncio.gather` + semaphore `CAPTION_MAX_CONCURRENCY` | f94893f | ✅ CLOSED |
+| G7-6 | P1 | Double-checked locking `threading.Lock` | f94893f | ✅ CLOSED |
+| G7-7 | P1 | Tách `_fail_jobs_exceeding_max_attempts` khỏi claim → dồn vào reaper (+STALE) | f94893f | ✅ CLOSED |
+| G7-8 | P1 | Retry 3 lần **+ doc.status outbox sweep** (at-least-once) | f94893f / 5756c00 | ✅ CLOSED |
+| G7-9 | P2 | `with_for_update(skip_locked=True)` (guard chỉ Postgres) | f94893f | ✅ CLOSED |
+| G7-10 | P2 | Split sentence-aware, gom câu tới gần max | f94893f | ✅ CLOSED |
+| G7-11 | P2 | Rename field `section_index`, giữ nguyên key payload `page_number` | f94893f | ✅ CLOSED |
+| G7-12 | P2 | `page.images.clear()` sau OCR mỗi trang (+ fix test snapshot) | f94893f / 1b5e761 | ✅ CLOSED |
+| G7-13 | P0 | `enqueue` skip nếu doc đã COMPLETED | f94893f | ✅ CLOSED |
+| G7-14 | P1 | Chia batch `EMBED_BATCH_SIZE` trong `embed_batch` | f94893f | ✅ CLOSED |
+| G7-15 | P1 | Đảo thứ tự delete + post-check `None or DELETED` + cleanup vector + `fail_job` | f94893f / b8a5eec / 716938b | ✅ CLOSED |
+| G7-16 | P1 | doc.status outbox sweep (`status_published_at` + task nền) | 5756c00 / a9d8ba9 | ✅ CLOSED |
+| G7-17 | P2 | Prune `existing_chunk_ids` ở nhánh rỗng trước `return 0` | f94893f | ✅ CLOSED |
+| G7-18 | P2 | Bỏ window đuôi cụt (`< size*0.3 + overlap`) | f94893f | ✅ CLOSED |
+
+## Hai cơ chế độ bền phát sinh (thiết kế riêng)
+
+| Cơ chế | Đóng lỗ | Cốt lõi | Doc | Commit |
+|--------|---------|---------|-----|--------|
+| **Store reconciler** | "no-row" (doc.ingest rớt, job chưa từng tạo) | Quét store định kỳ độc lập NATS, enqueue file sót; soft-delete tombstone (`DocumentStatus.DELETED`) chống hồi sinh | [decide/store-reconciler.md](../decide/store-reconciler.md) | 716938b, c4e5219 |
+| **doc.status outbox sweep** | "có-row terminal, tín hiệu mất" (G7-8 + G7-16) | `status_published_at` bền trên `ingest_jobs` (migration 0003) + sweep nền phát lại at-least-once; skip doc đã xóa | [decide/doc-status-outbox.md](../decide/doc-status-outbox.md) | 5756c00, a9d8ba9 |
+
+> **Phân biệt 2 lỗ durability:** reconciler đóng lỗ *"doc không có row"*; outbox sweep đóng lỗ
+> *"doc có row terminal nhưng tín hiệu doc.status không tới"*. Reconciler **không** thay được
+> outbox vì nó skip mọi row đã tồn tại (kể cả FAILED/COMPLETED).
+
+## Phát hiện ngoài lề trong review (đã fix kèm)
+
+- **Validate env bỏ qua trên đường config.yaml** (production): gom env mới + reconciler/sweep
+  vào `validate_ingest_runtime_limits()` gọi ở **cả 2 đường** → fail-closed startup. (b8a5eec / 716938b / 5756c00)
+- **Soft-delete làm vỡ G7-15 race guard + lộ DELETED**: sửa guard `None or DELETED`, lọc
+  DELETED khỏi `list_all`, edge 404, chặn rời DELETED trong `update_status`, parity in-memory. (716938b)
+- **Reconciler misconfig im lặng** (bật nhưng parser không S3): thêm log WARNING chẩn đoán. (c4e5219)
+- **CI Lint+Test failed**: test G7-12 giữ reference sống tới list bị `clear()` → snapshot
+  `list(images)` tại call-time, giữ nguyên tối ưu RAM. (1b5e761)
+
+## Nguyên tắc giữ vững khi fix
+
+- Parity Postgres ↔ in-memory (test cả 2 backend).
+- Không phá §1 dependency direction: sweep/reconciler ở **runtime layer**, repository/reaper
+  không biết NATS.
+- Không đổi schema payload `doc.status` (§2 contract với document-service).
+- Migration `0003` có version + rollback; chạy được cả SQLite (CI) lẫn Postgres.

@@ -27,7 +27,14 @@ class Settings(BaseSettings):
     mcp_service_url: str = "http://localhost:8003"
     mcp_timeout_seconds: int = 10
     mcp_internal_token: str | None = None
+    # native = discover tool động qua MCP list_tools() rồi trình thẳng cho model
+    # (auto-sync theo config.yaml của mcp-service). legacy = allow-list hardcode cũ.
+    # TODO(native-default): bật native mặc định sau khi vá nhánh native rớt `outcome`
+    # trong done-event + migrate test legacy (xem docs/gap/gap1.md mục liên quan).
     tool_routing_mode: str = "legacy"
+    # TTL cache cho danh sách tool spec discover từ mcp-service (giây). 0 = không cache
+    # (mặc định off để an toàn; production bật qua MCP_TOOL_CACHE_TTL_SECONDS).
+    mcp_tool_cache_ttl_seconds: int = 0
 
     nats_mode: str = "mock"
     nats_url: str = "nats://localhost:4222"

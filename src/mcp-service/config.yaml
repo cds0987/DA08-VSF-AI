@@ -2,6 +2,7 @@ active: ${PIPELINE_PROFILE:-baseline}
 
 profiles:
   baseline:
+    # ── Cấp SERVICE (không thuộc tool nào) ───────────────────────────────
     common:
       ai_mode: ${AI_PROVIDER:-offline}
       timeout: 60
@@ -17,45 +18,42 @@ profiles:
       # Shared-secret cho auth app-layer. Trống = auth TẮT (fail-open).
       internal_token: ${MCP_INTERNAL_TOKEN:-}
 
-    embedder:
-      model: ${EMBED_MODEL:-text-embedding-3-small}
-      base_url: ${EMBED_BASE_URL:-}
-      api_key: ${OPENAI_API_KEY:-}
-      dimension: ${EMBED_DIMENSION:-}
-
-    # NOTE: mcp-service = SEARCH-ONLY. KHÔNG có captioner/parser/chunker (việc ingest
-    # của rag-worker). Chỉ giữ embedder (embed query) + reranker + retrieval.
-    reranker:
-      impl: ${RERANK_PROVIDER:-none}
-      model: ${RERANK_MODEL:-gpt-4o-mini}
-      base_url: ${RERANK_BASE_URL:-}
-      api_key: ${RERANK_API_KEY:-}
-      timeout_seconds: ${RERANK_TIMEOUT_SECONDS:-30}
-      params:
-        batch_size: ${RERANK_BATCH_SIZE:-8}
-        passage_chars: ${RERANK_PASSAGE_CHARS:-800}
-
-    vector_store:
-      impl: ${VECTOR_DB_PROVIDER:-qdrant}
-      params:
-        collection: ${VECTOR_COLLECTION:-rag_chatbot}
-        url: ${VECTOR_DB_URL:-}
-        api_key: ${VECTOR_DB_API_KEY:-}
-        basic_auth: ${VECTOR_DB_BASIC_AUTH:-}
-        timeout: ${QDRANT_TIMEOUT:-}
-
-    vectorstore_contract:
-      provider: ${VECTOR_DB_PROVIDER:-qdrant}
-      collection: ${VECTOR_COLLECTION:-rag_chatbot}
-      embed_model: ${EMBED_MODEL:-text-embedding-3-small}
-
-    retrieval:
-      top_k_candidates: ${SEARCH_TOP_K:-20}
-      rerank_top_k: ${RERANK_TOP_K:-3}
-      rerank_threshold: ${RERANK_THRESHOLD:-0.7}
-
+    # ── Cấp TOOL: mọi config thuộc tool nào thì nest hẳn vào tool đó ──────
+    # mcp-service = SEARCH-ONLY (không captioner/parser/chunker — đó là việc của
+    # rag-worker). Tool rag_search sở hữu toàn bộ config của nó: embedder (embed
+    # query) + vector_store + vectorstore_contract + reranker + retrieval.
     rag_search:
       enabled: ${TOOL_RAG_SEARCH_ENABLED:-1}
+      embedder:
+        model: ${EMBED_MODEL:-text-embedding-3-small}
+        base_url: ${EMBED_BASE_URL:-}
+        api_key: ${OPENAI_API_KEY:-}
+        dimension: ${EMBED_DIMENSION:-}
+      vector_store:
+        impl: ${VECTOR_DB_PROVIDER:-qdrant}
+        params:
+          collection: ${VECTOR_COLLECTION:-rag_chatbot}
+          url: ${VECTOR_DB_URL:-}
+          api_key: ${VECTOR_DB_API_KEY:-}
+          basic_auth: ${VECTOR_DB_BASIC_AUTH:-}
+          timeout: ${QDRANT_TIMEOUT:-}
+      vectorstore_contract:
+        provider: ${VECTOR_DB_PROVIDER:-qdrant}
+        collection: ${VECTOR_COLLECTION:-rag_chatbot}
+        embed_model: ${EMBED_MODEL:-text-embedding-3-small}
+      reranker:
+        impl: ${RERANK_PROVIDER:-none}
+        model: ${RERANK_MODEL:-gpt-4o-mini}
+        base_url: ${RERANK_BASE_URL:-}
+        api_key: ${RERANK_API_KEY:-}
+        timeout_seconds: ${RERANK_TIMEOUT_SECONDS:-30}
+        params:
+          batch_size: ${RERANK_BATCH_SIZE:-8}
+          passage_chars: ${RERANK_PASSAGE_CHARS:-800}
+      retrieval:
+        top_k_candidates: ${SEARCH_TOP_K:-20}
+        rerank_top_k: ${RERANK_TOP_K:-3}
+        rerank_threshold: ${RERANK_THRESHOLD:-0.7}
 
     hr_query:
       enabled: ${TOOL_HR_QUERY_ENABLED:-0}

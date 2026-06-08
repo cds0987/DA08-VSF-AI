@@ -43,3 +43,7 @@ def resolve_tool(
 
 def available_tools() -> list[str]:
     return _TOOL_REGISTRY.available()
+
+
+def is_entry_point_tool(name: str) -> bool:
+    return _TOOL_REGISTRY.is_entry_point(name)

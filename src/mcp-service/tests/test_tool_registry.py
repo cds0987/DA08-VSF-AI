@@ -80,3 +80,31 @@ def test_register_duplicate_name_requires_override() -> None:
 
     with pytest.raises(ValueError):
         register_tool("duplicate_registry_tool", lambda settings, params: FakeTool(settings, dict(params)))
+
+
+def test_entry_point_tool_disabled_without_explicit_enable(monkeypatch) -> None:
+    """Tool đến từ entry-point bên thứ ba KHÔNG tự bật khi config không khai
+    `enabled`; built-in thì vẫn bật mặc định."""
+    from app.interfaces import mcp_server
+
+    register_tool(
+        "external_probe_tool",
+        lambda settings, params: FakeTool(settings, dict(params)),
+        override=True,
+    )
+
+    settings = _settings()
+    # available_tools chỉ trả tool ta quan tâm để cô lập test khỏi tool thật.
+    monkeypatch.setattr(mcp_server, "available_tools", lambda: ["external_probe_tool"])
+    monkeypatch.setattr(
+        mcp_server, "is_entry_point_tool", lambda name: name == "external_probe_tool"
+    )
+    monkeypatch.setattr(
+        type(settings), "tool_spec", lambda self, name: __import__(
+            "app.core.config", fromlist=["ToolSpec"]
+        ).ToolSpec(enabled=True, enabled_explicit=False, params={}),
+    )
+
+    # Không có tool nào bật -> build_mcp raise (entry-point tool bị bỏ qua).
+    with pytest.raises(RuntimeError, match="no MCP tool enabled"):
+        mcp_server.build_mcp(settings)

@@ -65,6 +65,10 @@ def _has_real_provider() -> bool:
 @dataclass(frozen=True)
 class ToolSpec:
     enabled: bool
+    # `enabled` có được khai tường minh trong config không. False = không có key
+    # `enabled` cho tool này → build_mcp áp default theo nguồn tool (built-in vs
+    # entry-point bên thứ ba).
+    enabled_explicit: bool = False
     params: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -116,10 +120,12 @@ class McpSettings:
 
     def tool_spec(self, name: str) -> ToolSpec:
         node = self.tools_profile.get(name) or {}
+        enabled_explicit = "enabled" in node
         enabled_raw = str(node.get("enabled", "1")).strip().lower()
         params = {key: value for key, value in node.items() if key != "enabled"}
         return ToolSpec(
             enabled=enabled_raw in {"1", "true", "yes", "on"},
+            enabled_explicit=enabled_explicit,
             params=params,
         )
 

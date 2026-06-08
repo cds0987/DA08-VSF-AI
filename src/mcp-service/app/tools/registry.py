@@ -13,7 +13,14 @@ class Registry(Generic[T]):
         self._label = label
         self._group = entry_point_group
         self._factories: dict[str, T] = {}
+        self._entry_point_names: set[str] = set()
         self._entry_points_loaded = False
+
+    def is_entry_point(self, name: str) -> bool:
+        """True nếu `name` được nạp từ entry-point (tool bên thứ ba), không phải
+        built-in `register()`. Dùng để policy enabled mặc định khác nhau."""
+        self._ensure_entry_points()
+        return name.lower() in self._entry_point_names
 
     def register(self, name: str, factory: T, *, override: bool = False) -> T:
         key = name.lower()
@@ -45,3 +52,4 @@ class Registry(Generic[T]):
         for entry_point in importlib.metadata.entry_points(group=self._group):
             if entry_point.name.lower() not in self._factories:
                 self.register(entry_point.name, entry_point.load())
+                self._entry_point_names.add(entry_point.name.lower())

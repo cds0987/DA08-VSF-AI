@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import json
 import re
+from time import monotonic
 from typing import Any
 import unicodedata
 
@@ -280,8 +281,24 @@ class MCPStreamableHttpClient:
         self._endpoint_url = _mcp_endpoint_url(settings.mcp_service_url)
         self._timeout_seconds = settings.mcp_timeout_seconds
         self._internal_token = (settings.mcp_internal_token or "").strip()
+        self._tool_cache_ttl = max(0, int(getattr(settings, "mcp_tool_cache_ttl_seconds", 0)))
+        self._tool_cache: list[ToolSpec] | None = None
+        self._tool_cache_expires_at = 0.0
 
     async def list_tool_specs(self) -> list[ToolSpec]:
+        # Cache TTL ngắn: tránh round-trip mcp-service mỗi lần route. Đổi tool ở
+        # mcp-service (restart) sẽ được thấy sau tối đa TTL giây.
+        if self._tool_cache_ttl > 0:
+            now = monotonic()
+            if self._tool_cache is not None and now < self._tool_cache_expires_at:
+                return self._tool_cache
+            specs = await self._fetch_tool_specs()
+            self._tool_cache = specs
+            self._tool_cache_expires_at = now + self._tool_cache_ttl
+            return specs
+        return await self._fetch_tool_specs()
+
+    async def _fetch_tool_specs(self) -> list[ToolSpec]:
         async with self._session() as session:
             tools_response = await session.list_tools()
         tools = getattr(tools_response, "tools", [])
