@@ -2,6 +2,7 @@ import os
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
 
 TEST_ENV = {
@@ -20,6 +21,7 @@ sys.path.insert(0, str(SERVICE_ROOT))
 
 from app.infrastructure.config import get_settings  # noqa: E402
 from app.interfaces.api.dependencies import reset_state_for_tests  # noqa: E402
+from app.interfaces.api.main import app  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -39,3 +41,11 @@ def tokens():
         "finance": "mock-user-finance",
         "admin": "mock-admin",
     }
+
+
+@pytest.fixture
+async def client():
+    """Async HTTP client cho FastAPI app — dung chung cho tat ca test files."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as async_client:
+        yield async_client

@@ -2,7 +2,9 @@ from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from app.application.route_decision import RouteDecision
 from app.application.tool_decision import ToolDecision
+from app.domain.outcome import Outcome
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,7 @@ class LLMStreamingClient(Protocol):
         recent_messages: list[tuple[str, str]],
         sources: Sequence[SearchResultLike],
         is_hr_answer: bool = False,
+        outcome: Outcome | None = None,
     ) -> AsyncIterator[str]:
         ...
 
@@ -67,6 +70,16 @@ class ToolDecisionClient(Protocol):
         recent_messages: list[tuple[str, str]],
         available_tools: Sequence[str],
     ) -> ToolDecision:
+        ...
+
+
+class RouteDecisionProvider(Protocol):
+    async def choose_route(
+        self,
+        question: str,
+        recent_messages: list[tuple[str, str]],
+        available_tools: Sequence[str],
+    ) -> RouteDecision:
         ...
 
 

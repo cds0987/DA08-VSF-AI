@@ -3,7 +3,29 @@ from collections.abc import AsyncIterator
 from fastapi import HTTPException, status
 
 from app.application.ports import SearchResultLike
+from app.domain.outcome import Outcome
 from app.infrastructure.config import Settings
+
+
+OUTCOME_GUIDANCE: dict[Outcome, str] = {
+    Outcome.NO_INFO: (
+        " Neu context khong chua thong tin phu hop, tra loi rang khong tim thay thong tin "
+        "trong tai lieu noi bo. Khong du doan hay them thong tin."
+    ),
+    Outcome.REFUSE: (
+        " Tra loi rang nguoi dung khong co quyen truy cap thong tin nay. "
+        "Khong cung cap thong tin bi cam."
+    ),
+    Outcome.CLARIFY: (
+        " Neu cau hoi chua ro hoac thieu ngu canh, yeu cau nguoi dung noi ro hon."
+    ),
+    Outcome.OFF_TOPIC: (
+        " Neu cau hoi nam ngoai pham vi HR, chinh sach cong ty, tai lieu noi bo thi tra loi rang cau hoi nam ngoai pham vi ho tro."
+    ),
+    Outcome.SUCCESS: (
+        " Tra loi ngan gon dua tren context, dung tieng Viet."
+    ),
+}
 
 
 class OpenAIStreamingClient:
@@ -25,6 +47,7 @@ class OpenAIStreamingClient:
         recent_messages: list[tuple[str, str]],
         sources: list[SearchResultLike],
         is_hr_answer: bool = False,
+        outcome: Outcome | None = None,
     ) -> AsyncIterator[str]:
         if self._settings.llm_mode == "mock":
             async for chunk in self._mock_stream(question, context, sources, is_hr_answer):
@@ -38,12 +61,13 @@ class OpenAIStreamingClient:
             )
 
         system_prompt = (
-            "Bạn là chatbot nội bộ VinSmartFuture. Trả lời ngắn gọn bằng tiếng Việt, "
-            "chỉ dựa trên context được cung cấp. Nếu context không đủ, nói không tìm thấy "
-            "thông tin trong tài liệu nội bộ."
+            "Ban la chatbot noi bo VinSmartFuture. Tra loi ngan gon bang tieng Viet, "
+            "chi dua tren context duoc cung cap."
         )
+        if outcome is not None and outcome in OUTCOME_GUIDANCE:
+            system_prompt += OUTCOME_GUIDANCE[outcome]
         if is_hr_answer:
-            system_prompt += " Dữ liệu HR là dữ liệu cá nhân của user hiện tại; không suy đoán user khác."
+            system_prompt += " Du lieu HR la du lieu ca nhan cua user hien tai; khong suy doan user khac."
 
         history = "\n".join(f"{role}: {content}" for role, content in recent_messages[-10:])
         user_prompt = (
@@ -58,6 +82,7 @@ class OpenAIStreamingClient:
                 instructions=system_prompt,
                 input=user_prompt,
                 stream=True,
+                max_output_tokens=self._settings.llm_max_output_tokens,
             )
             async for event in stream:
                 if getattr(event, "type", None) == "response.output_text.delta":

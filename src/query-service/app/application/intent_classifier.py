@@ -12,6 +12,9 @@ from app.infrastructure.config import Settings
 
 VALID_INTENTS = {
     "identity",
+    "clarification",
+    "out_of_scope",
+    "off_topic",
     "hr:payroll",
     "hr:leave_requests",
     "hr:leave_balance",
@@ -55,8 +58,74 @@ RULE_PATTERNS = (
             "ban lam duoc gi",
             "ban co the lam gi",
             "gioi thieu ve ban",
+            "ai tao ra ban",
             "who are you",
             "what can you do",
+            "who created you",
+        ),
+    ),
+    RulePattern(
+        intent="clarification",
+        phrases=(
+            "alo",
+            "hello",
+            "hi",
+            "xin chao",
+            "chao",
+            "mat bi sao vay",
+            "cai mat ong ay",
+            "tai sao lai the",
+            "tai sao the",
+            "mat ban bi dinh hat com kia",
+        ),
+    ),
+    RulePattern(
+        intent="out_of_scope",
+        phrases=(
+            "mat khau",
+            "password",
+            "secret key",
+            "api key",
+            "access token",
+            "refresh token",
+            "credentials",
+            "thong tin dang nhap",
+        ),
+    ),
+    RulePattern(
+        intent="off_topic",
+        phrases=(
+            # Vietnamese
+            "mua gi",
+            "can mua",
+            "noi ban",
+            "gia bao nhieu",
+            "cong thuc",
+            "cach lam",
+            "cach nau",
+            "thoi tiet",
+            "nha hang",
+            "an uong",
+            "di dau",
+            "choi gi",
+            "di cho",
+            "ban o dau",
+            "tim nha",
+            "du lich",
+            # English
+            "buy",
+            "shop",
+            "order",
+            "recipe",
+            "cook",
+            "restaurant",
+            "weather",
+            "lunch",
+            "dinner",
+            "breakfast",
+            "eat",
+            "travel",
+            "tourist",
         ),
     ),
     RulePattern(
@@ -66,7 +135,9 @@ RULE_PATTERNS = (
             "payroll",
             "khau tru",
             "phieu luong",
+            "bang luong",
             "salary",
+            "payslip",
             "net salary",
             "gross salary",
         ),
@@ -85,8 +156,26 @@ RULE_PATTERNS = (
         phrases=(
             "ngay nghi",
             "nghi phep con",
+            "bao nhieu ngay nghi",
+            "con bao nhieu ngay nghi",
             "leave balance",
+            "remaining leave",
+            "leave left",
             "pto balance",
+        ),
+    ),
+    RulePattern(
+        intent="rag",
+        phrases=(
+            "chinh sach",
+            "quy trinh",
+            "quy dinh",
+            "tai lieu",
+            "policy",
+            "procedure",
+            "guideline",
+            "handbook",
+            "onboarding",
         ),
     ),
 )
@@ -96,6 +185,20 @@ EMBEDDING_PROTOTYPES: dict[str, tuple[str, ...]] = {
     "identity": (
         "who are you",
         "what can this assistant do",
+    ),
+    "clarification": (
+        "hello",
+        "i do not understand this context",
+    ),
+    "out_of_scope": (
+        "admin password",
+        "share internal credentials",
+    ),
+    "off_topic": (
+        "what should i buy for lunch",
+        "restaurant recommendation nearby",
+        "how to cook pho",
+        "weather forecast tomorrow",
     ),
     "hr:payroll": (
         "salary payroll deduction",
@@ -108,6 +211,10 @@ EMBEDDING_PROTOTYPES: dict[str, tuple[str, ...]] = {
     "hr:leave_balance": (
         "remaining leave balance",
         "vacation days left",
+    ),
+    "rag": (
+        "leave policy and company handbook",
+        "onboarding procedure and internal guideline",
     ),
 }
 
