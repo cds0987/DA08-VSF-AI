@@ -60,13 +60,13 @@ jobs:
           python-version: "3.13"
 
       - name: Install test client deps
-        # boto3/requests/mcp cho ci_e2e; requirements của query-service để chạy
-        # CLIENT THẬT của nó (MCPStreamableHttpClient + Settings, kéo theo fastapi/
-        # pydantic/httpx...) ở bước query-search.
+        # boto3/requests/mcp cho ci_e2e (upload GCS + search MCP trực tiếp). KHÔNG
+        # cài query-service: e2e-cloud chỉ nghiệm thu rag-worker -> Qdrant -> mcp.
+        # Kết nối query-service <-> mcp do dev query-service tự test (xem issue +
+        # CI tích hợp mock riêng), không buộc e2e cloud này phụ thuộc query-service.
         run: |
           python -m pip install --upgrade pip
           pip install boto3 requests mcp
-          pip install -r src/query-service/requirements.txt
 
       # init-db.sql KHÔNG được commit (gitignored) -> sinh ở runtime cho compose mount.
       - name: Generate infra/localtest/init-db.sql
@@ -151,16 +151,10 @@ jobs:
           docker compose -f docker-compose.localtest.yml logs mcp-service || true
           exit 1
 
+      # Search golden queries gọi thẳng mcp-service qua MCP HTTP (lib mcp), KHÔNG
+      # qua query-service -> nghiệm thu rag_search của mcp độc lập với query-service.
       - name: Search golden queries via MCP HTTP
         run: python infra/localtest/ci_e2e.py search
-
-      # Mắt xích query-service: dùng CHÍNH client production của query-service
-      # (MCPStreamableHttpClient) gọi rag_search của mcp -> nghiệm thu kết nối
-      # query-service -> mcp-service qua search trên corpus vừa ingest.
-      - name: Query-service -> MCP search connectivity (real query-service client)
-        env:
-          MCP_SERVICE_URL: http://localhost:8003
-        run: python infra/localtest/ci_e2e.py query-search
 
       - name: Stack logs on failure
         if: failure()

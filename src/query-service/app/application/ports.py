@@ -1,6 +1,6 @@
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
 
 from app.application.route_decision import RouteDecision
 from app.application.tool_decision import ToolDecision
@@ -34,21 +34,8 @@ class HrQueryResultLike(Protocol):
     summary: str
 
 
-@dataclass(frozen=True)
-class ToolSpec:
-    name: str
-    description: str
-    input_schema: dict[str, Any]
-
-
 class MCPToolClient(Protocol):
-    async def list_tool_specs(self) -> list[ToolSpec]:
-        ...
-
     async def list_tools(self) -> list[str]:
-        ...
-
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         ...
 
     async def rag_search(
