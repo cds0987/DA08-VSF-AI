@@ -173,3 +173,84 @@ async def test_rule_classifier_routes_policy_question_to_rag() -> None:
     assert result.intent == "rag"
     assert result.source == "rule"
 
+
+@pytest.mark.asyncio
+async def test_rule_classifier_detects_off_topic_shopping() -> None:
+    llm_client = FakeLLMClient(
+        IntentClassification(intent="rag", confidence=0.99, source="llm")
+    )
+    classifier = HybridIntentClassifier(
+        Settings(_env_file=None, intent_classifier_mode="hybrid"),
+        embedding_client=FakeEmbeddingClient(),
+        llm_client=llm_client,
+    )
+
+    result = await classifier.classify("Ban giet an sua, toi can mua gi")
+
+    assert result.intent == "off_topic"
+    assert result.source == "rule"
+    assert result.confidence >= 0.9
+    assert llm_client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_rule_classifier_detects_off_topic_cooking() -> None:
+    llm_client = FakeLLMClient(
+        IntentClassification(intent="rag", confidence=0.99, source="llm")
+    )
+    classifier = HybridIntentClassifier(
+        Settings(_env_file=None, intent_classifier_mode="hybrid"),
+        embedding_client=FakeEmbeddingClient(),
+        llm_client=llm_client,
+    )
+
+    result = await classifier.classify("Cong thuc nau pho nhu the nao")
+
+    assert result.intent == "off_topic"
+    assert result.source == "rule"
+    assert llm_client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_rule_classifier_detects_off_topic_english_shopping() -> None:
+    llm_client = FakeLLMClient(
+        IntentClassification(intent="rag", confidence=0.99, source="llm")
+    )
+    classifier = HybridIntentClassifier(
+        Settings(_env_file=None, intent_classifier_mode="hybrid"),
+        embedding_client=FakeEmbeddingClient(),
+        llm_client=llm_client,
+    )
+
+    result = await classifier.classify("What should i buy for lunch at the supermarket")
+
+    assert result.intent == "off_topic"
+    assert result.source == "rule"
+    assert llm_client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_rule_classifier_off_topic_does_not_override_policy_context() -> None:
+    """Questions that mention both off-topic and policy keywords should NOT be off_topic."""
+    llm_client = FakeLLMClient(
+        IntentClassification(intent="off_topic", confidence=0.99, source="llm")
+    )
+    classifier = HybridIntentClassifier(
+        Settings(_env_file=None, intent_classifier_mode="hybrid"),
+        embedding_client=FakeEmbeddingClient(),
+        llm_client=llm_client,
+    )
+
+    result = await classifier.classify("Chinh sach mua sam cho nhan vien")
+
+    assert result.intent == "rag"
+    assert result.source == "rule"
+    assert llm_client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_off_topic_intent_is_valid() -> None:
+    """Ensure off_topic is in VALID_INTENTS so LLM classifier can return it."""
+    from app.application.intent_classifier import VALID_INTENTS
+
+    assert "off_topic" in VALID_INTENTS

@@ -17,6 +17,7 @@ import json
 import httpx
 import pytest
 
+from app.domain.outcome import Outcome
 from app.interfaces.api.dependencies import get_mcp_client, get_tool_decision_client
 
 
@@ -444,3 +445,125 @@ async def test_q15_password_security(client, tokens):
         f"Q15 phan hoi phai tu choi: {answer}"
     assert done_event(response)["sources"] == []
     assert mcp.last_tool_calls == [], "Q15 khong nen goi MCP tool (security refusal)"
+
+
+# ---------------------------------------------------------------------------
+# Nhom 6: Câu hỏi Off-Topic / Ngoài phạm vi doanh nghiệp  (Q16-Q20)
+# Muc tieu: Nhan dien va tu choi off-topic, khong goi MCP, tra ve OFF_TOPIC
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_q16_off_topic_mua_sua(client, tokens):
+    """
+    Q16: "Bạn ghét ăn sữa, tôi cần mua gì"
+    Muc tieu: Topic off-topic (mua sam / doi song), khong goi MCP, tra ve OFF_TOPIC.
+    Bug truoc day: cau hoi nay tro thanh rag_search, LLM tu ban cau tra loi
+    tu tai lieu HR, dan den hallucination.
+    """
+    mcp = get_mcp_client()
+    mcp.reset()
+
+    response = await client.post(
+        "/query",
+        headers=auth(tokens["hr"]),
+        json={"question": "Bạn ghét ăn sữa, tôi cần mua gì", "user_id": HR_USER_ID},
+    )
+
+    assert response.status_code == 200
+    done = done_event(response)
+    assert done["outcome"] == Outcome.OFF_TOPIC.value, \
+        f"Q16 phai tra ve OFF_TOPIC, nhan outcome={done.get('outcome')}"
+    assert done["sources"] == []
+    assert mcp.last_tool_calls == [], \
+        f"Q16 khong nen goi MCP tool (off-topic). MCP calls: {mcp.last_tool_calls}"
+
+
+@pytest.mark.asyncio
+async def test_q17_off_topic_cong_thuc_nau_an(client, tokens):
+    """
+    Q17: "Công thức nấu phở như thế nào?"
+    Muc tieu: Topic off-topic (nau an), tu choi.
+    """
+    mcp = get_mcp_client()
+    mcp.reset()
+
+    response = await client.post(
+        "/query",
+        headers=auth(tokens["finance"]),
+        json={"question": "Công thức nấu phở như thế nào?", "user_id": FINANCE_USER_ID},
+    )
+
+    assert response.status_code == 200
+    done = done_event(response)
+    assert done["outcome"] == Outcome.OFF_TOPIC.value
+    assert done["sources"] == []
+    assert mcp.last_tool_calls == [], "Q17 khong nen goi MCP tool (off-topic)"
+
+
+@pytest.mark.asyncio
+async def test_q18_off_topic_thoi_tiet(client, tokens):
+    """
+    Q18: "Thời tiết ngày mai thế nào?"
+    Muc tieu: Topic off-topic (thoi tiet), tu choi.
+    """
+    mcp = get_mcp_client()
+    mcp.reset()
+
+    response = await client.post(
+        "/query",
+        headers=auth(tokens["hr"]),
+        json={"question": "Thời tiết ngày mai thế nào?", "user_id": HR_USER_ID},
+    )
+
+    assert response.status_code == 200
+    done = done_event(response)
+    assert done["outcome"] == Outcome.OFF_TOPIC.value
+    assert done["sources"] == []
+    assert mcp.last_tool_calls == []
+
+
+@pytest.mark.asyncio
+async def test_q19_off_topic_nha_hang(client, tokens):
+    """
+    Q19: "Nên đi ăn nhà hàng nào ở quận 1?"
+    Muc tieu: Topic off-topic (nha hang / doi song), tu choi.
+    """
+    mcp = get_mcp_client()
+    mcp.reset()
+
+    response = await client.post(
+        "/query",
+        headers=auth(tokens["admin"]),
+        json={"question": "Nên đi ăn nhà hàng nào ở quận 1?", "user_id": ADMIN_USER_ID},
+    )
+
+    assert response.status_code == 200
+    done = done_event(response)
+    assert done["outcome"] == Outcome.OFF_TOPIC.value
+    assert done["sources"] == []
+    assert mcp.last_tool_calls == []
+
+
+@pytest.mark.asyncio
+async def test_q20_off_topic_khong_override_chinh_sach(client, tokens):
+    """
+    Q20: "Chính sách mua sắm văn phòng phẩm cho nhân viên"
+    Muc tieu: Cau hoi co "chinh sach" -> van phai la rag, khong phai off_topic.
+    "mua" chi la 1 phan cua chinh sach, khong phai shopping.
+    """
+    mcp = get_mcp_client()
+    mcp.reset()
+
+    response = await client.post(
+        "/query",
+        headers=auth(tokens["hr"]),
+        json={"question": "Chính sách mua sắm văn phòng phẩm cho nhân viên", "user_id": HR_USER_ID},
+    )
+
+    assert response.status_code == 200
+    done = done_event(response)
+    # Co policy keyword -> phai la rag, khong phai off_topic
+    assert done["outcome"] != "OFF_TOPIC", \
+        f"Q20 co 'chinh sach' nen khong phai off-topic. Nhan: {done.get('outcome')}"
+    assert mcp.last_tool_calls != [], "Q20 nen goi MCP tool (rag_search)"

@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     semantic_cache_threshold: float = 0.95
     rag_score_threshold: float = 0.70
     rag_result_limit: int = 3
+    llm_max_output_tokens: int = 1500
+    rag_context_max_chars: int = 10000
     query_rate_limit_per_minute: int = 20
     rate_limiter_mode: str = "memory"
     notification_keepalive_seconds: int = 25

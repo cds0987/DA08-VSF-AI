@@ -221,3 +221,4 @@ def reset_state_for_tests() -> None:
     get_intent_embedding_client.cache_clear()
     get_intent_llm_client.cache_clear()
     get_intent_classifier.cache_clear()
+    get_query_router.cache_clear()
