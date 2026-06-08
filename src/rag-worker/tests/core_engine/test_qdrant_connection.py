@@ -48,6 +48,19 @@ def test_basic_auth_does_not_override_existing_authorization_header() -> None:
     assert kwargs["headers"]["Authorization"] == "Bearer keep-me"
 
 
+def test_explicit_fields_override_same_keys_in_options() -> None:
+    cfg = VectorStoreConfig(
+        url="https://field.example",
+        api_key="field-key",
+        options={"url": "https://option.example", "api_key": "option-key"},
+    )
+
+    kwargs = build_remote_client_kwargs(cfg)
+
+    assert kwargs["url"] == "https://field.example:443"
+    assert kwargs["api_key"] == "field-key"
+
+
 def test_register_connection_option_can_extend_without_editing_builder(monkeypatch) -> None:
     name = "zz_test_marker"
     monkeypatch.setattr(

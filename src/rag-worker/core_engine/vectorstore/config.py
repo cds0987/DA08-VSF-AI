@@ -14,6 +14,7 @@ DEFAULT_PROVIDER = "qdrant"
 DEFAULT_COLLECTION = "rag_chatbot"
 DEFAULT_EMBED_MODEL = "text-embedding-3-small"
 DEFAULT_REMOTE_TIMEOUT = 30
+SCHEME_FORCED_PORT: Mapping[str, int] = {"https": 443}
 
 
 def _env(*names: str) -> str:
@@ -44,9 +45,10 @@ def normalize_remote_qdrant_url(url: str) -> str:
     parsed = urlparse(url)
     if not parsed.scheme or parsed.port is not None or not parsed.hostname:
         return url
-    if parsed.scheme == "https":
-        return urlunparse(parsed._replace(netloc=f"{parsed.hostname}:443"))
-    return url
+    port = SCHEME_FORCED_PORT.get(parsed.scheme)
+    if port is None:
+        return url
+    return urlunparse(parsed._replace(netloc=f"{parsed.hostname}:{port}"))
 
 
 @dataclass(frozen=True)
