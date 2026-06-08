@@ -96,6 +96,18 @@ def normalize_route_decision(
             outcome=outcome_map[route_name],
         )
 
+    if route_name == "off_topic":
+        return RouteDecision(
+            decision="off_topic",
+            direct_response=(
+                "Câu hỏi của bạn nằm ngoài phạm vi hệ thống HR và tài liệu nội bộ. "
+                "Tôi chỉ hỗ trợ về chính sách công ty, HR và thông tin nội bộ."
+            ),
+            reason=reason,
+            confidence=confidence,
+            outcome=Outcome.OFF_TOPIC,
+        )
+
     return RouteDecision(
         decision="rag_search",
         tool_arguments={"query": default_query},

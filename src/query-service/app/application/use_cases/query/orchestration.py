@@ -62,7 +62,7 @@ class QueryOrchestrationUseCase:
         decision = await self._choose_route(question, recent_messages)
 
         # Handle direct responses for clarification or out of scope
-        if decision.decision in {"clarification", "identity_shortcut", "out_of_scope"}:
+        if decision.decision in {"clarification", "identity_shortcut", "out_of_scope", "off_topic"}:
             async for event in self._handle_direct_response(
                 user.id,
                 session_id,
@@ -76,7 +76,10 @@ class QueryOrchestrationUseCase:
         # If the routing decision indicates a non-success outcome, use fallback with appropriate message
         from app.domain.outcome import Outcome
         if decision.outcome != Outcome.SUCCESS:
-            async for event in self._fallback(user.id, session_id, started, decision.outcome):
+            async for event in self._fallback(
+                user.id, session_id, started, decision.outcome,
+                question=question, recent_messages=recent_messages,
+            ):
                 yield event
             return
 
@@ -150,7 +153,10 @@ class QueryOrchestrationUseCase:
             department=user.department,
         )
         if not allowed_doc_ids:
-            async for event in self._fallback(user.id, session_id, started, Outcome.NO_INFO):
+            async for event in self._fallback(
+                user.id, session_id, started, Outcome.NO_INFO,
+                question=question, recent_messages=recent_messages,
+            ):
                 yield event
             return
 
@@ -184,7 +190,10 @@ class QueryOrchestrationUseCase:
                 continue
             acl_filtered_results.append(result)
         if not acl_filtered_results:
-            async for event in self._fallback(user.id, session_id, started, Outcome.NO_INFO):
+            async for event in self._fallback(
+                user.id, session_id, started, Outcome.NO_INFO,
+                question=question, recent_messages=recent_messages,
+            ):
                 yield event
             return
 
@@ -192,7 +201,10 @@ class QueryOrchestrationUseCase:
             result for result in acl_filtered_results if result.score >= self._settings.rag_score_threshold
         ]
         if not grounded_results:
-            async for event in self._fallback(user.id, session_id, started, Outcome.NO_INFO):
+            async for event in self._fallback(
+                user.id, session_id, started, Outcome.NO_INFO,
+                question=question, recent_messages=recent_messages,
+            ):
                 yield event
             return
 
@@ -279,17 +291,54 @@ class QueryOrchestrationUseCase:
         session_id: str,
         started: float,
         outcome: Outcome,
+        question: str = "",
+        recent_messages: list[tuple[str, str]] | None = None,
     ) -> AsyncIterator[dict]:
-        # Map outcome to specific fallback message
         messages = {
             Outcome.NO_INFO: "Không tìm thấy thông tin trong tài liệu nội bộ",
             Outcome.REFUSE: "Bạn không có đủ quyền hạn truy cập thông tin này",
             Outcome.CLARIFY: "Tôi chưa hiểu ý bạn, bạn có thể đưa thêm thông tin được không",
+            Outcome.OFF_TOPIC: "Câu hỏi của bạn nằm ngoài phạm vi hệ thống HR và tài liệu nội bộ. "
+                              "Tôi chỉ hỗ trợ về chính sách công ty, HR và thông tin nội bộ.",
         }
-        answer = messages.get(outcome, "Không tìm thấy thông tin trong tài liệu nội bộ")
-        for token in _word_chunks(answer):
+        static_message = messages.get(outcome, "Không tìm thấy thông tin trong tài liệu nội bộ")
+
+        # Neu co conversation context, thu dung LLM de generate tra loi co ngu canh
+        if recent_messages and outcome == Outcome.NO_INFO:
+            context_lines = "\n".join(
+                f"{role}: {content}" for role, content in recent_messages[-6:]
+            )
+            context_for_llm = (
+                f"Lich su cuoi cung:\n{context_lines}\n\n"
+                f"Cau hoi hien tai: {question}\n\n"
+                f"Tra loi ngan gon, dua tren ngu canh o tren, "
+                f"neu cau hoi hien tai la follow-up thi noi ro hon."
+            )
+            try:
+                answer_parts: list[str] = []
+                async for token in _word_stream(
+                    self._openai_client.stream_answer(
+                        question=question,
+                        context=context_for_llm,
+                        recent_messages=recent_messages,
+                        sources=[],
+                        is_hr_answer=False,
+                        outcome=outcome,
+                    )
+                ):
+                    answer_parts.append(token)
+                    yield {"token": token}
+                answer = "".join(answer_parts)
+                await self._save_assistant(user_id, session_id, answer, [], started)
+                yield {"done": True, "sources": [], "session_id": session_id, "fallback": True}
+                return
+            except Exception:
+                # LLM failed, fall through to static message
+                pass
+
+        for token in _word_chunks(static_message):
             yield {"token": token}
-        await self._save_assistant(user_id, session_id, answer, [], started)
+        await self._save_assistant(user_id, session_id, static_message, [], started)
         yield {"done": True, "sources": [], "session_id": session_id, "fallback": True}
 
     async def _save_assistant(

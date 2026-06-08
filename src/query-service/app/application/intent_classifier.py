@@ -14,6 +14,7 @@ VALID_INTENTS = {
     "identity",
     "clarification",
     "out_of_scope",
+    "off_topic",
     "hr:payroll",
     "hr:leave_requests",
     "hr:leave_balance",
@@ -92,6 +93,42 @@ RULE_PATTERNS = (
         ),
     ),
     RulePattern(
+        intent="off_topic",
+        phrases=(
+            # Vietnamese
+            "mua gi",
+            "can mua",
+            "noi ban",
+            "gia bao nhieu",
+            "cong thuc",
+            "cach lam",
+            "cach nau",
+            "thoi tiet",
+            "nha hang",
+            "an uong",
+            "di dau",
+            "choi gi",
+            "di cho",
+            "ban o dau",
+            "tim nha",
+            "du lich",
+            # English
+            "buy",
+            "shop",
+            "order",
+            "recipe",
+            "cook",
+            "restaurant",
+            "weather",
+            "lunch",
+            "dinner",
+            "breakfast",
+            "eat",
+            "travel",
+            "tourist",
+        ),
+    ),
+    RulePattern(
         intent="hr:payroll",
         phrases=(
             "luong",
@@ -156,6 +193,12 @@ EMBEDDING_PROTOTYPES: dict[str, tuple[str, ...]] = {
     "out_of_scope": (
         "admin password",
         "share internal credentials",
+    ),
+    "off_topic": (
+        "what should i buy for lunch",
+        "restaurant recommendation nearby",
+        "how to cook pho",
+        "weather forecast tomorrow",
     ),
     "hr:payroll": (
         "salary payroll deduction",

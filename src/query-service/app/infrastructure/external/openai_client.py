@@ -19,6 +19,9 @@ OUTCOME_GUIDANCE: dict[Outcome, str] = {
     Outcome.CLARIFY: (
         " Neu cau hoi chua ro hoac thieu ngu canh, yeu cau nguoi dung noi ro hon."
     ),
+    Outcome.OFF_TOPIC: (
+        " Neu cau hoi nam ngoai pham vi HR, chinh sach cong ty, tai lieu noi bo thi tra loi rang cau hoi nam ngoai pham vi ho tro."
+    ),
     Outcome.SUCCESS: (
         " Tra loi ngan gon dua tren context, dung tieng Viet."
     ),
@@ -79,6 +82,7 @@ class OpenAIStreamingClient:
                 instructions=system_prompt,
                 input=user_prompt,
                 stream=True,
+                max_output_tokens=self._settings.llm_max_output_tokens,
             )
             async for event in stream:
                 if getattr(event, "type", None) == "response.output_text.delta":

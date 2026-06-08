@@ -100,6 +100,43 @@ ENGLISH_HINTS = {
     "password",
 }
 
+OFF_TOPIC_KEYWORDS = (
+    # Vietnamese
+    "mua gi",
+    "can mua",
+    "noi ban",
+    "gia bao nhieu",
+    "cong thuc",
+    "cach lam",
+    "cach nau",
+    "thoi tiet",
+    "nha hang",
+    "an uong",
+    "di dau",
+    "choi gi",
+    "di cho",
+    "ban o dau",
+    "tim nha",
+    "du lich",
+    # English
+    "buy",
+    "shop",
+    "order",
+    "recipe",
+    "cook",
+    "restaurant",
+    "weather",
+    "lunch",
+    "dinner",
+    "breakfast",
+    "eat",
+    "travel",
+    "tourist",
+    "movie",
+    "game",
+    "sport",
+)
+
 
 @dataclass(frozen=True)
 class ShortcutMatch:
@@ -190,6 +227,9 @@ class QueryRouter:
         if normalized in GREETING_PHRASES or any(_contains_phrase(normalized, phrase) for phrase in CLARIFICATION_PHRASES):
             return ShortcutMatch(route="clarification", kind="clarification")
 
+        if self._is_off_topic(normalized):
+            return ShortcutMatch(route="off_topic", kind="off_topic")
+
         if len(normalized.split()) <= 2 and normalized in GREETING_PHRASES:
             return ShortcutMatch(route="clarification", kind="greeting")
 
@@ -202,50 +242,9 @@ class QueryRouter:
             return self._security_response(question, confidence=1.0)
         if shortcut.kind == "mixed":
             return self._mixed_query_response(question, confidence=1.0)
+        if shortcut.kind == "off_topic":
+            return self._off_topic_response(question, confidence=1.0)
         return self._clarification_response(question, reason=shortcut.kind, confidence=1.0)
-
-    def _from_classification(
-        self,
-        question: str,
-        classification: IntentClassification,
-    ) -> RouteDecision:
-        intent = classification.intent
-        confidence = classification.confidence
-        reason = classification.reason or classification.source
-
-        if intent == "identity":
-            return self._identity_response(question, confidence=confidence, reason=reason)
-        if intent == "clarification":
-            return self._clarification_response(question, confidence=confidence, reason=reason)
-        if intent == "out_of_scope":
-            return self._security_response(question, confidence=confidence, reason=reason)
-        if intent == "hr:leave_balance":
-            return RouteDecision(
-                decision="hr_query",
-                tool_arguments={"intent": "leave_balance"},
-                reason=reason,
-                confidence=confidence,
-            )
-        if intent == "hr:leave_requests":
-            return RouteDecision(
-                decision="hr_query",
-                tool_arguments={"intent": "leave_requests"},
-                reason=reason,
-                confidence=confidence,
-            )
-        if intent == "hr:payroll":
-            return RouteDecision(
-                decision="hr_query",
-                tool_arguments={"intent": "payroll"},
-                reason=reason,
-                confidence=confidence,
-            )
-        return RouteDecision(
-            decision="rag_search",
-            tool_arguments={"query": question},
-            reason=reason,
-            confidence=confidence,
-        )
 
     def _identity_response(
         self,
@@ -338,6 +337,84 @@ class QueryRouter:
         has_policy = any(_contains_phrase(normalized, phrase) for phrase in POLICY_PHRASES)
         has_personal_hr = any(_contains_phrase(normalized, phrase) for phrase in PERSONAL_HR_PHRASES)
         return has_policy and has_personal_hr
+
+    def _is_off_topic(self, normalized: str) -> bool:
+        if not any(_contains_phrase(normalized, kw) for kw in OFF_TOPIC_KEYWORDS):
+            return False
+        if any(_contains_phrase(normalized, phrase) for phrase in POLICY_PHRASES):
+            return False
+        if any(_contains_phrase(normalized, phrase) for phrase in PERSONAL_HR_PHRASES):
+            return False
+        return True
+
+    def _off_topic_response(
+        self,
+        question: str,
+        *,
+        confidence: float,
+        reason: str = "off_topic shortcut",
+    ) -> RouteDecision:
+        if _looks_english(question):
+            answer = (
+                "Your question is outside the scope of our internal HR and policy assistant. "
+                "I can only help with company policies, HR matters, and internal documents."
+            )
+        else:
+            answer = (
+                "Câu hỏi của bạn nằm ngoài phạm vi hệ thống HR và tài liệu nội bộ. "
+                "Tôi chỉ hỗ trợ về chính sách công ty, HR và thông tin nội bộ."
+            )
+        return RouteDecision(
+            decision="off_topic",
+            direct_response=answer,
+            reason=reason,
+            confidence=confidence,
+        )
+
+    def _from_classification(
+        self,
+        question: str,
+        classification: IntentClassification,
+    ) -> RouteDecision:
+        intent = classification.intent
+        confidence = classification.confidence
+        reason = classification.reason or classification.source
+
+        if intent == "identity":
+            return self._identity_response(question, confidence=confidence, reason=reason)
+        if intent == "clarification":
+            return self._clarification_response(question, confidence=confidence, reason=reason)
+        if intent == "out_of_scope":
+            return self._security_response(question, confidence=confidence, reason=reason)
+        if intent == "off_topic":
+            return self._off_topic_response(question, confidence=confidence, reason=reason)
+        if intent == "hr:leave_balance":
+            return RouteDecision(
+                decision="hr_query",
+                tool_arguments={"intent": "leave_balance"},
+                reason=reason,
+                confidence=confidence,
+            )
+        if intent == "hr:leave_requests":
+            return RouteDecision(
+                decision="hr_query",
+                tool_arguments={"intent": "leave_requests"},
+                reason=reason,
+                confidence=confidence,
+            )
+        if intent == "hr:payroll":
+            return RouteDecision(
+                decision="hr_query",
+                tool_arguments={"intent": "payroll"},
+                reason=reason,
+                confidence=confidence,
+            )
+        return RouteDecision(
+            decision="rag_search",
+            tool_arguments={"query": question},
+            reason=reason,
+            confidence=confidence,
+        )
 
 
 def _contains_phrase(normalized_text: str, normalized_phrase: str) -> bool:
