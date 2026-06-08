@@ -5,6 +5,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.application.ports import AuthenticatedUser
 from app.application.intent_classifier import HybridIntentClassifier
+from app.application.query_router import QueryRouter
 from app.application.use_cases.query.orchestration import QueryOrchestrationUseCase
 from app.infrastructure.auth.auth_service import AuthService
 from app.infrastructure.cache.rate_limiter import InMemoryRateLimiter, RedisRateLimiter
@@ -23,7 +24,6 @@ from app.infrastructure.external.intent_ai_client import (
     TokenHashIntentEmbeddingClient,
 )
 from app.infrastructure.external.openai_client import OpenAIStreamingClient
-from app.infrastructure.external.tool_decision_client import MockToolDecisionClient, OpenAIToolDecisionClient
 from app.infrastructure.messaging.nats_events import QueryNatsEventHandler
 from app.infrastructure.messaging.nats_subscriber import NatsSubscriberManager
 from app.infrastructure.messaging.notification_service import NotificationService
@@ -90,10 +90,7 @@ def get_mcp_client():
 
 @lru_cache
 def get_tool_decision_client():
-    settings = get_settings()
-    if settings.llm_mode.strip().lower() == "openai" and settings.openai_api_key:
-        return OpenAIToolDecisionClient(settings)
-    return MockToolDecisionClient()
+    return get_query_router()
 
 
 @lru_cache
@@ -121,6 +118,14 @@ def get_intent_classifier() -> HybridIntentClassifier:
         get_settings(),
         embedding_client=get_intent_embedding_client(),
         llm_client=get_intent_llm_client(),
+    )
+
+
+@lru_cache
+def get_query_router() -> QueryRouter:
+    return QueryRouter(
+        get_settings(),
+        get_intent_classifier(),
     )
 
 
@@ -160,7 +165,7 @@ def get_orchestration_use_case() -> QueryOrchestrationUseCase:
         semantic_cache=get_semantic_cache(),
         mcp_client=get_mcp_client(),
         openai_client=get_openai_client(),
-        tool_decision_client=get_tool_decision_client(),
+        route_decision_provider=get_query_router(),
     )
 
 

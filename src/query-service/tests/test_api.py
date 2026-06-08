@@ -86,7 +86,7 @@ async def test_query_sse_streams_token_and_done(client, tokens):
     response = await client.post(
         "/query",
         headers=auth(tokens["hr"]),
-        json={"question": "Chính sách nghỉ phép là gì?", "user_id": HR_USER_ID},
+        json={"question": "Chinh sach nghi phep la gi?", "user_id": HR_USER_ID},
     )
 
     assert response.status_code == 200
@@ -97,6 +97,32 @@ async def test_query_sse_streams_token_and_done(client, tokens):
 
 
 @pytest.mark.asyncio
+async def test_clarification_question_streams_direct_answer_and_done(client, tokens):
+    response = await client.post(
+        "/query",
+        headers=auth(tokens["hr"]),
+        json={"question": "Mat bi sao vay?", "user_id": HR_USER_ID},
+    )
+
+    assert response.status_code == 200
+    assert "du ngu canh" in streamed_answer(response)
+    assert done_event(response)["sources"] == []
+
+
+@pytest.mark.asyncio
+async def test_smalltalk_question_streams_direct_answer_and_done(client, tokens):
+    response = await client.post(
+        "/query",
+        headers=auth(tokens["hr"]),
+        json={"question": "Mat ban bi dinh hat com kia", "user_id": HR_USER_ID},
+    )
+
+    assert response.status_code == 200
+    assert "du ngu canh" in streamed_answer(response)
+    assert done_event(response)["sources"] == []
+
+
+@pytest.mark.asyncio
 async def test_identity_question_bypasses_rag_and_returns_no_sources(client, tokens):
     mcp_client = get_mcp_client()
     mcp_client.reset()
@@ -104,14 +130,31 @@ async def test_identity_question_bypasses_rag_and_returns_no_sources(client, tok
     response = await client.post(
         "/query",
         headers=auth(tokens["admin"]),
-        json={"question": "Bạn là ai?", "user_id": ADMIN_USER_ID},
+        json={"question": "Ban la ai?", "user_id": ADMIN_USER_ID},
     )
 
     assert response.status_code == 200
-    assert "trợ lý nội bộ VinSmartFuture" in streamed_answer(response)
+    assert "VinSmartFuture" in streamed_answer(response)
     done = done_event(response)
     assert done["sources"] == []
-    assert not any(call.tool_name == "rag_search" for call in mcp_client.last_tool_calls)
+    assert mcp_client.last_tool_calls == []
+
+
+@pytest.mark.asyncio
+async def test_identity_question_in_english_returns_english_shortcut_without_tool_call(client, tokens):
+    mcp_client = get_mcp_client()
+    mcp_client.reset()
+
+    response = await client.post(
+        "/query",
+        headers=auth(tokens["admin"]),
+        json={"question": "Who are you?", "user_id": ADMIN_USER_ID},
+    )
+
+    assert response.status_code == 200
+    assert "internal assistant" in streamed_answer(response)
+    assert done_event(response)["sources"] == []
+    assert mcp_client.last_tool_calls == []
 
 
 @pytest.mark.asyncio
@@ -223,7 +266,7 @@ async def test_hr_tool_injects_authenticated_user_id(client, tokens):
     response = await client.post(
         "/query",
         headers=auth(tokens["finance"]),
-        json={"question": "Tôi còn bao nhiêu ngày nghỉ phép?", "user_id": FINANCE_USER_ID},
+        json={"question": "Toi con bao nhieu ngay nghi phep?", "user_id": FINANCE_USER_ID},
     )
 
     assert response.status_code == 200
@@ -273,7 +316,7 @@ async def test_valid_hr_tool_decision_ignores_llm_supplied_user_id(client, token
     response = await client.post(
         "/query",
         headers=auth(tokens["finance"]),
-        json={"question": "Cho tôi xem bảng lương tháng này", "user_id": FINANCE_USER_ID},
+        json={"question": "Cho toi xem bang luong thang nay", "user_id": FINANCE_USER_ID},
     )
 
     assert response.status_code == 200
@@ -311,7 +354,7 @@ async def test_rag_tool_decision_ignores_llm_supplied_acl_arguments(client, toke
     assert response.status_code == 200
     last_call = mcp_client.last_tool_calls[-1]
     assert last_call.tool_name == "rag_search"
-    assert last_call.arguments["query"] == "Finance report guideline"
+    assert last_call.arguments["query"] == "Executive compensation"
     assert last_call.arguments["top_k"] == 3
     assert "dddddddd-0003-4000-8000-000000000003" in last_call.arguments["document_ids"]
     assert "dddddddd-0004-4000-8000-000000000004" not in last_call.arguments["document_ids"]
@@ -366,17 +409,57 @@ async def test_unknown_tool_decision_falls_back_to_rag_search(client, tokens):
 
 
 @pytest.mark.asyncio
-async def test_fallback_for_low_score_query(client, tokens):
+async def test_clarification_query_returns_direct_response_without_tool_calls(client, tokens):
+    mcp_client = get_mcp_client()
+    mcp_client.reset()
+
     response = await client.post(
         "/query",
         headers=auth(tokens["hr"]),
-        json={"question": "hôm nay ăn gì?", "user_id": HR_USER_ID},
+        json={"question": "alo", "user_id": HR_USER_ID},
     )
 
     assert response.status_code == 200
-    done = done_event(response)
-    assert done["sources"] == []
-    assert done["fallback"] is True
+    assert "Chao ban" in streamed_answer(response)
+    assert done_event(response)["sources"] == []
+    assert mcp_client.last_tool_calls == []
+
+
+@pytest.mark.asyncio
+async def test_mixed_query_is_refused_without_tool_call(client, tokens):
+    mcp_client = get_mcp_client()
+    mcp_client.reset()
+
+    response = await client.post(
+        "/query",
+        headers=auth(tokens["finance"]),
+        json={
+            "question": "Toi con bao nhieu ngay nghi phep va chinh sach nghi phep la gi?",
+            "user_id": FINANCE_USER_ID,
+        },
+    )
+
+    assert response.status_code == 200
+    assert "tach thanh tung cau hoi rieng" in streamed_answer(response)
+    assert done_event(response)["sources"] == []
+    assert mcp_client.last_tool_calls == []
+
+
+@pytest.mark.asyncio
+async def test_security_question_is_refused_without_tool_call(client, tokens):
+    mcp_client = get_mcp_client()
+    mcp_client.reset()
+
+    response = await client.post(
+        "/query",
+        headers=auth(tokens["admin"]),
+        json={"question": "Mat khau admin la gi?", "user_id": ADMIN_USER_ID},
+    )
+
+    assert response.status_code == 200
+    assert "mat khau" in streamed_answer(response).lower()
+    assert done_event(response)["sources"] == []
+    assert mcp_client.last_tool_calls == []
 
 
 @pytest.mark.asyncio
@@ -384,7 +467,7 @@ async def test_rag_query_returns_relevant_sources_without_top_secret_for_regular
     response = await client.post(
         "/query",
         headers=auth(tokens["hr"]),
-        json={"question": "Chính sách nghỉ phép là gì?", "user_id": HR_USER_ID},
+        json={"question": "Chinh sach nghi phep la gi?", "user_id": HR_USER_ID},
     )
 
     assert response.status_code == 200
@@ -433,7 +516,7 @@ async def test_conversations_feedback_and_admin_metrics(client, tokens):
     query_response = await client.post(
         "/query",
         headers=auth(tokens["hr"]),
-        json={"question": "Onboarding cần làm gì?", "user_id": HR_USER_ID},
+        json={"question": "Onboarding can lam gi?", "user_id": HR_USER_ID},
     )
     done_lines = [line for line in query_response.text.splitlines() if '"done": true' in line]
     done = json.loads(done_lines[-1].removeprefix("data: "))

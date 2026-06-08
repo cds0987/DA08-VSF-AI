@@ -11,11 +11,13 @@ from app.application.ports import (
     HrQueryResultLike,
     LLMStreamingClient,
     MCPToolClient,
+    RouteDecisionProvider,
     SearchResultLike,
     SemanticCache,
     ToolDecisionClient,
 )
-from app.application.tool_decision import ToolDecision, normalize_tool_decision
+from app.application.route_decision import RouteDecision, coerce_route_decision
+from app.domain.outcome import Outcome
 from app.domain.repositories.conversation_repository import ConversationRepository
 from app.domain.repositories.document_access_repository import DocumentAccessRepository
 from app.infrastructure.config import Settings
@@ -33,7 +35,8 @@ class QueryOrchestrationUseCase:
         semantic_cache: SemanticCache,
         mcp_client: MCPToolClient,
         openai_client: LLMStreamingClient,
-        tool_decision_client: ToolDecisionClient,
+        route_decision_provider: RouteDecisionProvider | ToolDecisionClient | None = None,
+        tool_decision_client: ToolDecisionClient | None = None,
     ) -> None:
         self._settings = settings
         self._conversation_repo = conversation_repo
@@ -41,7 +44,9 @@ class QueryOrchestrationUseCase:
         self._semantic_cache = semantic_cache
         self._mcp_client = mcp_client
         self._openai_client = openai_client
-        self._tool_decision_client = tool_decision_client
+        if route_decision_provider is None and tool_decision_client is None:
+            raise ValueError("A route decision provider is required")
+        self._route_decision_provider = route_decision_provider or tool_decision_client
 
     async def stream(
         self,
@@ -54,60 +59,90 @@ class QueryOrchestrationUseCase:
 
         context = await self._conversation_repo.get_context(user.id, recent_k=5)
         recent_messages = [(message.role, message.content) for message in context.recent_messages]
-        if _is_identity_question(question):
-            async for event in self._handle_identity(user.id, session_id, started):
+        decision = await self._choose_route(question, recent_messages)
+
+        # Handle direct responses for clarification or out of scope
+        if decision.decision in {"clarification", "identity_shortcut", "out_of_scope"}:
+            async for event in self._handle_direct_response(
+                user.id,
+                session_id,
+                started,
+                str(decision.direct_response or ""),
+                decision.outcome,
+            ):
                 yield event
             return
 
-        decision = await self._choose_tool(question, recent_messages)
-        if decision.tool_name == "hr_query":
+        # If the routing decision indicates a non-success outcome, use fallback with appropriate message
+        from app.domain.outcome import Outcome
+        if decision.outcome != Outcome.SUCCESS:
+            async for event in self._fallback(user.id, session_id, started, decision.outcome):
+                yield event
+            return
+
+        if decision.decision == "hr_query":
             async for event in self._handle_hr(
                 question=question,
                 user=user,
-                intent=str(decision.arguments["intent"]),
+                intent=str(decision.tool_arguments["intent"]),
                 recent_messages=recent_messages,
                 session_id=session_id,
                 started=started,
+                outcome=decision.outcome,
             ):
                 yield event
             return
 
         async for event in self._handle_rag(
             question=question,
+            search_query=str(decision.tool_arguments.get("query") or question),
             user=user,
             recent_messages=recent_messages,
             session_id=session_id,
             started=started,
+            outcome=decision.outcome,
         ):
             yield event
 
-    async def _choose_tool(
+    async def _choose_route(
         self,
         question: str,
         recent_messages: list[tuple[str, str]],
-    ) -> ToolDecision:
+    ) -> RouteDecision:
         try:
             available_tools = await self._mcp_client.list_tools()
-            raw_decision = await self._tool_decision_client.choose_tool(
-                question=question,
-                recent_messages=recent_messages,
-                available_tools=available_tools,
-            )
+            choose_route = getattr(self._route_decision_provider, "choose_route", None)
+            if choose_route is not None:
+                raw_decision = await choose_route(
+                    question=question,
+                    recent_messages=recent_messages,
+                    available_tools=available_tools,
+                )
+            else:
+                raw_decision = await self._route_decision_provider.choose_tool(
+                    question=question,
+                    recent_messages=recent_messages,
+                    available_tools=available_tools,
+                )
         except Exception:
-            return ToolDecision(tool_name="rag_search", arguments={}, reason="tool decision failed")
+            return RouteDecision(
+                decision="rag_search",
+                tool_arguments={"query": question},
+                reason="route decision failed",
+                confidence=0.0,
+            )
 
-        decision = normalize_tool_decision(raw_decision)
-        if decision.tool_name not in set(available_tools):
-            return ToolDecision(tool_name="rag_search", arguments={}, reason="chosen tool unavailable")
-        return decision
+        return coerce_route_decision(raw_decision, default_query=question)
 
     async def _handle_rag(
         self,
         question: str,
+        search_query: str,
         user: AuthenticatedUser,
         recent_messages: list[tuple[str, str]],
         session_id: str,
         started: float,
+        outcome: Outcome,
     ) -> AsyncIterator[dict]:
         allowed_doc_ids = await self._document_access_repo.get_allowed_doc_ids(
             user_id=user.id,
@@ -115,7 +150,7 @@ class QueryOrchestrationUseCase:
             department=user.department,
         )
         if not allowed_doc_ids:
-            async for event in self._fallback(user.id, session_id, started):
+            async for event in self._fallback(user.id, session_id, started, Outcome.NO_INFO):
                 yield event
             return
 
@@ -126,11 +161,11 @@ class QueryOrchestrationUseCase:
             for token in _word_chunks(answer):
                 yield {"token": token}
             await self._save_assistant(user.id, session_id, answer, sources, started)
-            yield {"done": True, "sources": sources, "session_id": session_id, "cached": True}
+            yield {"done": True, "sources": sources, "session_id": session_id, "cached": True, "outcome": outcome.value}
             return
 
         results = await self._mcp_client.rag_search(
-            query=question,
+            query=search_query,
             document_ids=list(allowed_doc_ids),
             top_k=self._settings.rag_result_limit,
         )
@@ -149,7 +184,7 @@ class QueryOrchestrationUseCase:
                 continue
             acl_filtered_results.append(result)
         if not acl_filtered_results:
-            async for event in self._fallback(user.id, session_id, started):
+            async for event in self._fallback(user.id, session_id, started, Outcome.NO_INFO):
                 yield event
             return
 
@@ -157,7 +192,7 @@ class QueryOrchestrationUseCase:
             result for result in acl_filtered_results if result.score >= self._settings.rag_score_threshold
         ]
         if not grounded_results:
-            async for event in self._fallback(user.id, session_id, started):
+            async for event in self._fallback(user.id, session_id, started, Outcome.NO_INFO):
                 yield event
             return
 
@@ -174,6 +209,7 @@ class QueryOrchestrationUseCase:
                 recent_messages=recent_messages,
                 sources=grounded_results,
                 is_hr_answer=False,
+                outcome=Outcome.SUCCESS,
             )
         ):
             answer_parts.append(token)
@@ -184,25 +220,28 @@ class QueryOrchestrationUseCase:
         if final_sources:
             await self._semantic_cache.put(cache_namespace, question, answer, final_sources)
         await self._save_assistant(user.id, session_id, answer, final_sources, started)
-        done_event = {"done": True, "sources": final_sources, "session_id": session_id}
+        done_event = {
+            "done": True,
+            "sources": final_sources,
+            "session_id": session_id,
+            "outcome": outcome.value,
+        }
         if not final_sources:
             done_event["fallback"] = True
         yield done_event
 
-    async def _handle_identity(
+    async def _handle_direct_response(
         self,
         user_id: str,
         session_id: str,
         started: float,
+        answer: str,
+        outcome: Outcome,
     ) -> AsyncIterator[dict]:
-        answer = (
-            "Mình là trợ lý nội bộ VinSmartFuture, hỗ trợ trả lời dựa trên tài liệu nội bộ "
-            "và dữ liệu bạn được cấp quyền truy cập."
-        )
         for token in _word_chunks(answer):
             yield {"token": token}
         await self._save_assistant(user_id, session_id, answer, [], started)
-        yield {"done": True, "sources": [], "session_id": session_id}
+        yield {"done": True, "sources": [], "session_id": session_id, "outcome": outcome.value}
 
     async def _handle_hr(
         self,
@@ -212,6 +251,7 @@ class QueryOrchestrationUseCase:
         recent_messages: list[tuple[str, str]],
         session_id: str,
         started: float,
+        outcome: Outcome,
     ) -> AsyncIterator[dict]:
         tool_result = await self._mcp_client.hr_query(user_id=user.id, intent=intent)
         context_text = _hr_context_text(tool_result)
@@ -223,6 +263,7 @@ class QueryOrchestrationUseCase:
                 recent_messages=recent_messages,
                 sources=[],
                 is_hr_answer=True,
+                outcome=Outcome.SUCCESS,
             )
         ):
             answer_parts.append(token)
@@ -230,15 +271,22 @@ class QueryOrchestrationUseCase:
 
         answer = "".join(answer_parts)
         await self._save_assistant(user.id, session_id, answer, [], started)
-        yield {"done": True, "sources": [], "session_id": session_id}
+        yield {"done": True, "sources": [], "session_id": session_id, "outcome": outcome.value}
 
     async def _fallback(
         self,
         user_id: str,
         session_id: str,
         started: float,
+        outcome: Outcome,
     ) -> AsyncIterator[dict]:
-        answer = "Không tìm thấy thông tin trong tài liệu nội bộ."
+        # Map outcome to specific fallback message
+        messages = {
+            Outcome.NO_INFO: "Không tìm thấy thông tin trong tài liệu nội bộ",
+            Outcome.REFUSE: "Bạn không có đủ quyền hạn truy cập thông tin này",
+            Outcome.CLARIFY: "Tôi chưa hiểu ý bạn, bạn có thể đưa thêm thông tin được không",
+        }
+        answer = messages.get(outcome, "Không tìm thấy thông tin trong tài liệu nội bộ")
         for token in _word_chunks(answer):
             yield {"token": token}
         await self._save_assistant(user_id, session_id, answer, [], started)
@@ -273,10 +321,7 @@ class QueryOrchestrationUseCase:
                 )
                 if not summary:
                     return
-                await self._conversation_repo.update_summary(
-                    user_id,
-                    summary,
-                )
+                await self._conversation_repo.update_summary(user_id, summary)
         else:
             await self._conversation_repo.save_message(user_id, "assistant", answer)
 
@@ -294,7 +339,7 @@ class QueryOrchestrationUseCase:
 def _hr_context_text(result: HrQueryResultLike) -> str:
     if result.summary:
         return result.summary
-    return f"Không có dữ liệu HR phù hợp cho intent {result.intent}."
+    return f"Khong co du lieu HR phu hop cho intent {result.intent}."
 
 
 def _extractive_summary(messages: list[tuple[str, str]]) -> str | None:
@@ -342,19 +387,6 @@ def _normalize_text(text: str) -> str:
     )
     without_punctuation = re.sub(r"[_\W]+", " ", without_accents, flags=re.UNICODE)
     return re.sub(r"\s+", " ", without_punctuation).strip()
-
-
-def _is_identity_question(question: str) -> bool:
-    normalized = _normalize_text(question)
-    phrases = (
-        "ban la ai",
-        "ban lam duoc gi",
-        "ban co the lam gi",
-        "gioi thieu ve ban",
-        "who are you",
-        "what can you do",
-    )
-    return any(phrase in normalized for phrase in phrases)
 
 
 def _is_fallback_answer(answer: str) -> bool:
