@@ -131,7 +131,13 @@ def to_vector_store_config(
         url=str(cfg.vector_store.params.get("url", "")),
         api_key=str(cfg.vector_store.params.get("api_key", "")),
         basic_auth=str(cfg.vector_store.params.get("basic_auth", "")),
+        timeout=_optional_int(cfg.vector_store.params.get("timeout")),
     )
+
+
+def _optional_int(value: object) -> int | None:
+    text = str(value or "").strip()
+    return int(text) if text else None
 
 
 def build_engine_from_config(

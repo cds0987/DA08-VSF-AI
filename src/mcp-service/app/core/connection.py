@@ -67,8 +67,13 @@ def _contribute_api_key(settings: McpSettings, kwargs: dict[str, Any]) -> None:
 
 
 def _contribute_timeout(settings: McpSettings, kwargs: dict[str, Any]) -> None:
-    del settings
-    kwargs.setdefault("timeout", int(os.getenv("QDRANT_TIMEOUT", str(DEFAULT_REMOTE_TIMEOUT))))
+    # Ưu tiên: options["timeout"] > config.yaml params.timeout > env QDRANT_TIMEOUT > default.
+    if "timeout" in kwargs:
+        return
+    if settings.timeout is not None:
+        kwargs["timeout"] = settings.timeout
+        return
+    kwargs["timeout"] = int(os.getenv("QDRANT_TIMEOUT", str(DEFAULT_REMOTE_TIMEOUT)))
 
 
 def _contribute_basic_auth(settings: McpSettings, kwargs: dict[str, Any]) -> None:

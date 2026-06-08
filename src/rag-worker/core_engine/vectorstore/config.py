@@ -60,6 +60,7 @@ class VectorStoreConfig:
     url: str = ""
     api_key: str = ""
     basic_auth: str = ""
+    timeout: int | None = None
     options: Mapping[str, Any] = field(default_factory=dict)
 
     @property

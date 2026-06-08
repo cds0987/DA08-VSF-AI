@@ -111,3 +111,17 @@ def test_register_connection_option_can_extend_without_editing_builder(monkeypat
 def test_duplicate_connection_option_requires_override() -> None:
     with pytest.raises(ValueError):
         register_connection_option("url", lambda settings, kwargs: None)
+
+
+def test_config_timeout_used_when_set() -> None:
+    assert build_remote_client_kwargs(_settings(url="http://qdrant:6333", timeout=45))["timeout"] == 45
+
+
+def test_options_timeout_wins_over_config_timeout() -> None:
+    settings = _settings(url="http://qdrant:6333", timeout=45, options={"timeout": 12})
+    assert build_remote_client_kwargs(settings)["timeout"] == 12
+
+
+def test_env_timeout_used_when_config_timeout_unset(monkeypatch) -> None:
+    monkeypatch.setenv("QDRANT_TIMEOUT", "77")
+    assert build_remote_client_kwargs(_settings(url="http://qdrant:6333"))["timeout"] == 77

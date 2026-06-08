@@ -88,6 +88,7 @@ class McpSettings:
     rerank_top_k: int
     rerank_threshold: float
     basic_auth: str = ""
+    timeout: int | None = None
     options: Mapping[str, Any] = field(default_factory=dict)
 
     def contract(self) -> ResolvedVectorstoreContract:
@@ -158,6 +159,7 @@ def load_settings(path: str | os.PathLike[str] | None = None) -> McpSettings:
         url=str(params.get("url") or "").strip(),
         api_key=str(params.get("api_key") or "").strip(),
         basic_auth=str(params.get("basic_auth") or "").strip(),
+        timeout=(int(str(params.get("timeout")).strip()) if str(params.get("timeout") or "").strip() else None),
         embed_base_url=str(embedder.get("base_url") or "").strip(),
         embed_api_key=str(embedder.get("api_key") or "").strip(),
         rerank_impl=str(reranker.get("impl") or "none").strip().lower(),

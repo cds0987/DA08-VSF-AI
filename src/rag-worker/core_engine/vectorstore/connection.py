@@ -50,8 +50,13 @@ def _contribute_api_key(config: VectorStoreConfig, kwargs: dict[str, Any]) -> No
 
 
 def _contribute_timeout(config: VectorStoreConfig, kwargs: dict[str, Any]) -> None:
-    del config
-    kwargs.setdefault("timeout", int(os.getenv("QDRANT_TIMEOUT", str(DEFAULT_REMOTE_TIMEOUT))))
+    # Ưu tiên: options["timeout"] > config.yaml params.timeout > env QDRANT_TIMEOUT > default.
+    if "timeout" in kwargs:
+        return
+    if config.timeout is not None:
+        kwargs["timeout"] = config.timeout
+        return
+    kwargs["timeout"] = int(os.getenv("QDRANT_TIMEOUT", str(DEFAULT_REMOTE_TIMEOUT)))
 
 
 def _contribute_basic_auth(config: VectorStoreConfig, kwargs: dict[str, Any]) -> None:
