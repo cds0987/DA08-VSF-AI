@@ -7,37 +7,15 @@ phải khớp đúng cái rag-worker ghi, nếu không sẽ đọc nhầm/đọc
 from __future__ import annotations
 
 import asyncio
-import base64
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, List, Sequence
-from urllib.parse import urlparse, urlunparse
 
+from app.core.connection import build_remote_client_kwargs
 from app.core.config import McpSettings
 from app.core.contract import check_stamp, meta_collection_name
 
 _QDRANT_NS = uuid.UUID("6ba7b811-9dad-11d1-80b4-00c04fd430c8")
-
-
-def _basic_auth_header(creds: str) -> str:
-    """`user:pass` -> `Basic <b64>` cho Qdrant sau nginx Basic Auth. Rỗng -> ''."""
-    creds = (creds or "").strip()
-    if not creds or ":" not in creds:
-        return ""
-    return "Basic " + base64.b64encode(creds.encode()).decode()
-
-
-def _normalize_remote_url(url: str) -> str:
-    """Qdrant Cloud Run expose HTTPS qua 443; URL không port -> qdrant-client mặc
-    định rớt về 6333 (sai). Thêm :443 cho URL https thiếu port (idempotent)."""
-    if not url:
-        return url
-    parsed = urlparse(url)
-    if not parsed.scheme or parsed.port is not None or not parsed.hostname:
-        return url
-    if parsed.scheme == "https":
-        return urlunparse(parsed._replace(netloc=f"{parsed.hostname}:443"))
-    return url
 
 
 def point_id(chunk_id: str) -> str:
@@ -100,25 +78,9 @@ class QdrantReader:
     # --- client helpers ---------------------------------------------------
     def _remote_client(self):
         if self._client is None:
-            import os
-
             from qdrant_client import AsyncQdrantClient
 
-            options = dict(self._settings.options)
-            # Qdrant Cloud Run (region xa + cold start) -> connect/TLS có thể vượt
-            # timeout mặc định httpx. Nới timeout (env override) cho verify/search.
-            options.setdefault("timeout", int(os.getenv("QDRANT_TIMEOUT", "30")))
-            # Qdrant sau reverse proxy (nginx) yêu cầu HTTP Basic Auth -> gửi qua headers.
-            header = _basic_auth_header(self._settings.basic_auth)
-            if header:
-                headers = dict(options.get("headers") or {})
-                headers.setdefault("Authorization", header)
-                options["headers"] = headers
-            self._client = AsyncQdrantClient(
-                url=_normalize_remote_url(self._settings.url) or None,
-                api_key=self._settings.api_key or None,
-                **options,
-            )
+            self._client = AsyncQdrantClient(**build_remote_client_kwargs(self._settings))
         return self._client
 
     def _local_client(self):
