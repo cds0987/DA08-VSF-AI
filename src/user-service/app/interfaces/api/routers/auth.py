@@ -26,12 +26,29 @@ async def login(
     request: Request,
     use_case: LoginUseCase = Depends(get_login_use_case),
 ) -> TokenResponse:
+    return await _login(request, use_case)
+
+
+@router.post("/admin/login", response_model=TokenResponse)
+async def admin_login(
+    request: Request,
+    use_case: LoginUseCase = Depends(get_login_use_case),
+) -> TokenResponse:
+    return await _login(request, use_case, required_role="admin")
+
+
+async def _login(
+    request: Request,
+    use_case: LoginUseCase,
+    required_role: str | None = None,
+) -> TokenResponse:
     payload = await _read_login_payload(request)
     try:
         result = await use_case.execute(
             email=payload["email"],
             password=payload["password"],
             ip_address=request.client.host if request.client else None,
+            required_role=required_role,
         )
     except AccountLockedError as exc:
         raise HTTPException(
@@ -62,6 +79,7 @@ async def me(current_user: User = Depends(get_current_user)) -> MeResponse:
         id=current_user.id,
         email=current_user.email,
         role=_role_value(current_user.role),
+        account_type=current_user.account_type,
         department=current_user.department,
     )
 
