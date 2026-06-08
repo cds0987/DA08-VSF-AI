@@ -2,8 +2,6 @@
 
 Huong dan nay test rieng `query-service` Phase 1 mock-first, khong can user-service, document-service, rag-worker hay mcp-service chay kem.
 
-Theo docs 4/6 v2, tai lieu khong con buoc approve/reject: Admin upload -> `queued` -> ingest -> `indexed`. Query Service chi truy van cac tai lieu da indexed/da co trong projection mock.
-
 Cap nhat v2 intent/tool routing:
 
 - API public `POST /query` khong doi body hay response SSE.

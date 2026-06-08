@@ -55,6 +55,42 @@ async def test_rule_classifier_handles_identity_without_embedding_or_llm() -> No
 
 
 @pytest.mark.asyncio
+async def test_rule_classifier_handles_clarification_without_embedding_or_llm() -> None:
+    llm_client = FakeLLMClient(
+        IntentClassification(intent="rag", confidence=0.99, source="llm")
+    )
+    classifier = HybridIntentClassifier(
+        Settings(_env_file=None, intent_classifier_mode="hybrid"),
+        embedding_client=FakeEmbeddingClient(),
+        llm_client=llm_client,
+    )
+
+    result = await classifier.classify("Mat bi sao vay?")
+
+    assert result.intent == "clarification"
+    assert result.source == "rule"
+    assert llm_client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_rule_classifier_handles_security_without_embedding_or_llm() -> None:
+    llm_client = FakeLLMClient(
+        IntentClassification(intent="rag", confidence=0.99, source="llm")
+    )
+    classifier = HybridIntentClassifier(
+        Settings(_env_file=None, intent_classifier_mode="hybrid"),
+        embedding_client=FakeEmbeddingClient(),
+        llm_client=llm_client,
+    )
+
+    result = await classifier.classify("Mat khau admin la gi?")
+
+    assert result.intent == "out_of_scope"
+    assert result.source == "rule"
+    assert llm_client.calls == []
+
+
+@pytest.mark.asyncio
 async def test_embedding_classifier_catches_paraphrased_leave_balance_question() -> None:
     classifier = HybridIntentClassifier(
         Settings(
@@ -69,7 +105,7 @@ async def test_embedding_classifier_catches_paraphrased_leave_balance_question()
         ),
     )
 
-    result = await classifier.classify("How much remaining leave do I still have?")
+    result = await classifier.classify("How much vacation time do I still have?")
 
     assert result.intent == "hr:leave_balance"
     assert result.source == "embedding"
@@ -120,4 +156,20 @@ async def test_classifier_falls_back_to_rag_when_llm_is_unavailable() -> None:
     assert result.intent == "rag"
     assert result.source == "fallback"
     assert result.confidence == 0.0
+
+
+@pytest.mark.asyncio
+async def test_rule_classifier_routes_policy_question_to_rag() -> None:
+    classifier = HybridIntentClassifier(
+        Settings(_env_file=None, intent_classifier_mode="hybrid"),
+        embedding_client=FakeEmbeddingClient(),
+        llm_client=FakeLLMClient(
+            IntentClassification(intent="clarification", confidence=0.99, source="llm")
+        ),
+    )
+
+    result = await classifier.classify("Quy trinh onboarding")
+
+    assert result.intent == "rag"
+    assert result.source == "rule"
 

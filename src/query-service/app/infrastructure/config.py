@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,7 +39,10 @@ class Settings(BaseSettings):
     langfuse_secret_key: str | None = None
     langfuse_host: str = "http://localhost:3100"
 
-    allowed_origins: str = "http://localhost:3000,http://localhost:3001"
+    allowed_origins: str = Field(
+        default="http://localhost:3000,http://localhost:3001",
+        validation_alias=AliasChoices("CORS_ORIGINS", "ALLOWED_ORIGINS"),
+    )
 
     semantic_cache_ttl_seconds: int = 3600
     semantic_cache_threshold: float = 0.95

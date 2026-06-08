@@ -99,10 +99,16 @@ class OpenAIIntentLLMClient:
         response = await self._client.responses.create(
             model=self._model,
             instructions=(
-                "Classify the user's intent for an internal company chatbot. "
+                "Classify one user question for an internal company chatbot. "
                 "Return only JSON with fields: intent, confidence, reason. "
                 f"Allowed intent values: {', '.join(sorted(VALID_INTENTS))}. "
-                "Do not include user_id, document_ids, or tool arguments."
+                "Use the same intent for semantically equivalent English and Vietnamese questions. "
+                "Use identity for questions about who the assistant is or who created it. "
+                "Use clarification for greetings, vague chat, or low-context follow-ups that should ask the user to clarify. "
+                "Use out_of_scope for passwords, credentials, internal secrets, or unsafe requests. "
+                "Use hr:leave_balance, hr:leave_requests, or hr:payroll only for the current user's personal HR data. "
+                "Use rag for policies, procedures, onboarding, guidelines, and internal document lookup. "
+                "Do not include user_id, document_ids, tool arguments, or direct responses."
             ),
             input=(
                 f"Recent messages:\n{history or '(empty)'}\n\n"
