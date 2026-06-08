@@ -83,11 +83,25 @@ class QueryOrchestrationUseCase:
                 yield event
             return
 
-        if decision.decision == "hr_query":
+        if decision.decision == "hr_query" and self._settings.tool_routing_mode.strip().lower() == "legacy":
             async for event in self._handle_hr(
                 question=question,
                 user=user,
                 intent=str(decision.tool_arguments["intent"]),
+                recent_messages=recent_messages,
+                session_id=session_id,
+                started=started,
+                outcome=decision.outcome,
+            ):
+                yield event
+            return
+
+        if decision.decision != "rag_search":
+            async for event in self._handle_generic_tool(
+                question=question,
+                tool_name=decision.decision,
+                arguments=dict(decision.tool_arguments),
+                user=user,
                 recent_messages=recent_messages,
                 session_id=session_id,
                 started=started,
@@ -135,7 +149,11 @@ class QueryOrchestrationUseCase:
                 confidence=0.0,
             )
 
-        return coerce_route_decision(raw_decision, default_query=question)
+        return coerce_route_decision(
+            raw_decision,
+            default_query=question,
+            allow_generic_tools=self._settings.tool_routing_mode.strip().lower() == "native",
+        )
 
     async def _handle_rag(
         self,
@@ -284,6 +302,89 @@ class QueryOrchestrationUseCase:
         answer = "".join(answer_parts)
         await self._save_assistant(user.id, session_id, answer, [], started)
         yield {"done": True, "sources": [], "session_id": session_id, "outcome": outcome.value}
+
+    async def _handle_generic_tool(
+        self,
+        question: str,
+        tool_name: str,
+        arguments: dict,
+        user: AuthenticatedUser,
+        recent_messages: list[tuple[str, str]],
+        session_id: str,
+        started: float,
+        outcome: Outcome,
+    ) -> AsyncIterator[dict]:
+        tool_result = await self._mcp_client.call_tool(
+            tool_name,
+            await self._inject_reserved_arguments(tool_name=tool_name, arguments=arguments, user=user),
+        )
+        context_text = str(tool_result.get("summary") or "")
+        if not context_text:
+            context_text = f"Khong co du lieu phu hop tu tool {tool_name}."
+        answer_parts: list[str] = []
+        async for token in _word_stream(
+            self._openai_client.stream_answer(
+                question=question,
+                context=context_text,
+                recent_messages=recent_messages,
+                sources=[],
+                is_hr_answer=tool_name == "hr_query",
+                outcome=Outcome.SUCCESS,
+            )
+        ):
+            answer_parts.append(token)
+            yield {"token": token}
+
+        answer = "".join(answer_parts)
+        await self._save_assistant(user.id, session_id, answer, [], started)
+        yield {"done": True, "sources": [], "session_id": session_id, "outcome": outcome.value}
+
+    async def _inject_reserved_arguments(
+        self,
+        *,
+        tool_name: str,
+        arguments: dict,
+        user: AuthenticatedUser,
+    ) -> dict:
+        payload = dict(arguments)
+        payload.pop("user_id", None)
+        payload.pop("document_ids", None)
+        payload.pop("top_k", None)
+
+        if tool_name == "rag_search":
+            allowed_doc_ids = await self._document_access_repo.get_allowed_doc_ids(
+                user_id=user.id,
+                role=user.role,
+                department=user.department,
+            )
+            payload["document_ids"] = list(allowed_doc_ids)
+            payload["top_k"] = self._settings.rag_result_limit
+            return payload
+
+        if tool_name == "hr_query":
+            payload["user_id"] = user.id
+            return payload
+
+        spec_by_name = {
+            spec.name: spec
+            for spec in await self._mcp_client.list_tool_specs()
+        }
+        schema = spec_by_name.get(tool_name)
+        if schema is None:
+            return payload
+        properties = schema.input_schema.get("properties") or {}
+        if "user_id" in properties:
+            payload["user_id"] = user.id
+        if "document_ids" in properties:
+            allowed_doc_ids = await self._document_access_repo.get_allowed_doc_ids(
+                user_id=user.id,
+                role=user.role,
+                department=user.department,
+            )
+            payload["document_ids"] = list(allowed_doc_ids)
+        if "top_k" in properties:
+            payload["top_k"] = self._settings.rag_result_limit
+        return payload
 
     async def _fallback(
         self,

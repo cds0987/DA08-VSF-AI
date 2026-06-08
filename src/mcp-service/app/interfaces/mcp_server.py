@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import hmac
-from typing import Any, List, Optional
+from typing import Any
 
 from app.core.config import McpSettings, load_settings
-from app.core.search import SearchService, build_search_service
-from app.core.vectorstore import SearchHit
+import app.tools  # noqa: F401
+from app.tools.base import McpTool, available_tools, resolve_tool
 
 MCP_DEFAULT_HOST = "0.0.0.0"
 MCP_DEFAULT_PORT = 8003
@@ -17,21 +17,6 @@ MCP_INTERNAL_TOKEN_HEADER = "X-Internal-Token"
 
 def mcp_endpoint_url(host: str, port: int) -> str:
     return f"http://{host}:{port}{MCP_PATH}"
-
-
-def _hit_to_dict(hit: SearchHit) -> dict[str, Any]:
-    return {
-        "chunk_id": hit.chunk_id,
-        "document_id": hit.document_id,
-        "document_name": hit.document_name,
-        "caption": hit.caption,
-        "parent_text": hit.parent_text,
-        "heading_path": hit.heading_path,
-        "score": hit.score,
-        "page_number": hit.page_number,
-        "source_gcs_uri": hit.source_gcs_uri,
-        "markdown_gcs_uri": hit.markdown_gcs_uri,
-    }
 
 
 class InternalTokenAuthMiddleware:
@@ -80,11 +65,10 @@ def build_mcp_middleware(token: str) -> list[Any]:
     return [Middleware(InternalTokenAuthMiddleware, token=token)]
 
 
-def build_mcp(settings: McpSettings | None = None) -> tuple[Any, SearchService]:
+def build_mcp(settings: McpSettings | None = None) -> tuple[Any, list[McpTool]]:
     from mcp.server.fastmcp import FastMCP
 
     settings = settings or load_settings()
-    service = build_search_service(settings)
 
     mcp = FastMCP(
         "mcp-service",
@@ -93,16 +77,14 @@ def build_mcp(settings: McpSettings | None = None) -> tuple[Any, SearchService]:
         stateless_http=True,
         json_response=True,
     )
-
-    @mcp.tool()
-    async def rag_search(
-        query: str,
-        document_ids: Optional[List[str]] = None,
-        top_k: Optional[int] = None,
-    ) -> dict[str, Any]:
-        """Search internal chunks, scoped by document_ids when provided."""
-
-        hits = await service.rag_search(query, document_ids=document_ids, top_k=top_k)
-        return {"results": [_hit_to_dict(hit) for hit in hits]}
-
-    return mcp, service
+    tools: list[McpTool] = []
+    for name in available_tools():
+        spec = settings.tool_spec(name)
+        if not spec.enabled:
+            continue
+        tool = resolve_tool(name, settings=settings, params=spec.params)
+        tool.register(mcp)
+        tools.append(tool)
+    if not tools:
+        raise RuntimeError("no MCP tool enabled")
+    return mcp, tools

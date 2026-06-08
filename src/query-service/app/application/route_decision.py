@@ -30,16 +30,26 @@ def coerce_route_decision(
     decision: RouteDecision | ToolDecision,
     *,
     default_query: str,
+    allow_generic_tools: bool = False,
 ) -> RouteDecision:
     if isinstance(decision, ToolDecision):
-        return _from_legacy_tool_decision(decision, default_query=default_query)
-    return normalize_route_decision(decision, default_query=default_query)
+        return _from_legacy_tool_decision(
+            decision,
+            default_query=default_query,
+            allow_generic_tools=allow_generic_tools,
+        )
+    return normalize_route_decision(
+        decision,
+        default_query=default_query,
+        allow_generic_tools=allow_generic_tools,
+    )
 
 
 def normalize_route_decision(
     decision: RouteDecision,
     *,
     default_query: str,
+    allow_generic_tools: bool = False,
 ) -> RouteDecision:
     route_name = str(decision.decision).strip()
     confidence = min(1.0, max(0.0, float(decision.confidence)))
@@ -108,6 +118,15 @@ def normalize_route_decision(
             outcome=Outcome.OFF_TOPIC,
         )
 
+    if allow_generic_tools and route_name:
+        return RouteDecision(
+            decision=route_name,
+            tool_arguments=dict(decision.tool_arguments),
+            reason=reason,
+            confidence=confidence,
+            outcome=Outcome.SUCCESS,
+        )
+
     return RouteDecision(
         decision="rag_search",
         tool_arguments={"query": default_query},
@@ -117,7 +136,12 @@ def normalize_route_decision(
     )
 
 
-def _from_legacy_tool_decision(decision: ToolDecision, *, default_query: str) -> RouteDecision:
+def _from_legacy_tool_decision(
+    decision: ToolDecision,
+    *,
+    default_query: str,
+    allow_generic_tools: bool = False,
+) -> RouteDecision:
     if decision.tool_name == "hr_query":
         intent = str(decision.arguments.get("intent", "")).strip()
         if intent in VALID_HR_INTENTS:
@@ -135,6 +159,14 @@ def _from_legacy_tool_decision(decision: ToolDecision, *, default_query: str) ->
             tool_arguments={"query": query},
             reason=decision.reason,
             confidence=0.0,
+        )
+    if allow_generic_tools and decision.tool_name:
+        return RouteDecision(
+            decision=str(decision.tool_name),
+            tool_arguments=dict(decision.arguments),
+            reason=decision.reason,
+            confidence=0.0,
+            outcome=Outcome.SUCCESS,
         )
     return RouteDecision(
         decision="rag_search",

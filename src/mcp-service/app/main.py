@@ -17,19 +17,23 @@ from app.interfaces.mcp_server import (
 logger = logging.getLogger("mcp-service")
 
 
-async def _close_service(service) -> None:
-    close = getattr(service, "aclose", None)
-    if callable(close):
-        await close()
+async def _close_tools(tools) -> None:
+    for tool in tools:
+        close = getattr(tool, "aclose", None)
+        if callable(close):
+            await close()
 
 
-async def _verify_and_reset(service) -> None:
+async def _verify_and_reset(tools) -> None:
     try:
-        await service.verify_contract()
+        for tool in tools:
+            verify = getattr(tool, "verify", None)
+            if callable(verify):
+                await verify()
     finally:
         # Drop any clients created during startup verification so the serving loop
         # can lazy-init fresh pooled clients bound to its own event loop.
-        await _close_service(service)
+        await _close_tools(tools)
 
 
 def main() -> int:
@@ -51,10 +55,10 @@ def main() -> int:
     )
     logger.info("mcp_auth mode=%s", "internal-token" if settings.auth_enabled else "disabled")
 
-    mcp, service = build_mcp(settings)
+    mcp, tools = build_mcp(settings)
 
     try:
-        asyncio.run(_verify_and_reset(service))
+        asyncio.run(_verify_and_reset(tools))
     except VectorstoreContractError as exc:
         logger.error("mcp_contract_verify_failed: %s", exc)
         return 1
@@ -74,7 +78,7 @@ def main() -> int:
         uvicorn.run(app, host=settings.host, port=settings.port,
                     log_level=settings.log_level.lower())
     finally:
-        asyncio.run(_close_service(service))
+        asyncio.run(_close_tools(tools))
     return 0
 
 

@@ -63,6 +63,12 @@ def _has_real_provider() -> bool:
 
 
 @dataclass(frozen=True)
+class ToolSpec:
+    enabled: bool
+    params: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class McpSettings:
     host: str
     port: int
@@ -90,6 +96,7 @@ class McpSettings:
     basic_auth: str = ""
     timeout: int | None = None
     options: Mapping[str, Any] = field(default_factory=dict)
+    tools_profile: Mapping[str, Any] = field(default_factory=dict)
 
     def contract(self) -> ResolvedVectorstoreContract:
         return resolve_vectorstore_contract(
@@ -106,6 +113,14 @@ class McpSettings:
     @property
     def auth_enabled(self) -> bool:
         return bool(self.internal_token.strip())
+
+    def tool_spec(self, name: str) -> ToolSpec:
+        node = self.tools_profile.get(name) or {}
+        enabled_raw = str(node.get("enabled", "1")).strip().lower()
+        return ToolSpec(
+            enabled=enabled_raw in {"1", "true", "yes", "on"},
+            params=node.get("params") or {},
+        )
 
 
 def _resolved_embed_model(profile: dict) -> str:
@@ -172,4 +187,5 @@ def load_settings(path: str | os.PathLike[str] | None = None) -> McpSettings:
         top_k_candidates=_int(retrieval.get("top_k_candidates"), 20),
         rerank_top_k=_int(retrieval.get("rerank_top_k"), 3),
         rerank_threshold=_float(retrieval.get("rerank_threshold"), 0.7),
+        tools_profile=profile,
     )

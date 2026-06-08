@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     mcp_service_url: str = "http://localhost:8003"
     mcp_timeout_seconds: int = 10
     mcp_internal_token: str | None = None
+    tool_routing_mode: str = "legacy"
 
     nats_mode: str = "mock"
     nats_url: str = "nats://localhost:4222"

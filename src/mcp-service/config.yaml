@@ -53,3 +53,11 @@ profiles:
       top_k_candidates: ${SEARCH_TOP_K:-20}
       rerank_top_k: ${RERANK_TOP_K:-3}
       rerank_threshold: ${RERANK_THRESHOLD:-0.7}
+
+    rag_search:
+      enabled: ${TOOL_RAG_SEARCH_ENABLED:-1}
+
+    hr_query:
+      enabled: ${TOOL_HR_QUERY_ENABLED:-0}
+      params:
+        database_url: ${MCP_DATABASE_URL:-}

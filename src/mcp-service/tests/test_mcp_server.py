@@ -132,11 +132,12 @@ def test_build_mcp_registers_rag_search_tool_and_query_service_shape(monkeypatch
     monkeypatch.setitem(sys.modules, "mcp", fake_mcp_module)
     monkeypatch.setitem(sys.modules, "mcp.server", fake_server_module)
     monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", fake_fastmcp_module)
-    monkeypatch.setattr("app.interfaces.mcp_server.build_search_service", lambda settings: stub_service)
+    monkeypatch.setattr("app.tools.rag_search.build_search_service", lambda settings: stub_service)
 
-    mcp, service = build_mcp(_settings())
+    mcp, tools = build_mcp(_settings())
 
-    assert service is stub_service
+    assert len(tools) == 1
+    assert tools[0].name == "rag_search"
     assert mcp.host == "0.0.0.0"
     assert mcp.port == 8003
     assert mcp.stateless_http is True

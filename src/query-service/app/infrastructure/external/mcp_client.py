@@ -6,6 +6,7 @@ import unicodedata
 
 import httpx
 
+from app.application.ports import ToolSpec
 from app.infrastructure.db.mock_data import MOCK_DOCUMENTS, MOCK_HR_DATA
 from app.infrastructure.config import Settings
 
@@ -75,10 +76,82 @@ class MockMCPClient:
     def __init__(self) -> None:
         self.last_tool_calls: list[ToolCallRecord] = []
 
+    async def list_tool_specs(self) -> list[ToolSpec]:
+        return [
+            ToolSpec(
+                name="rag_search",
+                description="Search internal company documents.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "document_ids": {"type": "array", "items": {"type": "string"}},
+                        "top_k": {"type": "integer"},
+                    },
+                    "required": ["query"],
+                },
+            ),
+            ToolSpec(
+                name="hr_query",
+                description="Read the current user's own HR data.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "user_id": {"type": "string"},
+                        "intent": {
+                            "type": "string",
+                            "enum": ["leave_balance", "leave_requests", "payroll"],
+                        },
+                    },
+                    "required": ["user_id", "intent"],
+                },
+            ),
+        ]
+
     async def list_tools(self) -> list[str]:
-        return ["rag_search", "hr_query"]
+        return [spec.name for spec in await self.list_tool_specs()]
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        if name == "rag_search":
+            results = await self._mock_rag_search(
+                query=str(arguments.get("query", "")),
+                document_ids=list(arguments.get("document_ids") or []),
+                top_k=int(arguments.get("top_k") or 5),
+            )
+            return {"results": [result.__dict__ for result in results]}
+        if name == "hr_query":
+            result = await self._mock_hr_query(
+                user_id=str(arguments.get("user_id", "")),
+                intent=str(arguments.get("intent", "")),
+            )
+            payload: dict[str, Any] = {
+                "intent": result.intent,
+                "summary": result.summary,
+            }
+            if result.leave_balance is not None:
+                payload["leave_balance"] = result.leave_balance.__dict__
+            if result.leave_requests is not None:
+                payload["leave_requests"] = [item.__dict__ for item in result.leave_requests]
+            if result.payroll is not None:
+                payload["payroll"] = [item.__dict__ for item in result.payroll]
+            return payload
+        self.last_tool_calls.append(
+            ToolCallRecord(
+                tool_name=name,
+                arguments=dict(arguments),
+            )
+        )
+        return {"summary": ""}
 
     async def rag_search(
+        self,
+        query: str,
+        document_ids: list[str],
+        top_k: int = 5,
+    ) -> list[SearchResult]:
+        return await self._mock_rag_search(query=query, document_ids=document_ids, top_k=top_k)
+
+    async def _mock_rag_search(
         self,
         query: str,
         document_ids: list[str],
@@ -137,6 +210,9 @@ class MockMCPClient:
         return sorted(results, key=lambda item: item.score, reverse=True)[:top_k]
 
     async def hr_query(self, user_id: str, intent: str) -> HrQueryResult:
+        return await self._mock_hr_query(user_id=user_id, intent=intent)
+
+    async def _mock_hr_query(self, user_id: str, intent: str) -> HrQueryResult:
         self.last_tool_calls.append(
             ToolCallRecord(
                 tool_name="hr_query",
@@ -205,19 +281,46 @@ class MCPStreamableHttpClient:
         self._timeout_seconds = settings.mcp_timeout_seconds
         self._internal_token = (settings.mcp_internal_token or "").strip()
 
-    async def list_tools(self) -> list[str]:
+    async def list_tool_specs(self) -> list[ToolSpec]:
         async with self._session() as session:
             tools_response = await session.list_tools()
         tools = getattr(tools_response, "tools", [])
-        names: list[str] = []
+        specs: list[ToolSpec] = []
         for tool in tools:
             if isinstance(tool, str):
-                names.append(tool)
-            elif isinstance(tool, dict) and tool.get("name"):
-                names.append(str(tool["name"]))
-            elif getattr(tool, "name", None):
-                names.append(str(tool.name))
-        return names
+                specs.append(ToolSpec(name=tool, description="", input_schema={}))
+                continue
+            if isinstance(tool, dict):
+                specs.append(
+                    ToolSpec(
+                        name=str(tool.get("name") or ""),
+                        description=str(tool.get("description") or ""),
+                        input_schema=dict(tool.get("inputSchema") or tool.get("input_schema") or {}),
+                    )
+                )
+                continue
+            specs.append(
+                ToolSpec(
+                    name=str(getattr(tool, "name", "") or ""),
+                    description=str(getattr(tool, "description", "") or ""),
+                    input_schema=dict(
+                        getattr(tool, "inputSchema", None)
+                        or getattr(tool, "input_schema", None)
+                        or {}
+                    ),
+                )
+            )
+        return [spec for spec in specs if spec.name]
+
+    async def list_tools(self) -> list[str]:
+        return [spec.name for spec in await self.list_tool_specs()]
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        result = await self._call_tool(name, arguments)
+        payload = _extract_tool_payload(result)
+        if isinstance(payload, dict):
+            return payload
+        return {}
 
     async def rag_search(
         self,
@@ -225,7 +328,7 @@ class MCPStreamableHttpClient:
         document_ids: list[str],
         top_k: int = 5,
     ) -> list[SearchResult]:
-        result = await self._call_tool(
+        payload = await self.call_tool(
             "rag_search",
             {
                 "query": query,
@@ -233,23 +336,19 @@ class MCPStreamableHttpClient:
                 "top_k": top_k,
             },
         )
-        payload = _extract_tool_payload(result)
         raw_results = payload.get("results", payload if isinstance(payload, list) else [])
         if not isinstance(raw_results, list):
             return []
         return [_search_result_from_payload(item) for item in raw_results if isinstance(item, dict)]
 
     async def hr_query(self, user_id: str, intent: str) -> HrQueryResult:
-        result = await self._call_tool(
+        payload = await self.call_tool(
             "hr_query",
             {
                 "user_id": user_id,
                 "intent": intent,
             },
         )
-        payload = _extract_tool_payload(result)
-        if not isinstance(payload, dict):
-            payload = {}
         return _hr_result_from_payload(payload, intent)
 
     async def _call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
