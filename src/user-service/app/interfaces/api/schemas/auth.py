@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, EmailStr
 
 
@@ -20,5 +22,6 @@ class MeResponse(BaseModel):
     id: str
     email: str
     role: str
+    account_type: Literal["internal", "external"]
     department: str
 

@@ -15,6 +15,7 @@ def user(role: UserRole = UserRole.USER, active: bool = True) -> User:
         email=f"{role.value}-{uuid4()}@company.com",
         role=role,
         is_active=active,
+        account_type="internal",
         department="IT",
         hashed_password="hashed:secret",
     )

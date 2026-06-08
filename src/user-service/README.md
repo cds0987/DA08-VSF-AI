@@ -28,6 +28,7 @@ Backend service phá»¥ trÃ¡ch xÃ¡c thá»±c, JWT, refresh token vÃ  qu�
 ## API chÃ­nh
 
 - `POST /auth/login`
+- `POST /auth/admin/login`
 - `GET /auth/me`
 - `POST /auth/refresh`
 - `GET /users`
@@ -88,6 +89,7 @@ CREATE TABLE IF NOT EXISTS user_svc.users (
     hashed_password VARCHAR(255),
     auth_provider VARCHAR(20) NOT NULL DEFAULT 'local',
     role VARCHAR(20) NOT NULL DEFAULT 'user',
+    account_type VARCHAR(20) NOT NULL DEFAULT 'internal' CHECK (account_type IN ('internal', 'external')),
     is_active BOOLEAN NOT NULL DEFAULT true,
     department VARCHAR(100) NOT NULL DEFAULT '',
     failed_login_count INTEGER NOT NULL DEFAULT 0,
@@ -152,6 +154,7 @@ INSERT INTO user_svc.users (
     hashed_password,
     auth_provider,
     role,
+    account_type,
     is_active,
     department
 )
@@ -160,12 +163,14 @@ VALUES (
     '<HASH_VUA_COPY>',
     'local',
     'admin',
+    'internal',
     true,
     'IT'
 )
 ON CONFLICT (email) DO UPDATE SET
     hashed_password = EXCLUDED.hashed_password,
     role = EXCLUDED.role,
+    account_type = EXCLUDED.account_type,
     is_active = true,
     department = EXCLUDED.department;
 ```
@@ -225,25 +230,27 @@ INSERT INTO user_svc.users (
     hashed_password,
     auth_provider,
     role,
+    account_type,
     is_active,
     department
 )
 VALUES
-('user01@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', true, 'HR'),
-('user02@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', true, 'Finance'),
-('user03@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', true, 'IT'),
-('user04@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', true, 'Sales'),
-('user05@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', true, 'Marketing'),
-('user06@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', true, 'HR'),
-('user07@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', true, 'Finance'),
-('user08@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', true, 'IT'),
-('user09@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', true, 'Operations'),
-('user10@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', true, 'Legal'),
-('user11@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', true, 'HR')
+('user01@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', 'internal', true, 'HR'),
+('user02@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', 'internal', true, 'Finance'),
+('user03@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', 'internal', true, 'IT'),
+('user04@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', 'internal', true, 'Sales'),
+('user05@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', 'internal', true, 'Marketing'),
+('user06@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', 'internal', true, 'HR'),
+('user07@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', 'internal', true, 'Finance'),
+('user08@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', 'internal', true, 'IT'),
+('user09@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', 'external', true, 'Operations'),
+('user10@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', 'external', true, 'Legal'),
+('user11@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', 'internal', true, 'HR')
 ON CONFLICT (email) DO UPDATE SET
     hashed_password = EXCLUDED.hashed_password,
     auth_provider = EXCLUDED.auth_provider,
     role = EXCLUDED.role,
+    account_type = EXCLUDED.account_type,
     is_active = EXCLUDED.is_active,
     department = EXCLUDED.department,
     updated_at = now();

@@ -86,6 +86,7 @@ class LoginUseCase:
         email: str,
         password: str,
         ip_address: str | None = None,
+        required_role: str | None = None,
     ) -> LoginResult:
         user = await self.user_repository.get_by_email(email)
         if user is None:
@@ -101,6 +102,15 @@ class LoginUseCase:
             user.hashed_password,
         ):
             await self._handle_failed_password(user, ip_address)
+            raise AuthenticationError()
+
+        if required_role is not None and _role_value(user.role) != required_role:
+            await self._log(
+                user,
+                "login_failed",
+                {"reason": "invalid_credentials"},
+                ip_address,
+            )
             raise AuthenticationError()
 
         await self.login_state_repository.reset_login_failures(user.id)

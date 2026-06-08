@@ -18,7 +18,9 @@ class JwtTokenService:
         jti = str(uuid4())
         payload = {
             "sub": str(user.id),
+            "user_id": str(user.id),
             "role": _role_value(user.role),
+            "account_type": user.account_type,
             "department": user.department,
             "jti": jti,
             "iat": int(now.timestamp()),
@@ -33,7 +35,11 @@ class JwtTokenService:
         except JWTError as exc:
             raise ValueError("invalid token") from exc
 
-        if not payload.get("sub") or not payload.get("jti"):
+        if (
+            not payload.get("sub")
+            or not payload.get("jti")
+            or not payload.get("account_type")
+        ):
             raise ValueError("missing required claims")
         return payload
 

@@ -33,6 +33,7 @@ class PostgresUserRepository(UserRepository):
             hashed_password=user.hashed_password,
             auth_provider=user.auth_provider,
             role=_role_value(user.role),
+            account_type=user.account_type,
             is_active=user.is_active,
             department=user.department,
         )
@@ -135,6 +136,7 @@ def _to_entity(model: UserModel | None) -> User | None:
         email=model.email,
         role=model.role,
         is_active=model.is_active,
+        account_type=model.account_type,
         department=model.department,
         hashed_password=model.hashed_password,
         auth_provider=model.auth_provider,
