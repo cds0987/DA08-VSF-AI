@@ -5,7 +5,8 @@
 # collection trên Qdrant Cloud.
 #
 # Yêu cầu GitHub Secrets:
-#   OPENAI_API_KEY, QDRANT_URL (có :6333), QDRANT_API_KEY,
+#   OPENAI_API_KEY, QDRANT_URL (có port, vd :443 cho Cloud Run hoặc :80 sau nginx),
+#   QDRANT_API_KEY hoặc VECTOR_DB_BASIC_AUTH (user:pass nếu Qdrant sau nginx Basic Auth),
 #   GCS_HMAC_KEY, GCS_HMAC_SECRET, JWT_SECRET_KEY
 # (GCS bucket cố định: vsf-rag-chatbot-docs-dev)
 
@@ -37,6 +38,8 @@ env:
   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   QDRANT_URL: ${{ secrets.QDRANT_URL }}
   QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+  # Qdrant sau nginx Basic Auth (http): user:pass. Rỗng nếu dùng Qdrant Cloud api-key.
+  VECTOR_DB_BASIC_AUTH: ${{ secrets.VECTOR_DB_BASIC_AUTH }}
   GCS_HMAC_KEY: ${{ secrets.GCS_HMAC_KEY }}
   GCS_HMAC_SECRET: ${{ secrets.GCS_HMAC_SECRET }}
   JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}

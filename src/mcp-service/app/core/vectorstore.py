@@ -7,6 +7,7 @@ phải khớp đúng cái rag-worker ghi, nếu không sẽ đọc nhầm/đọc
 from __future__ import annotations
 
 import asyncio
+import base64
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, List, Sequence
@@ -16,6 +17,14 @@ from app.core.config import McpSettings
 from app.core.contract import check_stamp, meta_collection_name
 
 _QDRANT_NS = uuid.UUID("6ba7b811-9dad-11d1-80b4-00c04fd430c8")
+
+
+def _basic_auth_header(creds: str) -> str:
+    """`user:pass` -> `Basic <b64>` cho Qdrant sau nginx Basic Auth. Rỗng -> ''."""
+    creds = (creds or "").strip()
+    if not creds or ":" not in creds:
+        return ""
+    return "Basic " + base64.b64encode(creds.encode()).decode()
 
 
 def _normalize_remote_url(url: str) -> str:
@@ -99,6 +108,12 @@ class QdrantReader:
             # Qdrant Cloud Run (region xa + cold start) -> connect/TLS có thể vượt
             # timeout mặc định httpx. Nới timeout (env override) cho verify/search.
             options.setdefault("timeout", int(os.getenv("QDRANT_TIMEOUT", "30")))
+            # Qdrant sau reverse proxy (nginx) yêu cầu HTTP Basic Auth -> gửi qua headers.
+            header = _basic_auth_header(self._settings.basic_auth)
+            if header:
+                headers = dict(options.get("headers") or {})
+                headers.setdefault("Authorization", header)
+                options["headers"] = headers
             self._client = AsyncQdrantClient(
                 url=_normalize_remote_url(self._settings.url) or None,
                 api_key=self._settings.api_key or None,

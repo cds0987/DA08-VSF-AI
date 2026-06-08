@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
@@ -21,6 +22,17 @@ def _env(*names: str) -> str:
         if value:
             return value
     return ""
+
+
+def basic_auth_header(creds: str) -> str:
+    """`user:pass` -> giá trị header `Authorization: Basic <b64>`. Rỗng -> ''.
+
+    Dùng khi Qdrant đứng sau reverse proxy (nginx) yêu cầu HTTP Basic Auth thay vì
+    Qdrant api-key. qdrant-client gửi qua param `headers`."""
+    creds = (creds or "").strip()
+    if not creds or ":" not in creds:
+        return ""
+    return "Basic " + base64.b64encode(creds.encode()).decode()
 
 
 def normalize_remote_qdrant_url(url: str) -> str:
@@ -45,6 +57,7 @@ class VectorStoreConfig:
     dimension: int = 1536
     url: str = ""
     api_key: str = ""
+    basic_auth: str = ""
     options: Mapping[str, Any] = field(default_factory=dict)
 
     @property
@@ -70,6 +83,11 @@ class VectorStoreConfig:
         kwargs.setdefault(
             "timeout", int(os.getenv("QDRANT_TIMEOUT", str(DEFAULT_REMOTE_TIMEOUT)))
         )
+        header = basic_auth_header(self.basic_auth)
+        if header:
+            headers = dict(kwargs.get("headers") or {})
+            headers.setdefault("Authorization", header)
+            kwargs["headers"] = headers
         return {
             "url": normalize_remote_qdrant_url(self.url) or None,
             "api_key": self.api_key or None,
@@ -127,4 +145,5 @@ class VectorStoreConfig:
             dimension=contract.dimension,
             url=os.getenv("VECTOR_DB_URL", os.getenv("QDRANT_URL", "")),
             api_key=os.getenv("VECTOR_DB_API_KEY", os.getenv("QDRANT_API_KEY", "")),
+            basic_auth=os.getenv("VECTOR_DB_BASIC_AUTH", os.getenv("QDRANT_BASIC_AUTH", "")),
         )

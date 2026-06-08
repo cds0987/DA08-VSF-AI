@@ -41,6 +41,7 @@ profiles:
         collection: ${VECTOR_COLLECTION:-rag_chatbot}
         url: ${VECTOR_DB_URL:-}
         api_key: ${VECTOR_DB_API_KEY:-}
+        basic_auth: ${VECTOR_DB_BASIC_AUTH:-}
 
     vectorstore_contract:
       provider: ${VECTOR_DB_PROVIDER:-qdrant}

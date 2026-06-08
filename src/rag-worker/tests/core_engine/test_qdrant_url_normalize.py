@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import base64
+
 import pytest
 
-from core_engine.vectorstore.config import VectorStoreConfig, normalize_remote_qdrant_url
+from core_engine.vectorstore.config import (
+    VectorStoreConfig,
+    basic_auth_header,
+    normalize_remote_qdrant_url,
+)
 
 
 @pytest.mark.parametrize(
@@ -50,3 +56,28 @@ def test_remote_client_kwargs_timeout_env_override(monkeypatch) -> None:
     kwargs = VectorStoreConfig(url="https://q.run.app").remote_client_kwargs()
     assert kwargs["timeout"] == 75
     assert kwargs["api_key"] is None
+
+
+@pytest.mark.parametrize(
+    "creds, expected",
+    [
+        ("***REDACTED-QDRANT-AUTH***", "Basic " + base64.b64encode(b"***REDACTED-QDRANT-AUTH***").decode()),
+        ("", ""),
+        ("nocolon", ""),  # thiếu ':' -> không phải user:pass hợp lệ
+    ],
+)
+def test_basic_auth_header(creds: str, expected: str) -> None:
+    assert basic_auth_header(creds) == expected
+
+
+def test_remote_client_kwargs_injects_basic_auth_header() -> None:
+    # Qdrant sau nginx Basic Auth (http port 80) -> header Authorization Basic.
+    cfg = VectorStoreConfig(url="http://10.0.0.1:80", basic_auth="***REDACTED-QDRANT-AUTH***")
+    kwargs = cfg.remote_client_kwargs()
+    assert kwargs["url"] == "http://10.0.0.1:80"
+    assert kwargs["headers"]["Authorization"] == basic_auth_header("***REDACTED-QDRANT-AUTH***")
+
+
+def test_remote_client_kwargs_no_basic_auth_no_headers() -> None:
+    kwargs = VectorStoreConfig(url="https://q.run.app").remote_client_kwargs()
+    assert "headers" not in kwargs
