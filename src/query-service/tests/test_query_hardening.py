@@ -70,31 +70,9 @@ class CapturingMcpClient:
     def __init__(self, results: list[StubSearchResult]) -> None:
         self.results = results
         self.last_top_k = None
-        self.last_generic_call = None
 
     async def list_tools(self) -> list[str]:
         return ["rag_search"]
-
-    async def list_tool_specs(self):
-        from app.application.ports import ToolSpec
-
-        return [
-            ToolSpec(
-                name="summary_tool",
-                description="Summary tool",
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string"},
-                        "user_id": {"type": "string"},
-                    },
-                },
-            )
-        ]
-
-    async def call_tool(self, name: str, arguments: dict):
-        self.last_generic_call = {"name": name, "arguments": dict(arguments)}
-        return {"summary": "summary from tool"}
 
     async def rag_search(self, query: str, document_ids: list[str], top_k: int = 5):
         self.last_top_k = top_k
@@ -112,14 +90,6 @@ class StubOpenAIClient:
 class StubDecisionClient:
     async def choose_tool(self, *args, **kwargs):
         return ToolDecision(tool_name="rag_search", arguments={})
-
-
-class StubGenericDecisionClient:
-    async def choose_tool(self, *args, **kwargs):
-        return ToolDecision(
-            tool_name="summary_tool",
-            arguments={"query": "hello", "user_id": "spoofed"},
-        )
 
 
 @pytest.mark.asyncio
@@ -199,38 +169,3 @@ async def test_summary_never_uses_fixed_mock_text():
     assert repo.summary is None or "Tóm tắt mock" not in repo.summary
     if repo.summary:
         assert "real question" in repo.summary
-
-
-@pytest.mark.asyncio
-async def test_native_generic_tool_injects_reserved_user_id():
-    mcp_client = CapturingMcpClient([])
-    use_case = QueryOrchestrationUseCase(
-        settings=Settings(_env_file=None, llm_mode="mock", tool_routing_mode="native"),
-        conversation_repo=StubConversationRepository(),
-        document_access_repo=StubAccessRepository(),
-        semantic_cache=InMemorySemanticCache(ttl_seconds=60, threshold=0.95),
-        mcp_client=mcp_client,
-        openai_client=StubOpenAIClient(),
-        tool_decision_client=StubGenericDecisionClient(),
-    )
-    events = [
-        event
-        async for event in use_case.stream(
-            "show my summary",
-            AuthenticatedUser(
-                id="user-42",
-                email="user@example.com",
-                role="user",
-                department="HR",
-            ),
-        )
-    ]
-
-    assert events[-1]["done"] is True
-    assert mcp_client.last_generic_call == {
-        "name": "summary_tool",
-        "arguments": {
-            "query": "hello",
-            "user_id": "user-42",
-        },
-    }

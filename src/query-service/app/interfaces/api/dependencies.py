@@ -24,10 +24,6 @@ from app.infrastructure.external.intent_ai_client import (
     TokenHashIntentEmbeddingClient,
 )
 from app.infrastructure.external.openai_client import OpenAIStreamingClient
-from app.infrastructure.external.tool_decision_client import (
-    MockToolDecisionClient,
-    OpenAIToolDecisionClient,
-)
 from app.infrastructure.messaging.nats_events import QueryNatsEventHandler
 from app.infrastructure.messaging.nats_subscriber import NatsSubscriberManager
 from app.infrastructure.messaging.notification_service import NotificationService
@@ -94,12 +90,7 @@ def get_mcp_client():
 
 @lru_cache
 def get_tool_decision_client():
-    settings = get_settings()
-    if settings.tool_routing_mode.strip().lower() != "native":
-        return get_query_router()
-    if settings.llm_mode.strip().lower() == "openai" and settings.openai_api_key:
-        return OpenAIToolDecisionClient(settings, get_mcp_client())
-    return MockToolDecisionClient(settings, get_mcp_client())
+    return get_query_router()
 
 
 @lru_cache
@@ -167,20 +158,14 @@ def get_openai_client() -> OpenAIStreamingClient:
 
 
 def get_orchestration_use_case() -> QueryOrchestrationUseCase:
-    settings = get_settings()
-    route_provider = (
-        get_tool_decision_client()
-        if settings.tool_routing_mode.strip().lower() == "native"
-        else get_query_router()
-    )
     return QueryOrchestrationUseCase(
-        settings=settings,
+        settings=get_settings(),
         conversation_repo=get_conversation_repo(),
         document_access_repo=get_document_access_repo(),
         semantic_cache=get_semantic_cache(),
         mcp_client=get_mcp_client(),
         openai_client=get_openai_client(),
-        route_decision_provider=route_provider,
+        route_decision_provider=get_query_router(),
     )
 
 
