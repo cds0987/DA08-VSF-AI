@@ -129,7 +129,7 @@ def test_proxy_leave_balance_shape_and_headers(monkeypatch) -> None:
             "sick_used": 1,
             "sick_remaining": 9,
         },
-        "summary": "ban con 8 ngay phep nam va 9 ngay phep om.",
+        "summary": "Bạn còn 8 ngày phép năm và 9 ngày phép ốm.",
     }
     _, fn, client = _tool(monkeypatch, post_response=FakeResponse(200, payload))
 
@@ -156,7 +156,7 @@ def test_proxy_leave_requests(monkeypatch) -> None:
                 }
             ]
         },
-        "summary": "don nghi gan nhat la annual tu 2026-06-10 den 2026-06-11, trang thai approved.",
+        "summary": "Đơn nghỉ gần nhất là annual từ 2026-06-10 đến 2026-06-11, trạng thái approved.",
     }
     _, fn, _ = _tool(monkeypatch, post_response=FakeResponse(200, payload))
 
@@ -171,7 +171,7 @@ def test_proxy_attendance(monkeypatch) -> None:
     payload = {
         "intent": "attendance",
         "data": {"period": "2026-06", "work_days": 20, "late_count": 1, "absent_count": 0},
-        "summary": "thang nay ban co 20 ngay cong, di muon 1 lan va vang 0 ngay.",
+        "summary": "Tháng này bạn có 20 ngày công, đi muộn 1 lần và vắng 0 ngày.",
     }
     _, fn, _ = _tool(monkeypatch, post_response=FakeResponse(200, payload))
 
@@ -190,7 +190,7 @@ def test_proxy_onboarding(monkeypatch) -> None:
             "completed_count": 1,
             "total_count": 1,
         },
-        "summary": "trang thai onboarding: completed, da hoan thanh 1/1 muc.",
+        "summary": "Trạng thái onboarding: completed, đã hoàn thành 1/1 mục.",
     }
     _, fn, _ = _tool(monkeypatch, post_response=FakeResponse(200, payload))
 

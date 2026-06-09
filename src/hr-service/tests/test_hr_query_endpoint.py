@@ -86,6 +86,9 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
+TOKEN = "dev-secret"
+
+
 def setup_module() -> None:
     app.dependency_overrides.clear()
     app.dependency_overrides[get_repo] = lambda: FakeHrRepository()
@@ -94,14 +97,14 @@ def setup_module() -> None:
         port=8004,
         log_level="INFO",
         database_url="",
-        internal_token="",
+        internal_token=TOKEN,
     )
     app.dependency_overrides[core_config.get_settings] = lambda: HrSettings(
         host="0.0.0.0",
         port=8004,
         log_level="INFO",
         database_url="",
-        internal_token="",
+        internal_token=TOKEN,
     )
 
 
@@ -111,23 +114,65 @@ def teardown_module() -> None:
 
 def test_leave_balance_endpoint() -> None:
     client = _client()
-    response = client.post("/hr/query", json={"user_id": USER_HR, "intent": "leave_balance"})
+    response = client.post(
+        "/hr/query",
+        json={"user_id": USER_HR, "intent": "leave_balance"},
+        headers={"X-Internal-Token": TOKEN},
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["intent"] == "leave_balance"
     assert body["data"]["annual_remaining"] == 8
-    assert "ban con 8 ngay phep nam" in body["summary"].lower()
+    assert set(body.keys()) == {"intent", "data", "summary"}
+    assert "Bạn" in body["summary"]
+    assert "ngày" in body["summary"]
 
 
 def test_user_isolation() -> None:
     client = _client()
-    response_a = client.post("/hr/query", json={"user_id": USER_HR, "intent": "leave_balance"})
-    response_b = client.post("/hr/query", json={"user_id": USER_FINANCE, "intent": "leave_balance"})
+    response_a = client.post("/hr/query", json={"user_id": USER_HR, "intent": "leave_balance"}, headers={"X-Internal-Token": TOKEN})
+    response_b = client.post("/hr/query", json={"user_id": USER_FINANCE, "intent": "leave_balance"}, headers={"X-Internal-Token": TOKEN})
     assert response_a.json()["data"] != response_b.json()["data"]
 
 
 def test_health_endpoint() -> None:
     client = _client()
-    response = client.get("/health")
+    response = client.get("/health", headers={"X-Internal-Token": TOKEN})
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_wrong_token_rejected() -> None:
+    client = _client()
+    response = client.post(
+        "/hr/query",
+        json={"user_id": USER_HR, "intent": "leave_balance"},
+        headers={"X-Internal-Token": "wrong"},
+    )
+    assert response.status_code == 401
+
+
+def test_missing_token_rejected() -> None:
+    client = _client()
+    response = client.post("/hr/query", json={"user_id": USER_HR, "intent": "leave_balance"})
+    assert response.status_code == 401
+
+
+def test_unknown_user_returns_404() -> None:
+    client = _client()
+    response = client.post(
+        "/hr/query",
+        json={"user_id": "99999999-9999-4999-8999-999999999999", "intent": "leave_balance"},
+        headers={"X-Internal-Token": TOKEN},
+    )
+    assert response.status_code == 404
+
+
+def test_invalid_intent_rejected() -> None:
+    client = _client()
+    response = client.post(
+        "/hr/query",
+        json={"user_id": USER_HR, "intent": "payroll"},
+        headers={"X-Internal-Token": TOKEN},
+    )
+    assert response.status_code == 422

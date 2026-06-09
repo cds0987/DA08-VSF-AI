@@ -28,28 +28,28 @@ class HrQueryRequest(BaseModel):
 
 
 def _leave_balance_summary(annual_remaining: int, sick_remaining: int) -> str:
-    return f"Ban con {annual_remaining} ngay phep nam va {sick_remaining} ngay phep om."
+    return f"Bạn còn {annual_remaining} ngày phép năm và {sick_remaining} ngày phép ốm."
 
 
 def _leave_requests_summary(requests: list[dict[str, Any]]) -> str:
     if not requests:
-        return "Ban chua co don nghi phep nao."
+        return "Bạn chưa có đơn nghỉ phép nào."
     request = requests[0]
     return (
-        f"Don nghi gan nhat la {request['leave_type']} tu {request['start_date']} "
-        f"den {request['end_date']}, trang thai {request['status']}."
+        f"Đơn nghỉ gần nhất là {request['leave_type']} từ {request['start_date']} "
+        f"đến {request['end_date']}, trạng thái {request['status']}."
     )
 
 
 def _attendance_summary(work_days: int, late_count: int, absent_count: int) -> str:
     return (
-        f"Thang nay ban co {work_days} ngay cong, di muon {late_count} lan "
-        f"va vang {absent_count} ngay."
+        f"Tháng này bạn có {work_days} ngày công, "
+        f"đi muộn {late_count} lần và vắng {absent_count} ngày."
     )
 
 
 def _onboarding_summary(status: str, completed: int, total: int) -> str:
-    return f"Trang thai onboarding: {status}, da hoan thanh {completed}/{total} muc."
+    return f"Trạng thái onboarding: {status}, đã hoàn thành {completed}/{total} mục."
 
 
 @router.post("/hr/query")
