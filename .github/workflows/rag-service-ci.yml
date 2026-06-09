@@ -1,9 +1,9 @@
 name: rag-worker + mcp-service search semantic
 
 on:
-  push:
+  pull_request:
     branches:
-      - nguyendev
+      - develop
     paths:
       - ".github/workflows/rag-service-ci.yml"
       - "src/rag-worker/**"

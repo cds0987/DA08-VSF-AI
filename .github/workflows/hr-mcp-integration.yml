@@ -8,16 +8,9 @@ name: hr-service + mcp-service integration (Docker real)
 # Docker network, nói chuyện với nhau qua HTTP thật.
 # Không cần Qdrant (rag_search disabled, chỉ hr_query bật).
 
+# CHỈ chạy ở PR → develop (gate trước merge). Không trigger push:develop để tránh
+# chạy lại lần 2 lúc merge — lúc merge chỉ deploy-develop chạy.
 on:
-  push:
-    branches:
-      - nguyendev
-      - develop
-    paths:
-      - ".github/workflows/hr-mcp-integration.yml"
-      - "src/hr-service/**"
-      - "src/mcp-service/app/tools/hr_query.py"
-      - "src/mcp-service/config.yaml"
   pull_request:
     branches:
       - develop

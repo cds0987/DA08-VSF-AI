@@ -1,11 +1,12 @@
 name: Deploy develop to GCP VM
 
-# CD 3 PHASE (push develop) — BUILD CÓ CHỌN LỌC:
+# CD (push develop = merge vào develop) — BUILD CÓ CHỌN LỌC:
 #   Phase 0 DETECT     : dò service nào THAY ĐỔI (paths-filter) -> chỉ build cái đó.
-#   Phase 1 TEST       : chỉ chạy khi rag-worker/mcp-service đổi (gate cho 2 service đó).
-#   Phase 2 BUILD+PUSH : build CHỈ service thay đổi -> push Docker Hub (:develop + :<git-sha>).
-#   Phase 3 DEPLOY     : chỉ chạy khi 1 trong 6 service hoặc compose đổi.
+#   Phase 1 BUILD+PUSH : build CHỈ service thay đổi -> push Docker Hub (:develop + :<git-sha>).
+#   Phase 2 DEPLOY     : chỉ chạy khi 1 trong 6 service hoặc compose đổi.
 #                        SSH VM -> docker compose PULL + up --no-build -> HEALTH GATE.
+# KHÔNG có phase test ở đây: contract parity + unit/e2e đã chạy ở PR→develop
+# (rag-service-ci.yml / e2e-cloud.yml / hr-mcp-integration.yml). Merge = build+deploy thôi.
 # Sửa docs/**, **.md -> KHÔNG chạy gì (paths-ignore). Code từ git; env từ GitHub Secrets.
 
 on:
@@ -29,14 +30,12 @@ jobs:
   # ───────────────────────── Phase 0: DETECT ───────────────────────
   # Quyết định build/test/deploy cái gì dựa trên file thay đổi của push.
   #   - services : JSON list service cần build (giao của 6 service với path đổi).
-  #   - run_test : true nếu rag-worker|mcp-service đổi.
   #   - run_deploy: true nếu rag-worker|mcp-service|hr-service|docker-compose đổi.
   # Nếu workflow này tự đổi -> build LẠI TẤT CẢ (an toàn).
   detect:
     runs-on: ubuntu-latest
     outputs:
       services: ${{ steps.matrix.outputs.services }}
-      run_test: ${{ steps.matrix.outputs.run_test }}
       run_deploy: ${{ steps.matrix.outputs.run_deploy }}
     steps:
       - uses: actions/checkout@v4
@@ -62,49 +61,17 @@ jobs:
             SVC=$(jq -cn --argjson ch "$CH" --argjson all "$ALL" '$all - ($all - $ch)')
           fi
           echo "services=$SVC" >> "$GITHUB_OUTPUT"
-          rt=false; echo "$SVC" | jq -e 'any(.[]; .=="rag-worker" or .=="mcp-service")' >/dev/null && rt=true
-          echo "run_test=$rt" >> "$GITHUB_OUTPUT"
           rd=false
           echo "$CH" | jq -e 'any(.[]; .=="rag-worker" or .=="mcp-service" or .=="hr-service" or .=="user-service" or .=="document-service" or .=="query-service" or .=="base" or .=="wf")' >/dev/null && rd=true
           echo "run_deploy=$rd" >> "$GITHUB_OUTPUT"
-          echo "→ services=$SVC  run_test=$rt  run_deploy=$rd"
+          echo "→ services=$SVC  run_deploy=$rd"
 
-  # ───────────────────────── Phase 1: TEST ─────────────────────────
-  # Chỉ chạy khi rag-worker|mcp-service đổi. Gate nhẹ: contract parity + unit test rag-worker.
-  # E2e/integration đầy đủ chạy ở rag-service-ci.yml / hr-mcp-integration.yml trên feature branch.
-  test:
-    needs: detect
-    if: needs.detect.outputs.run_test == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-      - name: Install deps (rag-worker + mcp-service)
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r src/rag-worker/requirements.txt
-          pip install -r src/mcp-service/requirements.txt
-      - name: Vectorstore contract parity (mcp consumer vs rag-worker producer)
-        run: python src/mcp-service/scripts/check_vectorstore_contract.py
-      - name: rag-worker unit tests (infra off)
-        working-directory: src/rag-worker
-        env:
-          APP_ENV: development
-          AI_PROVIDER: offline
-        run: pytest tests -q -ra --ignore=tests/e2e
-
-  # ──────────────────── Phase 2: BUILD + PUSH ──────────────────────
+  # ──────────────────── Phase 1: BUILD + PUSH ──────────────────────
   # Matrix = CHỈ service thay đổi (detect.services). Mỗi image 2 tag: :develop + :<git-sha>.
-  # Bỏ qua nếu không service nào đổi. Chặn nếu test (khi cần) fail.
+  # Bỏ qua nếu không service nào đổi. Validation đã xong ở PR→develop.
   build-push:
-    needs: [detect, test]
-    if: |
-      always()
-      && needs.detect.outputs.services != '[]'
-      && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    needs: detect
+    if: needs.detect.outputs.services != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -130,7 +97,7 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,scope=${{ matrix.service }},mode=max
 
-  # ──────────────────────── Phase 3: DEPLOY ────────────────────────
+  # ──────────────────────── Phase 2: DEPLOY ────────────────────────
   # Chỉ chạy khi 1 trong 6 service (rag-worker/mcp/hr/user/document/query) hoặc compose đổi.
   # Deploy dùng tag :develop (luôn mới nhất) — service không build lần này vẫn giữ image cũ.
   deploy:
