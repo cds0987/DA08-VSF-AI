@@ -132,7 +132,7 @@ class ConversationRepository(ABC):
         của câu trả lời assistant gần nhất trong session (POST /feedback)."""
 ```
 
-> `RerankService` ABC **đã chuyển sang mcp-service** (reranker nằm trong tool `rag_search`) — xem section mcp-service bên dưới.
+> Rerank **nằm trong mcp-service** (trong tool `rag_search`). Trong code thật reranker là một `Reranker` **Protocol** ở `app/core/rerank.py` (impl `none`/`lexical`/`llm`), KHÔNG phải `RerankService` ABC ở `domain/repositories/` — xem section mcp-service bên dưới.
 
 ```python
 # src/query-service/app/domain/repositories/document_access_repository.py
@@ -216,170 +216,147 @@ class NotificationRepository(ABC):
 
 ## mcp-service — Domain
 
-MCP Tool Service expose tool qua giao thức MCP. Mỗi tool self-contained. `RerankService` nằm ở đây (trong tool `rag_search`).
+MCP Tool Service expose tool qua giao thức MCP Streamable HTTP (`:8003`, path `/mcp`). **Search-only routing layer** —
+KHÔNG sở hữu dữ liệu HR. Tool đăng ký qua registry (`app/tools/`); hiện có 2 tool built-in: `rag_search` (đọc Qdrant)
+và `hr_query` (HTTP proxy sang **hr-service**).
+
+> ⚠️ **Lưu ý đối chiếu code**: mcp-service KHÔNG có `domain/repositories/*.py` (không `RerankService`/`HrClient` ABC),
+> KHÔNG có `domain/entities/search_result.py`. Shape kết quả search là `SearchHit` ở `app/core/vectorstore.py`;
+> reranker là `Reranker` Protocol ở `app/core/rerank.py`. `app/domain/entities/tool_io.py` chỉ còn `RagSearchInput`.
+> Toàn bộ DTO HR + `HrRepository` đã chuyển sang **hr-service** (xem section hr-service bên dưới).
 
 ```python
-# src/mcp-service/app/domain/entities/search_result.py
-# Bản sao contract NATS reply rag.search (database-per-service → mỗi service giữ bản riêng,
-# đồng bộ shape qua infra/nats/subjects.md). CÙNG shape với SearchResult của rag-worker:
-#   chunk_id, document_id, document_name, caption, parent_text, heading_path, score,
-#   page_number, source_gcs_uri, markdown_gcs_uri
+# src/mcp-service/app/core/vectorstore.py — shape 1 hit trả về cho client (KHÔNG phải domain entity).
+# CÙNG field với SearchResult của rag-worker (ghép qua Qdrant: point_id uuid5 + payload keys phải khớp).
 @dataclass
-class SearchResult:
-    chunk_id: str
-    document_id: str
-    document_name: str
-    caption: str
-    parent_text: str
-    heading_path: List[str]
-    score: float
-    page_number: Optional[int] = None
+class SearchHit:
+    chunk_id: str = ""
+    document_id: str = ""
+    document_name: str = ""
+    caption: str = ""
+    parent_text: str = ""
+    heading_path: List[str] = field(default_factory=list)
+    score: float = 0.0
+    page_number: int | None = None
     source_gcs_uri: str = ""
     markdown_gcs_uri: str = ""
 ```
 
 ```python
-# src/mcp-service/app/domain/repositories/rerank_service.py
-from abc import ABC, abstractmethod
-from typing import List
-from app.domain.entities.search_result import SearchResult
-
-class RerankService(ABC):
-
-    @abstractmethod
-    async def rerank(self, query: str, chunks: List[SearchResult], top_n: int = 3) -> List[SearchResult]:
-        """Rerank chunks bằng BGE-Reranker-v2-m3, trả về top_n có score cao nhất."""
+# src/mcp-service/app/core/rerank.py — reranker là Protocol, KHÔNG phải ABC ở domain/.
+# Impl: NoopReranker (giữ thứ tự vector score) | LexicalReranker (overlap) | LlmReranker (LLM chấm 0..1).
+# build_reranker("none"|"lexical"|"llm"); "llm" lỗi/timeout → fallback NoopReranker (best-effort).
+class Reranker(Protocol):
+    async def rerank(self, query: str, hits: List[SearchHit],
+                     top_k: int, threshold: float) -> List[SearchHit]: ...
 ```
 
 ```python
-# src/mcp-service/app/domain/entities/tool_io.py — I/O contract của MCP tool
-from dataclasses import dataclass, field
-from typing import List, Optional
-
+# src/mcp-service/app/domain/entities/tool_io.py — CHỈ còn input của rag_search.
 @dataclass
 class RagSearchInput:
     query: str
-    document_ids: Optional[List[str]]   # do MCP client (Query Service) inject sau khi lọc ACL; None = chỉ public
+    document_ids: Optional[List[str]]   # MCP client (Query Service) inject sau khi lọc ACL; None = chỉ public.
+                                        # mcp-service NHẬN nhưng search tool KHÔNG filter (no-op) — ACL do service khác.
     top_k: int = 5
+```
 
-@dataclass
+> **MCP tool — chữ ký & output thật (theo code):**
+> - `rag_search(query: str, document_ids: list[str] | None = None, top_k: int | None = None) -> dict`
+>   → `{"results": [SearchHit-as-dict, ...]}` (đã rerank, top-k). Đăng ký tại `app/tools/rag_search.py`.
+> - `hr_query(user_id: str, intent: str) -> dict` → **proxy** POST `/hr/query` sang hr-service,
+>   trả thẳng body `{"intent": ..., "data": {...}, "summary": ...}`. Đăng ký tại `app/tools/hr_query.py`.
+>   mcp-service KHÔNG typed output này; envelope do hr-service quyết.
+> - Tham số nhạy cảm (`document_ids`, `user_id`) do MCP client inject từ ACL/JWT, **không tin LLM**.
+> - `hr_query` mặc định **TẮT** (`TOOL_HR_QUERY_ENABLED=0`); bật khi hr-service sẵn sàng.
+> - Tool tạo đơn nghỉ phép (`create_leave_request`) **chưa đăng ký là MCP tool** trong mcp-service — hr-service
+>   đã có endpoint leave-request nhưng chưa expose qua MCP. (Roadmap/SA narrative còn ghi 3 tool — chưa khớp code.)
+
+---
+
+## hr-service — Domain
+
+HR Service (**Container 6**, `:8004`, internal only) sở hữu toàn bộ HR data trong `hr_db` (schema **`hr_svc`** ở
+production; code mock hiện seed schema này). mcp-service tool `hr_query` gọi vào qua HTTP nội bộ
+(`X-Internal-Token`). Filter bắt buộc `WHERE user_id = :current_user_id`.
+
+```python
+# src/hr-service/app/domain/entities/dtos.py — DTO thật (đã chuyển từ mcp-service sang đây).
+@dataclass(frozen=True)
 class HrQueryInput:
-    user_id: str                        # do MCP client inject từ JWT — KHÔNG để LLM tự điền
-    intent: str                         # 'leave_balance' | 'leave_requests' | 'payroll'
+    user_id: str                        # MCP client inject từ JWT — KHÔNG để LLM tự điền
+    intent: str
 
-# --- Output DTO (field bám đúng schema hr_svc trong data-schema.md) ---
-@dataclass
+@dataclass(frozen=True)
 class LeaveBalanceDTO:
     annual_total: int
     annual_used: int
-    annual_remaining: int               # = annual_total - annual_used
+    annual_remaining: int
     sick_total: int
     sick_used: int
-    sick_remaining: int                 # = sick_total - sick_used
+    sick_remaining: int
 
-@dataclass
-class LeaveRequestDTO:
-    id: str
-    leave_type: str                     # 'annual' | 'sick' | 'personal'
-    start_date: str                     # 'YYYY-MM-DD'
-    end_date: str                       # 'YYYY-MM-DD'
-    days_count: int
-    status: str                         # 'pending' | 'approved' | 'rejected' | 'cancelled'
-    approver_user_id: Optional[str] = None
-    rejected_reason: Optional[str] = None
-
-@dataclass
-class EmployeeProfileDTO:
-    user_id: str
-    employee_code: str
-    department: str
-    job_title: str
-    manager_user_id: Optional[str]
-    employment_status: str
-
-@dataclass
-class CreateLeaveRequestInput:
-    user_id: str                        # do Query Service inject từ JWT
+@dataclass(frozen=True)
+class LeaveRequestDTO:                   # bản MVP đơn giản hóa (không có id/approver/rejected_reason)
     leave_type: str
     start_date: str                     # 'YYYY-MM-DD'
     end_date: str
-    reason: str
+    days_count: int
+    status: str
 
-@dataclass
-class PayrollDTO:
+@dataclass(frozen=True)
+class PayrollDTO:                        # schema có sẵn nhưng intent payroll CHƯA expose (chờ SA-3)
     period: str                         # 'YYYY-MM'
     gross_salary: float
     deductions: float
     net_salary: float
 
-@dataclass
+@dataclass(frozen=True)
 class AttendanceDTO:
-    period: str                         # 'YYYY-MM'
+    period: str
     work_days: int
     late_count: int
     absent_count: int
 
-@dataclass
+@dataclass(frozen=True)
 class OnboardingItemDTO:
     task: str
     done: bool
 
-@dataclass
+@dataclass(frozen=True)
 class OnboardingDTO:
-    status: str                         # 'in_progress' | 'completed'
-    checklist: List[OnboardingItemDTO]
-    completed_count: int
-    total_count: int
+    status: str
+    checklist: list[OnboardingItemDTO] = field(default_factory=list)
+    completed_count: int = 0
+    total_count: int = 0
 
-@dataclass
-class HrQueryResult:
-    intent: str                                              # echo intent đã hỏi
-    leave_balance: Optional[LeaveBalanceDTO] = None          # set khi intent='leave_balance'
-    leave_requests: Optional[List[LeaveRequestDTO]] = None   # set khi intent='leave_requests'
-    payroll: Optional[List[PayrollDTO]] = None               # set khi intent='payroll' (theo period) — Cao, chờ SA-3
-    attendance: Optional[AttendanceDTO] = None               # set khi intent='attendance'
-    onboarding: Optional[OnboardingDTO] = None               # set khi intent='onboarding'
-    summary: str = ""                                        # câu tóm tắt tự nhiên cho LLM đưa vào câu trả lời
+@dataclass(frozen=True)
+class HrQueryResult:                     # envelope chung — data là dict tùy intent (KHÔNG phải union typed field)
+    intent: str
+    data: dict
+    summary: str
 ```
-
-> **MCP tool**: `rag_search(RagSearchInput) -> List[SearchResult]` (Top-3 sau rerank);
-> `hr_query(HrQueryInput) -> HrQueryResult` (output typed — tùy `intent` mà field tương ứng được set,
-> kèm `summary` để LLM dùng trực tiếp). Query Service là MCP client; tham số nhạy cảm (`document_ids`, `user_id`)
-> do client inject, không tin LLM.
-> **Leave request MVP**: AI có thể giúp tạo draft đơn nghỉ phép, nhưng chỉ gọi tool tạo đơn sau khi user xác nhận.
-> Tool tạo đơn gọi HR Service, HR Service set `status='pending'` và `approver_user_id = employees.manager_user_id`.
 
 ```python
-# src/mcp-service/app/domain/repositories/hr_client.py — gọi HR Service nội bộ
-from abc import ABC, abstractmethod
-from typing import List, Optional
-from app.domain.entities.tool_io import LeaveBalanceDTO, LeaveRequestDTO, PayrollDTO
-
-class HrClient(ABC):
-    """Gọi HR Service. HR Service LUÔN filter WHERE user_id (do MCP client inject từ JWT).
-    External account hoặc user không map tới employee active record → no data/forbidden."""
-
-    @abstractmethod
-    async def get_leave_balance(self, user_id: str) -> Optional[LeaveBalanceDTO]:
-        """Số phép năm/ốm còn lại (hr_svc.leave_balance)."""
-
-    @abstractmethod
-    async def get_leave_requests(self, user_id: str) -> List[LeaveRequestDTO]:
-        """Danh sách đơn nghỉ phép + trạng thái (hr_svc.leave_requests)."""
-
-    @abstractmethod
-    async def create_leave_request(self, data: CreateLeaveRequestInput) -> LeaveRequestDTO:
-        """Tạo đơn nghỉ phép sau khi user đã confirm draft.
-
-        HR Service resolve sếp trực tiếp bằng `employees.manager_user_id`,
-        set `leave_requests.approver_user_id`, `status='pending'`.
-        Không dùng `user-service.role` làm quyền duyệt nghiệp vụ.
-        """
-
-    @abstractmethod
-    async def get_payroll(self, user_id: str) -> List[PayrollDTO]:
-        """Bảng lương theo period (hr_svc.payroll_summary)."""
+# src/hr-service/app/domain/repositories/hr_repository.py — ABC, PostgresHrRepository implement.
+# Mọi method nhận user_id và LUÔN filter WHERE user_id.
+class HrRepository(ABC):
+    async def ping(self) -> None: ...
+    async def get_leave_balance(self, user_id: str) -> Optional[LeaveBalanceDTO]: ...
+    async def get_leave_requests(self, user_id: str) -> List[LeaveRequestDTO]: ...
+    async def get_attendance(self, user_id: str) -> Optional[AttendanceDTO]: ...
+    async def get_onboarding(self, user_id: str) -> Optional[OnboardingDTO]: ...
+    async def get_payroll(self, user_id: str) -> List[PayrollDTO]: ...   # chưa expose qua endpoint
+    async def aclose(self) -> None: ...
 ```
+
+> **HTTP contract (hr-service, theo `app/api/routes.py`):**
+> - `POST /hr/query` — body `{"user_id": str, "intent": Literal["leave_balance","leave_requests","attendance","onboarding"]}`,
+>   header `X-Internal-Token`. Trả `{"intent", "data", "summary"}`. Intent không hợp lệ → 422; user không có HR data → 404.
+> - `GET /health` → `{"status": "ok"}` (dùng bởi `HrQueryTool.verify()` lúc startup, fail-closed).
+> - `payroll` schema có sẵn nhưng **chưa nằm trong `Literal` intent** — chặn bởi SA-3.
+> - **Leave request MVP**: AI tạo draft, chỉ gọi tool tạo đơn sau khi user xác nhận; HR Service set `status='pending'`,
+>   `approver_user_id = employees.manager_user_id`. (Endpoint tạo/duyệt đơn còn ở giai đoạn thiết kế, xem `src/hr-service/docs/intent.md`.)
 
 ---
 
