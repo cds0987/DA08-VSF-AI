@@ -16,6 +16,7 @@
       "uvicorn[standard]" \
       sqlalchemy \
       asyncpg \
+      "psycopg[binary]" \
       python-dotenv \
       python-jose \
       python-multipart \
