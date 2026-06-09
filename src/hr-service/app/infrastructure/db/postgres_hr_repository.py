@@ -1,8 +1,3 @@
-"""PostgreSQL implementation của HrRepository.
-
-Dùng sync SQLAlchemy + asyncio.to_thread để tránh block event loop của uvicorn.
-Mọi method bắt buộc filter WHERE user_id — không có đường query data người khác.
-"""
 from __future__ import annotations
 
 import asyncio
@@ -12,7 +7,7 @@ import sqlalchemy as sa
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.domain.entities.tool_io import (
+from app.domain.entities.dtos import (
     AttendanceDTO,
     LeaveBalanceDTO,
     LeaveRequestDTO,
@@ -33,8 +28,6 @@ from app.infrastructure.db.models import (
 class PostgresHrRepository(HrRepository):
     def __init__(self, database_url: str) -> None:
         self._database_url = database_url
-        # Engine tạo lazy — cho phép tool được instantiate khi URL chưa set;
-        # verify() sẽ fail-closed nếu URL rỗng hoặc DB không reach được.
         self._engine = None
         self._session_factory: sessionmaker[Session] | None = None
 
@@ -42,35 +35,26 @@ class PostgresHrRepository(HrRepository):
         if self._engine is not None:
             return
         if not self._database_url:
-            raise RuntimeError(
-                "hr_query: MCP_DATABASE_URL chưa được cấu hình. "
-                "Set TOOL_HR_QUERY_ENABLED=1 và MCP_DATABASE_URL."
-            )
+            raise RuntimeError("hr-service: database_url is not configured")
         self._engine = create_engine(self._database_url, pool_pre_ping=True)
-        self._session_factory = sessionmaker(
-            bind=self._engine, autoflush=False, autocommit=False
-        )
-
-    # ── internal ─────────────────────────────────────────────────────────────
+        self._session_factory = sessionmaker(bind=self._engine, autoflush=False, autocommit=False)
 
     def _session(self) -> Session:
         self._ensure_engine()
         return self._session_factory()  # type: ignore[misc]
 
-    # ── HrRepository ─────────────────────────────────────────────────────────
-
     async def ping(self) -> None:
         def _ping() -> None:
             self._ensure_engine()
-            with self._session() as s:
-                s.execute(sa.text("SELECT 1"))
+            with self._session() as session:
+                session.execute(sa.text("SELECT 1"))
 
         await asyncio.to_thread(_ping)
 
     async def get_leave_balance(self, user_id: str) -> Optional[LeaveBalanceDTO]:
         def _query() -> Optional[LeaveBalanceDTO]:
-            with self._session() as s:
-                row = s.get(LeaveBalanceRecord, user_id)
+            with self._session() as session:
+                row = session.get(LeaveBalanceRecord, user_id)
                 if row is None:
                     return None
                 return LeaveBalanceDTO(
@@ -86,9 +70,9 @@ class PostgresHrRepository(HrRepository):
 
     async def get_leave_requests(self, user_id: str) -> List[LeaveRequestDTO]:
         def _query() -> List[LeaveRequestDTO]:
-            with self._session() as s:
+            with self._session() as session:
                 rows = (
-                    s.query(LeaveRequestRecord)
+                    session.query(LeaveRequestRecord)
                     .filter(LeaveRequestRecord.user_id == user_id)
                     .order_by(LeaveRequestRecord.created_at.desc())
                     .all()
@@ -108,8 +92,8 @@ class PostgresHrRepository(HrRepository):
 
     async def get_attendance(self, user_id: str) -> Optional[AttendanceDTO]:
         def _query() -> Optional[AttendanceDTO]:
-            with self._session() as s:
-                row = s.get(AttendanceRecord, user_id)
+            with self._session() as session:
+                row = session.get(AttendanceRecord, user_id)
                 if row is None:
                     return None
                 return AttendanceDTO(
@@ -123,12 +107,12 @@ class PostgresHrRepository(HrRepository):
 
     async def get_onboarding(self, user_id: str) -> Optional[OnboardingDTO]:
         def _query() -> Optional[OnboardingDTO]:
-            with self._session() as s:
-                row = s.get(OnboardingRecord, user_id)
+            with self._session() as session:
+                row = session.get(OnboardingRecord, user_id)
                 if row is None:
                     return None
                 checklist = [
-                    OnboardingItemDTO(task=item["task"], done=bool(item.get("done")))
+                    OnboardingItemDTO(task=str(item.get("task", "")), done=bool(item.get("done")))
                     for item in (row.checklist or [])
                     if isinstance(item, dict)
                 ]
@@ -144,9 +128,9 @@ class PostgresHrRepository(HrRepository):
 
     async def get_payroll(self, user_id: str) -> List[PayrollDTO]:
         def _query() -> List[PayrollDTO]:
-            with self._session() as s:
+            with self._session() as session:
                 rows = (
-                    s.query(PayrollSummaryRecord)
+                    session.query(PayrollSummaryRecord)
                     .filter(PayrollSummaryRecord.user_id == user_id)
                     .order_by(PayrollSummaryRecord.period.desc())
                     .all()
@@ -169,3 +153,4 @@ class PostgresHrRepository(HrRepository):
                 self._engine.dispose()
 
         await asyncio.to_thread(_dispose)
+

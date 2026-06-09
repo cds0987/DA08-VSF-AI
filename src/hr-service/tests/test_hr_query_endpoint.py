@@ -1,0 +1,178 @@
+from __future__ import annotations
+
+from fastapi.testclient import TestClient
+
+import app.core.config as core_config
+from app.api.routes import get_repo, get_settings
+from app.core.config import HrSettings
+from app.domain.entities.dtos import (
+    AttendanceDTO,
+    LeaveBalanceDTO,
+    LeaveRequestDTO,
+    OnboardingDTO,
+    OnboardingItemDTO,
+)
+from app.domain.repositories.hr_repository import HrRepository
+from app.main import app
+
+
+USER_HR = "11111111-1111-4111-8111-111111111111"
+USER_FINANCE = "22222222-2222-4222-8222-222222222222"
+
+
+class FakeHrRepository(HrRepository):
+    async def ping(self) -> None:
+        return None
+
+    async def get_leave_balance(self, user_id: str):
+        data = {
+            USER_HR: LeaveBalanceDTO(12, 4, 8, 10, 1, 9),
+            USER_FINANCE: LeaveBalanceDTO(12, 7, 5, 10, 0, 10),
+        }
+        return data.get(user_id)
+
+    async def get_leave_requests(self, user_id: str):
+        data = {
+            USER_HR: [
+                LeaveRequestDTO("annual", "2026-06-10", "2026-06-11", 2, "approved"),
+                LeaveRequestDTO("sick", "2026-06-18", "2026-06-18", 1, "pending"),
+            ],
+            USER_FINANCE: [
+                LeaveRequestDTO("annual", "2026-06-18", "2026-06-18", 1, "pending"),
+            ],
+        }
+        return data.get(user_id, [])
+
+    async def get_attendance(self, user_id: str):
+        data = {
+            USER_HR: AttendanceDTO("2026-06", 20, 1, 0),
+            USER_FINANCE: AttendanceDTO("2026-06", 19, 2, 1),
+        }
+        return data.get(user_id)
+
+    async def get_onboarding(self, user_id: str):
+        data = {
+            USER_HR: OnboardingDTO(
+                "completed",
+                [
+                    OnboardingItemDTO("Nhat laptop va the", True),
+                    OnboardingItemDTO("Hoan thanh dao tao bao mat", True),
+                    OnboardingItemDTO("Gap go team", True),
+                ],
+                3,
+                3,
+            ),
+            USER_FINANCE: OnboardingDTO(
+                "in_progress",
+                [
+                    OnboardingItemDTO("Nhat laptop va the", True),
+                    OnboardingItemDTO("Hoan thanh dao tao bao mat", False),
+                    OnboardingItemDTO("Gap go team", False),
+                ],
+                1,
+                3,
+            ),
+        }
+        return data.get(user_id)
+
+    async def get_payroll(self, user_id: str):
+        return []
+
+    async def aclose(self) -> None:
+        return None
+
+
+def _client() -> TestClient:
+    return TestClient(app)
+
+
+TOKEN = "dev-secret"
+
+
+def setup_module() -> None:
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_repo] = lambda: FakeHrRepository()
+    app.dependency_overrides[get_settings] = lambda: HrSettings(
+        host="0.0.0.0",
+        port=8004,
+        log_level="INFO",
+        database_url="",
+        internal_token=TOKEN,
+    )
+    app.dependency_overrides[core_config.get_settings] = lambda: HrSettings(
+        host="0.0.0.0",
+        port=8004,
+        log_level="INFO",
+        database_url="",
+        internal_token=TOKEN,
+    )
+
+
+def teardown_module() -> None:
+    app.dependency_overrides.clear()
+
+
+def test_leave_balance_endpoint() -> None:
+    client = _client()
+    response = client.post(
+        "/hr/query",
+        json={"user_id": USER_HR, "intent": "leave_balance"},
+        headers={"X-Internal-Token": TOKEN},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "leave_balance"
+    assert body["data"]["annual_remaining"] == 8
+    assert set(body.keys()) == {"intent", "data", "summary"}
+    assert "Bạn" in body["summary"]
+    assert "ngày" in body["summary"]
+
+
+def test_user_isolation() -> None:
+    client = _client()
+    response_a = client.post("/hr/query", json={"user_id": USER_HR, "intent": "leave_balance"}, headers={"X-Internal-Token": TOKEN})
+    response_b = client.post("/hr/query", json={"user_id": USER_FINANCE, "intent": "leave_balance"}, headers={"X-Internal-Token": TOKEN})
+    assert response_a.json()["data"] != response_b.json()["data"]
+
+
+def test_health_endpoint() -> None:
+    client = _client()
+    response = client.get("/health", headers={"X-Internal-Token": TOKEN})
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_wrong_token_rejected() -> None:
+    client = _client()
+    response = client.post(
+        "/hr/query",
+        json={"user_id": USER_HR, "intent": "leave_balance"},
+        headers={"X-Internal-Token": "wrong"},
+    )
+    assert response.status_code == 401
+
+
+def test_missing_token_rejected() -> None:
+    client = _client()
+    response = client.post("/hr/query", json={"user_id": USER_HR, "intent": "leave_balance"})
+    assert response.status_code == 401
+
+
+def test_unknown_user_returns_404() -> None:
+    client = _client()
+    response = client.post(
+        "/hr/query",
+        json={"user_id": "99999999-9999-4999-8999-999999999999", "intent": "leave_balance"},
+        headers={"X-Internal-Token": TOKEN},
+    )
+    assert response.status_code == 404
+
+
+def test_invalid_intent_rejected() -> None:
+    client = _client()
+    response = client.post(
+        "/hr/query",
+        json={"user_id": USER_HR, "intent": "payroll"},
+        headers={"X-Internal-Token": TOKEN},
+    )
+    assert response.status_code == 422
