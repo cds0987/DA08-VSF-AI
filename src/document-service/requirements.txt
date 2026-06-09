@@ -11,5 +11,5 @@ boto3
 nats-py
 pytest
 pytest-asyncio
-httpx
+httpx2
 
