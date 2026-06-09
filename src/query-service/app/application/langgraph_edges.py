@@ -37,19 +37,9 @@ def route_after_think(state: AgentState) -> str:
     return "answer"
 
 
-def route_after_act(state: AgentState) -> str:
-    """
-    Conditional edge after act_node.
-    - Max iterations reached? → answer_node
-    - Otherwise → think_node (loop back)
-    """
-    if state["iteration"] >= state["max_iterations"]:
-        return "answer"
-    return "think"
-
-
 def route_after_observe(state: AgentState) -> str:
     """
     After observing tool result, always go back to think_node.
+    (think_node uses state["force_answer"] to decide whether to call tools or emit the final answer.)
     """
     return "think"

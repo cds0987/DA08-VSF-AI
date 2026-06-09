@@ -35,6 +35,7 @@ from app.application.shortcuts import (
     EMERGENCY_ANSWER,
     DISTRESS_ANSWER,
     IT_SUPPORT_ANSWER,
+    INJURY_ANSWER,
     USER_PROFILE_PLACEHOLDER,
     next_offtopic_answer,
     IDENTITY_PHRASES,
@@ -204,6 +205,13 @@ async def triage_node(state: AgentState, model: BaseChatModel) -> dict:
             "phase": AgentPhase.DONE,
         }
 
+    if route == "injury":
+        return {
+            "shortcut_response": INJURY_ANSWER,
+            "shortcut_outcome": "SUCCESS",
+            "phase": AgentPhase.DONE,
+        }
+
     if route == "meta_conversation":
         # Look up the most recent prior user message in conversation history.
         # Skip any message that equals the current question — the save-ordering fix
@@ -344,9 +352,20 @@ async def think_node(
     if last_human is None or last_human.content != q:
         messages.append(HumanMessage(content=q))
 
-    # Bind tools and invoke model
-    bound_model = model.bind_tools(tools, tool_choice="auto")
-    response: AIMessage = await bound_model.ainvoke(messages)
+    # If force_answer is set (iteration cap reached or duplicate tool call detected),
+    # invoke the model WITHOUT tools so it MUST emit a final text answer synthesised
+    # from the gathered ToolMessage context.  route_after_think will then route to
+    # answer_node because there are no tool_calls in the response.
+    if state.get("force_answer"):
+        logger.info(
+            "langgraph_think_forced_answer",
+            extra={"session_id": state["session_id"], "iteration": state["iteration"]},
+        )
+        response: AIMessage = await model.ainvoke(messages)
+    else:
+        # Bind tools and invoke model
+        bound_model = model.bind_tools(tools, tool_choice="auto")
+        response: AIMessage = await bound_model.ainvoke(messages)
 
     tool_names = [tc["name"] for tc in (response.tool_calls or [])]
     logger.info(
@@ -403,6 +422,17 @@ async def act_node(
 
     allowed_doc_ids = frozenset(state["allowed_doc_ids"])
     user_id = state["user_id"]
+
+    # Dedup guard: if we have already executed this exact (tool, args) pair in a prior
+    # iteration, set force_answer so think_node will emit a final text response instead
+    # of looping again.  We still execute the tool this time so the LLM has the result.
+    existing_sigs = list(state.get("tool_call_signatures") or [])
+    try:
+        sig = f"{tool_name}:{json.dumps(tool_args, sort_keys=True)}"
+    except (TypeError, ValueError):
+        sig = f"{tool_name}:{str(sorted(tool_args.items()))}"
+    is_duplicate = sig in existing_sigs
+    new_sigs = existing_sigs + [sig]
 
     try:
         if tool_name == "rag_search":
@@ -505,7 +535,16 @@ async def act_node(
         "phase": AgentPhase.ACTING,
         "previous_phase": state["phase"],
         "tool_results": state.get("tool_results", []) + [tool_result],
+        "tool_call_signatures": new_sigs,
     }
+
+    # Duplicate tool call detected — force final text answer on the next think iteration.
+    if is_duplicate:
+        logger.info(
+            "langgraph_act_duplicate_tool_call",
+            extra={"session_id": state["session_id"], "tool": tool_name, "sig": sig[:120]},
+        )
+        new_state["force_answer"] = True
 
     if tool_name == "rag_search" and success:
         seen_docs = {s["document_name"] for s in existing_sources}
@@ -543,11 +582,26 @@ def observe_node(state: AgentState) -> dict:
         },
     )
 
-    return {
+    result: dict = {
         "phase": AgentPhase.OBSERVING,
         "previous_phase": state["phase"],
         "iteration": new_iteration,
     }
+
+    # Iteration cap reached — tell think_node to produce the final answer without
+    # calling any more tools. This makes the loop hard-bounded at max_iterations.
+    if new_iteration >= state["max_iterations"]:
+        logger.info(
+            "langgraph_observe_cap_reached",
+            extra={
+                "session_id": state["session_id"],
+                "iteration": new_iteration,
+                "max_iterations": state["max_iterations"],
+            },
+        )
+        result["force_answer"] = True
+
+    return result
 
 
 # ---------------------------------------------------------------------------

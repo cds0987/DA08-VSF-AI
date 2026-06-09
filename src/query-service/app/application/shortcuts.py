@@ -80,6 +80,18 @@ IT_SUPPORT_ANSWER = (
     "Bạn vui lòng mô tả lỗi cụ thể và liên hệ bộ phận IT Helpdesk để được hỗ trợ trực tiếp."
 )
 
+INJURY_ANSWER = (
+    "Mình rất tiếc khi bạn bị thương. "
+    "Nếu cần cấp cứu, hãy gọi 115 hoặc đến cơ sở y tế gần nhất. "
+    "Nếu bạn muốn xin nghỉ ốm, mình có thể hướng dẫn quy trình nghỉ phép/nghỉ ốm — "
+    "bạn muốn xem số ngày nghỉ còn lại hay quy trình nộp đơn?"
+)
+
+CROSS_USER_ANSWER = (
+    "Mình chỉ có thể tra cứu dữ liệu HR cá nhân của chính bạn. "
+    "Mình không thể cung cấp lương hoặc thông tin nhân sự của nhân viên khác hay phòng ban khác."
+)
+
 
 # ---------------------------------------------------------------------------
 # Phrase sets
@@ -128,6 +140,32 @@ IT_SUPPORT_PHRASES: frozenset[str] = frozenset({
     "ban phim hong", "chuot hong",
     # Network faults
     "mat mang", "mat wifi", "khong co mang", "khong vao duoc mang",
+})
+
+# Physical injury — empathy + 115 + offer sick-leave guidance.
+# Checked BEFORE distress so "gãy chân" routes here, NOT to distress.
+# Uses multi-word phrases requiring both the body part and injury verb.
+INJURY_PHRASES: frozenset[str] = frozenset({
+    "gay chan", "gay tay", "gay xuong", "gay xương",
+    "bong nang", "bong gan",
+    "chay mau",
+    "ngat xiu",
+    "treo chan",   # trẹo chân
+    "bi thuong nang",  # bị thương nặng (physical, not distress)
+})
+
+# Cross-user data requests — REFUSE (asking for another person's personal HR data).
+# MUST NOT match "của tôi" / "cua toi" — those are legitimate self-queries.
+# Checked AFTER security, BEFORE it_support.
+CROSS_USER_PHRASES: frozenset[str] = frozenset({
+    "luong nhan vien",     # lương nhân viên
+    "luong cua nhan vien", # lương của nhân viên
+    "nhan vien phong",     # nhân viên phòng (Finance/HR/...)
+    "luong phong",         # lương phòng
+    "bang luong phong",    # bảng lương phòng
+    "cua nguoi khac",      # của người khác
+    "cua dong nghiep",     # của đồng nghiệp
+    "don nghi cua nhan vien",  # đơn nghỉ của nhân viên
 })
 
 
@@ -200,7 +238,13 @@ def classify_shortcut(question: str) -> tuple[str, str] | None:
     outcome_str is one of: "SUCCESS", "REFUSE", "OFF_TOPIC", "CLARIFY".
 
     Check order (highest-priority first):
-      emergency → distress → identity → user_profile → security → it_support → off_topic → clarify
+      emergency → injury → distress → identity → user_profile → security
+      → cross_user → it_support → off_topic → clarify
+
+    Notes:
+    - injury is checked BEFORE distress so "gãy chân" routes to injury, not distress.
+    - cross_user is checked AFTER security but BEFORE it_support; it must not match
+      "của tôi" self-queries (phrases are phrased to require "nhân viên"/"đồng nghiệp"/etc.).
 
     USER_PROFILE_PLACEHOLDER is returned for user-identity questions — shortcut_node
     replaces it with the actual user profile from state.
@@ -210,6 +254,10 @@ def classify_shortcut(question: str) -> tuple[str, str] | None:
     # Safety-critical checks first — never let the LLM misroute these.
     if _phrase_match(normalized, EMERGENCY_PHRASES):
         return EMERGENCY_ANSWER, "SUCCESS"
+
+    # Physical injury: empathy + 115 + sick-leave offer (distinct from mental distress).
+    if _phrase_match(normalized, INJURY_PHRASES):
+        return INJURY_ANSWER, "SUCCESS"
 
     if _phrase_match(normalized, DISTRESS_PHRASES):
         return DISTRESS_ANSWER, "SUCCESS"
@@ -222,6 +270,10 @@ def classify_shortcut(question: str) -> tuple[str, str] | None:
 
     if _phrase_match(normalized, SECURITY_PHRASES):
         return SECURITY_ANSWER, "REFUSE"
+
+    # Cross-user data request: asking for another person's salary / leave info → REFUSE.
+    if _phrase_match(normalized, CROSS_USER_PHRASES):
+        return CROSS_USER_ANSWER, "REFUSE"
 
     if _phrase_match(normalized, IT_SUPPORT_PHRASES):
         return IT_SUPPORT_ANSWER, "SUCCESS"

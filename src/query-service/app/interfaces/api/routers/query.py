@@ -4,10 +4,35 @@ from fastapi.responses import StreamingResponse
 _SSE_RESPONSES = {
     200: {
         "description": "Server-Sent Events stream. Each line: `data: <json>\\n\\n`. "
-                       "Use curl or EventSource — Swagger UI cannot display SSE.",
+                       "Use EventSource (browser) or PowerShell (`Invoke-RestMethod` / `curl.exe -N`) — "
+                       "Swagger UI cannot display SSE.",
         "content": {"text/event-stream": {"schema": {"type": "string"}}},
     }
 }
+
+_QUERY_DESCRIPTION = """\
+Gửi câu hỏi, nhận phản hồi dạng **Server-Sent Events** (SSE).
+Swagger UI không hiển thị được SSE — dùng PowerShell bên dưới để test.
+
+**PowerShell native** (Invoke-RestMethod — in toàn bộ sau khi stream xong):
+```powershell
+$body = @{ question = "Tôi còn bao nhiêu ngày phép?"; user_id = "mock-user-hr" } | ConvertTo-Json
+Invoke-RestMethod -Uri http://localhost:8001/query -Method Post `
+  -Headers @{ Authorization = "Bearer mock-user-hr" } `
+  -ContentType "application/json" -Body $body
+```
+
+**curl.exe -N** (xem realtime từng SSE event):
+```powershell
+$body = @{ question = "Tôi còn bao nhiêu ngày phép?"; user_id = "mock-user-hr" } | ConvertTo-Json
+$bodyPath = Join-Path $env:TEMP "q.json"
+$body | Set-Content -LiteralPath $bodyPath -NoNewline -Encoding utf8
+curl.exe -N -X POST http://localhost:8001/query `
+  -H "Authorization: Bearer mock-user-hr" `
+  -H "Content-Type: application/json" `
+  --data "@$bodyPath"
+```
+"""
 
 from app.application.ports import AuthenticatedUser
 from app.application.use_cases.query.orchestration import QueryOrchestrationUseCase
@@ -23,7 +48,8 @@ from app.interfaces.api.sse import format_sse
 router = APIRouter(tags=["query"])
 
 
-@router.post("/query", response_class=StreamingResponse, responses=_SSE_RESPONSES)
+@router.post("/query", response_class=StreamingResponse, responses=_SSE_RESPONSES,
+             description=_QUERY_DESCRIPTION)
 async def query(
     request: QueryRequest,
     user: AuthenticatedUser = Depends(get_current_user),
