@@ -12,13 +12,15 @@ on:
   push:
     branches:
       - nguyendev
-      - main
+      - develop
     paths:
       - ".github/workflows/hr-mcp-integration.yml"
       - "src/hr-service/**"
       - "src/mcp-service/app/tools/hr_query.py"
       - "src/mcp-service/config.yaml"
   pull_request:
+    branches:
+      - develop
     paths:
       - ".github/workflows/hr-mcp-integration.yml"
       - "src/hr-service/**"
