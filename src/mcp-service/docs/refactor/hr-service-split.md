@@ -1,6 +1,6 @@
 # Tách `hr_query` thành `hr-service` độc lập
 
-> **Trạng thái:** 🔵 Kế hoạch — chưa bắt tay implement.
+> **Trạng thái:** ✅ Đã triển khai phần tách core: `hr-service` độc lập + `mcp-service` proxy HTTP.
 > Đọc [`docs/maintool/hr_query.md`](../maintool/hr_query.md) để hiểu scope + boundary của tool trước.
 
 ---

@@ -59,4 +59,5 @@ profiles:
     hr_query:
       enabled: ${TOOL_HR_QUERY_ENABLED:-0}
       params:
-        database_url: ${MCP_DATABASE_URL:-}
+        hr_service_url: ${HR_SERVICE_URL:-http://hr-service:8004}
+        internal_token: ${HR_SERVICE_INTERNAL_TOKEN:-}

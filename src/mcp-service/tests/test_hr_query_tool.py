@@ -1,228 +1,226 @@
-"""Unit tests cho HrQueryTool.
-
-Dùng FakeHrRepository inject qua monkeypatch — không cần Postgres thật.
-Test bắt buộc có: happy path mỗi intent + cross-user isolation + unknown user.
-"""
 from __future__ import annotations
 
 import asyncio
-from typing import List, Optional
 
+import httpx
 import pytest
 
 from app.core.config import McpSettings
-from app.domain.entities.tool_io import (
-    AttendanceDTO,
-    LeaveBalanceDTO,
-    LeaveRequestDTO,
-    OnboardingDTO,
-    OnboardingItemDTO,
-)
-from app.domain.repositories.hr_repository import HrRepository
 
-# ── Seed UUIDs (khớp với migration 0001_create_hr_schema) ────────────────────
 USER_HR = "11111111-1111-4111-8111-111111111111"
 USER_FINANCE = "22222222-2222-4222-8222-222222222222"
-USER_UNKNOWN = "33333333-3333-4333-8333-333333333333"
 
 
-# ── FakeHrRepository ──────────────────────────────────────────────────────────
+class FakeResponse:
+    def __init__(self, status_code: int, json_body: dict | None = None, url: str = "http://hr-service:8004/hr/query") -> None:
+        self.status_code = status_code
+        self._json_body = json_body or {}
+        self.request = httpx.Request("POST", url)
+        self.url = url
 
-class FakeHrRepository(HrRepository):
-    """In-memory stub dùng cho unit test — không cần DB."""
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            response = httpx.Response(self.status_code, request=self.request, json=self._json_body)
+            raise httpx.HTTPStatusError("error", request=self.request, response=response)
 
-    async def ping(self) -> None:
-        return
+    def json(self) -> dict:
+        return self._json_body
 
-    async def get_leave_balance(self, user_id: str) -> Optional[LeaveBalanceDTO]:
-        data = {
-            USER_HR:      LeaveBalanceDTO(12, 4, 8, 10, 1, 9),
-            USER_FINANCE: LeaveBalanceDTO(12, 7, 5, 10, 0, 10),
-        }
-        return data.get(user_id)
 
-    async def get_leave_requests(self, user_id: str) -> List[LeaveRequestDTO]:
-        data = {
-            USER_HR: [
-                LeaveRequestDTO("annual", "2026-06-10", "2026-06-11", 2, "approved"),
-                LeaveRequestDTO("sick",   "2026-06-18", "2026-06-18", 1, "pending"),
-            ],
-            USER_FINANCE: [
-                LeaveRequestDTO("annual", "2026-06-18", "2026-06-18", 1, "pending"),
-            ],
-        }
-        return data.get(user_id, [])
+class FakeAsyncClient:
+    def __init__(self, *args, **kwargs) -> None:
+        self.calls: list[tuple[str, str, dict | None, dict | None]] = []
+        self.post_response = FakeResponse(200)
+        self.get_response = FakeResponse(200, {"status": "ok"}, url="http://hr-service:8004/health")
+        self.closed = False
 
-    async def get_attendance(self, user_id: str) -> Optional[AttendanceDTO]:
-        data = {
-            USER_HR:      AttendanceDTO("2026-06", 20, 1, 0),
-            USER_FINANCE: AttendanceDTO("2026-06", 19, 2, 1),
-        }
-        return data.get(user_id)
+    async def post(self, path: str, json=None, headers=None):
+        self.calls.append(("POST", path, json, headers))
+        return self.post_response
 
-    async def get_onboarding(self, user_id: str) -> Optional[OnboardingDTO]:
-        data = {
-            USER_HR: OnboardingDTO(
-                "completed",
-                [
-                    OnboardingItemDTO("Nhận laptop và thẻ", True),
-                    OnboardingItemDTO("Hoàn thành đào tạo bảo mật", True),
-                    OnboardingItemDTO("Gặp gỡ team", True),
-                ],
-                3, 3,
-            ),
-            USER_FINANCE: OnboardingDTO(
-                "in_progress",
-                [
-                    OnboardingItemDTO("Nhận laptop và thẻ", True),
-                    OnboardingItemDTO("Hoàn thành đào tạo bảo mật", False),
-                    OnboardingItemDTO("Gặp gỡ team", False),
-                ],
-                1, 3,
-            ),
-        }
-        return data.get(user_id)
-
-    async def get_payroll(self, user_id: str) -> list:
-        return []
+    async def get(self, path: str, headers=None):
+        self.calls.append(("GET", path, None, headers))
+        return self.get_response
 
     async def aclose(self) -> None:
-        return
+        self.closed = True
 
-
-# ── helpers ───────────────────────────────────────────────────────────────────
 
 class FakeMCP:
     def __init__(self) -> None:
-        self.tools: dict = {}
+        self.tools: dict[str, object] = {}
 
     def tool(self):
         def decorator(func):
             self.tools[func.__name__] = func
             return func
+
         return decorator
 
 
-def _make_tool(monkeypatch) -> tuple:
-    """Trả về (mcp, hr_query_fn) với FakeHrRepository inject."""
-    from app.tools import hr_query as hr_module
-
-    fake_repo = FakeHrRepository()
-    monkeypatch.setattr(hr_module, "_build_hr_repository", lambda _url: fake_repo)
-
-    settings = McpSettings(
-        host="0.0.0.0", port=8003, log_level="INFO", app_env="development",
-        internal_token="", provider="qdrant", collection="rag_chatbot",
-        embed_model="offline", dimension=256, url="", api_key="",
-        embed_base_url="", embed_api_key="", rerank_impl="none",
-        rerank_model="gpt-4o-mini", rerank_base_url="", rerank_api_key="",
-        rerank_timeout_seconds=30.0, rerank_batch_size=8,
-        rerank_passage_chars=800, top_k_candidates=20,
-        rerank_top_k=3, rerank_threshold=0.6, options={},
+def _settings() -> McpSettings:
+    return McpSettings(
+        host="0.0.0.0",
+        port=8003,
+        log_level="INFO",
+        app_env="development",
+        internal_token="",
+        provider="qdrant",
+        collection="rag_chatbot",
+        embed_model="offline",
+        dimension=256,
+        url="",
+        api_key="",
+        embed_base_url="",
+        embed_api_key="",
+        rerank_impl="none",
+        rerank_model="gpt-4o-mini",
+        rerank_base_url="",
+        rerank_api_key="",
+        rerank_timeout_seconds=30.0,
+        rerank_batch_size=8,
+        rerank_passage_chars=800,
+        top_k_candidates=20,
+        rerank_top_k=3,
+        rerank_threshold=0.6,
+        options={},
+        tools_profile={
+            "hr_query": {
+                "enabled": "1",
+                "params": {
+                    "hr_service_url": "http://hr-service:8004",
+                    "internal_token": "test-token",
+                },
+            }
+        },
     )
-    from app.tools.hr_query import HrQueryTool
-    tool = HrQueryTool(settings, {"params": {"database_url": "postgresql://ignored"}})
+
+
+def _tool(monkeypatch, *, post_response: FakeResponse | None = None, get_response: FakeResponse | None = None):
+    import app.tools.hr_query as hr_module
+
+    fake_client = FakeAsyncClient()
+    if post_response is not None:
+        fake_client.post_response = post_response
+    if get_response is not None:
+        fake_client.get_response = get_response
+    monkeypatch.setattr(hr_module.httpx, "AsyncClient", lambda *args, **kwargs: fake_client)
+
+    params = {
+        "params": {
+            "hr_service_url": "http://hr-service:8004",
+            "internal_token": "test-token",
+        }
+    }
+    tool = hr_module.HrQueryTool(_settings(), params)
     mcp = FakeMCP()
     tool.register(mcp)
-    return mcp, mcp.tools["hr_query"]
+    return tool, mcp.tools["hr_query"], fake_client
 
 
-# ── happy path ────────────────────────────────────────────────────────────────
+def test_proxy_leave_balance_shape_and_headers(monkeypatch) -> None:
+    payload = {
+        "intent": "leave_balance",
+        "data": {
+            "annual_total": 12,
+            "annual_used": 4,
+            "annual_remaining": 8,
+            "sick_total": 10,
+            "sick_used": 1,
+            "sick_remaining": 9,
+        },
+        "summary": "ban con 8 ngay phep nam va 9 ngay phep om.",
+    }
+    _, fn, client = _tool(monkeypatch, post_response=FakeResponse(200, payload))
 
-def test_leave_balance_shape_and_summary(monkeypatch) -> None:
-    _, fn = _make_tool(monkeypatch)
     result = asyncio.run(fn(USER_HR, "leave_balance"))
 
-    assert result["intent"] == "leave_balance"
-    assert result["data"] == {
-        "annual_total": 12, "annual_used": 4, "annual_remaining": 8,
-        "sick_total": 10,   "sick_used": 1,  "sick_remaining": 9,
+    assert result == payload
+    assert client.calls[0][0] == "POST"
+    assert client.calls[0][1] == "/hr/query"
+    assert client.calls[0][2] == {"user_id": USER_HR, "intent": "leave_balance"}
+    assert client.calls[0][3] == {"X-Internal-Token": "test-token"}
+
+
+def test_proxy_leave_requests(monkeypatch) -> None:
+    payload = {
+        "intent": "leave_requests",
+        "data": {
+            "requests": [
+                {
+                    "leave_type": "annual",
+                    "start_date": "2026-06-10",
+                    "end_date": "2026-06-11",
+                    "days_count": 2,
+                    "status": "approved",
+                }
+            ]
+        },
+        "summary": "don nghi gan nhat la annual tu 2026-06-10 den 2026-06-11, trang thai approved.",
     }
-    assert "Bạn còn 8 ngày phép năm" in result["summary"]
-    assert "9 ngày phép ốm" in result["summary"]
-    # không có alias key thừa
-    assert set(result.keys()) == {"intent", "data", "summary"}
+    _, fn, _ = _tool(monkeypatch, post_response=FakeResponse(200, payload))
 
-
-def test_leave_requests_shape_and_summary(monkeypatch) -> None:
-    _, fn = _make_tool(monkeypatch)
     result = asyncio.run(fn(USER_HR, "leave_requests"))
 
     assert result["intent"] == "leave_requests"
-    requests = result["data"]["requests"]
-    assert len(requests) == 2
-    assert requests[0]["leave_type"] == "annual"
-    assert requests[0]["start_date"] == "2026-06-10"   # đúng tên field (không phải from_date)
-    assert requests[0]["end_date"] == "2026-06-11"
-    assert requests[0]["days_count"] == 2
-    assert "Đơn nghỉ gần nhất" in result["summary"]
+    assert result["data"]["requests"][0]["leave_type"] == "annual"
     assert set(result.keys()) == {"intent", "data", "summary"}
 
 
-def test_attendance_shape_and_summary(monkeypatch) -> None:
-    _, fn = _make_tool(monkeypatch)
+def test_proxy_attendance(monkeypatch) -> None:
+    payload = {
+        "intent": "attendance",
+        "data": {"period": "2026-06", "work_days": 20, "late_count": 1, "absent_count": 0},
+        "summary": "thang nay ban co 20 ngay cong, di muon 1 lan va vang 0 ngay.",
+    }
+    _, fn, _ = _tool(monkeypatch, post_response=FakeResponse(200, payload))
+
     result = asyncio.run(fn(USER_HR, "attendance"))
 
-    assert result["intent"] == "attendance"
     assert result["data"]["work_days"] == 20
-    assert result["data"]["late_count"] == 1
-    assert result["data"]["absent_count"] == 0
-    assert "20 ngày công" in result["summary"]
     assert set(result.keys()) == {"intent", "data", "summary"}
 
 
-def test_onboarding_shape_and_summary(monkeypatch) -> None:
-    _, fn = _make_tool(monkeypatch)
+def test_proxy_onboarding(monkeypatch) -> None:
+    payload = {
+        "intent": "onboarding",
+        "data": {
+            "status": "completed",
+            "checklist": [{"task": "Nhat laptop va the", "done": True}],
+            "completed_count": 1,
+            "total_count": 1,
+        },
+        "summary": "trang thai onboarding: completed, da hoan thanh 1/1 muc.",
+    }
+    _, fn, _ = _tool(monkeypatch, post_response=FakeResponse(200, payload))
+
     result = asyncio.run(fn(USER_HR, "onboarding"))
 
-    assert result["intent"] == "onboarding"
     assert result["data"]["status"] == "completed"
-    assert result["data"]["completed_count"] == 3
-    assert result["data"]["total_count"] == 3
-    assert "3/3" in result["summary"]
     assert set(result.keys()) == {"intent", "data", "summary"}
 
 
-# ── cross-user isolation (security) ──────────────────────────────────────────
+def test_proxy_raises_on_http_error(monkeypatch) -> None:
+    _, fn, _ = _tool(monkeypatch, post_response=FakeResponse(503, {"detail": "down"}))
 
-def test_cross_user_isolation_leave_balance(monkeypatch) -> None:
-    _, fn = _make_tool(monkeypatch)
-    r_hr      = asyncio.run(fn(USER_HR,      "leave_balance"))
-    r_finance = asyncio.run(fn(USER_FINANCE, "leave_balance"))
-
-    # mỗi user thấy đúng data của mình
-    assert r_hr["data"]["annual_remaining"] == 8
-    assert r_finance["data"]["annual_remaining"] == 5
-    # data không bị lẫn
-    assert r_hr["data"] != r_finance["data"]
+    with pytest.raises(httpx.HTTPStatusError):
+        asyncio.run(fn(USER_HR, "leave_balance"))
 
 
-def test_cross_user_isolation_onboarding(monkeypatch) -> None:
-    _, fn = _make_tool(monkeypatch)
-    r_hr      = asyncio.run(fn(USER_HR,      "onboarding"))
-    r_finance = asyncio.run(fn(USER_FINANCE, "onboarding"))
+def test_verify_hits_health_endpoint(monkeypatch) -> None:
+    tool, _, client = _tool(monkeypatch)
 
-    assert r_hr["data"]["status"] == "completed"
-    assert r_finance["data"]["status"] == "in_progress"
-    assert r_hr["data"]["completed_count"] != r_finance["data"]["completed_count"]
+    asyncio.run(tool.verify())
 
-
-# ── error cases ───────────────────────────────────────────────────────────────
-
-def test_unknown_user_raises(monkeypatch) -> None:
-    _, fn = _make_tool(monkeypatch)
-    with pytest.raises(ValueError, match="no HR data"):
-        asyncio.run(fn(USER_UNKNOWN, "leave_balance"))
+    assert client.calls[0][0] == "GET"
+    assert client.calls[0][1] == "/health"
+    assert client.calls[0][3] == {"X-Internal-Token": "test-token"}
 
 
-def test_summary_uses_proper_vietnamese(monkeypatch) -> None:
-    _, fn = _make_tool(monkeypatch)
-    r_lb = asyncio.run(fn(USER_HR, "leave_balance"))
-    r_at = asyncio.run(fn(USER_HR, "attendance"))
-    r_ob = asyncio.run(fn(USER_HR, "onboarding"))
+def test_aclose_closes_client(monkeypatch) -> None:
+    tool, _, client = _tool(monkeypatch)
 
-    # kiểm tra có dấu tiếng Việt thật sự (không phải romanized)
-    assert "Bạn" in r_lb["summary"]
-    assert "ngày" in r_lb["summary"]
-    assert "Tháng" in r_at["summary"]
-    assert "Trạng thái" in r_ob["summary"]
+    asyncio.run(tool.verify())
+    asyncio.run(tool.aclose())
+
+    assert client.closed is True

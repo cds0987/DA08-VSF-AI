@@ -101,6 +101,17 @@ services:
       - nats
     restart: unless-stopped
 
+  hr-service:
+    build:
+      context: ./src/hr-service
+    ports:
+      - "8004:8004"
+    env_file:
+      - ./deploy/env/hr-service.env
+    depends_on:
+      - nats
+    restart: unless-stopped
+
   nginx:
     image: nginx:1.27-alpine
     depends_on:
@@ -108,6 +119,7 @@ services:
       - document-service
       - query-service
       - mcp-service
+      - hr-service
       - rag-worker
     ports:
       - "80:80"

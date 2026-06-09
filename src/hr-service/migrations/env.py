@@ -1,7 +1,3 @@
-"""Alembic environment cho mcp_db (schema hr_mock).
-
-URL ưu tiên env DATABASE_URL, fallback sqlalchemy.url trong alembic.ini.
-"""
 from __future__ import annotations
 
 import os
@@ -26,7 +22,7 @@ target_metadata = Base.metadata
 def _database_url() -> str:
     url = os.getenv("DATABASE_URL") or config.get_main_option("sqlalchemy.url") or ""
     if not url:
-        raise RuntimeError("Thiếu DATABASE_URL để chạy migration.")
+        raise RuntimeError("Missing DATABASE_URL for migration.")
     return url
 
 
@@ -60,3 +56,4 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
+

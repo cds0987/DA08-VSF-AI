@@ -5,6 +5,8 @@ import json
 import sys
 import types
 
+import httpx
+
 from app.core.config import McpSettings
 from app.core.vectorstore import SearchHit
 from app.interfaces.mcp_server import (
@@ -67,6 +69,53 @@ class StubService:
                 markdown_gcs_uri="gs://bucket/doc-1.md",
             )
         ]
+
+
+class FakeResponse:
+    def __init__(self, status_code: int, json_body: dict | None = None, url: str = "http://hr-service:8004/hr/query") -> None:
+        self.status_code = status_code
+        self._json_body = json_body or {}
+        self.request = httpx.Request("POST", url)
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            response = httpx.Response(self.status_code, request=self.request, json=self._json_body)
+            raise httpx.HTTPStatusError("error", request=self.request, response=response)
+
+    def json(self) -> dict:
+        return self._json_body
+
+
+class FakeAsyncClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, dict | None, dict | None]] = []
+        self.post_response = FakeResponse(
+            200,
+            {
+                "intent": "leave_balance",
+                "data": {
+                    "annual_total": 12,
+                    "annual_used": 4,
+                    "annual_remaining": 8,
+                    "sick_total": 10,
+                    "sick_used": 1,
+                    "sick_remaining": 9,
+                },
+                "summary": "ban con 8 ngay phep nam va 9 ngay phep om.",
+            },
+        )
+        self.get_response = FakeResponse(200, {"status": "ok"}, url="http://hr-service:8004/health")
+
+    async def post(self, path: str, json=None, headers=None):
+        self.calls.append(("POST", path, json, headers))
+        return self.post_response
+
+    async def get(self, path: str, headers=None):
+        self.calls.append(("GET", path, None, headers))
+        return self.get_response
+
+    async def aclose(self) -> None:
+        return None
 
 
 def _settings() -> McpSettings:
@@ -138,10 +187,9 @@ def test_build_mcp_registers_rag_search_tool_and_query_service_shape(monkeypatch
         lambda settings: built_with.append(settings) or stub_service,
     )
 
-    settings = _settings()
     settings = McpSettings(
         **{
-            **settings.__dict__,
+            **_settings().__dict__,
             "tools_profile": {
                 "rag_search": {
                     "embedder": {
@@ -180,7 +228,6 @@ def test_build_mcp_registers_rag_search_tool_and_query_service_shape(monkeypatch
                         "rerank_threshold": "0.4",
                     },
                 },
-                # hr_query chưa dùng trong test này — tắt để tránh cần DATABASE_URL
                 "hr_query": {"enabled": "0"},
             },
         }
@@ -235,21 +282,23 @@ def test_build_mcp_registers_hr_query_tool(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "mcp.server", fake_server_module)
     monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", fake_fastmcp_module)
 
-    # Inject FakeHrRepository — không cần Postgres thật (cũng không cần SQLite)
     import app.tools.hr_query as hr_module
-    from tests.test_hr_query_tool import FakeHrRepository, USER_HR
+    from tests.test_hr_query_tool import USER_HR
 
-    monkeypatch.setattr(hr_module, "_build_hr_repository", lambda _url: FakeHrRepository())
+    fake_client = FakeAsyncClient()
+    monkeypatch.setattr(hr_module.httpx, "AsyncClient", lambda *args, **kwargs: fake_client)
 
-    settings = _settings()
     settings = McpSettings(
         **{
-            **settings.__dict__,
+            **_settings().__dict__,
             "tools_profile": {
                 "rag_search": {"enabled": "0"},
                 "hr_query": {
                     "enabled": "1",
-                    "params": {"database_url": ""},
+                    "params": {
+                        "hr_service_url": "http://hr-service:8004",
+                        "internal_token": "test-token",
+                    },
                 },
             },
         }
@@ -266,8 +315,14 @@ def test_build_mcp_registers_hr_query_tool(monkeypatch) -> None:
     assert result["intent"] == "leave_balance"
     assert result["data"]["annual_remaining"] == 8
     assert result["data"]["sick_remaining"] == 9
-    assert "Bạn còn 8 ngày phép năm" in result["summary"]
+    assert "ban con 8 ngay phep nam" in result["summary"].lower()
     assert set(result.keys()) == {"intent", "data", "summary"}
+    assert fake_client.calls[0] == (
+        "POST",
+        "/hr/query",
+        {"user_id": USER_HR, "intent": "leave_balance"},
+        {"X-Internal-Token": "test-token"},
+    )
 
 
 def test_build_mcp_registers_both_tools_simultaneously(monkeypatch) -> None:
@@ -287,14 +342,14 @@ def test_build_mcp_registers_both_tools_simultaneously(monkeypatch) -> None:
     )
 
     import app.tools.hr_query as hr_module
-    from tests.test_hr_query_tool import FakeHrRepository, USER_HR
+    from tests.test_hr_query_tool import USER_HR
 
-    monkeypatch.setattr(hr_module, "_build_hr_repository", lambda _url: FakeHrRepository())
+    fake_client = FakeAsyncClient()
+    monkeypatch.setattr(hr_module.httpx, "AsyncClient", lambda *args, **kwargs: fake_client)
 
-    settings = _settings()
     settings = McpSettings(
         **{
-            **settings.__dict__,
+            **_settings().__dict__,
             "tools_profile": {
                 "rag_search": {
                     "embedder": {
@@ -316,9 +371,7 @@ def test_build_mcp_registers_both_tools_simultaneously(monkeypatch) -> None:
                         "collection": "team_docs",
                         "embed_model": "text-embedding-3-large",
                     },
-                    "reranker": {
-                        "impl": "none",
-                    },
+                    "reranker": {"impl": "none"},
                     "retrieval": {
                         "top_k_candidates": "10",
                         "rerank_top_k": "3",
@@ -327,7 +380,10 @@ def test_build_mcp_registers_both_tools_simultaneously(monkeypatch) -> None:
                 },
                 "hr_query": {
                     "enabled": "1",
-                    "params": {"database_url": ""},
+                    "params": {
+                        "hr_service_url": "http://hr-service:8004",
+                        "internal_token": "test-token",
+                    },
                 },
             },
         }
@@ -336,12 +392,11 @@ def test_build_mcp_registers_both_tools_simultaneously(monkeypatch) -> None:
     mcp, tools = build_mcp(settings)
 
     tool_names = {tool.name for tool in tools}
-    assert "rag_search" in tool_names, "rag_search phải được register"
-    assert "hr_query" in tool_names, "hr_query phải được register"
+    assert "rag_search" in tool_names
+    assert "hr_query" in tool_names
     assert "rag_search" in mcp.tools
     assert "hr_query" in mcp.tools
 
-    # Mỗi tool vẫn hoạt động độc lập
     hr_result = asyncio.run(mcp.tools["hr_query"](USER_HR, "leave_balance"))
     assert hr_result["intent"] == "leave_balance"
     assert hr_result["data"]["annual_remaining"] == 8
@@ -379,3 +434,4 @@ def test_internal_token_auth_middleware_accepts_valid_header() -> None:
 
     assert messages[0]["status"] == 200
     assert messages[1]["body"] == b"ok"
+

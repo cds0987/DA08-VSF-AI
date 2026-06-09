@@ -1,0 +1,2 @@
+"""hr-service application package."""
+
