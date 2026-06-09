@@ -55,6 +55,12 @@ class EmptyMarkdownEngine(StubEngine):
         return 0 if not payload.markdown.strip() else 1
 
 
+class RecordingZeroChunkEngine(StubEngine):
+    async def ingest(self, payload):
+        self.ingest_calls.append(payload)
+        return 0
+
+
 class SlowEngine(StubEngine):
     async def ingest(self, payload):
         self.ingest_calls.append(payload)
@@ -350,12 +356,12 @@ def test_ingest_use_case_fails_when_ingest_produces_zero_chunks() -> None:
     asyncio.run(scenario())
 
 
-def test_ingest_use_case_fails_for_empty_csv_source(
+def test_ingest_use_case_passes_empty_markdown_from_empty_csv_source_and_fails_loudly(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def scenario() -> None:
-        engine = EmptyMarkdownEngine()
+        engine = RecordingZeroChunkEngine()
         documents = InMemoryDocumentRepository()
         artifact_store = StubArtifactStore()
         source_root = tmp_path / "sources"
@@ -381,6 +387,7 @@ def test_ingest_use_case_fails_for_empty_csv_source(
         assert processed is not None
         assert processed.status is IngestJobStatus.FAILED
         assert processed.error_message and "0 chunks" in processed.error_message
+        assert engine.ingest_calls[0].markdown == ""
 
     asyncio.run(scenario())
 

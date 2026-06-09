@@ -140,7 +140,7 @@ def _read_text_file(path: Path) -> _ParseStep:
 
 
 def _csv_row_to_markdown_line(row: list[str], width: int) -> str:
-    cells = [cell.strip() for cell in row]
+    cells = [cell.strip().replace("|", "\\|") for cell in row]
     if len(cells) < width:
         cells.extend([""] * (width - len(cells)))
     return "| " + " | ".join(cells[:width]) + " |"

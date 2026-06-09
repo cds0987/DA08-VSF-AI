@@ -200,6 +200,36 @@ def test_local_file_parser_reads_csv_source_under_source_root(
     asyncio.run(scenario())
 
 
+def test_local_file_parser_escapes_pipe_inside_csv_cell(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        source_root = tmp_path / "sources"
+        source_root.mkdir()
+        source_path = source_root / "report.csv"
+        source_path.write_text("slot,value\nA,10:00|11:00\n", encoding="utf-8")
+        monkeypatch.setenv("SOURCE_ROOT", str(source_root))
+        parser = LocalFileParser(max_workers=1)
+
+        try:
+            parsed = await parser.parse(
+                document_id="doc-1",
+                file_type="csv",
+                source_uri="local://report.csv",
+            )
+        finally:
+            parser.close()
+
+        assert parsed.markdown == (
+            "| slot | value |\n"
+            "| --- | --- |\n"
+            "| A | 10:00\\|11:00 |"
+        )
+
+    asyncio.run(scenario())
+
+
 def test_local_file_parser_requires_extractor_for_images(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
