@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -12,7 +12,30 @@ from app.core.config import McpSettings
 from app.tools.base import register_tool
 
 logger = logging.getLogger("mcp-service")
-MVP_INTENTS = {"leave_balance", "leave_requests", "attendance", "onboarding"}
+
+# Nguồn sự thật cho tập intent hr_query. `HrIntent` được publish ra MCP schema
+# (qua list_tools) để client discover được; `MVP_INTENTS` là chốt chặn runtime
+# server-side. Hai cái PHẢI khớp nhau — đổi 1 cái nhớ đổi cái kia, và khớp với
+# `Literal` ở hr-service routes.py (POST /hr/query). payroll/benefits/performance
+# là self-access (chỉ data của chính user), hr-service ghi audit mỗi lần truy cập.
+HrIntent = Literal[
+    "leave_balance",
+    "leave_requests",
+    "attendance",
+    "onboarding",
+    "payroll",
+    "benefits",
+    "performance",
+]
+MVP_INTENTS = {
+    "leave_balance",
+    "leave_requests",
+    "attendance",
+    "onboarding",
+    "payroll",
+    "benefits",
+    "performance",
+}
 
 
 def _mask_user_id(user_id: str) -> str:
@@ -80,7 +103,12 @@ class HrQueryTool:
 
     def register(self, mcp: Any) -> None:
         @mcp.tool()
-        async def hr_query(user_id: str, intent: str) -> dict[str, Any]:
+        async def hr_query(user_id: str, intent: HrIntent) -> dict[str, Any]:
+            """Truy vấn dữ liệu HR cá nhân của user hiện tại (chỉ đọc, luôn lọc theo user_id).
+
+            intent: leave_balance | leave_requests | attendance | onboarding
+                    | payroll | benefits | performance.
+            """
             return await self._call(user_id, intent)
 
     async def verify(self) -> None:

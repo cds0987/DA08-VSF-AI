@@ -210,12 +210,12 @@ def test_proxy_raises_on_http_error(monkeypatch) -> None:
 def test_proxy_rejects_unknown_intent(monkeypatch) -> None:
     _, fn, client = _tool(monkeypatch)
 
-    result = asyncio.run(fn(USER_HR, "payroll"))
+    result = asyncio.run(fn(USER_HR, "recruitment"))
 
     assert result == {
-        "intent": "payroll",
+        "intent": "recruitment",
         "data": {},
-        "summary": "Intent 'payroll' chưa được hỗ trợ.",
+        "summary": "Intent 'recruitment' chưa được hỗ trợ.",
     }
     assert client.calls == []
 

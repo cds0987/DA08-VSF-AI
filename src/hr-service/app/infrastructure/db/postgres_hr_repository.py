@@ -9,19 +9,24 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.domain.entities.dtos import (
     AttendanceDTO,
+    BenefitItemDTO,
+    BenefitsDTO,
     LeaveBalanceDTO,
     LeaveRequestDTO,
     OnboardingDTO,
     OnboardingItemDTO,
     PayrollDTO,
+    PerformanceReviewDTO,
 )
 from app.domain.repositories.hr_repository import HrRepository
 from app.infrastructure.db.models import (
     AttendanceRecord,
+    BenefitsRecord,
     LeaveBalanceRecord,
     LeaveRequestRecord,
     OnboardingRecord,
     PayrollSummaryRecord,
+    PerformanceReviewRecord,
 )
 
 
@@ -144,6 +149,41 @@ class PostgresHrRepository(HrRepository):
                     )
                     for row in rows
                 ]
+
+        return await asyncio.to_thread(_query)
+
+    async def get_benefits(self, user_id: str) -> Optional[BenefitsDTO]:
+        def _query() -> Optional[BenefitsDTO]:
+            with self._session() as session:
+                row = session.get(BenefitsRecord, user_id)
+                if row is None:
+                    return None
+                items = [
+                    BenefitItemDTO(name=str(item.get("name", "")), value=str(item.get("value", "")))
+                    for item in (row.items or [])
+                    if isinstance(item, dict)
+                ]
+                return BenefitsDTO(items=items)
+
+        return await asyncio.to_thread(_query)
+
+    async def get_performance(self, user_id: str) -> Optional[PerformanceReviewDTO]:
+        def _query() -> Optional[PerformanceReviewDTO]:
+            with self._session() as session:
+                row = (
+                    session.query(PerformanceReviewRecord)
+                    .filter(PerformanceReviewRecord.user_id == user_id)
+                    .order_by(PerformanceReviewRecord.period.desc())
+                    .first()
+                )
+                if row is None:
+                    return None
+                return PerformanceReviewDTO(
+                    period=row.period,
+                    rating=row.rating,
+                    kpi=list(row.kpi or []),
+                    reviewer_user_id=row.reviewer_user_id,
+                )
 
         return await asyncio.to_thread(_query)
 
