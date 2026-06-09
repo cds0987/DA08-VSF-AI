@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -11,7 +14,27 @@ from app.interfaces.api.routers import documents
 
 
 settings = get_settings()
-app = FastAPI(title=settings.app_name)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    app.state.nats_publisher = NatsPublisher(settings)
+    app.state.nats_status_subscriber = await start_status_subscriber(
+        settings,
+        app.state.nats_publisher,
+    )
+    try:
+        yield
+    finally:
+        subscriber = getattr(app.state, "nats_status_subscriber", None)
+        if subscriber is not None:
+            await subscriber.close()
+        publisher = getattr(app.state, "nats_publisher", None)
+        if publisher is not None:
+            await publisher.close()
+
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,25 +45,6 @@ app.add_middleware(
 )
 
 app.include_router(documents.router)
-
-
-@app.on_event("startup")
-async def startup() -> None:
-    app.state.nats_publisher = NatsPublisher(settings)
-    app.state.nats_status_subscriber = await start_status_subscriber(
-        settings,
-        app.state.nats_publisher,
-    )
-
-
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    subscriber = getattr(app.state, "nats_status_subscriber", None)
-    if subscriber is not None:
-        await subscriber.close()
-    publisher = getattr(app.state, "nats_publisher", None)
-    if publisher is not None:
-        await publisher.close()
 
 
 @app.get("/health")

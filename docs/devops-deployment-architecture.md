@@ -20,13 +20,14 @@ Môi trường này ưu tiên:
 - `query-service`
 - `rag-worker`
 - `mcp-service`
+- `hr-service` (internal only, không route public qua Nginx)
 - `nats` (JetStream enabled)
 - `redis`
 
 ### Thành phần managed / external
 - **GCP Cloud Storage (GCS)**: lưu file tài liệu gốc
 - **Qdrant Cloud**: vector database
-- **Cloud SQL PostgreSQL**: 4–5 databases riêng cho services
+- **Cloud SQL PostgreSQL**: 6 databases riêng cho services (`user_db`, `doc_db`, `query_db`, `mcp_db`, `hr_db`, `langfuse_db`)
 - **GitHub Actions**: CI/CD trigger từ branch `develop`
 
 > Frontend hiện chưa đủ code trong repo để containerize hoàn chỉnh, nên môi trường demo trước mắt tập trung vào backend/API. Khi frontend hoàn thiện, chỉ cần thêm container và route Nginx.
@@ -53,12 +54,14 @@ Services nội bộ
   - rag-worker       <-> NATS JetStream
   - query-service    <-> NATS JetStream
   - mcp-service      <-> NATS request-reply
+  - mcp-service      <-> hr-service (internal HTTP/gRPC)
+  - hr-service       -> NATS JetStream (`hr.employee_profile.updated`)
   - query-service    <-> Redis
   - document-service <-> GCS
   - rag-worker       <-> GCS
   - rag-worker       <-> Qdrant Cloud
   - mcp-service      <-> Qdrant Cloud
-  - user/document/query/mcp-service <-> Cloud SQL PostgreSQL
+  - user/document/query/mcp/hr-service <-> Cloud SQL PostgreSQL
 ```
 
 ---
@@ -117,6 +120,7 @@ Khi dự án ổn hơn có thể mở rộng:
 - `src/document-service/Dockerfile`
 - `src/query-service/Dockerfile`
 - `src/mcp-service/Dockerfile`
+- `src/hr-service/Dockerfile`
 - `.github/workflows/deploy-develop.yml`
 - `infra/gcp/gce-setup.sh`
 - `deploy/env/*.env.example`

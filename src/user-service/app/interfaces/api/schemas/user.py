@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -5,6 +7,7 @@ class UserItem(BaseModel):
     id: str
     email: str
     role: str
+    account_type: Literal["internal", "external"]
     department: str
     is_active: bool
 

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 
 class UserRole(str, Enum):
@@ -13,8 +13,9 @@ class User:
     id: str
     email: str
     role: UserRole | str
-    is_active: bool
-    department: str
+    is_active: bool = True
+    account_type: Literal["internal", "external"] = "internal"
+    department: str = ""
     hashed_password: Optional[str] = None
     auth_provider: str = "local"
 

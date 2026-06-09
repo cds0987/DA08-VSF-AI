@@ -23,11 +23,15 @@ DOC_ID = str(uuid4())
 
 
 def admin_user() -> CurrentUser:
-    return CurrentUser(id=ADMIN_ID, role="admin", department="IT")
+    return CurrentUser(id=ADMIN_ID, role="admin", account_type="internal", department="IT")
 
 
 def normal_user() -> CurrentUser:
-    return CurrentUser(id=str(uuid4()), role="user", department="Finance")
+    return CurrentUser(id=str(uuid4()), role="user", account_type="internal", department="Finance")
+
+
+def external_user() -> CurrentUser:
+    return CurrentUser(id=str(uuid4()), role="user", account_type="external", department="Finance")
 
 
 def sample_document(
@@ -188,4 +192,37 @@ def test_file_presign_forbidden_when_acl_does_not_match() -> None:
     )
 
     assert response.status_code == 403
+
+
+def test_external_user_cannot_get_internal_document_file() -> None:
+    doc = sample_document(classification="internal")
+    repo = InMemoryDocuments([doc])
+    app.dependency_overrides[dependencies.get_current_user] = external_user
+    app.dependency_overrides[dependencies.get_get_document_file_use_case] = (
+        lambda: GetDocumentFileUseCase(repo, FakeStorage())
+    )
+
+    response = TestClient(app).get(
+        f"/documents/{doc.id}/file",
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_internal_user_can_get_internal_document_file() -> None:
+    doc = sample_document(classification="internal")
+    repo = InMemoryDocuments([doc])
+    app.dependency_overrides[dependencies.get_current_user] = normal_user
+    app.dependency_overrides[dependencies.get_get_document_file_use_case] = (
+        lambda: GetDocumentFileUseCase(repo, FakeStorage())
+    )
+
+    response = TestClient(app).get(
+        f"/documents/{doc.id}/file",
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["file_type"] == "pdf"
 

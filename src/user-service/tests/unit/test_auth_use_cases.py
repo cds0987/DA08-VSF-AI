@@ -78,6 +78,7 @@ class InMemoryUsers:
             email=user.email,
             role=user.role,
             is_active=is_active,
+            account_type=user.account_type,
             department=user.department,
             hashed_password=user.hashed_password,
             auth_provider=user.auth_provider,
@@ -172,6 +173,7 @@ def make_user(active: bool = True) -> User:
         email="user@company.com",
         role=UserRole.USER,
         is_active=active,
+        account_type="internal",
         department="HR",
         hashed_password="hashed:secret",
     )
@@ -206,6 +208,17 @@ async def test_login_success_issues_access_and_refresh_token() -> None:
     assert result.refresh_token.count(".") == 1
     assert (await state.get_login_state(user.id)).failed_login_count == 0
     assert audit.actions == ["login"]
+
+
+@pytest.mark.asyncio
+async def test_login_required_admin_role_rejects_normal_user() -> None:
+    user = make_user()
+    use_case, _, audit = make_login_case(user)
+
+    with pytest.raises(AuthenticationError):
+        await use_case.execute("user@company.com", "secret", required_role="admin")
+
+    assert audit.actions == ["login_failed"]
 
 
 @pytest.mark.asyncio
@@ -267,6 +280,25 @@ def test_access_token_default_ttl_is_15_minutes() -> None:
 
     assert settings.access_token_ttl_minutes == 15
     assert token_service.ttl_minutes == 15
+
+
+def test_jwt_payload_includes_account_type() -> None:
+    from jose import jwt
+
+    from app.infrastructure.security.jwt_token_service import JwtTokenService
+
+    secret = "strong-test-secret"
+    user = make_user()
+    token_service = JwtTokenService(secret_key=secret)
+
+    access_token = token_service.create_access_token(user)
+    payload = jwt.decode(access_token.token, secret, algorithms=["HS256"])
+
+    assert payload["sub"] == user.id
+    assert payload["user_id"] == user.id
+    assert payload["role"] == "user"
+    assert payload["account_type"] == "internal"
+    assert payload["jti"] == access_token.jti
 
 
 @pytest.mark.asyncio

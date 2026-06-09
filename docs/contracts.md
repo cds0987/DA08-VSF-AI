@@ -23,7 +23,8 @@ class User:
     email: str
     role: UserRole
     is_active: bool = True
-    department: str = ""                        # dùng để check Secret-level access
+    account_type: str = "internal"              # "internal" | "external"
+    department: str = ""                        # Phase 1 snapshot; production source of truth: HR Service
     hashed_password: Optional[str] = None       # None nếu đăng nhập qua Microsoft SSO
     auth_provider: str = "local"                # "local" | "microsoft"
 ```
@@ -68,10 +69,20 @@ from typing import List, Optional
 from datetime import datetime
 
 @dataclass
+class Source:
+    document_id: Optional[str]
+    document_name: str
+    caption: str
+    heading_path: List[str]
+    score: float
+    source_gcs_uri: str
+
+@dataclass
 class Message:
     role: str           # "user" | "assistant"
     content: str
     created_at: datetime
+    sources: Optional[List[Source]] = None  # chỉ có ở assistant message có citation
 
 @dataclass
 class ConversationContext:
@@ -98,8 +109,14 @@ class ConversationRepository(ABC):
         """Lấy context cho LLM: summary của history cũ + recent_k turns gần nhất verbatim."""
 
     @abstractmethod
-    async def save_message(self, user_id: str, role: str, content: str) -> None:
-        """Lưu 1 tin nhắn vào lịch sử."""
+    async def save_message(self, user_id: str, role: str, content: str,
+                           sources: Optional[List[Source]] = None,
+                           latency_ms: Optional[int] = None) -> None:
+        """Lưu 1 tin nhắn vào lịch sử.
+
+        `sources` chỉ set cho assistant message khi câu trả lời có citation từ `rag_search`.
+        User message, HR-only answer hoặc fallback answer để `sources=None`/`[]`.
+        """
 
     @abstractmethod
     async def update_summary(self, user_id: str, summary: str) -> None:
@@ -125,16 +142,19 @@ from typing import List, Optional
 class DocumentAccessRepository(ABC):
 
     @abstractmethod
-    async def get_allowed_doc_ids(self, user_id: str, role: str, department: str) -> Optional[List[str]]:
-        """Query bảng projection `document_access` trong query_db → trả list doc_id user được phép đọc.
+    async def get_allowed_doc_ids(self, user_id: str, role: str, account_type: str,
+                                  department: Optional[str]) -> Optional[List[str]]:
+        """Query projection `document_access` + `user_access_profile` trong query_db
+        → trả list doc_id user được phép đọc.
         Database-per-service: KHÔNG đọc thẳng doc_db của Document Service. Projection này do
         `doc_access_subscriber` cập nhật từ event `doc.access` (NATS JetStream) — eventual consistency.
+        `user_access_profile_subscriber` cập nhật từ event `hr.employee_profile.updated`.
         None = user chỉ có quyền đọc public docs.
         Logic:
           admin       → None (search tất cả)
-          user/public → None (chỉ public)
-          internal    → list tất cả doc không phải secret/top_secret
-          secret      → doc có allowed_departments contains department
+          public      → internal/external đều đọc được
+          internal    → account_type == internal
+          secret      → account_type == internal AND doc có allowed_departments contains department
           top_secret  → doc có allowed_user_ids contains user_id
         Kết quả nên được cache Redis TTL ~60s.
         """
@@ -247,7 +267,7 @@ class HrQueryInput:
     user_id: str                        # do MCP client inject từ JWT — KHÔNG để LLM tự điền
     intent: str                         # 'leave_balance' | 'leave_requests' | 'payroll'
 
-# --- Output DTO (field bám đúng schema hr_mock trong data-schema.md) ---
+# --- Output DTO (field bám đúng schema hr_svc trong data-schema.md) ---
 @dataclass
 class LeaveBalanceDTO:
     annual_total: int
@@ -259,11 +279,31 @@ class LeaveBalanceDTO:
 
 @dataclass
 class LeaveRequestDTO:
+    id: str
     leave_type: str                     # 'annual' | 'sick' | 'personal'
     start_date: str                     # 'YYYY-MM-DD'
     end_date: str                       # 'YYYY-MM-DD'
     days_count: int
-    status: str                         # 'pending' | 'approved' | 'rejected'
+    status: str                         # 'pending' | 'approved' | 'rejected' | 'cancelled'
+    approver_user_id: Optional[str] = None
+    rejected_reason: Optional[str] = None
+
+@dataclass
+class EmployeeProfileDTO:
+    user_id: str
+    employee_code: str
+    department: str
+    job_title: str
+    manager_user_id: Optional[str]
+    employment_status: str
+
+@dataclass
+class CreateLeaveRequestInput:
+    user_id: str                        # do Query Service inject từ JWT
+    leave_type: str
+    start_date: str                     # 'YYYY-MM-DD'
+    end_date: str
+    reason: str
 
 @dataclass
 class PayrollDTO:
@@ -306,45 +346,39 @@ class HrQueryResult:
 > `hr_query(HrQueryInput) -> HrQueryResult` (output typed — tùy `intent` mà field tương ứng được set,
 > kèm `summary` để LLM dùng trực tiếp). Query Service là MCP client; tham số nhạy cảm (`document_ids`, `user_id`)
 > do client inject, không tin LLM.
+> **Leave request MVP**: AI có thể giúp tạo draft đơn nghỉ phép, nhưng chỉ gọi tool tạo đơn sau khi user xác nhận.
+> Tool tạo đơn gọi HR Service, HR Service set `status='pending'` và `approver_user_id = employees.manager_user_id`.
 
 ```python
-# src/mcp-service/app/domain/repositories/hr_repository.py — đọc hr_mock (mcp_db)
+# src/mcp-service/app/domain/repositories/hr_client.py — gọi HR Service nội bộ
 from abc import ABC, abstractmethod
 from typing import List, Optional
 from app.domain.entities.tool_io import LeaveBalanceDTO, LeaveRequestDTO, PayrollDTO
 
-class HrRepository(ABC):
-    """Query schema hr_mock trong mcp_db. LUÔN filter WHERE user_id (do MCP client inject từ JWT).
-    Implement: PostgresHrRepository (sync SQLAlchemy + asyncio.to_thread).
-    """
-
-    @abstractmethod
-    async def ping(self) -> None:
-        """Kiểm tra kết nối DB — gọi lúc startup verify (fail-closed)."""
+class HrClient(ABC):
+    """Gọi HR Service. HR Service LUÔN filter WHERE user_id (do MCP client inject từ JWT).
+    External account hoặc user không map tới employee active record → no data/forbidden."""
 
     @abstractmethod
     async def get_leave_balance(self, user_id: str) -> Optional[LeaveBalanceDTO]:
-        """Số phép năm/ốm còn lại (hr_mock.leave_balance)."""
+        """Số phép năm/ốm còn lại (hr_svc.leave_balance)."""
 
     @abstractmethod
     async def get_leave_requests(self, user_id: str) -> List[LeaveRequestDTO]:
-        """Danh sách đơn nghỉ phép + trạng thái (hr_mock.leave_requests), mới nhất trước."""
+        """Danh sách đơn nghỉ phép + trạng thái (hr_svc.leave_requests)."""
 
     @abstractmethod
-    async def get_attendance(self, user_id: str) -> Optional[AttendanceDTO]:
-        """Thông tin chấm công tháng hiện tại (hr_mock.attendance)."""
+    async def create_leave_request(self, data: CreateLeaveRequestInput) -> LeaveRequestDTO:
+        """Tạo đơn nghỉ phép sau khi user đã confirm draft.
 
-    @abstractmethod
-    async def get_onboarding(self, user_id: str) -> Optional[OnboardingDTO]:
-        """Trạng thái onboarding + checklist (hr_mock.onboarding)."""
+        HR Service resolve sếp trực tiếp bằng `employees.manager_user_id`,
+        set `leave_requests.approver_user_id`, `status='pending'`.
+        Không dùng `user-service.role` làm quyền duyệt nghiệp vụ.
+        """
 
     @abstractmethod
     async def get_payroll(self, user_id: str) -> List[PayrollDTO]:
-        """Bảng lương theo period (hr_mock.payroll_summary) — Cao, chưa expose MVP."""
-
-    @abstractmethod
-    async def aclose(self) -> None:
-        """Giải phóng connection pool."""
+        """Bảng lương theo period (hr_svc.payroll_summary)."""
 ```
 
 ---
@@ -534,6 +568,7 @@ from pydantic import BaseModel
 from typing import List
 
 class Source(BaseModel):
+    document_id: Optional[str] = None
     document_name: str
     caption: str
     heading_path: List[str]

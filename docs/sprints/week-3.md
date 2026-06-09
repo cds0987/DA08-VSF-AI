@@ -34,7 +34,7 @@
 
 ## ✅ Definition of Done cuối tuần
 - [ ] **Toàn bộ DoD Phase 1** đóng (auth + SSO, upload/ingestion, Q&A streaming + nguồn, classification enforce, Notification Center, Analytics Dashboard, Document Viewer, conversation history, guardrails, feedback).
-- [ ] Stack chạy ổn định trên **GCP** (12 containers + Cloud SQL), HTTPS hoạt động, smoke test 10 câu pass.
+- [ ] Stack chạy ổn định trên **GCP** (13 containers + Cloud SQL), HTTPS hoạt động, smoke test 10 câu pass.
 - [ ] **RAGAS** có đủ số liệu 5 chỉ số + load test có số liệu → **đạt ngưỡng**.
 - [ ] Quyết định rõ: tiếp Phase 2 hay tune thêm (theo nhánh quyết định ở [roadmap.md](../roadmap.md)).
 

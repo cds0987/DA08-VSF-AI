@@ -4,10 +4,10 @@
 
 | Role | Người phụ trách | Phụ trách chính | Service / Folder | Bắt đầu sau |
 |------|----------------|----------------|-----------------|-------------|
-| **SA** | Lê Hữu Hưng | Domain design, contracts, API schemas, code review | `app/domain/` (cả 5 services) | Ngay — làm đầu tiên |
+| **SA** | Lê Hữu Hưng | Domain design, contracts, API schemas, code review | `app/domain/` (6 backend services) | Ngay — làm đầu tiên |
 | **Frontend Dev** | Đặng Hồ Hải | 2 micro-frontend: Chat (End User) + Admin console, dùng chung base layer (auth, design system) | `src/frontend/chat/`, `src/frontend/admin/`, `src/frontend/base/` (Nuxt 4) | Sau khi SA freeze schemas |
 | **Backend Dev** | Vũ Quang Dũng | User Service + Document Service: auth, JWT, document management + **chủ NATS subject contract & JetStream config** | `src/user-service/`, `src/document-service/`, `infra/nats/` | Sau khi SA freeze domain |
-| **RAG Engineer** | Trần Thanh Nguyên | RAG Worker (ingestion + retrieval, NATS) + **MCP Tool Service** (tool rag_search/hr_query + rerank) | `src/rag-worker/app/`, `src/mcp-service/app/` | Sau khi SA freeze domain |
+| **RAG Engineer** | Trần Thanh Nguyên | RAG Worker + MCP Tool Service + HR Service: ingestion/retrieval, MCP tools, HR personal data + leave request MVP | `src/rag-worker/app/`, `src/mcp-service/app/`, `src/hr-service/app/` | Sau khi SA freeze domain |
 | **AI/Agent Engineer** | Phạm Quốc Dũng | Query Service: LLM orchestration, SSE streaming, notify, memory, MCP client | `src/query-service/app/` | Sau khi SA freeze domain |
 | **DevOps** | Trần Hữu Gia Huy | Docker, GCP, CI/CD, Nginx, **deploy/vận hành NATS container**, monitoring | `infra/`, `docker-compose.yml` | Ngay — song song với SA |
 
@@ -139,6 +139,11 @@ src/frontend/chat/
 ```
 → Gọi **Query Service** (chat/SSE/notifications) + `GET /documents/{id}/file` (presigned, để xem citation).
 
+**Leave request UI trong Chat app:**
+- `LeaveRequestDraft`: hiển thị draft đơn nghỉ phép do AI trích xuất; user phải bấm/nhắn xác nhận thì mới nộp.
+- `LeaveApprovalPanel`: chỉ hiện khi API pending approval trả về đơn có `approver_user_id = current_user_id`.
+- Người duyệt không dựa vào `user-service.role`; cùng một user app, ai là sếp trực tiếp của đơn nào thì thấy đơn đó.
+
 #### `src/frontend/admin/` — App Admin (container `nuxt-admin` :3001)
 ```
 src/frontend/admin/
@@ -204,7 +209,7 @@ src/user-service/app/
 ```
 
 **Key logic — user-service:**
-- `login_use_case.py`: nhận thêm param `required_role` (None = mọi role, "admin" = chỉ admin) → bcrypt verify → nếu `required_role` không khớp trả cùng `InvalidCredentialsError` (không lộ lý do) → sign JWT HS256 `{sub, role, department, jti}`
+- `login_use_case.py`: nhận thêm param `required_role` (None = mọi role, "admin" = chỉ admin) → bcrypt verify → nếu `required_role` không khớp trả cùng `InvalidCredentialsError` (không lộ lý do) → sign JWT HS256 `{sub/user_id, role, account_type, jti}`. `department` chỉ là snapshot Phase 1 nếu cần; source of truth production là HR Service.
 - `postgres_user_repository.py`: implement `get_by_email`, `get_by_id`, `create`, `list_all`, `set_active` từ `UserRepository` ABC
 - `dependencies.py`: `get_current_user()` — decode JWT bằng shared secret, trả về `User`; `require_admin()` — chặn non-admin khỏi `/users`
 - `users.py`: backing trang `admin/users` của Frontend (deactivate/reactivate). Chỉ Admin truy cập.
@@ -258,8 +263,9 @@ src/document-service/app/
 ```
 infra/nats/
 ├── subjects.md                  ← Đăng ký subject + payload (source of truth): doc.ingest, doc.status,
-│                                   doc.access, notify.doc_new  (rag.search payload do RAG Eng định nghĩa)
-└── jetstream.conf               ← Cấu hình stream/retention cho các subject persist (doc.*, notify.*)
+│                                   doc.access, notify.doc_new, hr.employee_profile.updated
+│                                   (rag.search payload do RAG Eng định nghĩa)
+└── jetstream.conf               ← Cấu hình stream/retention cho các subject persist (doc.*, notify.*, hr.*)
 ```
 - **Backend Dev** quyết: tên subject, payload, stream nào persist (JetStream). Đổi subject/payload → **báo Backend Dev** (tất cả service follow).
 - `rag.search` (request-reply giữa mcp-service ↔ rag-worker): payload do **RAG Eng** định nghĩa, nhưng vẫn đăng ký trong `subjects.md` để mọi người thấy.
@@ -272,7 +278,9 @@ infra/nats/
 
 ### RAG Engineer — Trần Thanh Nguyên
 
-**Phụ trách rag-worker + mcp-service. Bắt đầu Ngày 3. Workload nặng nhất Phase 1 (cả đường RAG: retrieval + rerank + tool).**
+**Phụ trách RAG Worker + MCP Tool Service + HR Service.**
+
+**Bắt đầu Ngày 3. Workload nặng nhất Phase 1: rag-worker + mcp-service + hr-service (retrieval + rerank + tool + HR personal data/leave request MVP).**
 
 **Files RAG Engineer tạo:**
 ```
@@ -322,34 +330,63 @@ src/rag-worker/app/
 - **OpenAI Embedding**: Nếu unreachable → ingestion fail, publish `doc.status` với status `failed`, Admin retry thủ công
 - **Gemini Vision API**: Tương tự — fail ingestion, không ảnh hưởng query flow
 
+#### HR Service
+
+**Files RAG Engineer tạo — hr-service:**
+```
+src/hr-service/app/
+├── application/
+│   └── services/
+│       └── employee_profile_service.py     ← CRUD employee profile + publish hr.employee_profile.updated
+├── infrastructure/
+│   ├── db/
+│   │   ├── models.py                       ← SQLAlchemy model hr_svc.* (hr_db)
+│   │   └── postgres_employee_repository.py ← Implement EmployeeRepository
+│   └── messaging/
+│       └── nats_publisher.py               ← Publish hr.employee_profile.updated
+└── interfaces/
+    └── api/
+        ├── main.py                         ← FastAPI :8004 internal only
+        └── routers/
+            └── hr.py                       ← Employee profile + leave/payroll internal endpoints
+```
+
+**Key logic — hr-service:**
+- Sở hữu `hr_db.hr_svc.*`: employee profile, department, employment_status, leave balance, leave requests, payroll summary.
+- Publish `hr.employee_profile.updated` khi `account_type`, department hoặc employment status thay đổi để Query Service cập nhật `query_svc.user_access_profile`.
+- Personal HR data chỉ trả cho `account_type=internal` và employee `active`; external account không có HR personal access.
+- MVP leave request: tạo đơn trong `hr_svc.leave_requests` sau khi user confirm draft; set `status='pending'`, `approver_user_id = employees.manager_user_id`. DB record là đơn chính thức, không tạo Word/PDF.
+- Approve/reject: chỉ user có `leave_requests.approver_user_id = current_user_id AND status='pending'` được duyệt. Không dùng `user-service.role` làm quyền duyệt nghiệp vụ.
+- MCP Service gọi HR Service qua internal HTTP/gRPC cho tool `hr_query`; Query Service không đọc trực tiếp `hr_db`.
+
 #### MCP Tool Service (RAG Engineer cũng phụ trách)
 
 > Service riêng expose tool qua giao thức **MCP** (transport Streamable HTTP/SSE, port 8003). Query Service
 > agent — và agent tương lai (Teams bot…) — là MCP client dùng chung tool. Self-contained: mỗi tool tự lo backend.
-> RAG Engineer ôm cả đường RAG: rag-worker (retrieval) + mcp-service (tool rag_search + rerank).
+> RAG Engineer ôm cả đường RAG và HR tool path: rag-worker (retrieval) + mcp-service (tool rag_search/hr_query/create_leave_request + rerank) + hr-service.
 
 **Files RAG Engineer tạo — mcp-service:**
 ```
 src/mcp-service/app/
 ├── interfaces/
-│   └── mcp_server.py                         ← Khai báo + expose 2 tool qua MCP: rag_search, hr_query
+│   └── mcp_server.py                         ← Khai báo + expose 3 tool qua MCP: rag_search, hr_query, create_leave_request
 ├── application/
 │   └── tools/
 │       ├── rag_search.py                     ← (query rewrite) → NATS rag.search (Top-5) → rerank → Top-3 SearchResult
-│       └── hr_query.py                        ← query mcp_db.hr_mock.* filter user_id → dữ liệu HR cá nhân
+│       └── hr_query.py                        ← call HR Service filter current user_id → dữ liệu HR cá nhân
 ├── infrastructure/
 │   ├── nats_rag_client.py                    ← NATS request-reply rag.search tới rag-worker (timeout 10s)
 │   ├── bge_reranker_client.py                ← Implement RerankService — BGE-Reranker-v2-m3 (Top-5 → Top-3)
 │   ├── langfuse_client.py                    ← Trace tool rag_search/hr_query (fail-silently)
 │   └── db/
-│       ├── models.py                          ← SQLAlchemy model hr_mock.* (mcp_db)
-│       └── postgres_hr_repository.py          ← Query hr_mock filter user_id
+│       ├── hr_client.py                       ← Internal client gọi HR Service
+│       └── models.py                          ← Tool metadata/config nếu cần
 └── main.py                                    ← Khởi MCP server (HTTP/SSE) :8003
 ```
 
 **Key logic:**
 - `rag_search(query, document_ids, top_k)`: nhận `document_ids` từ Query Service (đã lọc ACL) → NATS `rag.search` tới rag-worker → rerank Top-3. **Tool không tự quyết quyền** — chỉ dùng `document_ids` được truyền vào.
-- `hr_query(user_id, intent)`: nhận `user_id` từ Query Service → query `mcp_db.hr_mock.*` với `WHERE user_id`. Không tin user_id do LLM bịa — Query Service inject từ JWT.
+- `hr_query(user_id, intent)`: nhận `user_id` từ Query Service → gọi HR Service nội bộ. Không tin user_id do LLM bịa — Query Service inject từ JWT. MCP Service chỉ là tool gateway, không sở hữu HR data.
 - **Bảo mật**: mọi tham số nhạy cảm (`document_ids`, `user_id`) do **MCP client (Query Service) inject**, không để LLM tự điền.
 
 **Không được đụng:** `app/domain/` (SA owns), user-service, document-service, query-service.
@@ -410,12 +447,14 @@ src/query-service/app/
 3. **Semantic Cache check:** embed câu hỏi → cosine similarity > 0.95 → return cached response ngay
 4. **LlamaIndex FunctionCallingAgent** (MCP client) liệt kê tool từ **mcp-service** → LLM tự chọn tool:
    - `rag_search`: MCP tool ở mcp-service → (query rewrite) → NATS `rag.search` → RRF → Top-5 → rerank → Top-3
-   - `hr_query`: MCP tool ở mcp-service → query `mcp_db.hr_mock.*` filter `user_id`
+   - `hr_query`: MCP tool ở mcp-service → gọi HR Service filter `user_id`
+   - `create_leave_request`: chỉ gọi sau khi user confirm draft; Query Service inject `user_id`, HR Service tự resolve `approver_user_id`
    - **Bảo mật:** Query Service **tự inject** `document_ids = allowed_doc_ids` (từ bước 2) và `user_id = current_user` vào lời gọi tool — KHÔNG để LLM tự điền (tránh vượt quyền).
-5. Build prompt: system prompt + summary + recent messages + retrieved context
-6. Gọi OpenAI GPT-4o mini streaming: yield từng token → gửi SSE `data: {"token":"..."}`, kết thúc gửi `data: {"done":true,"sources":[...]}`
-7. Lưu message: `conv_repo.save_message(user_id, "user", question)` + `save_message(user_id, "assistant", full_answer)`
-8. Summary buffer: nếu conversation > 10 turns → gọi LLM compress → `conv_repo.update_summary()`
+5. Leave request confirm flow: nếu intent là tạo đơn nghỉ phép, AI trích xuất fields, hỏi lại thông tin thiếu, lưu draft vào Redis `pending_action:{user_id}` TTL ~10 phút, và chỉ gọi `create_leave_request` khi user trả lời xác nhận.
+6. Build prompt: system prompt + summary + recent messages + retrieved context
+7. Gọi OpenAI GPT-4o mini streaming: yield từng token → gửi SSE `data: {"token":"..."}`, kết thúc gửi `data: {"done":true,"sources":[...]}`
+8. Lưu message: `conv_repo.save_message(user_id, "user", question)` + `save_message(user_id, "assistant", full_answer, sources=...)`
+9. Summary buffer: nếu conversation > 10 turns → gọi LLM compress → `conv_repo.update_summary()`
 
 *Failure Handling:*
 - **MCP call (query-service → mcp-service)**: Circuit Breaker (`pybreaker`, fail_max=5, reset_timeout=30s) trong `mcp_client.py` — Circuit Open → trả 503 ngay
@@ -444,9 +483,9 @@ src/query-service/app/
 
 **Files DevOps tạo:**
 ```
-docker-compose.yml               ← 12 containers: nginx, nuxt-chat, nuxt-admin, user-service,
+docker-compose.yml               ← 13 containers: nginx, nuxt-chat, nuxt-admin, user-service,
                                     document-service, query-service, rag-worker, mcp-service,
-                                    nats (JetStream), qdrant, redis, langfuse :3100
+                                    hr-service, nats (JetStream), qdrant, redis, langfuse :3100
                                     (PostgreSQL = GCP Cloud SQL external, không có container)
 
 src/user-service/Dockerfile
@@ -454,6 +493,7 @@ src/document-service/Dockerfile
 src/query-service/Dockerfile
 src/rag-worker/Dockerfile
 src/mcp-service/Dockerfile
+src/hr-service/Dockerfile
 src/frontend/chat/Dockerfile
 src/frontend/admin/Dockerfile     ← (frontend/base là Nuxt layer, không có Dockerfile riêng)
 
@@ -500,6 +540,7 @@ Ngày 3+ (song song):
   Frontend  → frontend/base (auth + design system) trước → frontend/chat (chat SSE, notifications, document viewer) + frontend/admin (documents, users, analytics)
   Backend Dev       → user-service (auth, DB, JWT, quản lý user) + document-service (upload, GCS, NATS doc.ingest/doc.status)
   RAG Engineer      → rag-worker (ingestion Parent-Child + Gemini OCR + retrieval) + mcp-service (tool rag_search/hr_query + rerank)
+                    + hr-service (employee profile, HR data, leave request MVP, hr.employee_profile.updated)
   AI/Agent Engineer → query-service (FunctionCallingAgent + MCP client + SSE streaming + notify + history)
   DevOps            → GCP GCE setup + CI/CD + Langfuse server
 ```
@@ -522,14 +563,14 @@ Câu hỏi user
      │        ↓
      │   [RAG Eng] BGE-Reranker-v2-m3 (mcp-service): Top-5 → Top-3
      │
-     └── [RAG Eng] tool hr_query (mcp-service) → query mcp_db.hr_mock.* WHERE user_id = current_user
+     └── [RAG Eng] tool hr_query (mcp-service) → call HR Service WHERE user_id = current_user
      ↓
 [AI Eng / Query Service]   build prompt → OpenAI GPT-4o mini streaming → SSE về FE
 ```
 
 **Ranh giới dữ liệu:**
 - **RAG Engineer** ôm cả đường RAG: rag-worker (embed + hybrid search Top-5) **và** mcp-service (tool `rag_search` =
-  rag.search + **rerank Top-5→Top-3**; `hr_query` = đọc `mcp_db.hr_mock`). Tool self-contained, agent nào gọi cũng được.
+  rag.search + **rerank Top-5→Top-3**; `hr_query` = gọi HR Service nội bộ). Tool self-contained, agent nào gọi cũng được.
 - **AI/Agent Engineer** (Query Service, MCP client): quyết định `document_ids`/`user_id` (ACL), gọi tool qua MCP, build prompt, stream SSE.
 - mcp-service không tự quyết quyền — chỉ nhận `document_ids`/`user_id` do Query Service inject.
 
@@ -541,8 +582,8 @@ Câu hỏi user
 |------|-----------------|----------|
 | SA | Nặng tuần 1 → nhẹ dần (review PR) | Review, không code |
 | Frontend Dev | **Nặng** — 2 micro-frontend Nuxt 4: base layer (auth + design system) + Chat app (SSE + Notification Center + Document Viewer + conversation history) + Admin app (documents + users + Analytics Dashboard) | Trung bình — mở rộng dashboard, realtime 2 chiều |
-| Backend Dev | **Nặng hơn trước** — user-service (auth + user CRUD) + document-service (upload, GCS, NATS doc.ingest/doc.status, delete) + **chủ NATS subject contract** | Nhẹ — ít thay đổi |
-| RAG Engineer | **Rất nặng** — rag-worker (ingestion Parent-Child + Gemini OCR + retrieval Top-5) + mcp-service (tool rag_search/hr_query + rerank) | Tune chất lượng, chunk config |
+| Backend Dev | **Nặng** — user-service (auth + user CRUD) + document-service (upload, GCS, NATS doc.ingest/doc.status, delete) + **chủ NATS subject contract** | Nhẹ — ít thay đổi |
+| RAG Engineer | **Rất nặng** — rag-worker (ingestion Parent-Child + Gemini OCR + retrieval Top-5) + mcp-service (tool rag_search/hr_query/create_leave_request + rerank) + hr-service (employee profile/HR data/leave request MVP) | Tune chất lượng, chunk config |
 | AI/Agent Engineer | **Nặng** — query-service (FunctionCallingAgent + MCP client + SSE + notify + history) | Teams Bot (cũng là MCP client), dashboard analytics |
 | DevOps | Trung bình — Docker + GCP setup | Nhẹ — maintain |
 
@@ -591,6 +632,7 @@ feature branches:
   feat/hai/fe-admin
   feat/dung-vq/user-service
   feat/dung-vq/document-service
+  feat/nguyen/hr-service
 ```
 
 ### PR Checklist
@@ -609,8 +651,9 @@ feature branches:
 | `SearchResult` dataclass | SA define, RAG Engineer implement (trả về), AI/Agent Engineer consume (rerank + build prompt) | Sửa → báo SA → SA update contracts.md → tất cả update |
 | `DocumentAccessRepository` ABC | SA define, AI/Agent Engineer implement (`postgres_document_access_repo.py`) | Sửa → báo SA |
 | `RerankService` ABC | SA define, **RAG Engineer** implement trong **mcp-service** (`bge_reranker_client.py`) | Sửa → báo SA |
-| MCP tool contract (`rag_search`, `hr_query` I/O) | SA define; **RAG Engineer** implement (mcp-service), AI Engineer consume (Query Service MCP client) | Đổi tên/tham số tool → báo cả RAG Eng + AI Eng |
-| API schemas (Pydantic) | SA define, Backend Dev + AI/Agent Engineer implement, Frontend Dev consume | Sửa → báo SA |
+| MCP tool contract (`rag_search`, `hr_query`, `create_leave_request` I/O) | SA define; **RAG Engineer** implement (mcp-service), AI Engineer consume (Query Service MCP client) | Đổi tên/tham số tool → báo cả RAG Eng + AI Eng |
+| HR Service implementation | SA define schema/contract; **RAG Engineer** implement `src/hr-service/`; AI Engineer consume qua MCP tool, không gọi DB trực tiếp | Đổi HR schema/API/event → báo SA + AI Eng |
+| API schemas (Pydantic) | SA define, Backend Dev + RAG Engineer + AI/Agent Engineer implement, Frontend Dev consume | Sửa → báo SA |
 | `requirements.txt` | Tất cả | Thêm package → mở PR, không tự pip install rồi push |
 | `docker-compose.yml` | DevOps owns | Thêm env var mới → báo DevOps |
 | NATS subject contract + JetStream config (`infra/nats/`) | **Backend Dev** owns (rag.search payload = RAG Eng) | Đổi tên subject / payload / stream → báo Backend Dev; DevOps deploy container theo config |

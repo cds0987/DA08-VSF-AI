@@ -8,9 +8,10 @@ cp src/document-service/.env.example  src/document-service/.env
 cp src/query-service/.env.example     src/query-service/.env
 cp src/rag-worker/.env.example        src/rag-worker/.env
 cp src/mcp-service/.env.example       src/mcp-service/.env
+cp src/hr-service/.env.example        src/hr-service/.env
 ```
 
-> **Quan trọng:** `JWT_SECRET_KEY` phải giống nhau ở cả 5 services. User Service phát hành token; Document Service và Query Service verify locally bằng cùng secret — không gọi network qua User Service mỗi request. (RAG Worker chỉ giao tiếp NATS, MCP Service là internal — gọi từ Query Service.)
+> **Quan trọng:** `JWT_SECRET_KEY` phải giống nhau ở các service cần verify JWT. User Service phát hành token; Document Service và Query Service verify locally bằng cùng secret — không gọi network qua User Service mỗi request. JWT cần có `user_id`, `role`, `account_type`. (RAG Worker chỉ giao tiếp NATS, MCP Service và HR Service là internal.)
 
 ---
 
@@ -99,7 +100,7 @@ OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 MCP_SERVICE_URL=http://mcp-service:8003
 MCP_TIMEOUT_SECONDS=10
 
-# NATS (subscribe doc.access + notify.doc_new)
+# NATS (subscribe doc.access + notify.doc_new + hr.employee_profile.updated)
 NATS_URL=nats://nats:4222
 NATS_JETSTREAM_ENABLED=true
 
@@ -121,7 +122,7 @@ LANGFUSE_HOST=http://langfuse:3100
 | `OPENAI_LLM_MODEL` | Model LLM — streaming + Function Calling | `gpt-4o-mini` |
 | `OPENAI_EMBEDDING_MODEL` | Model embedding — 1536 dims | `text-embedding-3-small` |
 | `MCP_SERVICE_URL` | Endpoint MCP server (rag_search, hr_query) | `http://mcp-service:8003` |
-| `NATS_URL` | URL kết nối NATS (doc.access, notify.doc_new) | `nats://nats:4222` |
+| `NATS_URL` | URL kết nối NATS (doc.access, notify.doc_new, hr.employee_profile.updated) | `nats://nats:4222` |
 | `LANGFUSE_*` | LLM observability (traces, token cost, latency) | Self-hosted tại `:3100` |
 
 ---
@@ -175,7 +176,7 @@ LANGFUSE_HOST=http://langfuse:3100
 ## MCP Tool Service — `src/mcp-service/.env.example`
 
 ```env
-# Database (Cloud SQL — mcp_db, chứa hr_mock)
+# Database (Cloud SQL — mcp_db, chỉ chứa tool metadata/config nếu cần)
 DATABASE_URL=postgresql+asyncpg://user:password@<cloud-sql-ip>:5432/mcp_db
 
 # JWT (verify token nội bộ do Query Service truyền — optional)
@@ -194,6 +195,10 @@ OPENAI_LLM_MODEL=gpt-4o-mini
 RERANKER_MODEL=BAAI/bge-reranker-v2-m3
 RERANKER_TOP_N=3
 
+# HR Service (tool hr_query gọi nội bộ)
+HR_SERVICE_URL=http://hr-service:8004
+HR_SERVICE_TIMEOUT_SECONDS=5
+
 # MCP server
 MCP_TRANSPORT=streamable-http
 MCP_PORT=8003
@@ -201,12 +206,40 @@ MCP_PORT=8003
 
 | Biến | Mô tả | Lấy ở đâu |
 |------|-------|-----------|
-| `DATABASE_URL` | Connection string PostgreSQL | Cloud SQL IP — database `mcp_db` (hr_mock) |
+| `DATABASE_URL` | Connection string PostgreSQL | Cloud SQL IP — database `mcp_db` (tool metadata/config nếu cần) |
 | `JWT_SECRET_KEY` | Phải khớp với User Service (nếu verify token nội bộ) | Dùng cùng key đã generate |
 | `NATS_URL` | URL kết nối NATS (gọi rag.search tới RAG Worker) | `nats://nats:4222` |
 | `OPENAI_API_KEY` | Key gọi OpenAI (query rewrite) | platform.openai.com → API keys |
 | `RERANKER_MODEL` | Model rerank cross-encoder | `BAAI/bge-reranker-v2-m3` |
+| `HR_SERVICE_URL` | Endpoint HR Service nội bộ cho tool `hr_query` | `http://hr-service:8004` |
 | `MCP_TRANSPORT` / `MCP_PORT` | Transport + port MCP server | `streamable-http` / `8003` |
+
+---
+
+## HR Service — `src/hr-service/.env.example`
+
+```env
+# Database (Cloud SQL — hr_db)
+DATABASE_URL=postgresql+asyncpg://user:password@<cloud-sql-ip>:5432/hr_db
+
+# JWT (optional, nếu endpoint internal cần verify token/service token)
+JWT_SECRET_KEY=your-secret-key-change-in-production
+JWT_ALGORITHM=HS256
+
+# NATS (publish hr.employee_profile.updated cho Query Service projection)
+NATS_URL=nats://nats:4222
+NATS_JETSTREAM_ENABLED=true
+
+# HR server
+HR_SERVICE_PORT=8004
+```
+
+| Biến | Mô tả | Lấy ở đâu |
+|------|-------|-----------|
+| `DATABASE_URL` | Connection string PostgreSQL | Cloud SQL IP — database `hr_db` |
+| `JWT_SECRET_KEY` | Dùng cùng key nếu endpoint internal verify JWT/service token | Dùng cùng key đã generate |
+| `NATS_URL` | URL kết nối NATS để publish `hr.employee_profile.updated` | `nats://nats:4222` |
+| `HR_SERVICE_PORT` | Port internal của HR Service | `8004` |
 
 ---
 
@@ -240,7 +273,7 @@ NUXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8001     # /admin/metrics
 | `NUXT_PUBLIC_DOCUMENT_SERVICE_URL` | Upload / quản lý tài liệu (Admin only) | Admin |
 | `NUXT_PUBLIC_QUERY_SERVICE_URL` | Query / conversations / feedback (Chat); `/admin/metrics` (Admin) | Chat + Admin |
 
-> **Production note:** Frontend deploy cùng GCE với backend. Nginx route `/api/user/*` → `user-service:8000`, `/api/documents/*` → `document-service:8002`, `/api/query/*` → `query-service:8001`, `/api/mcp/*` → `mcp-service:8003`. Không cần CORS config vì cùng domain. (MCP Service chủ yếu được Query Service gọi nội bộ.)
+> **Production note:** Frontend deploy cùng GCE với backend. Nginx route `/api/user/*` → `user-service:8000`, `/api/documents/*` → `document-service:8002`, `/api/query/*` → `query-service:8001`, `/api/mcp/*` → `mcp-service:8003` nếu cần debug/tool gateway. Không cần CORS config vì cùng domain. `hr-service:8004` deploy cùng Docker Compose nhưng **internal only**, không route public qua Nginx; MCP Service gọi nội bộ bằng `HR_SERVICE_URL`.
 
 ---
 

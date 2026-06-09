@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -12,13 +12,26 @@ class Base(DeclarativeBase):
 
 class UserModel(Base):
     __tablename__ = "users"
-    __table_args__ = {"schema": "user_svc"}
+    __table_args__ = (
+        CheckConstraint(
+            "account_type IN ('internal', 'external')",
+            name="ck_users_account_type",
+        ),
+        {"schema": "user_svc"},
+    )
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     hashed_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
     auth_provider: Mapped[str] = mapped_column(String(20), nullable=False, default="local")
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="user")
+    account_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="internal",
+        server_default="internal",
+        index=True,
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     department: Mapped[str] = mapped_column(String(100), nullable=False, default="")
     failed_login_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

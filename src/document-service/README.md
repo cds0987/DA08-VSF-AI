@@ -30,12 +30,13 @@ File cau hinh mau nam o [src/document-service/.env.example](D:/DA08-VSF/src/docu
 
 ```powershell
 cd src/document-service
-copy .env.example .env
+python -m venv venv
+.\venv\Scripts\python.exe -m pip install --upgrade pip
 .\venv\Scripts\pip.exe install -r requirements.txt
 .\venv\Scripts\uvicorn.exe app.interfaces.api.main:app --reload --port 8002
 ```
 
-Neu ban khong dung virtualenv cua Windows, hay thay bang Python environment dang co san.
+Tao file `.env` trong folder nay truoc khi chay neu can override DB/NATS/GCS. Neu ban khong dung virtualenv cua Windows, hay thay bang Python environment dang co san.
 
 ## Chay test tu dong hien co
 
@@ -43,6 +44,9 @@ Test unit va API hien co dung fake repository, fake storage va fake publisher, n
 
 ```powershell
 cd src/document-service
+python -m venv venv
+.\venv\Scripts\python.exe -m pip install --upgrade pip
+.\venv\Scripts\pip.exe install -r requirements.txt
 .\venv\Scripts\python.exe -m pytest
 ```
 
@@ -67,7 +71,7 @@ Tai lieu nay huong dan test `document-service` theo dung flow that:
 
 Muc tieu la chay song song ca `user-service` va `document-service` tren may local ma khong bi loi auth.
 
-## 1. Kien truc test local
+## 1. Kien truc test local 
 
 Khi test theo flow nay, chung ta chay:
 
@@ -200,6 +204,7 @@ CREATE TABLE IF NOT EXISTS user_svc.users (
     hashed_password VARCHAR(255),
     auth_provider VARCHAR(20) NOT NULL DEFAULT 'local',
     role VARCHAR(20) NOT NULL DEFAULT 'user',
+    account_type VARCHAR(20) NOT NULL DEFAULT 'internal',
     is_active BOOLEAN NOT NULL DEFAULT true,
     department VARCHAR(100) NOT NULL DEFAULT '',
     failed_login_count INTEGER NOT NULL DEFAULT 0,
@@ -207,6 +212,9 @@ CREATE TABLE IF NOT EXISTS user_svc.users (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
+
+CREATE INDEX IF NOT EXISTS idx_users_account_type
+ON user_svc.users(account_type);
 
 CREATE TABLE IF NOT EXISTS user_svc.refresh_tokens (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -284,6 +292,7 @@ INSERT INTO user_svc.users (
     hashed_password,
     auth_provider,
     role,
+    account_type,
     is_active,
     department
 )
@@ -293,6 +302,7 @@ VALUES
     crypt('***REDACTED-SEED-ADMIN-PW***', gen_salt('bf')),
     'local',
     'admin',
+    'internal',
     true,
     'IT'
 ),
@@ -301,13 +311,24 @@ VALUES
     crypt('DemoUserPassword123!', gen_salt('bf')),
     'local',
     'user',
+    'internal',
     true,
     'HR'
+),
+(
+    'external01@partner.com',
+    crypt('DemoExternalPassword123!', gen_salt('bf')),
+    'local',
+    'user',
+    'external',
+    true,
+    'Partner'
 )
 ON CONFLICT (email) DO UPDATE SET
     hashed_password = EXCLUDED.hashed_password,
     auth_provider = EXCLUDED.auth_provider,
     role = EXCLUDED.role,
+    account_type = EXCLUDED.account_type,
     is_active = EXCLUDED.is_active,
     department = EXCLUDED.department,
     updated_at = now();
@@ -322,7 +343,8 @@ Thoat `psql`:
 Tai khoan test:
 
 - admin: `admin@company.com` / `***REDACTED-SEED-ADMIN-PW***`
-- user: `user01@company.com` / `DemoUserPassword123!`
+- internal user: `user01@company.com` / `DemoUserPassword123!`
+- external user: `external01@partner.com` / `DemoExternalPassword123!`
 
 ## 6. Cau hinh .env cho ca 2 service
 
@@ -364,6 +386,8 @@ Dung 2 terminal rieng.
 
 ```powershell
 cd D:\DA08-VSF\src\user-service
+python -m venv venv
+.\venv\Scripts\python.exe -m pip install --upgrade pip
 .\venv\Scripts\pip.exe install -r requirements.txt
 .\venv\Scripts\python.exe -m uvicorn app.interfaces.api.main:app --reload --host 127.0.0.1 --port 8000
 ```
@@ -372,12 +396,13 @@ cd D:\DA08-VSF\src\user-service
 
 ```powershell
 cd D:\DA08-VSF\src\document-service
-copy .env.example .env
+python -m venv venv
+.\venv\Scripts\python.exe -m pip install --upgrade pip
 .\venv\Scripts\pip.exe install -r requirements.txt
 .\venv\Scripts\python.exe -m uvicorn app.interfaces.api.main:app --reload --host 127.0.0.1 --port 8002
 ```
 
-Sau khi `copy .env.example .env`, nho mo `src/document-service/.env` va sua lai dung gia tri o Muc 6.2 truoc khi chay server.
+Tao hoac sua `src/document-service/.env` dung gia tri o Muc 6.2 truoc khi chay server.
 
 ### 7.1 Cach chay song song ma khong loi
 
@@ -429,6 +454,22 @@ $UserToken = $UserLogin.access_token
 $UserToken
 ```
 
+### 8.3 Login bang external user
+
+```powershell
+$ExternalLogin = Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8000/auth/login `
+  -ContentType "application/json" `
+  -Body (@{
+    email = "external01@partner.com"
+    password = "DemoExternalPassword123!"
+  } | ConvertTo-Json)
+
+$ExternalToken = $ExternalLogin.access_token
+$ExternalToken
+```
+
 Kiem tra token admin dung:
 
 ```powershell
@@ -436,6 +477,14 @@ Invoke-RestMethod `
   -Method Get `
   -Uri http://127.0.0.1:8000/auth/me `
   -Headers @{ Authorization = "Bearer $AdminToken" }
+```
+
+Token dung contract phai co `sub`, `role`, `account_type`, `department`. `document-service` se tra `401` neu token thieu `account_type`.
+
+Swagger/OpenAPI cua service nam o:
+
+```text
+http://127.0.0.1:8002/docs
 ```
 
 ## 9. Test document-service bang access token tu user-service
@@ -486,6 +535,9 @@ docker run --rm -it natsio/nats-box:latest sh -lc "nats --server nats://host.doc
 
 Upload lai 1 file nua, ban se thay payload co cac truong:
 
+- `event_id`
+- `event_version`
+- `occurred_at`
 - `doc_id`
 - `gcs_key`
 - `document_name`
@@ -504,10 +556,12 @@ docker run --rm -it natsio/nats-box:latest sh -lc "nats --server nats://host.doc
 
 Khi upload:
 
+- co `event_id`, `event_version`, `occurred_at`
 - `deleted = false`
 
 Khi delete:
 
+- co `event_id`, `event_version`, `occurred_at`
 - `deleted = true`
 
 ### 9.5 Goi GET /documents
@@ -532,7 +586,7 @@ Invoke-RestMethod `
 
 ### 9.7 Goi GET /documents/{id}/file
 
-Neu document la `internal`, user thuong cung co the lay URL.
+Neu document la `internal`, chi user co `account_type=internal` moi lay duoc URL.
 
 ```powershell
 Invoke-RestMethod `
@@ -548,10 +602,23 @@ Ket qua mong doi:
 - co `file_type`
 - `expires_in = 300`
 
+External user se bi chan voi document `internal`:
+
+```powershell
+Invoke-RestMethod `
+  -Method Get `
+  -Uri "http://127.0.0.1:8002/documents/$DocId/file" `
+  -Headers @{ Authorization = "Bearer $ExternalToken" } `
+| ConvertTo-Json -Depth 10
+```
+
+Ket qua mong doi: HTTP `403`.
+
 Neu muon test ACL:
 
 - upload voi `classification = secret` va `allowed_departments = HR`
-- dang nhap user department `HR` thi duoc xem
+- internal user department `HR` thi duoc xem
+- external user department `HR` van bi `403`
 - user khac department thi bi `403`
 
 Vi du upload `secret`:
@@ -575,13 +642,17 @@ $SecretDocId = $UploadSecret.document_id
 Indexed:
 
 ```powershell
-docker run --rm -it natsio/nats-box:latest sh -lc "nats --server nats://host.docker.internal:4222 pub doc.status '{\"doc_id\":\"$DocId\",\"status\":\"indexed\",\"chunk_count\":3}'"
+$StatusEventId = [guid]::NewGuid().ToString()
+$OccurredAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+docker run --rm -it natsio/nats-box:latest sh -lc "nats --server nats://host.docker.internal:4222 pub doc.status '{\"event_id\":\"$StatusEventId\",\"event_version\":1,\"occurred_at\":\"$OccurredAt\",\"doc_id\":\"$DocId\",\"status\":\"indexed\",\"chunk_count\":3}'"
 ```
 
 Failed:
 
 ```powershell
-docker run --rm -it natsio/nats-box:latest sh -lc "nats --server nats://host.docker.internal:4222 pub doc.status '{\"doc_id\":\"$DocId\",\"status\":\"failed\",\"error\":\"indexing failed\"}'"
+$StatusEventId = [guid]::NewGuid().ToString()
+$OccurredAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+docker run --rm -it natsio/nats-box:latest sh -lc "nats --server nats://host.docker.internal:4222 pub doc.status '{\"event_id\":\"$StatusEventId\",\"event_version\":1,\"occurred_at\":\"$OccurredAt\",\"doc_id\":\"$DocId\",\"status\":\"failed\",\"error\":\"indexing failed\"}'"
 ```
 
 ### 9.9 Kiem tra update status va notify.doc_new
@@ -665,10 +736,16 @@ Ban dang dung token cua user thuong de goi:
 
 - `POST /documents/upload`
 - `GET /documents`
-- `GET /documents/{id}`
 - `DELETE /documents/{id}`
 
 Hay dung admin token.
+
+Neu `GET /documents/{id}` hoac `GET /documents/{id}/file` tra `403`, hay kiem tra ACL cua document:
+
+- `public`: moi user dang nhap deu xem duoc
+- `internal`: chi `account_type=internal`
+- `secret`: `account_type=internal` va `department` nam trong `allowed_departments`
+- `top_secret`: `user_id` nam trong `allowed_user_ids`
 
 ### 11.4 Upload fail
 
@@ -686,6 +763,6 @@ Tat `uvicorn` va chay lai.
 ## Ghi chu thiet ke
 
 - `upload` chi cho admin.
-- `file` endpoint kiem tra ACL theo `classification`, `allowed_departments`, `allowed_user_ids`.
+- `GET /documents/{id}` va `GET /documents/{id}/file` kiem tra ACL theo `account_type`, `department`, `allowed_departments`, `allowed_user_ids`.
 - Khi publish event that bai sau khi luu file, document se duoc danh dau `FAILED`.
 - Khi xoa tai lieu, service chi xoa metadata va file, con vector delete la TODO cho contract NATS rieng.

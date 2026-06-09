@@ -16,15 +16,43 @@ from app.interfaces.api.dependencies import (
     get_refresh_token_use_case,
 )
 from app.interfaces.api.schemas.auth import MeResponse, RefreshTokenRequest, TokenResponse
+# Import Form để map trường phẳng lên Swagger UI
+from fastapi.param_functions import Form
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+# Khai báo dependency giả lập trường để Swagger UI tự vẽ ô nhập liệu phẳng (username/password)
+async def swagger_login_fields(
+    username: str = Form(default="admin@company.com", description="Email đăng nhập"),
+    password: str = Form(default="***REDACTED-SEED-ADMIN-PW***", description="Mật khẩu")
+):
+    return None
+
+
 @router.post("/login", response_model=TokenResponse)
 async def login(
     request: Request,
+    _swagger_ui: None = Depends(swagger_login_fields), # Chỉ dùng để vẽ giao diện Swagger, không chạm vào request logic
     use_case: LoginUseCase = Depends(get_login_use_case),
+) -> TokenResponse:
+    return await _login(request, use_case)
+
+
+@router.post("/admin/login", response_model=TokenResponse)
+async def admin_login(
+    request: Request,
+    _swagger_ui: None = Depends(swagger_login_fields), # Chỉ dùng để vẽ giao diện Swagger, không chạm vào request logic
+    use_case: LoginUseCase = Depends(get_login_use_case),
+) -> TokenResponse:
+    return await _login(request, use_case, required_role="admin")
+
+
+async def _login(
+    request: Request,
+    use_case: LoginUseCase,
+    required_role: str | None = None,
 ) -> TokenResponse:
     payload = await _read_login_payload(request)
     try:
@@ -32,6 +60,7 @@ async def login(
             email=payload["email"],
             password=payload["password"],
             ip_address=request.client.host if request.client else None,
+            required_role=required_role,
         )
     except AccountLockedError as exc:
         raise HTTPException(
@@ -62,6 +91,7 @@ async def me(current_user: User = Depends(get_current_user)) -> MeResponse:
         id=current_user.id,
         email=current_user.email,
         role=_role_value(current_user.role),
+        account_type=current_user.account_type,
         department=current_user.department,
     )
 

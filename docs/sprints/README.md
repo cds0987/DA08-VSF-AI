@@ -31,7 +31,7 @@ Dự án 5 tuần, chia thành **3 sprint**: `[Sprint 1: T1] · [Sprint 2: T2–
 
 | Sprint | Tuần | Phase (roadmap) | Sprint Goal |
 |--------|------|-----------------|-------------|
-| **Sprint 1** | 1 | Phase 1 (nền) | SA freeze domain/contracts/schemas; DevOps dựng hạ tầng; team scaffold 5 service |
+| **Sprint 1** | 1 | Phase 1 (nền) | SA freeze domain/contracts/schemas; DevOps dựng hạ tầng; team scaffold 6 backend service |
 | **Sprint 2** | 2–3 | Phase 1 + 1.5 | Build core → happy-path E2E → hoàn thiện Phase 1 → deploy GCP → **eval RAGAS (cuối T3)** |
 | **Sprint 3** | 4–5 | Phase 2 | Teams Bot + Knowledge Gap + realtime 2 chiều + dashboard nâng cao + **demo cuối (T5)** |
 
@@ -55,10 +55,10 @@ Dự án 5 tuần, chia thành **3 sprint**: `[Sprint 1: T1] · [Sprint 2: T2–
 
 | Role | Người | Service / Folder |
 |------|-------|------------------|
-| **SA** | Lê Hữu Hưng | `app/domain/` (cả 5 service), contracts, schemas, review |
+| **SA** | Lê Hữu Hưng | `app/domain/` (6 backend service), contracts, schemas, review |
 | **Frontend Dev** | Đặng Hồ Hải | `src/frontend/chat/`, `src/frontend/admin/`, `src/frontend/base/` (Nuxt 4) |
 | **Backend Dev** | Vũ Quang Dũng | `src/user-service/`, `src/document-service/`, `infra/nats/` |
-| **RAG Engineer** | Trần Thanh Nguyên | `src/rag-worker/`, `src/mcp-service/` |
+| **RAG Engineer** | Trần Thanh Nguyên | `src/rag-worker/`, `src/mcp-service/`, `src/hr-service/` |
 | **AI/Agent Engineer** | Phạm Quốc Dũng | `src/query-service/` |
 | **DevOps** | Trần Hữu Gia Huy | `infra/`, `docker-compose.yml`, Nginx, GCP, CI/CD |
 
