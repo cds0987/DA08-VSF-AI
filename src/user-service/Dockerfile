@@ -22,10 +22,13 @@
       pydantic \
       bcrypt \
       passlib \
-      email-validator
+      email-validator \
+      newrelic
 
   COPY app ./app
 
   EXPOSE 8000
 
-  CMD ["uvicorn", "app.interfaces.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+  # New Relic APM: newrelic-admin bootstraps agent rồi exec uvicorn. Cấu hình (license
+  # key, app name) đọc từ biến môi trường NEW_RELIC_* (set ở docker-compose).
+  CMD ["newrelic-admin", "run-program", "uvicorn", "app.interfaces.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

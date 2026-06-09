@@ -18,4 +18,6 @@ COPY config.yaml ./config.yaml
 
 EXPOSE 8003
 
-CMD ["python", "-m", "app.main"]
+# New Relic APM: newrelic-admin bootstraps agent rồi exec app. Cấu hình (license key,
+# app name) đọc từ biến môi trường NEW_RELIC_* (set ở docker-compose).
+CMD ["newrelic-admin", "run-program", "python", "-m", "app.main"]

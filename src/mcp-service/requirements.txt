@@ -6,3 +6,4 @@ PyYAML>=6.0
 pydantic>=2.0
 pytest>=8.0
 pytest-asyncio>=0.23
+newrelic>=9.0.0

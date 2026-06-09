@@ -11,3 +11,4 @@ mcp>=1.27,<2
 redis>=5.0.0
 pytest>=8.2.0
 pytest-asyncio>=0.23.0
+newrelic>=9.0.0

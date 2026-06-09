@@ -1,5 +1,14 @@
 version: "3.9"
 
+# New Relic APM dùng chung cho mọi service. License key là region EU (prefix eu01) ->
+# agent tự detect collector EU, không cần set NEW_RELIC_HOST. Mỗi service tự đặt
+# NEW_RELIC_APP_NAME riêng (merge anchor này + override app name).
+x-newrelic: &newrelic
+  NEW_RELIC_LICENSE_KEY: "***REDACTED-NEWRELIC-KEY***"
+  NEW_RELIC_DISTRIBUTED_TRACING_ENABLED: "true"
+  NEW_RELIC_APPLICATION_LOGGING_ENABLED: "true"
+  NEW_RELIC_LOG: stderr
+
 services:
   nats:
     image: nats:2.10
@@ -38,6 +47,9 @@ services:
       - "8000:8000"
     env_file:
       - ./deploy/env/user-service.env
+    environment:
+      <<: *newrelic
+      NEW_RELIC_APP_NAME: vsf-user-service
     restart: unless-stopped
 
   document-service:
@@ -46,6 +58,9 @@ services:
       - "8002:8002"
     env_file:
       - ./deploy/env/document-service.env
+    environment:
+      <<: *newrelic
+      NEW_RELIC_APP_NAME: vsf-document-service
     depends_on:
       - nats
     restart: unless-stopped
@@ -58,6 +73,9 @@ services:
       - "8001:8001"
     env_file:
       - ./deploy/env/query-service.env
+    environment:
+      <<: *newrelic
+      NEW_RELIC_APP_NAME: vsf-query-service
     depends_on:
       - nats
       - redis
@@ -87,6 +105,8 @@ services:
     env_file:
       - ./deploy/env/rag-worker.env
     environment:
+      <<: *newrelic
+      NEW_RELIC_APP_NAME: vsf-rag-worker
       DATABASE_URL: ${RAG_DATABASE_URL:-postgresql+psycopg://postgres:***REDACTED-DB-PW***@34.87.63.152:5432/rag_db}
     depends_on:
       nats:
@@ -105,6 +125,9 @@ services:
       - "8003:8003"
     env_file:
       - ./deploy/env/mcp-service.env
+    environment:
+      <<: *newrelic
+      NEW_RELIC_APP_NAME: vsf-mcp-service
     depends_on:
       nats:
         condition: service_started
@@ -136,6 +159,9 @@ services:
       - "8004:8004"
     env_file:
       - ./deploy/env/hr-service.env
+    environment:
+      <<: *newrelic
+      NEW_RELIC_APP_NAME: vsf-hr-service
     depends_on:
       nats:
         condition: service_started
