@@ -56,6 +56,14 @@
       "document_name": "Travel Per Diem Rates",
       "query": "what is the daily meal allowance per diem for travel",
       "expect_keyword": "fifty"
+    },
+    {
+      "file": "department_headcount.csv",
+      "file_type": "csv",
+      "document_id": "doc-department-headcount",
+      "document_name": "Department Headcount",
+      "query": "how many people are in the Engineering department headcount",
+      "expect_keyword": "forty-two"
     }
   ]
 }
