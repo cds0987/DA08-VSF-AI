@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+import types
 
 import pytest
 
@@ -92,6 +94,21 @@ def test_entry_point_tool_disabled_without_explicit_enable(monkeypatch) -> None:
         lambda settings, params: FakeTool(settings, dict(params)),
         override=True,
     )
+
+    fake_mcp_module = types.ModuleType("mcp")
+    fake_server_module = types.ModuleType("mcp.server")
+    fake_fastmcp_module = types.ModuleType("mcp.server.fastmcp")
+    fake_fastmcp_module.FastMCP = type(
+        "FakeFastMCP",
+        (),
+        {
+            "__init__": lambda self, *args, **kwargs: None,
+            "tool": lambda self: (lambda func: func),
+        },
+    )
+    monkeypatch.setitem(sys.modules, "mcp", fake_mcp_module)
+    monkeypatch.setitem(sys.modules, "mcp.server", fake_server_module)
+    monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", fake_fastmcp_module)
 
     settings = _settings()
     # available_tools chỉ trả tool ta quan tâm để cô lập test khỏi tool thật.

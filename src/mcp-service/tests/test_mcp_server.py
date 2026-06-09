@@ -179,7 +179,9 @@ def test_build_mcp_registers_rag_search_tool_and_query_service_shape(monkeypatch
                         "rerank_top_k": "5",
                         "rerank_threshold": "0.4",
                     },
-                }
+                },
+                # hr_query chưa dùng trong test này — tắt để tránh cần DATABASE_URL
+                "hr_query": {"enabled": "0"},
             },
         }
     )
@@ -222,6 +224,130 @@ def test_build_mcp_registers_rag_search_tool_and_query_service_shape(monkeypatch
             }
         ]
     }
+
+
+def test_build_mcp_registers_hr_query_tool(monkeypatch) -> None:
+    fake_mcp_module = types.ModuleType("mcp")
+    fake_server_module = types.ModuleType("mcp.server")
+    fake_fastmcp_module = types.ModuleType("mcp.server.fastmcp")
+    fake_fastmcp_module.FastMCP = FakeFastMCP
+    monkeypatch.setitem(sys.modules, "mcp", fake_mcp_module)
+    monkeypatch.setitem(sys.modules, "mcp.server", fake_server_module)
+    monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", fake_fastmcp_module)
+
+    # Inject FakeHrRepository — không cần Postgres thật (cũng không cần SQLite)
+    import app.tools.hr_query as hr_module
+    from tests.test_hr_query_tool import FakeHrRepository, USER_HR
+
+    monkeypatch.setattr(hr_module, "_build_hr_repository", lambda _url: FakeHrRepository())
+
+    settings = _settings()
+    settings = McpSettings(
+        **{
+            **settings.__dict__,
+            "tools_profile": {
+                "rag_search": {"enabled": "0"},
+                "hr_query": {
+                    "enabled": "1",
+                    "params": {"database_url": ""},
+                },
+            },
+        }
+    )
+
+    mcp, tools = build_mcp(settings)
+
+    assert [tool.name for tool in tools] == ["hr_query"]
+    assert "hr_query" in mcp.tools
+    assert "rag_search" not in mcp.tools
+
+    result = asyncio.run(mcp.tools["hr_query"](USER_HR, "leave_balance"))
+
+    assert result["intent"] == "leave_balance"
+    assert result["data"]["annual_remaining"] == 8
+    assert result["data"]["sick_remaining"] == 9
+    assert "Bạn còn 8 ngày phép năm" in result["summary"]
+    assert set(result.keys()) == {"intent", "data", "summary"}
+
+
+def test_build_mcp_registers_both_tools_simultaneously(monkeypatch) -> None:
+    """Cả rag_search và hr_query bật cùng lúc — không tool nào ẩn tool kia."""
+    stub_service = StubService()
+
+    fake_mcp_module = types.ModuleType("mcp")
+    fake_server_module = types.ModuleType("mcp.server")
+    fake_fastmcp_module = types.ModuleType("mcp.server.fastmcp")
+    fake_fastmcp_module.FastMCP = FakeFastMCP
+    monkeypatch.setitem(sys.modules, "mcp", fake_mcp_module)
+    monkeypatch.setitem(sys.modules, "mcp.server", fake_server_module)
+    monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", fake_fastmcp_module)
+    monkeypatch.setattr(
+        "app.tools.rag_search.build_search_service",
+        lambda settings: stub_service,
+    )
+
+    import app.tools.hr_query as hr_module
+    from tests.test_hr_query_tool import FakeHrRepository, USER_HR
+
+    monkeypatch.setattr(hr_module, "_build_hr_repository", lambda _url: FakeHrRepository())
+
+    settings = _settings()
+    settings = McpSettings(
+        **{
+            **settings.__dict__,
+            "tools_profile": {
+                "rag_search": {
+                    "embedder": {
+                        "base_url": "https://embed.example",
+                        "api_key": "embed-key",
+                        "dimension": "1024",
+                    },
+                    "vector_store": {
+                        "impl": "qdrant",
+                        "params": {
+                            "collection": "team_docs",
+                            "url": "https://qdrant.example",
+                            "api_key": "vector-key",
+                            "timeout": "15",
+                        },
+                    },
+                    "vectorstore_contract": {
+                        "provider": "qdrant",
+                        "collection": "team_docs",
+                        "embed_model": "text-embedding-3-large",
+                    },
+                    "reranker": {
+                        "impl": "none",
+                    },
+                    "retrieval": {
+                        "top_k_candidates": "10",
+                        "rerank_top_k": "3",
+                        "rerank_threshold": "0.5",
+                    },
+                },
+                "hr_query": {
+                    "enabled": "1",
+                    "params": {"database_url": ""},
+                },
+            },
+        }
+    )
+
+    mcp, tools = build_mcp(settings)
+
+    tool_names = {tool.name for tool in tools}
+    assert "rag_search" in tool_names, "rag_search phải được register"
+    assert "hr_query" in tool_names, "hr_query phải được register"
+    assert "rag_search" in mcp.tools
+    assert "hr_query" in mcp.tools
+
+    # Mỗi tool vẫn hoạt động độc lập
+    hr_result = asyncio.run(mcp.tools["hr_query"](USER_HR, "leave_balance"))
+    assert hr_result["intent"] == "leave_balance"
+    assert hr_result["data"]["annual_remaining"] == 8
+
+    rag_result = asyncio.run(mcp.tools["rag_search"]("leave policy", None, None))
+    assert rag_result["results"][0]["document_id"] == "doc-1"
 
 
 def test_build_mcp_middleware_enabled_when_internal_token_is_configured() -> None:

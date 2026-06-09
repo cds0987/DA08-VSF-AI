@@ -264,6 +264,10 @@ CREATE TABLE hr_svc.payroll_summary (
 CREATE INDEX idx_payroll_user ON hr_svc.payroll_summary(user_id, period DESC);
 ```
 
+> **MVP scope (Giai đoạn 1):** `leave_balance`, `leave_requests`, `attendance`, `onboarding`.
+> `payroll_summary` tạo sẵn schema nhưng chưa expose qua tool — chờ SA-3 (nguồn role) chốt.
+> `employee_profile` / `org_structure` **không tạo bảng** — lấy từ JWT claim (user-service sở hữu data đó).
+
 ---
 
 ## Qdrant Collection — Vector Payload

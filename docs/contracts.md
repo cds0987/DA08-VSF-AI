@@ -313,11 +313,32 @@ class PayrollDTO:
     net_salary: float
 
 @dataclass
+class AttendanceDTO:
+    period: str                         # 'YYYY-MM'
+    work_days: int
+    late_count: int
+    absent_count: int
+
+@dataclass
+class OnboardingItemDTO:
+    task: str
+    done: bool
+
+@dataclass
+class OnboardingDTO:
+    status: str                         # 'in_progress' | 'completed'
+    checklist: List[OnboardingItemDTO]
+    completed_count: int
+    total_count: int
+
+@dataclass
 class HrQueryResult:
     intent: str                                              # echo intent đã hỏi
     leave_balance: Optional[LeaveBalanceDTO] = None          # set khi intent='leave_balance'
     leave_requests: Optional[List[LeaveRequestDTO]] = None   # set khi intent='leave_requests'
-    payroll: Optional[List[PayrollDTO]] = None               # set khi intent='payroll' (theo period)
+    payroll: Optional[List[PayrollDTO]] = None               # set khi intent='payroll' (theo period) — Cao, chờ SA-3
+    attendance: Optional[AttendanceDTO] = None               # set khi intent='attendance'
+    onboarding: Optional[OnboardingDTO] = None               # set khi intent='onboarding'
     summary: str = ""                                        # câu tóm tắt tự nhiên cho LLM đưa vào câu trả lời
 ```
 
