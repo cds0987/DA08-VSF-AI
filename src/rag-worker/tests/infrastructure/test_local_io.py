@@ -169,6 +169,37 @@ def test_local_file_parser_reads_pptx_source_via_markitdown(
     asyncio.run(scenario())
 
 
+def test_local_file_parser_reads_csv_source_under_source_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        source_root = tmp_path / "sources"
+        source_root.mkdir()
+        source_path = source_root / "report.csv"
+        source_path.write_text("name,days,status\nAlice,2,approved\nBob,1,pending\n", encoding="utf-8")
+        monkeypatch.setenv("SOURCE_ROOT", str(source_root))
+        parser = LocalFileParser(max_workers=1)
+
+        try:
+            parsed = await parser.parse(
+                document_id="doc-1",
+                file_type="csv",
+                source_uri="local://report.csv",
+            )
+        finally:
+            parser.close()
+
+        assert parsed.markdown == (
+            "| name | days | status |\n"
+            "| --- | --- | --- |\n"
+            "| Alice | 2 | approved |\n"
+            "| Bob | 1 | pending |"
+        )
+
+    asyncio.run(scenario())
+
+
 def test_local_file_parser_requires_extractor_for_images(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
