@@ -20,9 +20,20 @@ services:
       - redis_data:/data
     restart: unless-stopped
 
+  # Qdrant CÙNG VM với rag-worker + mcp-service: chạy trong compose network, KHÔNG
+  # expose host port -> không truy cập được từ ngoài. Producer (rag-worker) + consumer
+  # (mcp-service) nói chuyện qua http://qdrant:6333 nội bộ. Bỏ phụ thuộc Qdrant Cloud /
+  # qdrant-base external + nginx basic-auth. Data bền qua volume qdrant_data.
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  # Image kéo từ Docker Hub (KHÔNG build trên VM). CI build+push ở Phase 2; VM chỉ pull.
+  # DOCKERHUB_USERNAME + IMAGE_TAG do deploy workflow truyền qua SSH env (mặc định: develop).
   user-service:
-    build:
-      context: ./src/user-service
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/user-service:${IMAGE_TAG:-develop}
     ports:
       - "8000:8000"
     env_file:
@@ -30,8 +41,7 @@ services:
     restart: unless-stopped
 
   document-service:
-    build:
-      context: ./src/document-service
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/document-service:${IMAGE_TAG:-develop}
     ports:
       - "8002:8002"
     env_file:
@@ -43,8 +53,7 @@ services:
         - /home/tranhuugiahuynb/secrets/gcp-sa.json:/secrets/gcp-sa.json:ro
 
   query-service:
-    build:
-      context: ./src/query-service
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/query-service:${IMAGE_TAG:-develop}
     ports:
       - "8001:8001"
     env_file:
@@ -59,11 +68,9 @@ services:
   # chạy đua DDL trên cùng DB, và migration lỗi -> fail-fast thay vì crash-loop.
   # DB là Cloud SQL (external, luôn sẵn) nên không depends_on service nào; DevOps
   # phải CREATE DATABASE rag_db sẵn + mở mạng VM -> Cloud SQL trước khi deploy.
-  # Build image ở đây (rag-worker:local); rag-worker tái dùng image, không build lại.
+  # Dùng CHUNG image rag-worker (đã pull từ Docker Hub); chỉ override command = alembic.
   rag-migrate:
-    build:
-      context: ./src/rag-worker
-    image: rag-worker:local
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/rag-worker:${IMAGE_TAG:-develop}
     command: ["alembic", "upgrade", "head"]
     working_dir: /app
     env_file:
@@ -76,13 +83,15 @@ services:
     restart: "no"
 
   rag-worker:
-    image: rag-worker:local
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/rag-worker:${IMAGE_TAG:-develop}
     env_file:
       - ./deploy/env/rag-worker.env
     environment:
       DATABASE_URL: ${RAG_DATABASE_URL:-postgresql+psycopg://postgres:***REDACTED-DB-PW***@34.87.63.152:5432/rag_db}
     depends_on:
       nats:
+        condition: service_started
+      qdrant:
         condition: service_started
       rag-migrate:
         condition: service_completed_successfully
@@ -91,25 +100,52 @@ services:
         - /home/tranhuugiahuynb/secrets/gcp-sa.json:/secrets/gcp-sa.json:ro
 
   mcp-service:
-    build:
-      context: ./src/mcp-service
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/mcp-service:${IMAGE_TAG:-develop}
     ports:
       - "8003:8003"
     env_file:
       - ./deploy/env/mcp-service.env
     depends_on:
-      - nats
+      nats:
+        condition: service_started
+      qdrant:
+        condition: service_started
+      hr-service:
+        condition: service_healthy
     restart: unless-stopped
 
+  # Migration one-shot hr_db (alembic upgrade head). Cùng pattern rag-migrate: build
+  # dùng CHUNG image hr-service (pull từ Docker Hub). alembic env.py đọc DATABASE_URL;
+  # runtime hr-service đọc HR_DATABASE_URL -> map qua environment ở đây.
+  # DevOps phải CREATE DATABASE hr_db trên Cloud SQL trước (xem deploy-develop.yml notes).
+  hr-migrate:
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/hr-service:${IMAGE_TAG:-develop}
+    command: ["alembic", "upgrade", "head"]
+    working_dir: /app
+    env_file:
+      - ./deploy/env/hr-service.env
+    environment:
+      DATABASE_URL: ${HR_DATABASE_URL:-postgresql+psycopg://postgres:***REDACTED-DB-PW***@34.87.63.152:5432/hr_db}
+    restart: "no"
+
   hr-service:
-    build:
-      context: ./src/hr-service
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/hr-service:${IMAGE_TAG:-develop}
     ports:
       - "8004:8004"
     env_file:
       - ./deploy/env/hr-service.env
     depends_on:
-      - nats
+      nats:
+        condition: service_started
+      hr-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # hr image là python -> dùng urllib (không có curl). /health yêu cầu internal token.
+      test: ["CMD", "python", "-c", "import os,urllib.request; urllib.request.urlopen(urllib.request.Request('http://localhost:8004/health', headers={'X-Internal-Token': os.environ.get('HR_INTERNAL_TOKEN','')}))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     restart: unless-stopped
 
   nginx:
@@ -130,3 +166,4 @@ services:
 volumes:
   nats_data:
   redis_data:
+  qdrant_data:
