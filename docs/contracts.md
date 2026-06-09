@@ -273,11 +273,32 @@ class PayrollDTO:
     net_salary: float
 
 @dataclass
+class AttendanceDTO:
+    period: str                         # 'YYYY-MM'
+    work_days: int
+    late_count: int
+    absent_count: int
+
+@dataclass
+class OnboardingItemDTO:
+    task: str
+    done: bool
+
+@dataclass
+class OnboardingDTO:
+    status: str                         # 'in_progress' | 'completed'
+    checklist: List[OnboardingItemDTO]
+    completed_count: int
+    total_count: int
+
+@dataclass
 class HrQueryResult:
     intent: str                                              # echo intent đã hỏi
     leave_balance: Optional[LeaveBalanceDTO] = None          # set khi intent='leave_balance'
     leave_requests: Optional[List[LeaveRequestDTO]] = None   # set khi intent='leave_requests'
-    payroll: Optional[List[PayrollDTO]] = None               # set khi intent='payroll' (theo period)
+    payroll: Optional[List[PayrollDTO]] = None               # set khi intent='payroll' (theo period) — Cao, chờ SA-3
+    attendance: Optional[AttendanceDTO] = None               # set khi intent='attendance'
+    onboarding: Optional[OnboardingDTO] = None               # set khi intent='onboarding'
     summary: str = ""                                        # câu tóm tắt tự nhiên cho LLM đưa vào câu trả lời
 ```
 
@@ -293,7 +314,13 @@ from typing import List, Optional
 from app.domain.entities.tool_io import LeaveBalanceDTO, LeaveRequestDTO, PayrollDTO
 
 class HrRepository(ABC):
-    """Query schema hr_mock trong mcp_db. LUÔN filter WHERE user_id (do MCP client inject từ JWT)."""
+    """Query schema hr_mock trong mcp_db. LUÔN filter WHERE user_id (do MCP client inject từ JWT).
+    Implement: PostgresHrRepository (sync SQLAlchemy + asyncio.to_thread).
+    """
+
+    @abstractmethod
+    async def ping(self) -> None:
+        """Kiểm tra kết nối DB — gọi lúc startup verify (fail-closed)."""
 
     @abstractmethod
     async def get_leave_balance(self, user_id: str) -> Optional[LeaveBalanceDTO]:
@@ -301,11 +328,23 @@ class HrRepository(ABC):
 
     @abstractmethod
     async def get_leave_requests(self, user_id: str) -> List[LeaveRequestDTO]:
-        """Danh sách đơn nghỉ phép + trạng thái (hr_mock.leave_requests)."""
+        """Danh sách đơn nghỉ phép + trạng thái (hr_mock.leave_requests), mới nhất trước."""
+
+    @abstractmethod
+    async def get_attendance(self, user_id: str) -> Optional[AttendanceDTO]:
+        """Thông tin chấm công tháng hiện tại (hr_mock.attendance)."""
+
+    @abstractmethod
+    async def get_onboarding(self, user_id: str) -> Optional[OnboardingDTO]:
+        """Trạng thái onboarding + checklist (hr_mock.onboarding)."""
 
     @abstractmethod
     async def get_payroll(self, user_id: str) -> List[PayrollDTO]:
-        """Bảng lương theo period (hr_mock.payroll_summary)."""
+        """Bảng lương theo period (hr_mock.payroll_summary) — Cao, chưa expose MVP."""
+
+    @abstractmethod
+    async def aclose(self) -> None:
+        """Giải phóng connection pool."""
 ```
 
 ---

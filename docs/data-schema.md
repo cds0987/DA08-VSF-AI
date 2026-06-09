@@ -213,7 +213,27 @@ CREATE TABLE hr_mock.payroll_summary (
 );
 
 CREATE INDEX idx_payroll_user ON hr_mock.payroll_summary(user_id, period DESC);
+
+CREATE TABLE hr_mock.attendance (
+    user_id      UUID PRIMARY KEY,
+    period       VARCHAR(7) NOT NULL,      -- 'YYYY-MM' tháng ghi nhận, vd '2026-06'
+    work_days    INTEGER NOT NULL DEFAULT 0,
+    late_count   INTEGER NOT NULL DEFAULT 0,
+    absent_count INTEGER NOT NULL DEFAULT 0,
+    updated_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
+CREATE TABLE hr_mock.onboarding (
+    user_id    UUID PRIMARY KEY,
+    status     VARCHAR(20) NOT NULL DEFAULT 'in_progress',  -- 'in_progress' | 'completed'
+    checklist  JSONB       NOT NULL DEFAULT '[]',           -- [{task: str, done: bool}]
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
 ```
+
+> **MVP scope (Giai đoạn 1):** `leave_balance`, `leave_requests`, `attendance`, `onboarding`.
+> `payroll_summary` tạo sẵn schema nhưng chưa expose qua tool — chờ SA-3 (nguồn role) chốt.
+> `employee_profile` / `org_structure` **không tạo bảng** — lấy từ JWT claim (user-service sở hữu data đó).
 
 ---
 

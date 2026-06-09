@@ -371,11 +371,14 @@ register_tool("hr_query", lambda s, p: HrQueryTool(s, p))
 
 ---
 
-## 7. ⚠️ Điểm SA phải chốt trước khi code phần liên quan
-1. **Reserved-param set** (`user_id`/`document_ids`/`top_k`) — contract ngầm mcp↔query; ghi vào `docs/contracts.md` để mọi tool mới đặt đúng tên param thì được tiêm tự động (chặn Phần D4).
-2. **DB instance cho mcp_db** — chung Postgres (schema riêng) hay tách (chặn B1).
-3. **Nguồn `employee_profile`/`org_structure`** — user-service vs HRIS (chặn B2).
-4. **Nguồn role** cho intent nhạy cảm — JWT claim nào (chặn B6).
+## 7. Điểm SA phải chốt trước khi code phần liên quan
+
+| # | Vấn đề | Trạng thái |
+|---|---|---|
+| SA-1 | **DB instance cho mcp_db** — chung Postgres (schema riêng) hay tách (chặn B1). | ✅ **RESOLVED** — cùng Cloud SQL instance, schema riêng `hr_mock` trong `mcp_db`. Migration đã viết. |
+| SA-2 | **Nguồn `employee_profile`/`org_structure`** — user-service vs HRIS (chặn B2). | ✅ **RESOLVED** — lấy từ JWT claim, không tạo bảng trong mcp_db. |
+| SA-3 | **Reserved-param set** (`user_id`/`document_ids`/`top_k`) — ghi vào `docs/contracts.md` (chặn D4). | ⚠️ **OPEN** |
+| SA-4 | **Nguồn role** cho intent nhạy cảm — JWT claim nào (chặn B6). | ⚠️ **OPEN** — chặn Giai đoạn 2 (`payroll`, `performance`). |
 
 ---
 
