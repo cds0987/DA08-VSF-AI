@@ -61,6 +61,14 @@ class AgentState(TypedDict):
     user_department: str
     allowed_doc_ids: list[str]
 
+    # --- Loop termination guards ---
+    # force_answer: set True by observe_node (iteration cap) or act_node (duplicate tool call)
+    # to tell think_node to produce a final text answer without calling any tool.
+    force_answer: bool
+    # tool_call_signatures: tracks (tool_name, args) pairs already executed so
+    # act_node can detect duplicate calls and set force_answer before the loop repeats.
+    tool_call_signatures: list[str]
+
     # --- Metadata ---
     session_id: str
     question: str
@@ -91,6 +99,8 @@ def create_initial_state(
         shortcut_outcome=None,
         tool_results=[],
         sources=[],
+        force_answer=False,
+        tool_call_signatures=[],
         user_id=user_id,
         user_role=user_role,
         user_department=user_department,

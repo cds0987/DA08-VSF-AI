@@ -28,13 +28,31 @@ router = APIRouter(tags=["notifications"])
 _SSE_RESPONSES = {
     200: {
         "description": "Server-Sent Events stream. Keep-alive `:keep-alive` every ~25 s. "
-                       "Use EventSource or curl — Swagger UI cannot display SSE.",
+                       "Use EventSource (browser) or PowerShell (`curl.exe -N`) — "
+                       "Swagger UI cannot display SSE.",
         "content": {"text/event-stream": {"schema": {"type": "string"}}},
     }
 }
 
+_NOTIFICATIONS_DESCRIPTION = """\
+Đăng ký nhận thông báo realtime qua **Server-Sent Events** (SSE).
+Keep-alive được gửi mỗi ~25 giây. Swagger UI không hiển thị được SSE — dùng PowerShell để test.
 
-@router.get("/notifications", response_class=StreamingResponse, responses=_SSE_RESPONSES)
+**curl.exe -N** (xem realtime từng event):
+```powershell
+curl.exe -N http://localhost:8001/notifications -H "Authorization: Bearer mock-user-hr"
+```
+
+**Invoke-RestMethod** (in khi stream kết thúc hoặc timeout):
+```powershell
+Invoke-RestMethod -Uri http://localhost:8001/notifications `
+  -Headers @{ Authorization = "Bearer mock-user-hr" }
+```
+"""
+
+
+@router.get("/notifications", response_class=StreamingResponse, responses=_SSE_RESPONSES,
+            description=_NOTIFICATIONS_DESCRIPTION)
 async def notifications_stream(
     user: AuthenticatedUser = Depends(get_current_user),
     manager: ConnectionManager = Depends(get_connection_manager),

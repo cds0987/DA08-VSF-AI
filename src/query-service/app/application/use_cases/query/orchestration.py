@@ -239,190 +239,220 @@ class QueryOrchestrationUseCase:
         shortcut_acting_emitted = False
 
         langfuse_callbacks = [self._langfuse_callback] if self._langfuse_callback is not None else []
-        run_config = {
-            "callbacks": langfuse_callbacks,
-            "metadata": {
+        # recursion_limit is a defence-in-depth net; Part 1 (force_answer + act→observe→think
+        # wiring) provides the logical hard cap.  Set to 3 * max_iterations + overhead.
+        _recursion_limit = max(12, self._settings.agent_max_iterations * 4 + 4)
+        run_config: dict = {
+            "recursion_limit": _recursion_limit,
+        }
+        if langfuse_callbacks:
+            run_config["callbacks"] = langfuse_callbacks
+            run_config["metadata"] = {
                 "session_id": session_id,
                 "user_id": user.id,
                 "agent_mode": self._settings.agent_mode,
-            },
-        } if langfuse_callbacks else {}
+            }
 
-        async for event in self._langgraph_agent.astream_events(
-            initial_state, version="v2", config=run_config if run_config else None
-        ):
-            event_type = event["event"]
+        _GRACEFUL_CRASH_MSG = (
+            "Mình chưa xử lý được yêu cầu này, bạn thử diễn đạt lại ngắn gọn hơn nhé."
+        )
 
-            # Node enter event — derive iteration count from the node name
-            if event_type == "on_chain_start":
-                node_name = event.get("name", "")
-                # act_node and observe_node represent actual tool-call iterations
-                # think_node enters before the LLM call; answer_node is the final step (no iteration increment)
-                if node_name in ("act", "observe"):
-                    last_iteration = max(last_iteration, 1)
-                # NOTE: do NOT increment for "think" or "answer" — shortcut path has 0 iterations
+        try:
+            async for event in self._langgraph_agent.astream_events(
+                initial_state, version="v2", config=run_config
+            ):
+                event_type = event["event"]
 
-            # Token stream from LLM
-            elif event_type == "on_chat_model_stream":
-                token = event["data"]["chunk"].content
-                if token:
-                    answer_accumulator.append(token)
-                    # Detect phase from content (ReAct markers)
-                    current_phase = "generating"
-                    stripped = token.lstrip()
-                    if stripped.startswith("THOUGHT:"):
-                        current_phase = "thinking"
-                    elif stripped.startswith("ACTION:") or stripped.startswith("OBSERVATION:"):
-                        current_phase = "observing"
+                # Node enter event — derive iteration count from the node name
+                if event_type == "on_chain_start":
+                    node_name = event.get("name", "")
+                    # act_node and observe_node represent actual tool-call iterations
+                    # think_node enters before the LLM call; answer_node is the final step (no iteration increment)
+                    if node_name in ("act", "observe"):
+                        last_iteration = max(last_iteration, 1)
+                    # NOTE: do NOT increment for "think" or "answer" — shortcut path has 0 iterations
+
+                # Token stream from LLM
+                elif event_type == "on_chat_model_stream":
+                    token = event["data"]["chunk"].content
+                    if token:
+                        answer_accumulator.append(token)
+                        # Detect phase from content (ReAct markers)
+                        current_phase = "generating"
+                        stripped = token.lstrip()
+                        if stripped.startswith("THOUGHT:"):
+                            current_phase = "thinking"
+                        elif stripped.startswith("ACTION:") or stripped.startswith("OBSERVATION:"):
+                            current_phase = "observing"
+                        yield {
+                            "token": token,
+                            "phase": current_phase,
+                            "agent_mode": "langgraph",
+                            "session_id": session_id,
+                            "iterations": last_iteration,
+                        }
+
+                # Tool call started
+                elif event_type == "on_tool_start":
+                    tool_name = event["name"]
+                    input_data = event.get("data", {}).get("input", {})
                     yield {
-                        "token": token,
-                        "phase": current_phase,
+                        "phase": "acting",
                         "agent_mode": "langgraph",
                         "session_id": session_id,
                         "iterations": last_iteration,
+                        "tool": tool_name,
+                        "tool_args": input_data,
                     }
 
-            # Tool call started
-            elif event_type == "on_tool_start":
-                tool_name = event["name"]
-                input_data = event.get("data", {}).get("input", {})
-                yield {
-                    "phase": "acting",
-                    "agent_mode": "langgraph",
-                    "session_id": session_id,
-                    "iterations": last_iteration,
-                    "tool": tool_name,
-                    "tool_args": input_data,
-                }
-
-            # Tool call completed
-            elif event_type == "on_tool_end":
-                tool_name = event["name"]
-                output_data = event.get("data", {}).get("output", "")
-                yield {
-                    "phase": "observing",
-                    "agent_mode": "langgraph",
-                    "session_id": session_id,
-                    "iterations": last_iteration,
-                    "tool": tool_name,
-                    "tool_result": str(output_data)[:200] if output_data else "",
-                }
-
-            # Graph error — LLM failure or unhandled exception
-            elif event_type == "on_chain_error":
-                error_val = event.get("data", {}).get("error")
-                error_msg = str(getattr(error_val, "args", [str(error_val)])[0])
-                logger.error(
-                    "langgraph_stream_error",
-                    extra={"session_id": session_id, "error": error_msg},
-                )
-                await self._save_assistant(
-                    user.id, session_id,
-                    f"Loi he thong: {error_msg}",
-                    [], started,
-                )
-                yield {
-                    "error": error_msg,
-                    "done": True,
-                    "sources": [],
-                    "session_id": session_id,
-                    "outcome": Outcome.ERROR.value,
-                    "agent_mode": "langgraph",
-                    "iterations": max(last_iteration, 1),
-                }
-                return
-
-            # Graph complete — only the top-level graph on_chain_end is final
-            elif event_type == "on_chain_end":
-                # Skip sub-node on_chain_end (shortcut, answer, etc.) — only handle graph root
-                run_name = event.get("name", "")
-                if run_name not in ("VinSmartFutureReActAgent", "VinSmartFutureAgent"):
-                    continue
-
-                final_state = event.get("data", {}).get("output", {})
-                if isinstance(final_state, dict):
-                    shortcut_response = final_state.get("shortcut_response")
-                    shortcut_outcome = final_state.get("shortcut_outcome") or "SUCCESS"
-
-                    # Shortcut path — emit acting event then token stream
-                    if shortcut_response:
-                        # Emit one acting event to signal shortcut before streaming answer
-                        if not shortcut_acting_emitted:
-                            yield {
-                                "phase": "acting",
-                                "agent_mode": "langgraph",
-                                "session_id": session_id,
-                                "iterations": 0,
-                                "tool": "shortcut_off_topic",
-                                "tool_args": {"outcome": shortcut_outcome},
-                            }
-                            shortcut_acting_emitted = True
-
-                        for token in _word_chunks(shortcut_response):
-                            yield {
-                                "token": token,
-                                "phase": "generating",
-                                "agent_mode": "langgraph",
-                                "session_id": session_id,
-                                "iterations": 0,
-                            }
-                        answer = shortcut_response
-                    else:
-                        # answer_accumulator is empty when the model adapter uses non-streaming
-                        # ainvoke (OpenAIResponsesChatModel has no _astream, so astream_events
-                        # never emits on_chat_model_stream events).  Recover the answer directly
-                        # from the final AIMessage in the state's message list.
-                        if not answer_accumulator:
-                            messages_in_state = final_state.get("messages", [])
-                            for msg in reversed(messages_in_state):
-                                content = getattr(msg, "content", "") or ""
-                                tool_calls = getattr(msg, "tool_calls", None) or []
-                                if content and not tool_calls:
-                                    # Strip any leaked ReAct marker lines before streaming.
-                                    clean = _strip_agent_markers(content)
-                                    if not clean:
-                                        # Sanitizer removed everything — treat as no answer.
-                                        break
-                                    # Stream the recovered answer as token events so the UI
-                                    # receives incremental updates, matching the shortcut path.
-                                    for token in _word_chunks(clean):
-                                        yield {
-                                            "token": token,
-                                            "phase": "generating",
-                                            "agent_mode": "langgraph",
-                                            "session_id": session_id,
-                                            "iterations": last_iteration,
-                                        }
-                                    answer_accumulator.append(clean)
-                                    break
-
-                        answer = "".join(answer_accumulator)
-
-                        # If LLM returned nothing at all, emit NO_INFO instead of empty SUCCESS
-                        if not answer:
-                            shortcut_outcome = "NO_INFO"
-
-                    sources = final_state.get("sources", [])
-                    # shortcut path: 0 iterations (no tool calls); think path: iterations = number of act/observe runs
-                    final_iteration = 0 if shortcut_response else max(last_iteration, 1)
-                    # Override outcome to NO_INFO if the answer is a generic fallback
-                    if answer and _is_fallback_answer(answer) and shortcut_outcome == "SUCCESS":
-                        shortcut_outcome = "NO_INFO"
-                    outcome_value = _outcome_to_enum_value(shortcut_outcome)
-
-                    # Output guardrail — redact PII from final answer before persisting/sending.
-                    answer = await self._output_guardrail.redact(answer)
-
-                    await self._save_assistant(user.id, session_id, answer, sources, started)
+                # Tool call completed
+                elif event_type == "on_tool_end":
+                    tool_name = event["name"]
+                    output_data = event.get("data", {}).get("output", "")
                     yield {
-                        "done": True,
-                        "sources": sources,
-                        "session_id": session_id,
-                        "outcome": outcome_value,
+                        "phase": "observing",
                         "agent_mode": "langgraph",
-                        "iterations": final_iteration,
+                        "session_id": session_id,
+                        "iterations": last_iteration,
+                        "tool": tool_name,
+                        "tool_result": str(output_data)[:200] if output_data else "",
+                    }
+
+                # Graph error — LLM failure or unhandled exception
+                elif event_type == "on_chain_error":
+                    error_val = event.get("data", {}).get("error")
+                    error_msg = str(getattr(error_val, "args", [str(error_val)])[0])
+                    logger.error(
+                        "langgraph_stream_error",
+                        extra={"session_id": session_id, "error": error_msg},
+                    )
+                    await self._save_assistant(
+                        user.id, session_id,
+                        f"Loi he thong: {error_msg}",
+                        [], started,
+                    )
+                    yield {
+                        "error": error_msg,
+                        "done": True,
+                        "sources": [],
+                        "session_id": session_id,
+                        "outcome": Outcome.ERROR.value,
+                        "agent_mode": "langgraph",
+                        "iterations": max(last_iteration, 1),
                     }
                     return
+
+                # Graph complete — only the top-level graph on_chain_end is final
+                elif event_type == "on_chain_end":
+                    # Skip sub-node on_chain_end (shortcut, answer, etc.) — only handle graph root
+                    run_name = event.get("name", "")
+                    if run_name not in ("VinSmartFutureReActAgent", "VinSmartFutureAgent"):
+                        continue
+
+                    final_state = event.get("data", {}).get("output", {})
+                    if isinstance(final_state, dict):
+                        shortcut_response = final_state.get("shortcut_response")
+                        shortcut_outcome = final_state.get("shortcut_outcome") or "SUCCESS"
+
+                        # Shortcut path — emit acting event then token stream
+                        if shortcut_response:
+                            # Emit one acting event to signal shortcut before streaming answer
+                            if not shortcut_acting_emitted:
+                                yield {
+                                    "phase": "acting",
+                                    "agent_mode": "langgraph",
+                                    "session_id": session_id,
+                                    "iterations": 0,
+                                    "tool": "shortcut_off_topic",
+                                    "tool_args": {"outcome": shortcut_outcome},
+                                }
+                                shortcut_acting_emitted = True
+
+                            for token in _word_chunks(shortcut_response):
+                                yield {
+                                    "token": token,
+                                    "phase": "generating",
+                                    "agent_mode": "langgraph",
+                                    "session_id": session_id,
+                                    "iterations": 0,
+                                }
+                            answer = shortcut_response
+                        else:
+                            # answer_accumulator is empty when the model adapter uses non-streaming
+                            # ainvoke (OpenAIResponsesChatModel has no _astream, so astream_events
+                            # never emits on_chat_model_stream events).  Recover the answer directly
+                            # from the final AIMessage in the state's message list.
+                            if not answer_accumulator:
+                                messages_in_state = final_state.get("messages", [])
+                                for msg in reversed(messages_in_state):
+                                    content = getattr(msg, "content", "") or ""
+                                    tool_calls = getattr(msg, "tool_calls", None) or []
+                                    if content and not tool_calls:
+                                        # Strip any leaked ReAct marker lines before streaming.
+                                        clean = _strip_agent_markers(content)
+                                        if not clean:
+                                            # Sanitizer removed everything — treat as no answer.
+                                            break
+                                        # Stream the recovered answer as token events so the UI
+                                        # receives incremental updates, matching the shortcut path.
+                                        for token in _word_chunks(clean):
+                                            yield {
+                                                "token": token,
+                                                "phase": "generating",
+                                                "agent_mode": "langgraph",
+                                                "session_id": session_id,
+                                                "iterations": last_iteration,
+                                            }
+                                        answer_accumulator.append(clean)
+                                        break
+
+                            answer = "".join(answer_accumulator)
+
+                            # If LLM returned nothing at all, emit NO_INFO instead of empty SUCCESS
+                            if not answer:
+                                shortcut_outcome = "NO_INFO"
+
+                        sources = final_state.get("sources", [])
+                        # shortcut path: 0 iterations; think path: iterations = number of act/observe runs
+                        final_iteration = 0 if shortcut_response else max(last_iteration, 1)
+                        # Override outcome to NO_INFO if the answer is a generic fallback
+                        if answer and _is_fallback_answer(answer) and shortcut_outcome == "SUCCESS":
+                            shortcut_outcome = "NO_INFO"
+                        outcome_value = _outcome_to_enum_value(shortcut_outcome)
+
+                        # Output guardrail — redact PII from final answer before persisting/sending.
+                        answer = await self._output_guardrail.redact(answer)
+
+                        await self._save_assistant(user.id, session_id, answer, sources, started)
+                        yield {
+                            "done": True,
+                            "sources": sources,
+                            "session_id": session_id,
+                            "outcome": outcome_value,
+                            "agent_mode": "langgraph",
+                            "iterations": final_iteration,
+                        }
+                        return
+
+        except Exception as _stream_exc:
+            # Catch GraphRecursionError and any unexpected crash mid-stream.
+            # Saving an assistant turn completes the exchange so the frontend does NOT
+            # resend the user message (which would cause duplicates).
+            _err_name = type(_stream_exc).__name__
+            logger.error(
+                "langgraph_stream_fatal",
+                extra={"session_id": session_id, "error_type": _err_name, "error": str(_stream_exc)[:300]},
+            )
+            await self._save_assistant(user.id, session_id, _GRACEFUL_CRASH_MSG, [], started)
+            yield {
+                "error": _err_name,
+                "done": True,
+                "sources": [],
+                "session_id": session_id,
+                "outcome": Outcome.NO_INFO.value,
+                "agent_mode": "langgraph",
+                "iterations": max(last_iteration, 1),
+            }
 
     async def _choose_route(
         self,
