@@ -1,6 +1,8 @@
 """HR query tool - HTTP proxy sang hr-service."""
 from __future__ import annotations
 
+import hashlib
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -8,6 +10,16 @@ import httpx
 
 from app.core.config import McpSettings
 from app.tools.base import register_tool
+
+logger = logging.getLogger("mcp-service")
+MVP_INTENTS = {"leave_balance", "leave_requests", "attendance", "onboarding"}
+
+
+def _mask_user_id(user_id: str) -> str:
+    value = user_id.strip()
+    if not value:
+        return "unknown"
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
 
 
 class HrQueryTool:
@@ -29,13 +41,37 @@ class HrQueryTool:
             self._client = httpx.AsyncClient(base_url=self._base_url, timeout=10.0)
         return self._client
 
+    def _unsupported_intent_response(self, intent: str) -> dict[str, Any]:
+        return {
+            "intent": intent,
+            "data": {},
+            "summary": f"Intent '{intent}' chưa được hỗ trợ.",
+        }
+
+    def _not_found_response(self, intent: str) -> dict[str, Any]:
+        return {
+            "intent": intent,
+            "data": {},
+            "summary": "Bạn chưa có dữ liệu HR cho mục này.",
+        }
+
     async def _call(self, user_id: str, intent: str) -> dict[str, Any]:
+        masked_user = _mask_user_id(user_id)
+        if intent not in MVP_INTENTS:
+            logger.info("hr_query intent=%s user=%s status=unsupported_intent", intent, masked_user)
+            return self._unsupported_intent_response(intent)
+
         client = self._get_client()
         response = await client.post(
             "/hr/query",
             json={"user_id": user_id, "intent": intent},
             headers=self._headers(),
         )
+        if response.status_code == 404:
+            logger.info("hr_query intent=%s user=%s status=404", intent, masked_user)
+            return self._not_found_response(intent)
+
+        logger.info("hr_query intent=%s user=%s status=%s", intent, masked_user, response.status_code)
         response.raise_for_status()
         body = response.json()
         if not isinstance(body, dict):
