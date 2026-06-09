@@ -1,0 +1,6 @@
+host: ${HR_HOST:-0.0.0.0}
+port: ${HR_PORT:-8004}
+log_level: ${LOG_LEVEL:-INFO}
+database_url: ${HR_DATABASE_URL:-}
+internal_token: ${HR_INTERNAL_TOKEN:-}
+

@@ -12,6 +12,7 @@ __pycache__/
 .ruff_cache/
 pytest-cache-files-*/
 *.py[cod]
+*.db
 query-body.json
 feedback-body.json
 notify-body.json

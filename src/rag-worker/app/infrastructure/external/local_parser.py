@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import csv
 import os
 import zipfile
 from collections.abc import Callable, Mapping
@@ -136,6 +137,27 @@ def _text_step(markdown: str) -> _ParseStep:
 def _read_text_file(path: Path) -> _ParseStep:
     _ensure_source_file(path)
     return _text_step(path.read_text(encoding="utf-8"))
+
+
+def _csv_row_to_markdown_line(row: list[str], width: int) -> str:
+    cells = [cell.strip().replace("|", "\\|") for cell in row]
+    if len(cells) < width:
+        cells.extend([""] * (width - len(cells)))
+    return "| " + " | ".join(cells[:width]) + " |"
+
+
+def _read_csv_file(path: Path) -> _ParseStep:
+    _ensure_source_file(path)
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        rows = [[str(cell) for cell in row] for row in csv.reader(handle)]
+    rows = [row for row in rows if any(cell.strip() for cell in row)]
+    if not rows:
+        return _text_step("")
+    width = max(len(row) for row in rows)
+    header = _csv_row_to_markdown_line(rows[0], width)
+    separator = "| " + " | ".join(["---"] * width) + " |"
+    body = [_csv_row_to_markdown_line(row, width) for row in rows[1:]]
+    return _text_step("\n".join([header, separator, *body]))
 
 
 class _HTMLToText(HTMLParser):
@@ -306,6 +328,7 @@ _READER_REGISTRY: Registry[ReaderFactory] = Registry(
     "reader", entry_point_group="rag_worker.reader"
 )
 _READER_REGISTRY.register("text", lambda params: _read_text_file)
+_READER_REGISTRY.register("csv", lambda params: _read_csv_file)
 _READER_REGISTRY.register("html_strip", lambda params: _read_html_file)
 _READER_REGISTRY.register("docx_xml", lambda params: _read_docx_file)
 _READER_REGISTRY.register("image", lambda params: _read_image_file)
@@ -318,6 +341,7 @@ _READER_REGISTRY.register("pypdf", _make_pypdf_reader)
 _DEFAULT_READER_IMPL: dict[str, str] = {
     "md": "text",
     "txt": "text",
+    "csv": "csv",
     "html": "html_strip",
     "htm": "html_strip",
     "docx": "docx_xml",

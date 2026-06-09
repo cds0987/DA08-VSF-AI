@@ -25,4 +25,5 @@ def test_load_settings_offline_defaults(monkeypatch) -> None:
     assert settings.tool_spec("rag_search").enabled is True
     assert settings.tool_spec("rag_search").params["embedder"]["model"] == "text-embedding-3-small"
     assert settings.tool_spec("hr_query").enabled is False
-    assert settings.tool_spec("hr_query").params["params"]["database_url"] == ""
+    assert settings.tool_spec("hr_query").params["params"]["hr_service_url"] == "http://hr-service:8004"
+    assert settings.tool_spec("hr_query").params["params"]["internal_token"] == ""

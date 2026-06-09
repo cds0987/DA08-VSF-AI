@@ -2,6 +2,7 @@ fastapi
 uvicorn[standard]
 sqlalchemy
 asyncpg
+psycopg[binary]>=3.1
 python-dotenv
 python-jose
 python-multipart
@@ -11,5 +12,6 @@ boto3
 nats-py
 pytest
 pytest-asyncio
-httpx
+httpx2
+newrelic
 

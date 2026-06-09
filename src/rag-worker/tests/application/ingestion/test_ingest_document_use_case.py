@@ -49,6 +49,18 @@ class ZeroChunkEngine(StubEngine):
         return 0
 
 
+class EmptyMarkdownEngine(StubEngine):
+    async def ingest(self, payload):
+        self.ingest_calls.append(payload)
+        return 0 if not payload.markdown.strip() else 1
+
+
+class RecordingZeroChunkEngine(StubEngine):
+    async def ingest(self, payload):
+        self.ingest_calls.append(payload)
+        return 0
+
+
 class SlowEngine(StubEngine):
     async def ingest(self, payload):
         self.ingest_calls.append(payload)
@@ -340,6 +352,42 @@ def test_ingest_use_case_fails_when_ingest_produces_zero_chunks() -> None:
         job = await use_case.get_job(next(iter(documents._jobs)))
         assert job is not None
         assert job.status is IngestJobStatus.FAILED
+
+    asyncio.run(scenario())
+
+
+def test_ingest_use_case_passes_empty_markdown_from_empty_csv_source_and_fails_loudly(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        engine = RecordingZeroChunkEngine()
+        documents = InMemoryDocumentRepository()
+        artifact_store = StubArtifactStore()
+        source_root = tmp_path / "sources"
+        source_root.mkdir()
+        (source_root / "empty.csv").write_text("", encoding="utf-8")
+        monkeypatch.setenv("SOURCE_ROOT", str(source_root))
+        from app.infrastructure.external.local_parser import LocalFileParser
+
+        real_parser = LocalFileParser(max_workers=1)
+        use_case = IngestDocumentUseCase(engine, documents, documents, real_parser, artifact_store)
+        try:
+            await use_case.enqueue(
+                document_id="doc-empty-csv",
+                document_name="Empty CSV",
+                file_type="csv",
+                markdown=None,
+                source_uri="local://empty.csv",
+            )
+            processed = await use_case.process_next_job()
+        finally:
+            real_parser.close()
+
+        assert processed is not None
+        assert processed.status is IngestJobStatus.FAILED
+        assert processed.error_message and "0 chunks" in processed.error_message
+        assert engine.ingest_calls[0].markdown == ""
 
     asyncio.run(scenario())
 

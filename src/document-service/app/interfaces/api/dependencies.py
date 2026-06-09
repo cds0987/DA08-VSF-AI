@@ -116,7 +116,8 @@ async def get_current_user(
 
     user_id = payload.get("sub")
     role = payload.get("role")
-    if not user_id or not role:
+    account_type = payload.get("account_type")
+    if not user_id or not role or not account_type:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
@@ -124,6 +125,7 @@ async def get_current_user(
     return CurrentUser(
         id=str(user_id),
         role=str(role),
+        account_type=str(account_type),
         department=str(payload.get("department") or ""),
     )
 

@@ -18,6 +18,7 @@ Copy các file ví dụ trong `deploy/env/`:
 - `query-service.env.example` -> `query-service.env`
 - `rag-worker.env.example` -> `rag-worker.env`
 - `mcp-service.env.example` -> `mcp-service.env`
+- `hr-service.env.example` -> `hr-service.env`
 
 Điền giá trị thật trước khi chạy deploy.
 
@@ -37,6 +38,7 @@ docker compose logs -f document-service
 docker compose logs -f query-service
 docker compose logs -f rag-worker
 docker compose logs -f mcp-service
+docker compose logs -f hr-service
 ```
 
 Dừng:

@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -95,6 +96,16 @@ class FakePublisher:
         self.access_payloads.append(payload)
 
 
+class FakeNotifyPublisher:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.notify_payloads: list[dict] = []
+
+    async def publish_notify_doc_new(self, payload: dict) -> None:
+        self.events.append("publisher.notify")
+        self.notify_payloads.append(payload)
+
+
 class FakeAudit:
     def __init__(self) -> None:
         self.actions: list[str] = []
@@ -104,7 +115,7 @@ class FakeAudit:
 
 
 def admin() -> CurrentUser:
-    return CurrentUser(id=str(uuid4()), role="admin", department="IT")
+    return CurrentUser(id=str(uuid4()), role="admin", account_type="internal", department="IT")
 
 
 def document(
@@ -174,6 +185,89 @@ def test_nats_event_metadata_is_added_to_doc_events() -> None:
 
 
 @pytest.mark.asyncio
+async def test_status_indexed_updates_db_then_publishes_notify(monkeypatch) -> None:
+    from app.infrastructure.messaging import nats_subscriber
+
+    events: list[str] = []
+    doc = document(
+        classification="secret",
+        allowed_departments=["HR"],
+        allowed_user_ids=["user-1"],
+    )
+
+    class FakeSessionContext:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+    class FakeRepo:
+        def __init__(self, session: object) -> None:
+            self.session = session
+
+        async def update_status(
+            self,
+            document_id: str,
+            status: DocumentStatus,
+            chunk_count: int = 0,
+            error: str | None = None,
+        ) -> None:
+            events.append("repo.update_status")
+            assert document_id == doc.id
+            assert status == DocumentStatus.INDEXED
+            assert chunk_count == 7
+            assert error is None
+
+        async def get_by_id(self, document_id: str) -> Document | None:
+            events.append("repo.get_by_id")
+            assert document_id == doc.id
+            return doc
+
+    class FakeMessage:
+        def __init__(self) -> None:
+            self.data = json.dumps(
+                {
+                    "event_id": str(uuid4()),
+                    "event_version": 1,
+                    "occurred_at": "2026-06-05T09:18:47Z",
+                    "doc_id": doc.id,
+                    "status": "indexed",
+                    "chunk_count": 7,
+                },
+            ).encode("utf-8")
+            self.acked = False
+            self.naked = False
+
+        async def ack(self) -> None:
+            events.append("message.ack")
+            self.acked = True
+
+        async def nak(self) -> None:
+            self.naked = True
+
+    monkeypatch.setattr(nats_subscriber, "AsyncSessionLocal", lambda: FakeSessionContext())
+    monkeypatch.setattr(nats_subscriber, "PostgresDocumentRepository", FakeRepo)
+    publisher = FakeNotifyPublisher(events)
+    message = FakeMessage()
+
+    await nats_subscriber._handle_status_message(message, publisher)  # noqa: SLF001
+
+    assert events == ["repo.update_status", "repo.get_by_id", "publisher.notify", "message.ack"]
+    assert message.acked is True
+    assert message.naked is False
+    assert publisher.notify_payloads == [
+        {
+            "doc_id": doc.id,
+            "document_name": "policy.pdf",
+            "classification": "secret",
+            "allowed_departments": ["HR"],
+            "allowed_user_ids": ["user-1"],
+        },
+    ]
+
+
+@pytest.mark.asyncio
 async def test_upload_rejects_unsupported_extension() -> None:
     use_case, _, _, _ = make_upload_case()
 
@@ -228,11 +322,15 @@ async def test_upload_publishes_ingest_and_access_events() -> None:
     assert result.status == "queued"
     assert result.document_id in repo.documents
     assert next(iter(repo.documents.values())).gcs_key.startswith(f"raw/{result.document_id}/")
-    assert publisher.ingest_payloads[0]["doc_id"] == result.document_id
-    assert publisher.ingest_payloads[0]["gcs_key"].startswith(
-        f"gs://rag-chatbot-docs/raw/{result.document_id}/"
-    )
-    assert publisher.ingest_payloads[0]["document_name"] == "policy.pdf"
+    assert publisher.ingest_payloads[0] == {
+        "doc_id": result.document_id,
+        "gcs_key": f"gs://rag-chatbot-docs/raw/{result.document_id}/policy.pdf",
+        "document_name": "policy.pdf",
+        "file_type": "pdf",
+        "classification": "secret",
+        "allowed_departments": ["HR"],
+        "allowed_user_ids": [],
+    }
     assert "s3_key" not in publisher.ingest_payloads[0]
     assert publisher.access_payloads[0] == {
         "doc_id": result.document_id,
@@ -262,10 +360,38 @@ async def test_file_acl_allows_matching_secret_department() -> None:
     doc = document(classification="secret", allowed_departments=["HR"])
     use_case = GetDocumentFileUseCase(InMemoryDocuments([doc]), FakeStorage())
 
-    result = await use_case.execute(CurrentUser(id=str(uuid4()), role="user", department="HR"), doc.id)
+    result = await use_case.execute(
+        CurrentUser(id=str(uuid4()), role="user", account_type="internal", department="HR"),
+        doc.id,
+    )
 
     assert result.file_type == "pdf"
     assert result.expires_in == 300
+
+
+@pytest.mark.asyncio
+async def test_file_acl_denies_external_user_for_internal_document() -> None:
+    doc = document(classification="internal")
+    use_case = GetDocumentFileUseCase(InMemoryDocuments([doc]), FakeStorage())
+
+    with pytest.raises(PermissionDeniedError):
+        await use_case.execute(
+            CurrentUser(id=str(uuid4()), role="user", account_type="external", department="HR"),
+            doc.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_file_acl_allows_internal_user_for_internal_document() -> None:
+    doc = document(classification="internal")
+    use_case = GetDocumentFileUseCase(InMemoryDocuments([doc]), FakeStorage())
+
+    result = await use_case.execute(
+        CurrentUser(id=str(uuid4()), role="user", account_type="internal", department="HR"),
+        doc.id,
+    )
+
+    assert result.file_type == "pdf"
 
 
 @pytest.mark.asyncio
@@ -273,7 +399,10 @@ async def test_file_acl_allows_admin_top_secret_bypass() -> None:
     doc = document(classification="top_secret", allowed_user_ids=[str(uuid4())])
     use_case = GetDocumentFileUseCase(InMemoryDocuments([doc]), FakeStorage())
 
-    result = await use_case.execute(CurrentUser(id=str(uuid4()), role="admin", department="IT"), doc.id)
+    result = await use_case.execute(
+        CurrentUser(id=str(uuid4()), role="admin", account_type="internal", department="IT"),
+        doc.id,
+    )
 
     assert result.file_type == "pdf"
 
@@ -284,7 +413,48 @@ async def test_file_acl_denies_empty_department_for_secret() -> None:
     use_case = GetDocumentFileUseCase(InMemoryDocuments([doc]), FakeStorage())
 
     with pytest.raises(PermissionDeniedError):
-        await use_case.execute(CurrentUser(id=str(uuid4()), role="user", department=""), doc.id)
+        await use_case.execute(
+            CurrentUser(id=str(uuid4()), role="user", account_type="internal", department=""),
+            doc.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_file_acl_denies_external_user_for_secret_document() -> None:
+    doc = document(classification="secret", allowed_departments=["HR"])
+    use_case = GetDocumentFileUseCase(InMemoryDocuments([doc]), FakeStorage())
+
+    with pytest.raises(PermissionDeniedError):
+        await use_case.execute(
+            CurrentUser(id=str(uuid4()), role="user", account_type="external", department="HR"),
+            doc.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_file_acl_allows_matching_top_secret_user() -> None:
+    user_id = str(uuid4())
+    doc = document(classification="top_secret", allowed_user_ids=[user_id])
+    use_case = GetDocumentFileUseCase(InMemoryDocuments([doc]), FakeStorage())
+
+    result = await use_case.execute(
+        CurrentUser(id=user_id, role="user", account_type="external", department=""),
+        doc.id,
+    )
+
+    assert result.file_type == "pdf"
+
+
+@pytest.mark.asyncio
+async def test_file_acl_denies_non_matching_top_secret_user() -> None:
+    doc = document(classification="top_secret", allowed_user_ids=[str(uuid4())])
+    use_case = GetDocumentFileUseCase(InMemoryDocuments([doc]), FakeStorage())
+
+    with pytest.raises(PermissionDeniedError):
+        await use_case.execute(
+            CurrentUser(id=str(uuid4()), role="user", account_type="internal", department="HR"),
+            doc.id,
+        )
 
 
 @pytest.mark.asyncio
@@ -293,7 +463,7 @@ async def test_get_document_allows_authorized_user_metadata() -> None:
     use_case = GetDocumentUseCase(InMemoryDocuments([doc]))
 
     result = await use_case.execute(
-        CurrentUser(id=str(uuid4()), role="user", department="Finance"),
+        CurrentUser(id=str(uuid4()), role="user", account_type="internal", department="Finance"),
         doc.id,
     )
 
@@ -306,7 +476,10 @@ async def test_get_document_denies_unauthorized_user_metadata() -> None:
     use_case = GetDocumentUseCase(InMemoryDocuments([doc]))
 
     with pytest.raises(PermissionDeniedError):
-        await use_case.execute(CurrentUser(id=str(uuid4()), role="user", department="Finance"), doc.id)
+        await use_case.execute(
+            CurrentUser(id=str(uuid4()), role="user", account_type="internal", department="Finance"),
+            doc.id,
+        )
 
 
 @pytest.mark.asyncio
@@ -326,7 +499,13 @@ async def test_delete_soft_deletes_before_best_effort_storage_delete() -> None:
 
     assert result.message == "Document deleted"
     assert events == ["repo.delete", "publisher.access", "audit.log", "storage.delete"]
-    assert publisher.access_payloads[0]["deleted"] is True
+    assert publisher.access_payloads[0] == {
+        "doc_id": doc.id,
+        "classification": "internal",
+        "allowed_departments": [],
+        "allowed_user_ids": [],
+        "deleted": True,
+    }
 
 
 def test_settings_rejects_weak_secret_and_non_hs256_algorithm() -> None:
@@ -353,7 +532,63 @@ async def test_document_auth_rejects_expired_token() -> None:
         {
             "sub": str(uuid4()),
             "role": "user",
+            "account_type": "internal",
             "exp": datetime.now(timezone.utc) - timedelta(minutes=1),
+        },
+        settings.jwt_secret_key,
+        algorithm="HS256",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user(token=token, settings=settings)
+
+    assert exc_info.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_document_auth_decodes_account_type() -> None:
+    from datetime import timedelta
+
+    from jose import jwt
+
+    from app.core.config import Settings
+    from app.interfaces.api.dependencies import get_current_user
+
+    settings = Settings(jwt_secret_key="strong-test-secret")
+    token = jwt.encode(
+        {
+            "sub": str(uuid4()),
+            "role": "user",
+            "account_type": "external",
+            "department": "Partner",
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+        },
+        settings.jwt_secret_key,
+        algorithm="HS256",
+    )
+
+    user = await get_current_user(token=token, settings=settings)
+
+    assert user.account_type == "external"
+    assert user.department == "Partner"
+
+
+@pytest.mark.asyncio
+async def test_document_auth_rejects_token_without_account_type() -> None:
+    from datetime import timedelta
+
+    from fastapi import HTTPException
+    from jose import jwt
+
+    from app.core.config import Settings
+    from app.interfaces.api.dependencies import get_current_user
+
+    settings = Settings(jwt_secret_key="strong-test-secret")
+    token = jwt.encode(
+        {
+            "sub": str(uuid4()),
+            "role": "user",
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
         },
         settings.jwt_secret_key,
         algorithm="HS256",
@@ -408,5 +643,12 @@ async def test_nats_publisher_reuses_connection_and_drains(monkeypatch) -> None:
 
     assert fake_nats.connect_count == 1
     assert len(fake_nats.connection.published) == 2
+    first_subject, first_data = fake_nats.connection.published[0]
+    first_payload = json.loads(first_data.decode("utf-8"))
+    assert first_subject == "doc.access"
+    assert first_payload["doc_id"] == "doc-1"
+    assert first_payload["event_id"]
+    assert first_payload["event_version"] == 1
+    assert first_payload["occurred_at"].endswith("Z")
     assert fake_nats.connection.drained is True
 

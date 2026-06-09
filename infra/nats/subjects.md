@@ -2,7 +2,7 @@
 
 Owner: Backend Dev - Vu Quang Dung.
 
-This file is the source of truth for NATS subjects, payload shape, delivery mode, retry behavior, and idempotency across Document Service, RAG Worker, Query Service, MCP Service, and DevOps.
+This file is the source of truth for NATS subjects, payload shape, delivery mode, retry behavior, and idempotency across Document Service, RAG Worker, Query Service, MCP Service, HR Service, and DevOps.
 
 ## Change Rules
 
@@ -41,12 +41,13 @@ The business fields documented below remain top-level fields, so existing DTOs c
 | `doc.ingest` | JetStream publish/subscribe | Document Service | RAG Worker | `DOC_EVENTS` | at-least-once, explicit ack | `event_id`; fallback `doc_id + "doc.ingest"` |
 | `doc.status` | JetStream publish/subscribe | RAG Worker | Document Service | `DOC_EVENTS` | at-least-once, explicit ack | `event_id`; fallback `doc_id + status` |
 | `doc.access` | JetStream publish/subscribe durable | Document Service | Query Service | `DOC_EVENTS` | at-least-once, durable, explicit ack | `event_id`; fallback `doc_id` with latest `occurred_at` |
+| `hr.employee_profile.updated` | JetStream publish/subscribe durable | HR Service | Query Service | `HR_EVENTS` | at-least-once, durable, explicit ack | `event_id`; fallback `user_id` with latest `occurred_at` |
 | `notify.doc_new` | JetStream publish/subscribe | Document Service | Query Service | `NOTIFY_EVENTS` | at-least-once, explicit ack | `event_id`; fallback `doc_id + "doc_new"` |
 | `rag.search` | Core NATS request-reply | MCP Service tool `rag_search` | RAG Worker | none | synchronous, timeout 10s | request-scoped; no persistence |
 
 ## Error And Retry Rules
 
-- JetStream events (`doc.ingest`, `doc.status`, `doc.access`, `notify.doc_new`) are at-least-once. Consumers must be idempotent.
+- JetStream events (`doc.ingest`, `doc.status`, `doc.access`, `hr.employee_profile.updated`, `notify.doc_new`) are at-least-once. Consumers must be idempotent.
 - Consumers deduplicate by `event_id` when present. If metadata is missing during transition, use the fallback key listed in the overview.
 - Consumers must ack only after durable side effects complete.
 - If processing fails with a retryable error, do not ack; JetStream will redeliver based on consumer config.
@@ -184,6 +185,39 @@ Delete example:
 ```
 
 Required fields: `event_id`, `event_version`, `occurred_at`, `doc_id`, `classification`, `allowed_departments`, `allowed_user_ids`, `deleted`.
+
+## `hr.employee_profile.updated`
+
+Purpose: HR Service publishes employee profile changes. Query Service updates projection `query_svc.user_access_profile` and must not call HR Service in the hot path for ACL pre-filtering.
+
+| Field | Value |
+| --- | --- |
+| Owner | Backend Dev - Vu Quang Dung |
+| Producer | HR Service |
+| Consumer | Query Service |
+| Projection | `query_svc.user_access_profile` |
+| Type | JetStream publish/subscribe durable |
+| Stream | `HR_EVENTS` |
+| Durability | Query Service must use a durable consumer such as `QUERY_SERVICE_USER_ACCESS_PROFILE` |
+| Delivery | at-least-once, explicit ack |
+| Retry | retry until Query Service upserts projection row |
+| Idempotency key | `event_id`; fallback `user_id` with latest `occurred_at` wins |
+
+Payload example:
+
+```json
+{
+  "event_id": "6b2cc50b-6d30-41f5-8a3f-8c885bcb8600",
+  "event_version": 1,
+  "occurred_at": "2026-06-05T09:15:32Z",
+  "user_id": "0c84ef85-e3a8-4b60-a60b-f8b50f7958f7",
+  "account_type": "internal",
+  "department": "HR",
+  "employment_status": "active"
+}
+```
+
+Required fields: `event_id`, `event_version`, `occurred_at`, `user_id`, `account_type`, `department`, `employment_status`.
 
 ## `notify.doc_new`
 

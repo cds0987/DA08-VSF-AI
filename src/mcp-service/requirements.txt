@@ -1,10 +1,9 @@
-# mcp-service — service độc lập (không dùng chung core_engine rag-worker).
-# Ghép với rag-worker CHỈ qua Qdrant.
 mcp>=1.2.0
 qdrant-client>=1.7.0
 openai>=1.30.0
+httpx>=0.27
 PyYAML>=6.0
 pydantic>=2.0
-# Test
 pytest>=8.0
 pytest-asyncio>=0.23
+newrelic>=9.0.0

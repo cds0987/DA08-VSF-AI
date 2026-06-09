@@ -43,6 +43,7 @@ profiles:
         pptx: { impl: markitdown }
         xls: { impl: markitdown }
         xlsx: { impl: markitdown }
+        csv: { impl: csv }
       ocr:
         model: ${OCR_MODEL:-gpt-4o-mini}
         base_url: ${OCR_BASE_URL:-}

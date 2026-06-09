@@ -1,29 +1,204 @@
 name: Deploy develop to GCP VM
 
+# CD 3 PHASE (push develop) — BUILD CÓ CHỌN LỌC:
+#   Phase 0 DETECT     : dò service nào THAY ĐỔI (paths-filter) -> chỉ build cái đó.
+#   Phase 1 TEST       : chỉ chạy khi rag-worker/mcp-service đổi (gate cho 2 service đó).
+#   Phase 2 BUILD+PUSH : build CHỈ service thay đổi -> push Docker Hub (:develop + :<git-sha>).
+#   Phase 3 DEPLOY     : chỉ chạy khi 1 trong 6 service hoặc compose đổi.
+#                        SSH VM -> docker compose PULL + up --no-build -> HEALTH GATE.
+# Sửa docs/**, **.md -> KHÔNG chạy gì (paths-ignore). Code từ git; env từ GitHub Secrets.
+
 on:
   push:
     branches:
       - develop
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+
+# Không cho 2 lần deploy chồng nhau lên cùng 1 VM.
+concurrency:
+  group: deploy-develop
+  cancel-in-progress: false
+
+# GITHUB_TOKEN chỉ cần đọc repo (deploy fetch code). Push image dùng Docker Hub creds riêng.
+permissions:
+  contents: read
 
 jobs:
-  deploy:
+  # ───────────────────────── Phase 0: DETECT ───────────────────────
+  # Quyết định build/test/deploy cái gì dựa trên file thay đổi của push.
+  #   - services : JSON list service cần build (giao của 6 service với path đổi).
+  #   - run_test : true nếu rag-worker|mcp-service đổi.
+  #   - run_deploy: true nếu rag-worker|mcp-service|hr-service|docker-compose đổi.
+  # Nếu workflow này tự đổi -> build LẠI TẤT CẢ (an toàn).
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.matrix.outputs.services }}
+      run_test: ${{ steps.matrix.outputs.run_test }}
+      run_deploy: ${{ steps.matrix.outputs.run_deploy }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: f
+        with:
+          filters: |
+            rag-worker: 'src/rag-worker/**'
+            mcp-service: 'src/mcp-service/**'
+            hr-service: 'src/hr-service/**'
+            user-service: 'src/user-service/**'
+            document-service: 'src/document-service/**'
+            query-service: 'src/query-service/**'
+            base: 'docker-compose.yml'
+            wf: '.github/workflows/deploy-develop.yml'
+      - id: matrix
+        run: |
+          CH='${{ steps.f.outputs.changes }}'
+          ALL='["rag-worker","mcp-service","hr-service","user-service","document-service","query-service"]'
+          if echo "$CH" | jq -e 'any(.[]; .=="wf")' >/dev/null; then
+            SVC="$ALL"                                   # workflow đổi -> build all
+          else
+            SVC=$(jq -cn --argjson ch "$CH" --argjson all "$ALL" '$all - ($all - $ch)')
+          fi
+          echo "services=$SVC" >> "$GITHUB_OUTPUT"
+          rt=false; echo "$SVC" | jq -e 'any(.[]; .=="rag-worker" or .=="mcp-service")' >/dev/null && rt=true
+          echo "run_test=$rt" >> "$GITHUB_OUTPUT"
+          rd=false
+          echo "$CH" | jq -e 'any(.[]; .=="rag-worker" or .=="mcp-service" or .=="hr-service" or .=="user-service" or .=="document-service" or .=="query-service" or .=="base" or .=="wf")' >/dev/null && rd=true
+          echo "run_deploy=$rd" >> "$GITHUB_OUTPUT"
+          echo "→ services=$SVC  run_test=$rt  run_deploy=$rd"
+
+  # ───────────────────────── Phase 1: TEST ─────────────────────────
+  # Chỉ chạy khi rag-worker|mcp-service đổi. Gate nhẹ: contract parity + unit test rag-worker.
+  # E2e/integration đầy đủ chạy ở rag-service-ci.yml / hr-mcp-integration.yml trên feature branch.
+  test:
+    needs: detect
+    if: needs.detect.outputs.run_test == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install deps (rag-worker + mcp-service)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r src/rag-worker/requirements.txt
+          pip install -r src/mcp-service/requirements.txt
+      - name: Vectorstore contract parity (mcp consumer vs rag-worker producer)
+        run: python src/mcp-service/scripts/check_vectorstore_contract.py
+      - name: rag-worker unit tests (infra off)
+        working-directory: src/rag-worker
+        env:
+          APP_ENV: development
+          AI_PROVIDER: offline
+        run: pytest tests -q -ra --ignore=tests/e2e
 
-      - name: Deploy via SSH
+  # ──────────────────── Phase 2: BUILD + PUSH ──────────────────────
+  # Matrix = CHỈ service thay đổi (detect.services). Mỗi image 2 tag: :develop + :<git-sha>.
+  # Bỏ qua nếu không service nào đổi. Chặn nếu test (khi cần) fail.
+  build-push:
+    needs: [detect, test]
+    if: |
+      always()
+      && needs.detect.outputs.services != '[]'
+      && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.detect.outputs.services) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build & push ${{ matrix.service }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ./src/${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:develop
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+
+  # ──────────────────────── Phase 3: DEPLOY ────────────────────────
+  # Chỉ chạy khi 1 trong 6 service (rag-worker/mcp/hr/user/document/query) hoặc compose đổi.
+  # Deploy dùng tag :develop (luôn mới nhất) — service không build lần này vẫn giữ image cũ.
+  deploy:
+    needs: [detect, build-push]
+    if: |
+      always()
+      && needs.detect.outputs.run_deploy == 'true'
+      && (needs.build-push.result == 'success' || needs.build-push.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy + healthcheck via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
           port: ${{ secrets.VM_SSH_PORT || 22 }}
+          command_timeout: 20m
+          envs: APP_DIR,RAG_WORKER_ENV,MCP_SERVICE_ENV,HR_SERVICE_ENV,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN
           script: |
-            set -e
-            cd ${{ secrets.APP_DIR }}
-            git fetch origin
-            git checkout develop
-            git reset --hard origin/develop
-            docker compose up --build -d
+            set -euo pipefail
+            APP_DIR="${{ secrets.APP_DIR }}"
+            export DOCKERHUB_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
+            export IMAGE_TAG="develop"
+            cd "$APP_DIR"
+
+            echo "==> 1) Sync code = origin/develop (production phản ánh đúng git)"
+            # VM remote là HTTPS + repo private -> fetch bằng GITHUB_TOKEN ephemeral của
+            # run (contents:read), không lưu credential trên VM, không cần deploy key.
+            git fetch "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" develop
+            git reset --hard FETCH_HEAD
+
+            echo "==> 2) Provision env files từ GitHub Secrets (không nằm trong git)"
+            mkdir -p deploy/env
+            printf '%s\n' "${{ secrets.RAG_WORKER_ENV }}"  > deploy/env/rag-worker.env
+            printf '%s\n' "${{ secrets.MCP_SERVICE_ENV }}" > deploy/env/mcp-service.env
+            printf '%s\n' "${{ secrets.HR_SERVICE_ENV }}"  > deploy/env/hr-service.env
+
+            echo "==> 3) Login Docker Hub + PULL image (KHÔNG build trên VM)"
+            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+            docker compose pull qdrant rag-worker mcp-service hr-service user-service document-service query-service
+
+            echo "==> 4) Up image đã pull (deps: nats, rag-migrate, hr-migrate one-shot alembic)"
+            docker compose up -d --no-build qdrant rag-worker mcp-service hr-service user-service document-service query-service
+
+            echo "==> 5) HEALTH GATE (fail deploy nếu service không khỏe)"
+            ok=0
+            for i in $(seq 1 60); do
+              rw=$(docker inspect -f '{{.State.Health.Status}}' da08-vsf-rag-worker-1 2>/dev/null || echo none)
+              hr=$(docker inspect -f '{{.State.Health.Status}}' da08-vsf-hr-service-1   2>/dev/null || echo none)
+              mc=$(docker inspect -f '{{.State.Status}}'        da08-vsf-mcp-service-1  2>/dev/null || echo none)
+              mr=$(docker inspect -f '{{.RestartCount}}'        da08-vsf-mcp-service-1  2>/dev/null || echo 99)
+              echo "  [$i] rag-worker=$rw hr-service=$hr mcp-service=$mc(restarts=$mr)"
+              if [ "$rw" = healthy ] && [ "$hr" = healthy ] && [ "$mc" = running ] && [ "$mr" -le 2 ]; then
+                ok=1; break
+              fi
+              sleep 5
+            done
+
+            if [ "$ok" != 1 ]; then
+              echo "::error::Health gate FAILED — dump logs:"
+              for s in rag-worker mcp-service hr-service hr-migrate rag-migrate qdrant; do
+                echo "----- $s -----"
+                docker compose -f "$APP_DIR/docker-compose.yml" logs --no-color --tail 60 "$s" 2>/dev/null || true
+              done
+              exit 1
+            fi
+
+            echo "==> 6) OK. Dọn image rác."
             docker image prune -f
+            echo "Deploy develop -> production: DONE (tag=$IMAGE_TAG)."

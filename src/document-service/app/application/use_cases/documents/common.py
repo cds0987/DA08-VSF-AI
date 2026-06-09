@@ -6,6 +6,8 @@ from app.application.exceptions import PermissionDeniedError, ValidationError
 
 
 ALLOWED_CLASSIFICATIONS = {"public", "internal", "secret", "top_secret"}
+# Keep this whitelist in sync with rag-worker local parser suffix support.
+# Parity check lives in rag-worker/tests/infrastructure/test_parser_parity.py.
 ALLOWED_EXTENSIONS = {"pdf", "docx", "txt", "xlsx", "csv", "pptx", "md"}
 MAX_FILE_BYTES = 50 * 1024 * 1024
 
@@ -62,9 +64,10 @@ def can_access_document(
     if classification == "public":
         return True
     if classification == "internal":
-        # User Service verifies active users before issuing usable tokens; this service checks locally.
-        return True
+        return user.account_type == "internal"
     if classification == "secret":
+        if user.account_type != "internal":
+            return False
         department = user.department.strip()
         if not department:
             return False
@@ -73,4 +76,3 @@ def can_access_document(
     if classification == "top_secret":
         return user.id in allowed_user_ids
     return False
-
