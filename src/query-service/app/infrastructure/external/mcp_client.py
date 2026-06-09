@@ -1,11 +1,13 @@
 from dataclasses import dataclass
 import json
 import re
+import time
 from typing import Any
 import unicodedata
 
 import httpx
 
+from app.application.ports import ToolSpec
 from app.infrastructure.db.mock_data import MOCK_DOCUMENTS, MOCK_HR_DATA
 from app.infrastructure.config import Settings
 
@@ -13,6 +15,39 @@ streamable_http_client = None
 ClientSession = None
 
 MCP_INTERNAL_TOKEN_HEADER = "X-Internal-Token"
+
+# Params injected server-side — never exposed in the tool schema shown to the model.
+_RESERVED_PARAMS: frozenset[str] = frozenset({"user_id", "document_ids", "top_k"})
+
+# Static tool specs for mock mode (reserved params already stripped).
+_MOCK_TOOL_SPECS: list[ToolSpec] = [
+    ToolSpec(
+        name="rag_search",
+        description="Tìm kiếm thông tin trong tài liệu nội bộ của công ty.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Câu hỏi hoặc từ khóa cần tìm kiếm"},
+            },
+            "required": ["query"],
+        },
+    ),
+    ToolSpec(
+        name="hr_query",
+        description="Truy vấn thông tin HR cá nhân: số ngày nghỉ phép, lịch sử đơn nghỉ, bảng lương.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "intent": {
+                    "type": "string",
+                    "enum": ["leave_balance", "leave_requests", "payroll"],
+                    "description": "Loại thông tin HR cần truy vấn",
+                },
+            },
+            "required": ["intent"],
+        },
+    ),
+]
 
 
 @dataclass(frozen=True)
@@ -81,6 +116,36 @@ class MockMCPClient:
 
     async def list_tools(self) -> list[str]:
         return ["rag_search", "hr_query"]
+
+    async def list_tool_specs(self) -> list[ToolSpec]:
+        return list(_MOCK_TOOL_SPECS)
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        if name == "rag_search":
+            query = str(arguments.get("query", ""))
+            document_ids = list(arguments.get("document_ids", []))
+            top_k = int(arguments.get("top_k", 5))
+            results = await self.rag_search(query=query, document_ids=document_ids, top_k=top_k)
+            return {
+                "results": [
+                    {
+                        "chunk_id": r.chunk_id,
+                        "document_id": r.document_id,
+                        "document_name": r.document_name,
+                        "caption": r.caption,
+                        "parent_text": r.parent_text,
+                        "heading_path": r.heading_path,
+                        "score": r.score,
+                    }
+                    for r in results
+                ]
+            }
+        if name == "hr_query":
+            user_id = str(arguments.get("user_id", ""))
+            intent = str(arguments.get("intent", "leave_balance"))
+            result = await self.hr_query(user_id=user_id, intent=intent)
+            return {"summary": result.summary, "intent": result.intent}
+        return {"error": f"Unknown tool: {name}"}
 
     async def rag_search(
         self,
@@ -216,24 +281,57 @@ class MCPStreamableHttpClient:
             fail_max=settings.mcp_circuit_fail_max,
             reset_timeout=settings.mcp_circuit_reset_timeout_seconds,
         )
+        self._tool_specs_cache: list[ToolSpec] | None = None
+        self._tool_specs_cache_at: float = 0.0
+        self._tool_specs_ttl: int = settings.mcp_tool_cache_ttl_seconds
 
     @property
     def is_circuit_open(self) -> bool:
         return bool(getattr(self._breaker, "current_state", "closed") == "open")
 
     async def list_tools(self) -> list[str]:
+        specs = await self.list_tool_specs()
+        return [spec.name for spec in specs]
+
+    async def list_tool_specs(self) -> list[ToolSpec]:
+        now = time.monotonic()
+        if (
+            self._tool_specs_cache is not None
+            and self._tool_specs_ttl > 0
+            and now - self._tool_specs_cache_at < self._tool_specs_ttl
+        ):
+            return self._tool_specs_cache
         async with self._session() as session:
             tools_response = await session.list_tools()
-        tools = getattr(tools_response, "tools", [])
-        names: list[str] = []
-        for tool in tools:
+        raw_tools = getattr(tools_response, "tools", [])
+        specs: list[ToolSpec] = []
+        for tool in raw_tools:
             if isinstance(tool, str):
-                names.append(tool)
-            elif isinstance(tool, dict) and tool.get("name"):
-                names.append(str(tool["name"]))
-            elif getattr(tool, "name", None):
-                names.append(str(tool.name))
-        return names
+                specs.append(ToolSpec(name=tool, description="", input_schema={}))
+                continue
+            name = (tool.get("name") if isinstance(tool, dict) else getattr(tool, "name", None)) or ""
+            if not name:
+                continue
+            description = str(
+                (tool.get("description") if isinstance(tool, dict) else getattr(tool, "description", "")) or ""
+            )
+            raw_schema: dict = (
+                (tool.get("inputSchema") or tool.get("input_schema") or {})
+                if isinstance(tool, dict)
+                else (getattr(tool, "inputSchema", None) or getattr(tool, "input_schema", None) or {})
+            )
+            if isinstance(raw_schema, dict):
+                raw_schema = _strip_reserved_params(raw_schema)
+            specs.append(ToolSpec(name=str(name), description=description, input_schema=raw_schema))
+        self._tool_specs_cache = specs
+        self._tool_specs_cache_at = now
+        return specs
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        result = await self._call_tool(name, arguments)
+        if isinstance(result, dict):
+            return result
+        return {}
 
     async def rag_search(
         self,
@@ -415,6 +513,18 @@ def _normalize_text(text: str) -> str:
     )
     without_punctuation = re.sub(r"[_\W]+", " ", without_accents, flags=re.UNICODE)
     return re.sub(r"\s+", " ", without_punctuation).strip()
+
+
+def _strip_reserved_params(schema: dict[str, Any]) -> dict[str, Any]:
+    """Remove server-injected params from a JSON Schema so the model never sees them."""
+    props = schema.get("properties", {})
+    if not props or not (_RESERVED_PARAMS & props.keys()):
+        return schema
+    new_props = {k: v for k, v in props.items() if k not in _RESERVED_PARAMS}
+    result: dict[str, Any] = {**schema, "properties": new_props}
+    if "required" in schema:
+        result["required"] = [r for r in schema["required"] if r not in _RESERVED_PARAMS]
+    return result
 
 
 def _import_pybreaker():

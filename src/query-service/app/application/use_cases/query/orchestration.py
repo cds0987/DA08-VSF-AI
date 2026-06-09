@@ -145,16 +145,28 @@ class QueryOrchestrationUseCase:
             return
 
         if decision.decision == "hr_query":
-            async for event in self._handle_hr(
-                question=question,
-                user=user,
-                intent=str(decision.tool_arguments["intent"]),
-                recent_messages=recent_messages,
-                session_id=session_id,
-                started=started,
-                outcome=decision.outcome,
-            ):
-                yield event
+            intent = str(decision.tool_arguments.get("intent", "leave_balance"))
+            if self._settings.tool_routing_mode.strip().lower() == "native":
+                async for event in self._handle_generic_tool(
+                    tool_name="hr_query",
+                    arguments={"user_id": user.id, "intent": intent},
+                    user=user,
+                    session_id=session_id,
+                    started=started,
+                    outcome=decision.outcome,
+                ):
+                    yield event
+            else:
+                async for event in self._handle_hr(
+                    question=question,
+                    user=user,
+                    intent=intent,
+                    recent_messages=recent_messages,
+                    session_id=session_id,
+                    started=started,
+                    outcome=decision.outcome,
+                ):
+                    yield event
             return
 
         async for event in self._handle_rag(
@@ -591,6 +603,33 @@ class QueryOrchestrationUseCase:
         await self._save_assistant(user.id, session_id, answer, [], started)
         yield {"done": True, "sources": [], "session_id": session_id, "outcome": outcome.value}
 
+    async def _handle_generic_tool(
+        self,
+        tool_name: str,
+        arguments: dict,
+        user: AuthenticatedUser,
+        session_id: str,
+        started: float,
+        outcome: Outcome,
+    ) -> AsyncIterator[dict]:
+        """Summary-style handler for any non-rag tool in tool_routing_mode=native.
+
+        Calls call_tool() generically and streams the 'summary' field from the result.
+        rag_search always uses _handle_rag (bespoke ACL + score + semantic cache).
+        """
+        result = await self._mcp_client.call_tool(tool_name, arguments)
+        summary = str(result.get("summary") or result.get("answer") or result.get("text") or "")
+        if not summary:
+            async for event in self._fallback(
+                user.id, session_id, started, Outcome.NO_INFO
+            ):
+                yield event
+            return
+        for token in _word_chunks(summary):
+            yield {"token": token}
+        await self._save_assistant(user.id, session_id, summary, [], started)
+        yield {"done": True, "sources": [], "session_id": session_id, "outcome": outcome.value}
+
     async def _fallback(
         self,
         user_id: str,
@@ -636,7 +675,7 @@ class QueryOrchestrationUseCase:
                     yield {"token": token}
                 answer = "".join(answer_parts)
                 await self._save_assistant(user_id, session_id, answer, [], started)
-                yield {"done": True, "sources": [], "session_id": session_id, "fallback": True}
+                yield {"done": True, "sources": [], "session_id": session_id, "fallback": True, "outcome": outcome.value}
                 return
             except Exception:
                 # LLM failed, fall through to static message
@@ -645,7 +684,7 @@ class QueryOrchestrationUseCase:
         for token in _word_chunks(static_message):
             yield {"token": token}
         await self._save_assistant(user_id, session_id, static_message, [], started)
-        yield {"done": True, "sources": [], "session_id": session_id, "fallback": True}
+        yield {"done": True, "sources": [], "session_id": session_id, "fallback": True, "outcome": outcome.value}
 
     async def _save_assistant(
         self,

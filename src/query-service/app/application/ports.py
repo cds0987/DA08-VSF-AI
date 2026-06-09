@@ -1,10 +1,18 @@
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from app.application.route_decision import RouteDecision
 from app.application.tool_decision import ToolDecision
 from app.domain.outcome import Outcome
+
+
+@dataclass(frozen=True)
+class ToolSpec:
+    """Tool specification as seen by the model — reserved params already stripped."""
+    name: str
+    description: str
+    input_schema: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -39,6 +47,9 @@ class MCPToolClient(Protocol):
     async def list_tools(self) -> list[str]:
         ...
 
+    async def list_tool_specs(self) -> list[ToolSpec]:
+        ...
+
     async def rag_search(
         self,
         query: str,
@@ -48,6 +59,9 @@ class MCPToolClient(Protocol):
         ...
 
     async def hr_query(self, user_id: str, intent: str) -> HrQueryResultLike:
+        ...
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         ...
 
 

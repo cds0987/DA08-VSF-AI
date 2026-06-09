@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     mcp_internal_token: str | None = None
     mcp_circuit_fail_max: int = 5
     mcp_circuit_reset_timeout_seconds: int = 30
+    mcp_tool_cache_ttl_seconds: int = 0  # 0 = off; seconds to cache list_tool_specs() response
+    tool_routing_mode: str = "legacy"  # "legacy" = typed methods; "native" = generic call_tool
 
     nats_mode: str = "mock"
     nats_url: str = "nats://localhost:4222"
