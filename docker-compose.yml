@@ -110,6 +110,8 @@ services:
         condition: service_started
       qdrant:
         condition: service_started
+      rag-worker:
+        condition: service_healthy
       hr-service:
         condition: service_healthy
     restart: unless-stopped
