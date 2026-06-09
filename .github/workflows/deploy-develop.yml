@@ -4,7 +4,7 @@ name: Deploy develop to GCP VM
 #   Phase 0 DETECT     : dò service nào THAY ĐỔI (paths-filter) -> chỉ build cái đó.
 #   Phase 1 TEST       : chỉ chạy khi rag-worker/mcp-service đổi (gate cho 2 service đó).
 #   Phase 2 BUILD+PUSH : build CHỈ service thay đổi -> push Docker Hub (:develop + :<git-sha>).
-#   Phase 3 DEPLOY     : chỉ chạy khi service được-deploy (rag-worker/mcp/hr) hoặc compose đổi.
+#   Phase 3 DEPLOY     : chỉ chạy khi 1 trong 6 service hoặc compose đổi.
 #                        SSH VM -> docker compose PULL + up --no-build -> HEALTH GATE.
 # Sửa docs/**, **.md -> KHÔNG chạy gì (paths-ignore). Code từ git; env từ GitHub Secrets.
 
@@ -65,7 +65,7 @@ jobs:
           rt=false; echo "$SVC" | jq -e 'any(.[]; .=="rag-worker" or .=="mcp-service")' >/dev/null && rt=true
           echo "run_test=$rt" >> "$GITHUB_OUTPUT"
           rd=false
-          echo "$CH" | jq -e 'any(.[]; .=="rag-worker" or .=="mcp-service" or .=="hr-service" or .=="base" or .=="wf")' >/dev/null && rd=true
+          echo "$CH" | jq -e 'any(.[]; .=="rag-worker" or .=="mcp-service" or .=="hr-service" or .=="user-service" or .=="document-service" or .=="query-service" or .=="base" or .=="wf")' >/dev/null && rd=true
           echo "run_deploy=$rd" >> "$GITHUB_OUTPUT"
           echo "→ services=$SVC  run_test=$rt  run_deploy=$rd"
 
@@ -131,7 +131,7 @@ jobs:
           cache-to: type=gha,scope=${{ matrix.service }},mode=max
 
   # ──────────────────────── Phase 3: DEPLOY ────────────────────────
-  # Chỉ chạy khi service được-deploy (rag-worker/mcp/hr) hoặc compose đổi.
+  # Chỉ chạy khi 1 trong 6 service (rag-worker/mcp/hr/user/document/query) hoặc compose đổi.
   # Deploy dùng tag :develop (luôn mới nhất) — service không build lần này vẫn giữ image cũ.
   deploy:
     needs: [detect, build-push]
@@ -171,10 +171,10 @@ jobs:
 
             echo "==> 3) Login Docker Hub + PULL image (KHÔNG build trên VM)"
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-            docker compose pull qdrant rag-worker mcp-service hr-service
+            docker compose pull qdrant rag-worker mcp-service hr-service user-service document-service query-service
 
             echo "==> 4) Up image đã pull (deps: nats, rag-migrate, hr-migrate one-shot alembic)"
-            docker compose up -d --no-build qdrant rag-worker mcp-service hr-service
+            docker compose up -d --no-build qdrant rag-worker mcp-service hr-service user-service document-service query-service
 
             echo "==> 5) HEALTH GATE (fail deploy nếu service không khỏe)"
             ok=0
