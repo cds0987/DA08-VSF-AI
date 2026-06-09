@@ -231,12 +231,16 @@ def test_proxy_soft_404(monkeypatch) -> None:
 
 
 def test_proxy_logs_masked_user_id(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+    import app.tools.hr_query as hr_module
+
     _, fn, _ = _tool(monkeypatch, post_response=FakeResponse(200, {"intent": "attendance", "data": {}, "summary": "ok"}))
+    masked_user = hr_module._mask_user_id(USER_HR)
 
     with caplog.at_level("INFO", logger="mcp-service"):
         asyncio.run(fn(USER_HR, "attendance"))
 
     assert "hr_query intent=attendance" in caplog.text
+    assert masked_user in caplog.text
     assert USER_HR not in caplog.text
 
 

@@ -58,7 +58,7 @@ class HrQueryTool:
     async def _call(self, user_id: str, intent: str) -> dict[str, Any]:
         masked_user = _mask_user_id(user_id)
         if intent not in MVP_INTENTS:
-            logger.info("hr_query intent=%s user=%s status=unsupported_intent", intent, masked_user)
+            logger.warning("hr_query intent=%s user=%s status=unsupported_intent", intent, masked_user)
             return self._unsupported_intent_response(intent)
 
         client = self._get_client()
