@@ -12,18 +12,28 @@ MOCK_TOKENS: dict[str, AuthenticatedUser] = {
         email="hr.user@company.com",
         role="user",
         department="HR",
+        account_type="internal",
     ),
     "mock-user-finance": AuthenticatedUser(
         id="22222222-2222-4222-8222-222222222222",
         email="finance.user@company.com",
         role="user",
         department="Finance",
+        account_type="internal",
     ),
     "mock-admin": AuthenticatedUser(
         id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         email="admin@company.com",
         role="admin",
         department="Admin",
+        account_type="internal",
+    ),
+    "mock-user-external": AuthenticatedUser(
+        id="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        email="external.user@partner.com",
+        role="user",
+        department="",
+        account_type="external",
     ),
 }
 
@@ -77,6 +87,7 @@ class AuthService:
             role=str(role),
             department=str(payload.get("department", "")),
             is_active=bool(payload.get("is_active", True)),
+            account_type=str(payload.get("account_type", "internal")),
         )
 
     async def _authenticate_user_service(self, authorization: str | None) -> AuthenticatedUser:
@@ -114,6 +125,7 @@ class AuthService:
             role=str(role),
             department=str(payload.get("department", "")),
             is_active=bool(payload.get("is_active", True)),
+            account_type=str(payload.get("account_type", "internal")),
         )
 
     @staticmethod

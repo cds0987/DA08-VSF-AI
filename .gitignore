@@ -24,3 +24,4 @@ infra/localtest/init-db.sql
 deploy/env/*.env
 deploy/env/*.env.local
 deploy/env/*.secret
+.codegraph

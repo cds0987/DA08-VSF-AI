@@ -75,6 +75,10 @@ class MockMCPClient:
     def __init__(self) -> None:
         self.last_tool_calls: list[ToolCallRecord] = []
 
+    @property
+    def is_circuit_open(self) -> bool:
+        return False
+
     async def list_tools(self) -> list[str]:
         return ["rag_search", "hr_query"]
 
@@ -199,11 +203,23 @@ class MockMCPClient:
         self.last_tool_calls.clear()
 
 
+class MCPCircuitOpenError(RuntimeError):
+    """Raised when the MCP circuit breaker is open and calls are blocked."""
+
+
 class MCPStreamableHttpClient:
     def __init__(self, settings: Settings) -> None:
         self._endpoint_url = _mcp_endpoint_url(settings.mcp_service_url)
         self._timeout_seconds = settings.mcp_timeout_seconds
         self._internal_token = (settings.mcp_internal_token or "").strip()
+        self._breaker = _build_circuit_breaker(
+            fail_max=settings.mcp_circuit_fail_max,
+            reset_timeout=settings.mcp_circuit_reset_timeout_seconds,
+        )
+
+    @property
+    def is_circuit_open(self) -> bool:
+        return bool(getattr(self._breaker, "current_state", "closed") == "open")
 
     async def list_tools(self) -> list[str]:
         async with self._session() as session:
@@ -253,6 +269,15 @@ class MCPStreamableHttpClient:
         return _hr_result_from_payload(payload, intent)
 
     async def _call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        pybreaker = _import_pybreaker()
+        try:
+            return await self._breaker.call_async(self._call_tool_inner, name, arguments)
+        except pybreaker.CircuitBreakerError as exc:
+            raise MCPCircuitOpenError(
+                f"MCP circuit breaker is open — calls to {name} are blocked"
+            ) from exc
+
+    async def _call_tool_inner(self, name: str, arguments: dict[str, Any]) -> Any:
         async with self._session() as session:
             result = await session.call_tool(name, arguments=arguments)
         if bool(getattr(result, "isError", False)):
@@ -390,6 +415,19 @@ def _normalize_text(text: str) -> str:
     )
     without_punctuation = re.sub(r"[_\W]+", " ", without_accents, flags=re.UNICODE)
     return re.sub(r"\s+", " ", without_punctuation).strip()
+
+
+def _import_pybreaker():
+    try:
+        import pybreaker
+    except ImportError as exc:
+        raise RuntimeError("pybreaker is required for the MCP circuit breaker") from exc
+    return pybreaker
+
+
+def _build_circuit_breaker(fail_max: int, reset_timeout: int):
+    pybreaker = _import_pybreaker()
+    return pybreaker.CircuitBreaker(fail_max=fail_max, reset_timeout=reset_timeout)
 
 
 def _mcp_endpoint_url(service_url: str) -> str:

@@ -1,6 +1,6 @@
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 from app.application.route_decision import RouteDecision
 from app.application.tool_decision import ToolDecision
@@ -14,6 +14,7 @@ class AuthenticatedUser:
     role: str
     department: str
     is_active: bool = True
+    account_type: str = "internal"
 
 
 class SearchResultLike(Protocol):
@@ -88,4 +89,43 @@ class SemanticCache(Protocol):
         ...
 
     async def put(self, namespace: str, question: str, answer: str, sources: list[dict]) -> None:
+        ...
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    tool_name: str
+    arguments: dict
+
+
+@dataclass(frozen=True)
+class ToolResult:
+    tool_name: str
+    success: bool
+    data: str
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class ReActMessage:
+    role: Literal["user", "assistant", "tool"]
+    content: str
+    tool_name: str | None = None
+
+
+@dataclass(frozen=True)
+class ReActOutput:
+    is_final_answer: bool
+    content: str
+    tool_calls: list[ToolCall]
+    sources: list[dict]
+    reasoning: str
+
+
+class AgentLLMClient(Protocol):
+    async def react_step(
+        self,
+        messages: list[ReActMessage],
+        available_tools: list[str],
+    ) -> ReActOutput:
         ...

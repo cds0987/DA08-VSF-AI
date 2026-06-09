@@ -4,6 +4,8 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.application.ports import AuthenticatedUser
+from app.application.langgraph_agent import build_langgraph_agent
+from app.application.langgraph_state import create_initial_state
 from app.application.intent_classifier import HybridIntentClassifier
 from app.application.query_router import QueryRouter
 from app.application.use_cases.query.orchestration import QueryOrchestrationUseCase
@@ -14,9 +16,13 @@ from app.infrastructure.config import Settings, get_settings
 from app.infrastructure.db.mock_conversation_repo import InMemoryConversationRepository
 from app.infrastructure.db.mock_document_access_repo import InMemoryDocumentAccessRepository
 from app.infrastructure.db.mock_notification_repo import InMemoryNotificationRepository
+from app.infrastructure.db.mock_user_access_profile_repo import InMemoryUserAccessProfileRepository
 from app.infrastructure.db.postgres_conversation_repo import PostgresConversationRepository
 from app.infrastructure.db.postgres_document_access_repo import PostgresDocumentAccessRepository
 from app.infrastructure.db.postgres_notification_repo import PostgresNotificationRepository
+from app.infrastructure.db.postgres_user_access_profile_repo import PostgresUserAccessProfileRepository
+from app.infrastructure.external.langchain_mcp_client import LangChainMCPToolsLoader
+from app.infrastructure.external.langchain_responses_adapter import OpenAIResponsesChatModel
 from app.infrastructure.external.mcp_client import MCPStreamableHttpClient, MockMCPClient
 from app.infrastructure.external.intent_ai_client import (
     OpenAIIntentEmbeddingClient,
@@ -27,6 +33,8 @@ from app.infrastructure.external.openai_client import OpenAIStreamingClient
 from app.infrastructure.messaging.nats_events import QueryNatsEventHandler
 from app.infrastructure.messaging.nats_subscriber import NatsSubscriberManager
 from app.infrastructure.messaging.notification_service import NotificationService
+from app.infrastructure.guardrails.llm_guard_service import build_guardrails
+from app.infrastructure.observability.langfuse_tracing import build_langfuse_callback
 from app.infrastructure.sse.connection_manager import ConnectionManager
 
 bearer_scheme = HTTPBearer(auto_error=False, scheme_name="BearerAuth")
@@ -73,6 +81,14 @@ def get_notification_repo():
     if settings.nats_mode.strip().lower() == "nats" and settings.database_url:
         return PostgresNotificationRepository(settings.database_url)
     return InMemoryNotificationRepository()
+
+
+@lru_cache
+def get_user_access_profile_repo():
+    settings = get_settings()
+    if settings.nats_mode.strip().lower() == "nats" and settings.database_url:
+        return PostgresUserAccessProfileRepository(settings.database_url)
+    return InMemoryUserAccessProfileRepository()
 
 
 @lru_cache
@@ -157,6 +173,16 @@ def get_openai_client() -> OpenAIStreamingClient:
     return OpenAIStreamingClient(get_settings())
 
 
+@lru_cache
+def get_langfuse_callback():
+    return build_langfuse_callback(get_settings())
+
+
+@lru_cache
+def get_guardrails():
+    return build_guardrails(get_settings())
+
+
 def get_orchestration_use_case() -> QueryOrchestrationUseCase:
     return QueryOrchestrationUseCase(
         settings=get_settings(),
@@ -166,6 +192,9 @@ def get_orchestration_use_case() -> QueryOrchestrationUseCase:
         mcp_client=get_mcp_client(),
         openai_client=get_openai_client(),
         route_decision_provider=get_query_router(),
+        langgraph_agent=get_langgraph_agent(),
+        langfuse_callback=get_langfuse_callback(),
+        guardrails=get_guardrails(),
     )
 
 
@@ -177,6 +206,47 @@ def get_notification_service() -> NotificationService:
 
 
 @lru_cache
+def get_langchain_mcp_tools_loader() -> LangChainMCPToolsLoader | None:
+    """
+    Build a LangChainMCPToolsLoader when both USE_LANGGRAPH and real MCP are active.
+    Returns None for mock mode (think_node falls back to build_langgraph_tools).
+    """
+    settings = get_settings()
+    if not settings.use_langgraph:
+        return None
+    if settings.mcp_mode.strip().lower() not in {"real", "mcp"}:
+        return None
+    return LangChainMCPToolsLoader(settings=settings, mcp_client=get_mcp_client())
+
+
+@lru_cache
+def get_langchain_model() -> OpenAIResponsesChatModel:
+    """LangChain-compatible model wrapping OpenAI Responses API. Used by LangGraph."""
+    settings = get_settings()
+    return OpenAIResponsesChatModel(
+        api_key=settings.openai_api_key or "",
+        model=settings.openai_llm_model,
+        timeout=float(settings.openai_timeout_seconds),
+    )
+
+
+@lru_cache
+def get_langgraph_agent():
+    """
+    Cached compiled LangGraph agent. Built once per process.
+    Only constructed when use_langgraph=True, otherwise returns None.
+    """
+    settings = get_settings()
+    if not settings.use_langgraph:
+        return None
+    return build_langgraph_agent(
+        model=get_langchain_model(),
+        mcp_client=get_mcp_client(),
+        tools_loader=get_langchain_mcp_tools_loader(),
+    )
+
+
+@lru_cache
 def get_nats_subscriber_manager() -> NatsSubscriberManager | None:
     settings = get_settings()
     if settings.nats_mode.strip().lower() != "nats":
@@ -184,6 +254,7 @@ def get_nats_subscriber_manager() -> NatsSubscriberManager | None:
     handler = QueryNatsEventHandler(
         document_access_repo=get_document_access_repo(),
         notification_service=get_notification_service(),
+        user_access_profile_repo=get_user_access_profile_repo(),
         processed_event_max_size=settings.nats_processed_event_max_size,
         processed_event_ttl_seconds=settings.nats_processed_event_ttl_seconds,
     )
@@ -209,10 +280,14 @@ def reset_state_for_tests() -> None:
     decision_reset = getattr(get_tool_decision_client(), "reset", None)
     if decision_reset:
         decision_reset()
+    profile_reset = getattr(get_user_access_profile_repo(), "reset", None)
+    if profile_reset:
+        profile_reset()
     get_nats_subscriber_manager.cache_clear()
     get_conversation_repo.cache_clear()
     get_document_access_repo.cache_clear()
     get_notification_repo.cache_clear()
+    get_user_access_profile_repo.cache_clear()
     get_connection_manager.cache_clear()
     get_mcp_client.cache_clear()
     get_semantic_cache.cache_clear()
@@ -222,3 +297,9 @@ def reset_state_for_tests() -> None:
     get_intent_llm_client.cache_clear()
     get_intent_classifier.cache_clear()
     get_query_router.cache_clear()
+    get_langchain_model.cache_clear()
+    get_langchain_mcp_tools_loader.cache_clear()
+    get_langgraph_agent.cache_clear()
+    get_langfuse_callback.cache_clear()
+    get_guardrails.cache_clear()
+    get_openai_client.cache_clear()

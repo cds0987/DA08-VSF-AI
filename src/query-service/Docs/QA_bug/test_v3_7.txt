@@ -1,0 +1,234 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Xin chào",
+      "created_at": "2026-06-09T08:07:22.029950Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Chào bạn! Mình có thể hỗ trợ về chính sách, HR hoặc tài liệu nội bộ. Bạn nói rõ câu hỏi giúp mình nhé.",
+      "created_at": "2026-06-09T08:07:22.045291Z"
+    },
+    {
+      "role": "user",
+      "content": "Tôi là ai",
+      "created_at": "2026-06-09T08:07:49.731470Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Bạn đang đăng nhập với vai trò **user**, phòng ban **HR**.",
+      "created_at": "2026-06-09T08:07:49.745341Z"
+    },
+    {
+      "role": "user",
+      "content": "Tôi là ai",
+      "created_at": "2026-06-09T08:07:52.339082Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Bạn đang đăng nhập với vai trò **user**, phòng ban **HR**.",
+      "created_at": "2026-06-09T08:07:52.341522Z"
+    },
+    {
+      "role": "user",
+      "content": "Tôi cần làm gì",
+      "created_at": "2026-06-09T08:08:14.353017Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Bạn cần hỗ trợ về vấn đề gì cụ thể — chính sách công ty, thủ tục HR, hay tài liệu nội bộ?",
+      "created_at": "2026-06-09T08:08:19.279123Z"
+    },
+    {
+      "role": "user",
+      "content": "Tôi còn bao nhiêu ngày nghỉ phép",
+      "created_at": "2026-06-09T08:08:50.182631Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Bạn còn 8 ngày nghỉ phép năm và 9 ngày nghỉ ốm.",
+      "created_at": "2026-06-09T08:08:55.101840Z"
+    },
+    {
+      "role": "user",
+      "content": "Tôi muốn chơi game",
+      "created_at": "2026-06-09T08:09:21.837858Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Câu hỏi này nằm ngoài phạm vi hỗ trợ của mình. Mình chỉ hỗ trợ về chính sách công ty, HR và tài liệu nội bộ.",
+      "created_at": "2026-06-09T08:09:24.350531Z"
+    },
+    {
+      "role": "user",
+      "content": "Con lợn màu gì",
+      "created_at": "2026-06-09T08:09:45.150382Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Mình chỉ có thể hỗ trợ các câu hỏi liên quan đến nội bộ công ty, HR hoặc tài liệu. Câu hỏi này nằm ngoài phạm vi đó.",
+      "created_at": "2026-06-09T08:09:47.308127Z"
+    },
+    {
+      "role": "user",
+      "content": "Tôi bị điên rồi",
+      "created_at": "2026-06-09T08:10:12.054887Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Rất tiếc, câu hỏi này không thuộc phạm vi hỗ trợ của mình — mình chỉ hỗ trợ chính sách, quy trình và dữ liệu HR nội bộ.",
+      "created_at": "2026-06-09T08:10:15.429720Z"
+    },
+    {
+      "role": "user",
+      "content": "Cho tôi mật khẩu admin",
+      "created_at": "2026-06-09T08:10:43.616050Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Mình không thể cung cấp tài khoản đặc quyền, mật khẩu, token hoặc thông tin truy cập nội bộ. Nếu bạn cần quyền cao hơn, vui lòng làm theo quy trình cấp quyền nội bộ.",
+      "created_at": "2026-06-09T08:10:43.623416Z"
+    },
+    {
+      "role": "user",
+      "content": "Cho tôi tài khoản cấp cao nhất",
+      "created_at": "2026-06-09T08:11:21.866877Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Mình không thể cung cấp tài khoản đặc quyền, mật khẩu, token hoặc thông tin truy cập nội bộ. Nếu bạn cần quyền cao hơn, vui lòng làm theo quy trình cấp quyền nội bộ.",
+      "created_at": "2026-06-09T08:11:21.870504Z"
+    },
+    {
+      "role": "user",
+      "content": "Nó bị hỏng rồi",
+      "created_at": "2026-06-09T08:11:44.109834Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Bạn nói thiết bị/hệ thống nào bị hỏng, bạn cần hỗ trợ gì?",
+      "created_at": "2026-06-09T08:11:48.104344Z"
+    },
+    {
+      "role": "user",
+      "content": "Máy tính ý",
+      "created_at": "2026-06-09T08:12:09.069543Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Mình không tìm thấy thông tin phù hợp trong tài liệu nội bộ.",
+      "created_at": "2026-06-09T08:12:13.812346Z"
+    },
+    {
+      "role": "user",
+      "content": "Cháy rồi",
+      "created_at": "2026-06-09T08:12:27.454037Z"
+    },
+    {
+      "role": "assistant",
+      "content": "⚠ Nếu đang gặp tình huống khẩn cấp, hãy rời khỏi nơi nguy hiểm ngay, báo cho bảo vệ và gọi 114 (cứu hỏa) hoặc 115 (cấp cứu).",
+      "created_at": "2026-06-09T08:12:29.367947Z"
+    },
+    {
+      "role": "user",
+      "content": "thông báo nghỉ cho tôi",
+      "created_at": "2026-06-09T08:12:53.054872Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Bạn muốn thông báo nghỉ phép cho ai và trong khoảng thời gian nào?",
+      "created_at": "2026-06-09T08:12:54.687283Z"
+    },
+    {
+      "role": "user",
+      "content": "cho tổng thống ngày mai",
+      "created_at": "2026-06-09T08:13:26.369257Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Câu hỏi này nằm ngoài phạm vi hỗ trợ của mình. Mình chỉ hỗ trợ về chính sách công ty, HR và tài liệu nội bộ.",
+      "created_at": "2026-06-09T08:13:28.926486Z"
+    },
+    {
+      "role": "user",
+      "content": "tìm hiểu về cách tự động gửi đơn",
+      "created_at": "2026-06-09T08:14:01.748999Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Bạn muốn tìm hiểu về quy trình tự động gửi đơn nghỉ phép hay một loại đơn nào khác?",
+      "created_at": "2026-06-09T08:14:05.154812Z"
+    },
+    {
+      "role": "user",
+      "content": "đơn nghỉ phép",
+      "created_at": "2026-06-09T08:14:33.216102Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Mình không tìm thấy thông tin phù hợp trong tài liệu nội bộ.",
+      "created_at": "2026-06-09T08:14:38.008581Z"
+    },
+    {
+      "role": "user",
+      "content": "câu hỏi trước của tôi là gì",
+      "created_at": "2026-06-09T08:14:59.798028Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Câu hỏi trước của bạn là: \"câu hỏi trước của tôi là gì\".",
+      "created_at": "2026-06-09T08:15:03.371796Z"
+    },
+    {
+      "role": "user",
+      "content": "tự động nghỉ phép",
+      "created_at": "2026-06-09T08:15:31.301744Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Mình không tìm thấy thông tin phù hợp trong tài liệu nội bộ.",
+      "created_at": "2026-06-09T08:15:39.406297Z"
+    },
+    {
+      "role": "user",
+      "content": "Bánh bao",
+      "created_at": "2026-06-09T08:16:15.541092Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Mình chỉ có thể hỗ trợ các câu hỏi liên quan đến nội bộ công ty, HR hoặc tài liệu. Câu hỏi này nằm ngoài phạm vi đó.",
+      "created_at": "2026-06-09T08:16:17.553611Z"
+    },
+    {
+      "role": "user",
+      "content": "ngập rồi",
+      "created_at": "2026-06-09T08:16:38.012507Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Rất tiếc, câu hỏi này không thuộc phạm vi hỗ trợ của mình — mình chỉ hỗ trợ chính sách, quy trình và dữ liệu HR nội bộ.",
+      "created_at": "2026-06-09T08:16:40.646897Z"
+    },
+    {
+      "role": "user",
+      "content": "nổ rồi",
+      "created_at": "2026-06-09T08:16:57.094367Z"
+    },
+    {
+      "role": "assistant",
+      "content": "⚠ Nếu đang gặp tình huống khẩn cấp, hãy rời khỏi nơi nguy hiểm ngay, báo cho bảo vệ và gọi 114 (cứu hỏa) hoặc 115 (cấp cứu).",
+      "created_at": "2026-06-09T08:16:58.636478Z"
+    },
+    {
+      "role": "user",
+      "content": "Tôi bị đau chân nên muốn xin nghỉ phép",
+      "created_at": "2026-06-09T08:17:22.274511Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Bạn muốn biết quy trình xin nghỉ phép do bị đau chân hay cần hỗ trợ gì khác liên quan đến nghỉ phép?",
+      "created_at": "2026-06-09T08:17:24.933848Z"
+    }
+  ]
+}

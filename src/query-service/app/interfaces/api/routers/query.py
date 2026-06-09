@@ -1,6 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
+_SSE_RESPONSES = {
+    200: {
+        "description": "Server-Sent Events stream. Each line: `data: <json>\\n\\n`. "
+                       "Use curl or EventSource — Swagger UI cannot display SSE.",
+        "content": {"text/event-stream": {"schema": {"type": "string"}}},
+    }
+}
+
 from app.application.ports import AuthenticatedUser
 from app.application.use_cases.query.orchestration import QueryOrchestrationUseCase
 from app.infrastructure.cache.rate_limiter import RateLimiterUnavailable
@@ -15,7 +23,7 @@ from app.interfaces.api.sse import format_sse
 router = APIRouter(tags=["query"])
 
 
-@router.post("/query")
+@router.post("/query", response_class=StreamingResponse, responses=_SSE_RESPONSES)
 async def query(
     request: QueryRequest,
     user: AuthenticatedUser = Depends(get_current_user),

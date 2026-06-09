@@ -10,6 +10,7 @@ class DocumentAccessRepository(ABC):
         user_id: str,
         role: str,
         department: str,
+        account_type: str = "internal",
     ) -> Optional[list[str]]:
         """Return document ids the user can read from the local ACL projection."""
 

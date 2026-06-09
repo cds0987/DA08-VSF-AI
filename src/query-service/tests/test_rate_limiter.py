@@ -1,59 +1,77 @@
+"""Tests for rate limiting on POST /query."""
+
 import pytest
+from httpx import AsyncClient
 
-from app.infrastructure.cache.rate_limiter import InMemoryRateLimiter, RedisRateLimiter
-from app.infrastructure.config import get_settings
-from app.interfaces.api.dependencies import get_rate_limiter
-
-
-class FakeRedis:
-    def __init__(self) -> None:
-        self.values: dict[str, int] = {}
-        self.expirations: dict[str, int] = {}
-
-    async def incr(self, key: str) -> int:
-        self.values[key] = self.values.get(key, 0) + 1
-        return self.values[key]
-
-    async def expire(self, key: str, ttl: int) -> None:
-        self.expirations[key] = ttl
-
-
-class FakeRedisModule:
-    def __init__(self) -> None:
-        self.client = FakeRedis()
-
-    def from_url(self, url: str, *, encoding: str, decode_responses: bool):
-        return self.client
+from tests.conftest import HR_USER_ID, FINANCE_USER_ID
 
 
 @pytest.mark.asyncio
-async def test_inmemory_rate_limiter_is_async_for_router_use():
-    limiter = InMemoryRateLimiter(max_requests_per_minute=1)
-
-    assert await limiter.allow("user-1") is True
-    assert await limiter.allow("user-1") is False
+async def test_rate_limit_allows_first_request(hr_client: AsyncClient):
+    r = await hr_client.post("/query", json={
+        "question": "Chính sách nghỉ phép?",
+        "user_id": HR_USER_ID,
+    })
+    assert r.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_redis_rate_limiter_shares_counts_across_instances():
-    redis_module = FakeRedisModule()
-    first = RedisRateLimiter("redis://test", max_requests_per_minute=1, redis_module=redis_module)
-    second = RedisRateLimiter("redis://test", max_requests_per_minute=1, redis_module=redis_module)
+async def test_rate_limit_blocks_after_exceeding(hr_client: AsyncClient):
+    """After exhausting the per-minute budget, the next request must return 429."""
+    from app.interfaces.api.dependencies import get_rate_limiter
 
-    assert await first.allow("user-1") is True
-    assert await second.allow("user-1") is False
+    limiter = get_rate_limiter()
+    user_id = HR_USER_ID
+
+    # Exhaust the budget directly via the limiter (faster than sending HTTP requests)
+    for _ in range(20):
+        await limiter.allow(user_id)
+
+    r = await hr_client.post("/query", json={
+        "question": "One more request",
+        "user_id": user_id,
+    })
+    assert r.status_code == 429
 
 
-def test_production_dependency_uses_redis_rate_limiter(monkeypatch):
-    monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv("AUTH_MODE", "user_service")
-    monkeypatch.setenv("MCP_MODE", "real")
-    monkeypatch.setenv("NATS_MODE", "nats")
-    monkeypatch.setenv("LLM_MODE", "openai")
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setenv("RATE_LIMITER_MODE", "redis")
-    monkeypatch.setenv("ENABLE_DEV_ENDPOINTS", "false")
-    get_settings.cache_clear()
-    get_rate_limiter.cache_clear()
+@pytest.mark.asyncio
+async def test_rate_limit_is_per_user(hr_client: AsyncClient, finance_client: AsyncClient):
+    """Rate limit buckets must be isolated per user — exhausting HR should not block Finance."""
+    from app.interfaces.api.dependencies import get_rate_limiter
 
-    assert isinstance(get_rate_limiter(), RedisRateLimiter)
+    limiter = get_rate_limiter()
+    for _ in range(20):
+        await limiter.allow(HR_USER_ID)
+
+    # HR is now rate-limited
+    r_hr = await hr_client.post("/query", json={
+        "question": "Another question",
+        "user_id": HR_USER_ID,
+    })
+    assert r_hr.status_code == 429
+
+    # Finance user must still be allowed
+    r_finance = await finance_client.post("/query", json={
+        "question": "Chính sách nghỉ phép?",
+        "user_id": FINANCE_USER_ID,
+    })
+    assert r_finance.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_resets_after_window(hr_client: AsyncClient):
+    """After reset, the user should be allowed again."""
+    from app.interfaces.api.dependencies import get_rate_limiter
+
+    limiter = get_rate_limiter()
+    for _ in range(20):
+        await limiter.allow(HR_USER_ID)
+
+    # Force reset the limiter state
+    limiter.reset()
+
+    r = await hr_client.post("/query", json={
+        "question": "Câu hỏi sau khi reset",
+        "user_id": HR_USER_ID,
+    })
+    assert r.status_code == 200

@@ -2,11 +2,20 @@ from collections.abc import Sequence
 import json
 import re
 import unicodedata
+import warnings
 
 from fastapi import HTTPException, status
 
 from app.application.tool_decision import ToolDecision, VALID_HR_INTENTS, VALID_TOOL_NAMES
 from app.infrastructure.config import Settings
+
+warnings.warn(
+    "OpenAIToolDecisionClient and MockToolDecisionClient are deprecated. "
+    "Use QueryAgentLoop with AGENT_MODE=react for true agentic behavior. "
+    "These classes will be removed in a future version.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 class MockToolDecisionClient:

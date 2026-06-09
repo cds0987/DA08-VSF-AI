@@ -1,11 +1,13 @@
 from collections.abc import AsyncIterator
 import hashlib
+import json
 import logging
 import re
 from time import perf_counter
 import unicodedata
 from uuid import uuid4
 
+from app.application.langgraph_state import create_initial_state, AgentPhase
 from app.application.ports import (
     AuthenticatedUser,
     HrQueryResultLike,
@@ -26,6 +28,23 @@ from app.infrastructure.config import Settings
 logger = logging.getLogger(__name__)
 
 
+# Numeric enum values match the reference REACT agent convention:
+#   REFUSE=1, CLARIFY=2, NO_INFO=3, OFF_TOPIC=4, SUCCESS=5
+_OUTCOME_ENUM_MAP: dict[str, int] = {
+    "REFUSE": Outcome.REFUSE.value,       # 1
+    "CLARIFY": Outcome.CLARIFY.value,     # 2
+    "NO_INFO": Outcome.NO_INFO.value,      # 3
+    "OFF_TOPIC": Outcome.OFF_TOPIC.value,  # 4
+    "SUCCESS": Outcome.SUCCESS.value,      # 5
+    "ERROR": Outcome.ERROR.value,         # 6
+}
+
+
+def _outcome_to_enum_value(outcome_str: str) -> int:
+    """Convert outcome string to numeric enum value for SSE compatibility."""
+    return _OUTCOME_ENUM_MAP.get(outcome_str.upper(), Outcome.SUCCESS.value)
+
+
 class QueryOrchestrationUseCase:
     def __init__(
         self,
@@ -37,6 +56,9 @@ class QueryOrchestrationUseCase:
         openai_client: LLMStreamingClient,
         route_decision_provider: RouteDecisionProvider | ToolDecisionClient | None = None,
         tool_decision_client: ToolDecisionClient | None = None,
+        langgraph_agent=None,
+        langfuse_callback=None,
+        guardrails=None,
     ) -> None:
         self._settings = settings
         self._conversation_repo = conversation_repo
@@ -44,6 +66,17 @@ class QueryOrchestrationUseCase:
         self._semantic_cache = semantic_cache
         self._mcp_client = mcp_client
         self._openai_client = openai_client
+        self._langgraph_agent = langgraph_agent
+        self._langfuse_callback = langfuse_callback
+        # guardrails is a (InputGuardrail, OutputGuardrail) tuple or None
+        if guardrails is not None:
+            self._input_guardrail, self._output_guardrail = guardrails
+        else:
+            from app.infrastructure.guardrails.llm_guard_service import (
+                NoOpInputGuardrail, NoOpOutputGuardrail,
+            )
+            self._input_guardrail = NoOpInputGuardrail()
+            self._output_guardrail = NoOpOutputGuardrail()
         if route_decision_provider is None and tool_decision_client is None:
             raise ValueError("A route decision provider is required")
         self._route_decision_provider = route_decision_provider or tool_decision_client
@@ -55,10 +88,39 @@ class QueryOrchestrationUseCase:
     ) -> AsyncIterator[dict]:
         started = perf_counter()
         session_id = str(uuid4())
-        await self._conversation_repo.save_message(user.id, "user", question)
 
+        # Input guardrail — block prompt injection before touching the LLM or MCP.
+        blocked, reason = await self._input_guardrail.scan(question)
+        if blocked:
+            logger.warning(
+                "guardrail_input_blocked",
+                extra={"user_id": user.id, "session_id": session_id, "reason": reason},
+            )
+            yield {
+                "done": True,
+                "outcome": Outcome.REFUSE.value,
+                "sources": [],
+                "session_id": session_id,
+                "guardrail": reason,
+            }
+            return
+
+        # NOTE: user question is saved AFTER context is fetched so that
+        # state["messages"] contains only prior turns (not the current question).
+        # Each path below saves the question right after the context fetch.
+
+        # LangGraph path (canonical) — requires use_langgraph=True and a built agent.
+        # Falls through to the legacy direct-orchestration path when no agent is available
+        # (e.g. mock mode / no OpenAI key).
+        if self._langgraph_agent is not None:
+            async for event in self._stream_langgraph(question, user, session_id, started):
+                yield event
+            return
+
+        # Legacy path: direct orchestration without agent (mock/test mode)
         context = await self._conversation_repo.get_context(user.id, recent_k=5)
         recent_messages = [(message.role, message.content) for message in context.recent_messages]
+        await self._conversation_repo.save_message(user.id, "user", question)
         decision = await self._choose_route(question, recent_messages)
 
         # Handle direct responses for clarification or out of scope
@@ -74,7 +136,6 @@ class QueryOrchestrationUseCase:
             return
 
         # If the routing decision indicates a non-success outcome, use fallback with appropriate message
-        from app.domain.outcome import Outcome
         if decision.outcome != Outcome.SUCCESS:
             async for event in self._fallback(
                 user.id, session_id, started, decision.outcome,
@@ -106,6 +167,250 @@ class QueryOrchestrationUseCase:
             outcome=decision.outcome,
         ):
             yield event
+
+    async def _stream_langgraph(
+        self,
+        question: str,
+        user: AuthenticatedUser,
+        session_id: str,
+        started: float,
+    ) -> AsyncIterator[dict]:
+        """
+        Stream responses using the LangGraph agent.
+        Uses astream_events for full granularity: token-level SSE + tool lifecycle events.
+        Emits events compatible with the reference REACT agent format:
+          - token events with phase, agent_mode, session_id, iterations
+          - tool events (acting/observing) with phase, agent_mode, session_id, iterations
+          - done event with outcome numeric enum, sources, agent_mode, iterations
+        """
+        from langchain_core.messages import HumanMessage, AIMessage as LCAIMessage
+
+        allowed_doc_ids = await self._document_access_repo.get_allowed_doc_ids(
+            user_id=user.id,
+            role=user.role,
+            department=user.department,
+            account_type=user.account_type,
+        )
+
+        # Fetch recent conversation turns for context (follow-up queries like "Ngày mai").
+        # IMPORTANT: fetch history BEFORE saving the current question so that
+        # state["messages"] contains only prior turns.
+        recent_lc_messages: list = []
+        try:
+            ctx = await self._conversation_repo.get_context(user.id, recent_k=4)
+            for msg in ctx.recent_messages:
+                if msg.role == "user":
+                    recent_lc_messages.append(HumanMessage(content=msg.content))
+                elif msg.role == "assistant":
+                    recent_lc_messages.append(LCAIMessage(content=msg.content))
+        except Exception:
+            pass  # history is optional — never block the current query
+
+        # Save current question NOW (after the history snapshot is taken).
+        await self._conversation_repo.save_message(user.id, "user", question)
+
+        initial_state = create_initial_state(
+            question=question,
+            user_id=user.id,
+            user_role=user.role,
+            user_department=user.department,
+            allowed_doc_ids=list(allowed_doc_ids) if allowed_doc_ids else [],
+            session_id=session_id,
+            max_iterations=self._settings.agent_max_iterations,
+            recent_messages=recent_lc_messages,
+        )
+
+        answer_accumulator: list[str] = []
+        # Track which node/name the last iteration was in, to derive a stable iteration count
+        last_iteration = 0
+        # Track if we already emitted the shortcut acting event
+        shortcut_acting_emitted = False
+
+        langfuse_callbacks = [self._langfuse_callback] if self._langfuse_callback is not None else []
+        run_config = {
+            "callbacks": langfuse_callbacks,
+            "metadata": {
+                "session_id": session_id,
+                "user_id": user.id,
+                "agent_mode": self._settings.agent_mode,
+            },
+        } if langfuse_callbacks else {}
+
+        async for event in self._langgraph_agent.astream_events(
+            initial_state, version="v2", config=run_config if run_config else None
+        ):
+            event_type = event["event"]
+
+            # Node enter event — derive iteration count from the node name
+            if event_type == "on_chain_start":
+                node_name = event.get("name", "")
+                # act_node and observe_node represent actual tool-call iterations
+                # think_node enters before the LLM call; answer_node is the final step (no iteration increment)
+                if node_name in ("act", "observe"):
+                    last_iteration = max(last_iteration, 1)
+                # NOTE: do NOT increment for "think" or "answer" — shortcut path has 0 iterations
+
+            # Token stream from LLM
+            elif event_type == "on_chat_model_stream":
+                token = event["data"]["chunk"].content
+                if token:
+                    answer_accumulator.append(token)
+                    # Detect phase from content (ReAct markers)
+                    current_phase = "generating"
+                    stripped = token.lstrip()
+                    if stripped.startswith("THOUGHT:"):
+                        current_phase = "thinking"
+                    elif stripped.startswith("ACTION:") or stripped.startswith("OBSERVATION:"):
+                        current_phase = "observing"
+                    yield {
+                        "token": token,
+                        "phase": current_phase,
+                        "agent_mode": "langgraph",
+                        "session_id": session_id,
+                        "iterations": last_iteration,
+                    }
+
+            # Tool call started
+            elif event_type == "on_tool_start":
+                tool_name = event["name"]
+                input_data = event.get("data", {}).get("input", {})
+                yield {
+                    "phase": "acting",
+                    "agent_mode": "langgraph",
+                    "session_id": session_id,
+                    "iterations": last_iteration,
+                    "tool": tool_name,
+                    "tool_args": input_data,
+                }
+
+            # Tool call completed
+            elif event_type == "on_tool_end":
+                tool_name = event["name"]
+                output_data = event.get("data", {}).get("output", "")
+                yield {
+                    "phase": "observing",
+                    "agent_mode": "langgraph",
+                    "session_id": session_id,
+                    "iterations": last_iteration,
+                    "tool": tool_name,
+                    "tool_result": str(output_data)[:200] if output_data else "",
+                }
+
+            # Graph error — LLM failure or unhandled exception
+            elif event_type == "on_chain_error":
+                error_val = event.get("data", {}).get("error")
+                error_msg = str(getattr(error_val, "args", [str(error_val)])[0])
+                logger.error(
+                    "langgraph_stream_error",
+                    extra={"session_id": session_id, "error": error_msg},
+                )
+                await self._save_assistant(
+                    user.id, session_id,
+                    f"Loi he thong: {error_msg}",
+                    [], started,
+                )
+                yield {
+                    "error": error_msg,
+                    "done": True,
+                    "sources": [],
+                    "session_id": session_id,
+                    "outcome": Outcome.ERROR.value,
+                    "agent_mode": "langgraph",
+                    "iterations": max(last_iteration, 1),
+                }
+                return
+
+            # Graph complete — only the top-level graph on_chain_end is final
+            elif event_type == "on_chain_end":
+                # Skip sub-node on_chain_end (shortcut, answer, etc.) — only handle graph root
+                run_name = event.get("name", "")
+                if run_name not in ("VinSmartFutureReActAgent", "VinSmartFutureAgent"):
+                    continue
+
+                final_state = event.get("data", {}).get("output", {})
+                if isinstance(final_state, dict):
+                    shortcut_response = final_state.get("shortcut_response")
+                    shortcut_outcome = final_state.get("shortcut_outcome") or "SUCCESS"
+
+                    # Shortcut path — emit acting event then token stream
+                    if shortcut_response:
+                        # Emit one acting event to signal shortcut before streaming answer
+                        if not shortcut_acting_emitted:
+                            yield {
+                                "phase": "acting",
+                                "agent_mode": "langgraph",
+                                "session_id": session_id,
+                                "iterations": 0,
+                                "tool": "shortcut_off_topic",
+                                "tool_args": {"outcome": shortcut_outcome},
+                            }
+                            shortcut_acting_emitted = True
+
+                        for token in _word_chunks(shortcut_response):
+                            yield {
+                                "token": token,
+                                "phase": "generating",
+                                "agent_mode": "langgraph",
+                                "session_id": session_id,
+                                "iterations": 0,
+                            }
+                        answer = shortcut_response
+                    else:
+                        # answer_accumulator is empty when the model adapter uses non-streaming
+                        # ainvoke (OpenAIResponsesChatModel has no _astream, so astream_events
+                        # never emits on_chat_model_stream events).  Recover the answer directly
+                        # from the final AIMessage in the state's message list.
+                        if not answer_accumulator:
+                            messages_in_state = final_state.get("messages", [])
+                            for msg in reversed(messages_in_state):
+                                content = getattr(msg, "content", "") or ""
+                                tool_calls = getattr(msg, "tool_calls", None) or []
+                                if content and not tool_calls:
+                                    # Strip any leaked ReAct marker lines before streaming.
+                                    clean = _strip_agent_markers(content)
+                                    if not clean:
+                                        # Sanitizer removed everything — treat as no answer.
+                                        break
+                                    # Stream the recovered answer as token events so the UI
+                                    # receives incremental updates, matching the shortcut path.
+                                    for token in _word_chunks(clean):
+                                        yield {
+                                            "token": token,
+                                            "phase": "generating",
+                                            "agent_mode": "langgraph",
+                                            "session_id": session_id,
+                                            "iterations": last_iteration,
+                                        }
+                                    answer_accumulator.append(clean)
+                                    break
+
+                        answer = "".join(answer_accumulator)
+
+                        # If LLM returned nothing at all, emit NO_INFO instead of empty SUCCESS
+                        if not answer:
+                            shortcut_outcome = "NO_INFO"
+
+                    sources = final_state.get("sources", [])
+                    # shortcut path: 0 iterations (no tool calls); think path: iterations = number of act/observe runs
+                    final_iteration = 0 if shortcut_response else max(last_iteration, 1)
+                    # Override outcome to NO_INFO if the answer is a generic fallback
+                    if answer and _is_fallback_answer(answer) and shortcut_outcome == "SUCCESS":
+                        shortcut_outcome = "NO_INFO"
+                    outcome_value = _outcome_to_enum_value(shortcut_outcome)
+
+                    # Output guardrail — redact PII from final answer before persisting/sending.
+                    answer = await self._output_guardrail.redact(answer)
+
+                    await self._save_assistant(user.id, session_id, answer, sources, started)
+                    yield {
+                        "done": True,
+                        "sources": sources,
+                        "session_id": session_id,
+                        "outcome": outcome_value,
+                        "agent_mode": "langgraph",
+                        "iterations": final_iteration,
+                    }
+                    return
 
     async def _choose_route(
         self,
@@ -151,6 +456,7 @@ class QueryOrchestrationUseCase:
             user_id=user.id,
             role=user.role,
             department=user.department,
+            account_type=user.account_type,
         )
         if not allowed_doc_ids:
             async for event in self._fallback(
@@ -407,6 +713,32 @@ def _word_chunks(text: str) -> list[str]:
     return re.findall(r"\S+\s*", text) or [""]
 
 
+# Marker prefixes that must never appear in the final answer.
+# The LangGraph agent uses native tool_calls for reasoning; if the model still
+# emits a text ReAct scaffold this sanitizer strips it before streaming.
+_MARKER_RE = re.compile(
+    r"^\s*("
+    r"THOUGHT|ACTION|OBSERVATION|REASONING|FINAL[\s_]ANSWER"
+    r"|Assistant|AI"
+    r")[\s:：\-]+.*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _strip_agent_markers(text: str) -> str:
+    """
+    Remove any ReAct-style text markers (THOUGHT:/ACTION:/OBSERVATION: etc.)
+    that the model emitted despite being configured for native tool calling.
+
+    Strips entire lines whose leading label matches _MARKER_RE, then collapses
+    runs of blank lines to a single blank line and trims surrounding whitespace.
+    """
+    cleaned = _MARKER_RE.sub("", text)
+    # Collapse multiple consecutive blank lines.
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
 async def _word_stream(chunks: AsyncIterator[str]) -> AsyncIterator[str]:
     buffer = ""
     async for chunk in chunks:
@@ -439,5 +771,11 @@ def _normalize_text(text: str) -> str:
 
 
 def _is_fallback_answer(answer: str) -> bool:
+    """
+    Return True when the answer is a generic no-info fallback.
+
+    Matches any phrasing that contains the core "khong tim thay thong tin" substring
+    after normalization, covering both old and new prompt wordings.
+    """
     normalized = _normalize_text(answer)
-    return "khong tim thay thong tin trong tai lieu noi bo" in normalized
+    return "khong tim thay thong tin" in normalized
