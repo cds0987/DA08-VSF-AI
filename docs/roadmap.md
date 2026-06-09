@@ -101,7 +101,7 @@ _Cloud Deployment_
 - [ ] Cloud SQL PostgreSQL thay thế local DB — data không mất khi restart
 - [ ] File upload lưu vào Cloud Storage (GCS), không lưu local
 - [ ] Qdrant self-hosted trên GCP, có persistent volume
-- [ ] HTTPS hoạt động qua Nginx + Let's Encrypt (hoặc domain nội bộ)
+- [ ] HTTPS hoạt động qua Nginx + Let's Encrypt trên domain **vsfchat.com** (mua trên Namecheap, trỏ A record về GCE External IP)
 - [ ] Langfuse self-hosted trên GCP, IT/DevOps truy cập được
 - [ ] Cloud Monitoring alarm hoạt động — cảnh báo IT/DevOps khi GCE CPU > 80% hoặc service không phản hồi
 - [ ] Smoke test sau mỗi deploy: 10 câu hỏi mẫu pass toàn bộ trước khi tuyên bố production-ready

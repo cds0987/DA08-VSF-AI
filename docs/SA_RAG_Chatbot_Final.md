@@ -843,6 +843,7 @@ graph TB
 | Ingestion | NATS Worker (self-hosted, in-memory) | Cloud Pub/Sub + Worker Service riêng (persistent, DLQ) |
 | Cache | Redis (self-hosted GCE) – Semantic Cache | Cloud Memorystore Redis (managed, auto-scaling) |
 | Load Balancer | Nginx trên GCE | GCP Cloud Load Balancing + Cloud Armor |
+| Domain & SSL | `vsfchat.com` — mua trên Namecheap, trỏ A record về GCE External IP. HTTPS qua Nginx + Let's Encrypt (certbot). | GCP Managed SSL Certificate + Cloud Armor |
 | Tracing | Langfuse (self-hosted on GCP) — Docker Compose | Langfuse cluster riêng trên Cloud Run (Phase 2 Production Scale) |
 | Monitoring | Cloud Monitoring basic | Cloud Monitoring + Grafana + PagerDuty |
 
