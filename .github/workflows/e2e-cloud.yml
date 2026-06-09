@@ -14,8 +14,6 @@ name: e2e-cloud (ingest + search trên GCP/Qdrant thật)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [nguyendev]
   pull_request:
     branches: [develop]
     paths:

@@ -11,7 +11,6 @@ name: hr-service + mcp-service integration (Docker real)
 on:
   push:
     branches:
-      - nguyendev
       - develop
     paths:
       - ".github/workflows/hr-mcp-integration.yml"
