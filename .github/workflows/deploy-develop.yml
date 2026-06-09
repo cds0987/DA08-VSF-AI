@@ -18,6 +18,10 @@ concurrency:
   group: deploy-develop
   cancel-in-progress: false
 
+# GITHUB_TOKEN chỉ cần đọc repo (deploy fetch code). Push image dùng Docker Hub creds riêng.
+permissions:
+  contents: read
+
 env:
   # 6 service build+push lên Docker Hub. Tên repo image = <DOCKERHUB_USERNAME>/<service>.
   # Đổi đường dẫn context tại bước "Build & push" qua matrix bên dưới.
@@ -116,8 +120,10 @@ jobs:
             cd "$APP_DIR"
 
             echo "==> 1) Sync code = origin/develop (production phản ánh đúng git)"
-            git fetch origin develop
-            git reset --hard origin/develop
+            # VM remote là HTTPS + repo private -> fetch bằng GITHUB_TOKEN ephemeral của
+            # run (contents:read), không lưu credential trên VM, không cần deploy key.
+            git fetch "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" develop
+            git reset --hard FETCH_HEAD
 
             echo "==> 2) Provision env files từ GitHub Secrets (không nằm trong git)"
             mkdir -p deploy/env
