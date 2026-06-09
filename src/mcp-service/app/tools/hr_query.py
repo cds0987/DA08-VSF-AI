@@ -112,9 +112,25 @@ class HrQueryTool:
             return await self._call(user_id, intent)
 
     async def verify(self) -> None:
-        client = self._get_client()
-        response = await client.get("/health", headers=self._headers())
-        response.raise_for_status()
+        # Best-effort: hr-service tạm down KHÔNG được làm sập mcp-service (và kéo
+        # theo rag_search). Health chỉ là probe khởi động — lỗi thì log cảnh báo
+        # và để tool vẫn đăng ký; lúc serve client sẽ lazy reconnect, mỗi call tự
+        # xử lý lỗi (5xx raise / 404 mềm). Contract fail-closed của rag_search nằm
+        # ở RagSearchTool.verify, không liên quan tool này.
+        if not self._base_url:
+            logger.warning("hr_query verify skipped: hr_service_url chưa cấu hình")
+            return
+        try:
+            client = self._get_client()
+            response = await client.get("/health", headers=self._headers())
+            response.raise_for_status()
+            logger.info("hr_query verify ok hr_service=%s", self._base_url)
+        except Exception as exc:  # noqa: BLE001 — chủ ý nuốt mọi lỗi health (best-effort)
+            logger.warning(
+                "hr_query verify degraded: hr-service không reachable (%s) — "
+                "tool vẫn đăng ký, call sẽ best-effort",
+                exc,
+            )
 
     async def aclose(self) -> None:
         if self._client is not None:

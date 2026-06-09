@@ -254,6 +254,16 @@ def test_verify_hits_health_endpoint(monkeypatch) -> None:
     assert client.calls[0][3] == {"X-Internal-Token": "test-token"}
 
 
+def test_verify_degraded_does_not_raise(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+    # hr-service /health trả 503 -> verify KHÔNG được raise (best-effort), chỉ warning.
+    tool, _, _ = _tool(monkeypatch, get_response=FakeResponse(503, {"detail": "down"}, url="http://hr-service:8004/health"))
+
+    with caplog.at_level("WARNING", logger="mcp-service"):
+        asyncio.run(tool.verify())  # phải không ném
+
+    assert "hr_query verify degraded" in caplog.text
+
+
 def test_aclose_closes_client(monkeypatch) -> None:
     tool, _, client = _tool(monkeypatch)
 
