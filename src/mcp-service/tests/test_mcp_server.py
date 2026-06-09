@@ -224,6 +224,43 @@ def test_build_mcp_registers_rag_search_tool_and_query_service_shape(monkeypatch
     }
 
 
+def test_build_mcp_registers_hr_query_tool(monkeypatch) -> None:
+    fake_mcp_module = types.ModuleType("mcp")
+    fake_server_module = types.ModuleType("mcp.server")
+    fake_fastmcp_module = types.ModuleType("mcp.server.fastmcp")
+    fake_fastmcp_module.FastMCP = FakeFastMCP
+    monkeypatch.setitem(sys.modules, "mcp", fake_mcp_module)
+    monkeypatch.setitem(sys.modules, "mcp.server", fake_server_module)
+    monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", fake_fastmcp_module)
+
+    settings = _settings()
+    settings = McpSettings(
+        **{
+            **settings.__dict__,
+            "tools_profile": {
+                "rag_search": {"enabled": False},
+                "hr_query": {
+                    "enabled": True,
+                    "params": {"database_url": "sqlite:///ignored.db"},
+                },
+            },
+        }
+    )
+
+    mcp, tools = build_mcp(settings)
+
+    assert [tool.name for tool in tools] == ["hr_query"]
+    assert "hr_query" in mcp.tools
+    assert "rag_search" not in mcp.tools
+
+    result = asyncio.run(mcp.tools["hr_query"]("11111111-1111-4111-8111-111111111111", "leave_balance"))
+
+    assert result["intent"] == "leave_balance"
+    assert result["leave_balance"] == {"annual_remaining": 8, "sick_remaining": 9}
+    assert result["data"] == result["leave_balance"]
+    assert "summary" in result
+
+
 def test_build_mcp_middleware_enabled_when_internal_token_is_configured() -> None:
     middleware = build_mcp_middleware("secret")
 
