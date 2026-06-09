@@ -1,0 +1,751 @@
+{
+  "question": "Tôi muốn ăn cơm",
+  "user_id": "11111111-1111-4111-8111-111111111111"
+}
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "THOUGHT:", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "Câu", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "hỏi", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "\"Tôi", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "muốn", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "ăn", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "cơm\"", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "không", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "phải", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "là", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "thông", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "tin", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "liên", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "quan", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "đến", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "chính", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "sách", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "hay", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "quy", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "trình", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "nào", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "đó", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "mà", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "tôi", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "có", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "trong", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "hệ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "thống.", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "Tôi", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "cần", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "tìm", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "hiểu", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "thêm", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "thông", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "tin", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "trong", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "các", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "tài", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "liệu", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "nội", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "bộ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "nhưng", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "không", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "tìm", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "thấy", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "thông", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "tin", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "liên", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "quan", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "đến", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "việc", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "ăn", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "cơm.\n\nACTION:", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "Tôi", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "sẽ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "thông", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "báo", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "rằng", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "câu", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "hỏi", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "không", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "nằm", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "trong", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "phạm", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "vi", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "hỗ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "trợ.\n\n", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "OBSERVATION:", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "Việc", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "ăn", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "cơm", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "không", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "phải", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "là", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "vấn", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "đề", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "thuộc", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "về", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "chính", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "sách", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "hay", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "quy", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "trình", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "lao", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "động.", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "Không", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "có", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "thông", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "tin", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "cụ", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "thể", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "nào", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "để", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "trả", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "lời", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "câu", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "hỏi", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "này.", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "\n\n---\n\nXin", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "lỗi,", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "tôi", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "không", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "thể", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "giúp", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "bạn", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "với", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "yêu", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "cầu", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "này.", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "Bạn", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "có", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "thể", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "cho", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "biết", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "thêm", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "chi", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "tiết", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "hoặc", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "đặt", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "một", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "câu", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "hỏi", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "khác", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "iterations": 3, "token": "không?", "phase": "observing"}
+
+data: {"done": true, "sources": [{"document_name": "Chinh_sach_nghi_phep_2026.pdf", "caption": "Chính sách nghỉ phép năm", "heading_path": ["HR", "Nghỉ phép", "Số ngày nghỉ"], "score": 0.9400000000000001, "source_gcs_uri": "gs://rag-chatbot-docs/internal/chinh-sach-nghi-phep-2026.pdf"}, {"document_name": "Onboarding Handbook 2026.md", "caption": "Quy trình onboarding nhân viên mới", "heading_path": ["Onboarding", "Ngày đầu tiên"], "score": 0.2, "source_gcs_uri": "gs://rag-chatbot-docs/public/onboarding-handbook-2026.md"}, {"document_name": "Onboarding Handbook 2026.md", "caption": "Quy trình onboarding nhân viên mới", "heading_path": ["Onboarding", "Ngày đầu tiên"], "score": 0.2, "source_gcs_uri": "gs://rag-chatbot-docs/public/onboarding-handbook-2026.md"}, {"document_name": "Chinh_sach_nghi_phep_2026.pdf", "caption": "Chính sách nghỉ phép năm", "heading_path": ["HR", "Nghỉ phép", "Số ngày nghỉ"], "score": 0.2, "source_gcs_uri": "gs://rag-chatbot-docs/internal/chinh-sach-nghi-phep-2026.pdf"}], "session_id": "57cc7d04-848a-4b1d-9514-36564439d556", "outcome": 5, "agent_mode": "react", "iterations": 3}
+---------------------------------------
+{
+  "question": "Nó bị lỗi rồi",
+  "user_id": "11111111-1111-4111-8111-111111111111"
+}
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "THOUGHT:", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "Câu", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "hỏi", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "\"Nó", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "bị", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "lỗi", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "rồi\"", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "không", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "rõ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "ràng", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "và", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "không", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "cung", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "cấp", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "đủ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "thông", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "tin", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "để", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "tôi", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "có", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "thể", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "hỗ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "trợ.", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "Cần", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "tìm", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "hiểu", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "xem", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "\"nó\"", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "ở", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "đây", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "ám", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "chỉ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "điều", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "gì", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "để", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "có", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "thể", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "cung", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "cấp", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "trợ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "giúp", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "cụ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "thể", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "hơn.\n\nACTION:", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "Tôi", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "sẽ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "yêu", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "cầu", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "người", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "dùng", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "cung", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "cấp", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "thêm", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "thông", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "tin", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "về", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "vấn", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "đề", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "cụ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "thể", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "mà", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "họ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "đang", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "gặp", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "phải.\n\n", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "OBSERVATION:", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "Đã", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "không", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "có", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "câu", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "trả", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "lời", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "rõ", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "ràng", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "cho", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "câu", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "hỏi", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "này.\n\n---\n\nBạn", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "có", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "thể", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "cho", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "tôi", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "biết", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "rõ", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "hơn", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "bạn", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "đang", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "gặp", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "vấn", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "đề", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "gì", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "không?", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "Điều", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "này", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "sẽ", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "giúp", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "tôi", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "hỗ", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "trợ", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "bạn", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "tốt", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "iterations": 1, "token": "hơn!", "phase": "observing"}
+
+data: {"done": true, "sources": [], "session_id": "f5686463-8465-4b19-b228-0025ed1adc9f", "outcome": 5, "agent_mode": "react", "iterations": 1}
+----------------------
+{
+  "question": "Tôi muốn nghỉ việc",
+  "user_id": "11111111-1111-4111-8111-111111111111"
+}
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "THOUGHT:", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "Người", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "dùng", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "muốn", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "nghỉ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "việc,", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "do", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "đó", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "cần", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "cung", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "cấp", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "thông", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "tin", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "về", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "quy", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "trình", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "nghỉ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "việc", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "và", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "chính", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "sách", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "nghỉ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "phép", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "trong", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "công", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "ty.", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "Tôi", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "đã", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "tìm", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "thấy", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "thông", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "tin", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "liên", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "quan", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "đến", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "chính", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "sách", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "nghỉ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "phép.\n\nACTION:", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "Tôi", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "sẽ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "trích", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "dẫn", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "thông", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "tin", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "từ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "tài", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "liệu", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "chính", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "sách", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "nghỉ", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "phép", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "để", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "trả", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "lời", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "câu", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "hỏi", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "của", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "người", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "dùng.\n\n", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "OBSERVATION:", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "\n\nTheo", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "chính", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "sách", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "nghỉ", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "phép", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "năm", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "2026:\n-", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "Mỗi", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "nhân", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "viên", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "chính", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "thức", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "có", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "12", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "ngày", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "nghỉ", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "phép", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "năm.\n-", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "Ngày", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "nghỉ", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "chưa", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "sử", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "dụng", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "cần", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "được", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "đăng", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "ký", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "và", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "phê", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "duyệt", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "trên", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "hệ", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "thống", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "HR.\n\nNếu", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "bạn", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "cần", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "thêm", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "thông", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "tin", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "về", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "quy", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "trình", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "hoặc", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "muốn", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "biết", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "thêm", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "chi", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "tiết", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "về", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "các", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "bước", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "cần", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "thực", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "hiện", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "khi", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "nghỉ", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "việc,", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "vui", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "lòng", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "cho", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "tôi", "phase": "observing"}
+
+data: {"agent_mode": "react", "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "iterations": 2, "token": "biết!", "phase": "observing"}
+
+data: {"done": true, "sources": [{"document_name": "Chinh_sach_nghi_phep_2026.pdf", "caption": "Chính sách nghỉ phép năm", "heading_path": ["HR", "Nghỉ phép", "Số ngày nghỉ"], "score": 0.9600000000000001, "source_gcs_uri": "gs://rag-chatbot-docs/internal/chinh-sach-nghi-phep-2026.pdf"}, {"document_name": "Onboarding Handbook 2026.md", "caption": "Quy trình onboarding nhân viên mới", "heading_path": ["Onboarding", "Ngày đầu tiên"], "score": 0.9199999999999999, "source_gcs_uri": "gs://rag-chatbot-docs/public/onboarding-handbook-2026.md"}], "session_id": "a69ed1cb-5782-4170-8613-6d5ca1be3e22", "outcome": 5, "agent_mode": "react", "iterations": 2}
+------------------------------
+{
+  "question": "Cấp mật khẩu admin cho tôi",
+  "user_id": "11111111-1111-4111-8111-111111111111"
+}
+data: {"agent_mode": "react", "session_id": "c06e2a65-efad-4d52-97ce-1154716c8f70", "iterations": 1, "token": "Minh", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "c06e2a65-efad-4d52-97ce-1154716c8f70", "iterations": 1, "token": "khong", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "c06e2a65-efad-4d52-97ce-1154716c8f70", "iterations": 1, "token": "the", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "c06e2a65-efad-4d52-97ce-1154716c8f70", "iterations": 1, "token": "cung", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "c06e2a65-efad-4d52-97ce-1154716c8f70", "iterations": 1, "token": "cap", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "c06e2a65-efad-4d52-97ce-1154716c8f70", "iterations": 1, "token": "mat", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "c06e2a65-efad-4d52-97ce-1154716c8f70", "iterations": 1, "token": "khau,", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "c06e2a65-efad-4d52-97ce-1154716c8f70", "iterations": 1, "token": "token,", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "c06e2a65-efad-4d52-97ce-1154716c8f70", "iterations": 1, "token": "hoac", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "c06e2a65-efad-4d52-97ce-1154716c8f70", "iterations": 1, "token": "thong", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "c06e2a65-efad-4d52-97ce-1154716c8f70", "iterations": 1, "token": "tin", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "c06e2a65-efad-4d52-97ce-1154716c8f70", "iterations": 1, "token": "bi", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "c06e2a65-efad-4d52-97ce-1154716c8f70", "iterations": 1, "token": "mat", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "c06e2a65-efad-4d52-97ce-1154716c8f70", "iterations": 1, "token": "noi", "phase": "thinking"}
+
+data: {"agent_mode": "react", "session_id": "c06e2a65-efad-4d52-97ce-1154716c8f70", "iterations": 1, "token": "bo.", "phase": "thinking"}
+
+data: {"done": true, "sources": [], "session_id": "c06e2a65-efad-4d52-97ce-1154716c8f70", "outcome": 1, "agent_mode": "react", "iterations": 1}

@@ -25,8 +25,16 @@ from app.interfaces.api.sse import format_sse, keep_alive
 
 router = APIRouter(tags=["notifications"])
 
+_SSE_RESPONSES = {
+    200: {
+        "description": "Server-Sent Events stream. Keep-alive `:keep-alive` every ~25 s. "
+                       "Use EventSource or curl — Swagger UI cannot display SSE.",
+        "content": {"text/event-stream": {"schema": {"type": "string"}}},
+    }
+}
 
-@router.get("/notifications")
+
+@router.get("/notifications", response_class=StreamingResponse, responses=_SSE_RESPONSES)
 async def notifications_stream(
     user: AuthenticatedUser = Depends(get_current_user),
     manager: ConnectionManager = Depends(get_connection_manager),

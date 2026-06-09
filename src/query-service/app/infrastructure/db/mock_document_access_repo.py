@@ -20,6 +20,7 @@ class InMemoryDocumentAccessRepository(DocumentAccessRepository):
         user_id: str,
         role: str,
         department: str,
+        account_type: str = "internal",
     ) -> list[str]:
         return [
             document_id
@@ -28,6 +29,7 @@ class InMemoryDocumentAccessRepository(DocumentAccessRepository):
                 user_id=user_id,
                 role=role,
                 department=department,
+                account_type=account_type,
                 classification=str(record["classification"]),
                 allowed_departments=list(record["allowed_departments"]),
                 allowed_user_ids=list(record["allowed_user_ids"]),
@@ -60,11 +62,17 @@ def can_access_document(
     role: str,
     department: str,
     classification: str,
+    account_type: str = "internal",
     allowed_departments: list[str] | None = None,
     allowed_user_ids: list[str] | None = None,
 ) -> bool:
+    # Admin bypasses all classification checks regardless of account type.
     if role == "admin":
         return True
+    # External accounts (partners/contractors) may only read public documents.
+    if account_type == "external":
+        return classification == "public"
+    # Internal account rules:
     if classification == "public":
         return True
     if classification == "internal":

@@ -6,6 +6,7 @@ from app.infrastructure.messaging.nats_events import (
     InvalidNatsEventPayload,
     QueryNatsEventHandler,
     parse_doc_access_event,
+    parse_hr_employee_profile_updated_event,
     parse_notify_doc_new_event,
 )
 
@@ -41,6 +42,11 @@ class NatsSubscriberManager:
             durable="QUERY_SERVICE_NOTIFY_DOC_NEW",
             cb=self._notify_doc_new_callback,
         )
+        await jetstream.subscribe(
+            "hr.employee_profile.updated",
+            durable="QUERY_SERVICE_HR_PROFILE",
+            cb=self._hr_employee_profile_callback,
+        )
 
     async def stop(self) -> None:
         if self._connection is not None:
@@ -59,6 +65,13 @@ class NatsSubscriberManager:
             msg,
             validate=parse_notify_doc_new_event,
             handle=self._handler.handle_notify_doc_new,
+        )
+
+    async def _hr_employee_profile_callback(self, msg: Any) -> None:
+        await self._handle_message(
+            msg,
+            validate=parse_hr_employee_profile_updated_event,
+            handle=self._handler.handle_hr_employee_profile_updated,
         )
 
     async def _handle_message(self, msg: Any, *, validate, handle) -> None:

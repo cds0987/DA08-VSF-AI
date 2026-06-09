@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.domain.repositories.document_access_repository import DocumentAccessRepository
+from app.domain.repositories.user_access_profile_repository import UserAccessProfileRepository
 from app.infrastructure.messaging.notification_service import DocNewEvent, NotificationService
 
 
@@ -18,6 +19,16 @@ class DocAccessEvent:
     allowed_departments: list[str]
     allowed_user_ids: list[str]
     deleted: bool
+    event_id: str | None
+    occurred_at: datetime
+
+
+@dataclass(frozen=True)
+class HrEmployeeProfileUpdatedEvent:
+    user_id: str
+    account_type: str
+    department: str
+    employment_status: str
     event_id: str | None
     occurred_at: datetime
 
@@ -38,11 +49,13 @@ class QueryNatsEventHandler:
         self,
         document_access_repo: DocumentAccessRepository | None = None,
         notification_service: NotificationService | None = None,
+        user_access_profile_repo: UserAccessProfileRepository | None = None,
         processed_event_max_size: int = 10000,
         processed_event_ttl_seconds: int = 86400,
     ) -> None:
         self._document_access_repo = document_access_repo
         self._notification_service = notification_service
+        self._user_access_profile_repo = user_access_profile_repo
         self._processed_event_ids: OrderedDict[str, datetime] = OrderedDict()
         self._doc_access_seen_at: dict[str, datetime] = {}
         self._notify_fallback_keys: OrderedDict[str, datetime] = OrderedDict()
@@ -96,6 +109,21 @@ class QueryNatsEventHandler:
         self._remember_fallback_key(fallback_key)
         return delivered
 
+    async def handle_hr_employee_profile_updated(self, payload: dict[str, Any]) -> None:
+        if self._user_access_profile_repo is None:
+            return
+        event = parse_hr_employee_profile_updated_event(payload)
+        if self._is_duplicate_event(event.event_id):
+            return
+        await self._user_access_profile_repo.upsert_profile(
+            user_id=event.user_id,
+            account_type=event.account_type,
+            department=event.department,
+            employment_status=event.employment_status,
+            occurred_at=event.occurred_at,
+        )
+        self._remember_event(event.event_id)
+
     def _is_duplicate_event(self, event_id: str | None) -> bool:
         self._prune_store(self._processed_event_ids)
         return bool(event_id and event_id in self._processed_event_ids)
@@ -132,6 +160,19 @@ def parse_doc_access_event(payload: dict[str, Any]) -> DocAccessEvent:
         allowed_departments=_string_list(payload.get("allowed_departments"), "allowed_departments"),
         allowed_user_ids=_string_list(payload.get("allowed_user_ids"), "allowed_user_ids"),
         deleted=bool(payload.get("deleted", False)),
+        event_id=_optional_str(payload.get("event_id")),
+        occurred_at=_event_time(payload.get("occurred_at")),
+    )
+
+
+def parse_hr_employee_profile_updated_event(
+    payload: dict[str, Any],
+) -> HrEmployeeProfileUpdatedEvent:
+    return HrEmployeeProfileUpdatedEvent(
+        user_id=_required_str(payload, "user_id"),
+        account_type=_required_str(payload, "account_type"),
+        department=str(payload.get("department") or ""),
+        employment_status=_required_str(payload, "employment_status"),
         event_id=_optional_str(payload.get("event_id")),
         occurred_at=_event_time(payload.get("occurred_at")),
     )

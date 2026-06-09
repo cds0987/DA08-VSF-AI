@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     mcp_service_url: str = "http://localhost:8003"
     mcp_timeout_seconds: int = 10
     mcp_internal_token: str | None = None
+    mcp_circuit_fail_max: int = 5
+    mcp_circuit_reset_timeout_seconds: int = 30
+    mcp_tool_cache_ttl_seconds: int = 0  # 0 = off; seconds to cache list_tool_specs() response
+    tool_routing_mode: str = "legacy"  # "legacy" = typed methods; "native" = generic call_tool
 
     nats_mode: str = "mock"
     nats_url: str = "nats://localhost:4222"
@@ -38,6 +42,9 @@ class Settings(BaseSettings):
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None
     langfuse_host: str = "http://localhost:3100"
+
+    guardrails_mode: str = "off"
+    observability_mode: str = "off"
 
     allowed_origins: str = Field(
         default="http://localhost:3000,http://localhost:3001",
@@ -66,6 +73,11 @@ class Settings(BaseSettings):
 
     enable_dev_endpoints: bool = Field(default=False)
 
+    agent_mode: str = "guarded"
+    agent_max_iterations: int = 3
+
+    use_langgraph: bool = True  # LangGraph is the canonical agent; set to false to use legacy orchestration
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @model_validator(mode="after")
@@ -90,6 +102,16 @@ class Settings(BaseSettings):
                     raise ValueError(f"{name}=mock is not allowed in production")
             if self.rate_limiter_mode.strip().lower() != "redis":
                 raise ValueError("RATE_LIMITER_MODE=redis is required in production")
+            if self.guardrails_mode.strip().lower() != "llm_guard":
+                raise ValueError("GUARDRAILS_MODE=llm_guard is required in production")
+            if self.observability_mode.strip().lower() != "langfuse":
+                raise ValueError("OBSERVABILITY_MODE=langfuse is required in production")
+            if self.observability_mode.strip().lower() == "langfuse" and (
+                not self.langfuse_public_key or not self.langfuse_secret_key
+            ):
+                raise ValueError(
+                    "LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are required when OBSERVABILITY_MODE=langfuse"
+                )
 
         return self
 

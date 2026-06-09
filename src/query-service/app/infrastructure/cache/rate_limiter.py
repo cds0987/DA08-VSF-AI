@@ -51,6 +51,13 @@ class RedisRateLimiter:
             raise RateLimiterUnavailable("Redis rate limiter unavailable") from exc
         return int(count) <= self._max
 
+    async def ping(self) -> None:
+        """Raise if Redis is unreachable. Used by /health."""
+        try:
+            await self._get_client().ping()
+        except Exception as exc:
+            raise RateLimiterUnavailable("Redis ping failed") from exc
+
     def reset(self) -> None:
         self._client = None
 

@@ -14,6 +14,7 @@ class PostgresDocumentAccessRepository(DocumentAccessRepository):
         user_id: str,
         role: str,
         department: str,
+        account_type: str = "internal",
     ) -> list[str]:
         pool = await self._get_pool()
         async with pool.acquire() as connection:
@@ -30,6 +31,7 @@ class PostgresDocumentAccessRepository(DocumentAccessRepository):
                 user_id=user_id,
                 role=role,
                 department=department,
+                account_type=account_type,
                 classification=str(row["classification"]),
                 allowed_departments=list(row["allowed_departments"] or []),
                 allowed_user_ids=list(row["allowed_user_ids"] or []),
