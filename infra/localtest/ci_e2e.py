@@ -61,7 +61,7 @@ def _mint_jwt() -> str:
     b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=")
     head = b64(b'{"alg":"HS256","typ":"JWT"}')
     payload = b64(json.dumps({
-        "sub": str(uuid.uuid4()), "role": "admin", "department": "hr",
+        "sub": str(uuid.uuid4()), "role": "admin", "account_type": "internal", "department": "hr",
         "exp": int(time.time()) + 3600,
     }, separators=(",", ":")).encode())
     sig = b64(hmac.new(secret.encode(), head + b"." + payload, hashlib.sha256).digest())
