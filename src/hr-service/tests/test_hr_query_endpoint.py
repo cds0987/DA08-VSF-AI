@@ -7,10 +7,14 @@ from app.api.routes import get_repo, get_settings
 from app.core.config import HrSettings
 from app.domain.entities.dtos import (
     AttendanceDTO,
+    BenefitItemDTO,
+    BenefitsDTO,
     LeaveBalanceDTO,
     LeaveRequestDTO,
     OnboardingDTO,
     OnboardingItemDTO,
+    PayrollDTO,
+    PerformanceReviewDTO,
 )
 from app.domain.repositories.hr_repository import HrRepository
 from app.main import app
@@ -76,7 +80,28 @@ class FakeHrRepository(HrRepository):
         return data.get(user_id)
 
     async def get_payroll(self, user_id: str):
-        return []
+        data = {
+            USER_HR: [PayrollDTO("2026-05", 1200.0, 200.0, 1000.0)],
+            USER_FINANCE: [PayrollDTO("2026-05", 1500.0, 250.0, 1250.0)],
+        }
+        return data.get(user_id, [])
+
+    async def get_benefits(self, user_id: str):
+        data = {
+            USER_HR: BenefitsDTO(
+                [
+                    BenefitItemDTO("Bao hiem suc khoe", "Goi A"),
+                    BenefitItemDTO("Phu cap an trua", "30 USD/thang"),
+                ]
+            ),
+        }
+        return data.get(user_id)
+
+    async def get_performance(self, user_id: str):
+        data = {
+            USER_HR: PerformanceReviewDTO("2026-03", "Xuat sac", [{"name": "Tuyen dung", "score": 95}], None),
+        }
+        return data.get(user_id)
 
     async def aclose(self) -> None:
         return None
@@ -172,7 +197,59 @@ def test_invalid_intent_rejected() -> None:
     client = _client()
     response = client.post(
         "/hr/query",
-        json={"user_id": USER_HR, "intent": "payroll"},
+        json={"user_id": USER_HR, "intent": "recruitment"},
         headers={"X-Internal-Token": TOKEN},
     )
     assert response.status_code == 422
+
+
+def test_payroll_endpoint() -> None:
+    client = _client()
+    response = client.post(
+        "/hr/query",
+        json={"user_id": USER_HR, "intent": "payroll"},
+        headers={"X-Internal-Token": TOKEN},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "payroll"
+    assert body["data"]["payroll"][0]["net_salary"] == 1000.0
+    assert set(body.keys()) == {"intent", "data", "summary"}
+
+
+def test_benefits_endpoint() -> None:
+    client = _client()
+    response = client.post(
+        "/hr/query",
+        json={"user_id": USER_HR, "intent": "benefits"},
+        headers={"X-Internal-Token": TOKEN},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "benefits"
+    assert len(body["data"]["items"]) == 2
+    assert "Bao hiem suc khoe" in body["summary"]
+
+
+def test_performance_endpoint() -> None:
+    client = _client()
+    response = client.post(
+        "/hr/query",
+        json={"user_id": USER_HR, "intent": "performance"},
+        headers={"X-Internal-Token": TOKEN},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "performance"
+    assert body["data"]["rating"] == "Xuat sac"
+    assert "Xuat sac" in body["summary"]
+
+
+def test_sensitive_intent_no_data_returns_404() -> None:
+    client = _client()
+    response = client.post(
+        "/hr/query",
+        json={"user_id": USER_FINANCE, "intent": "benefits"},
+        headers={"X-Internal-Token": TOKEN},
+    )
+    assert response.status_code == 404

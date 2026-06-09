@@ -104,6 +104,32 @@ class OnboardingRecord(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class BenefitsRecord(Base):
+    __tablename__ = "benefits"
+    __table_args__ = {"schema": "hr_svc"}
+
+    user_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    items: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PerformanceReviewRecord(Base):
+    __tablename__ = "performance_reviews"
+    __table_args__ = (
+        Index("idx_performance_user", "user_id", "period"),
+        UniqueConstraint("user_id", "period", name="uq_performance_user_period"),
+        {"schema": "hr_svc"},
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    period: Mapped[str] = mapped_column(String(7), nullable=False)
+    rating: Mapped[str] = mapped_column(String(20), nullable=False)
+    kpi: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    reviewer_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class PayrollSummaryRecord(Base):
     __tablename__ = "payroll_summary"
     __table_args__ = (

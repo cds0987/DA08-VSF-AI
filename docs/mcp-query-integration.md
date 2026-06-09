@@ -1,7 +1,7 @@
 # Tích hợp `rag_search`: query-service ↔ mcp-service
 
 > Phạm vi: nối **query-service (MCP client)** với **mcp-service (MCP tool server)** cho tool `rag_search`.
-> `hr_query` **đang bắt đầu làm** ở mcp-service (chưa có kế hoạch cụ thể) — không nằm trong tài liệu này.
+> `hr_query` **đã được implement** ở mcp-service dưới dạng **HTTP proxy** sang hr-service (`POST /hr/query`), mặc định TẮT (`TOOL_HR_QUERY_ENABLED=0`) — không nằm trong phạm vi tài liệu `rag_search` này. Xem `docs/contracts.md` (section hr-service) + `src/hr-service/docs/`.
 > Trạng thái hiện tại: 🟡 **phía mcp-service đã xong** (LLM reranker + endpoint + fail-closed, commit `56489bd`/`78943f3`; e2e CI rag-worker→mcp **xanh**, xem mục 11). Còn lại nằm ở **query-service** (real MCP client + đổi field `s3`→`gcs`).
 
 ---
@@ -189,7 +189,7 @@ Field tên `*_gcs_uri` nhưng **value bên trong vẫn `s3://...`**. Vô hại c
 
 ## 8. Docs cần cập nhật theo
 
-- [`docs/contracts.md`](contracts.md) — 🔴 **còn lệch**: section `mcp-service` mô tả DDD + `hr_query` + BGE reranker, không khớp code thật (`app/core/*`, search-only, reranker `none|lexical|llm`). Cần SA sửa cho khớp, đánh dấu `hr_query` "chưa làm".
+- [`docs/contracts.md`](contracts.md) — ✅ **đã sửa khớp code**: section `mcp-service` mô tả search-only (`SearchHit` ở `app/core/vectorstore.py`, reranker Protocol `none|lexical|llm` ở `app/core/rerank.py`, `tool_io.py` chỉ còn `RagSearchInput`); thêm section `hr-service` cho DTO HR + `HrRepository` + contract `POST /hr/query`; `hr_query` ở mcp-service là HTTP proxy.
 - [`src/mcp-service/README.md`](../src/mcp-service/README.md) — ✅ đã cập nhật: runtime contract, tool shape, `hr_query chua implement`.
 - File này — ✅ đã cập nhật field `gcs` (mục 3/4) + trạng thái mcp xong + CI e2e (mục 11).
 
@@ -210,7 +210,7 @@ Field tên `*_gcs_uri` nhưng **value bên trong vẫn `s3://...`**. Vô hại c
 
 ## 10. Ngoài phạm vi (ghi để khỏi quên)
 
-- `hr_query` (tool HR: leave_balance / leave_requests / payroll) — **đang bắt đầu làm** ở mcp-service, chưa có kế hoạch cụ thể.
+- `hr_query` (tool HR: leave_balance / leave_requests / attendance / onboarding) — **đã implement** ở mcp-service như HTTP proxy sang hr-service, mặc định TẮT. Tích hợp phía query-service (real client cho `hr_query`) nằm ngoài tài liệu `rag_search` này.
 - Hybrid search (vector + BM25 RRF) — mcp-service v1 hiện chỉ vector + rerank.
 
 > **Reranker**: chốt dùng **LLM đánh giá lại** (mục 5.5) — đây là việc IN-SCOPE, không phải để sau.

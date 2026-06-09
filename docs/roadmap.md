@@ -70,7 +70,7 @@ _HR Personal Q&A_
 _MCP Tool Service_
 - [ ] mcp-service chạy như MCP server riêng (port 8003), expose 3 tool: `rag_search`, `hr_query`, `create_leave_request`
 - [ ] Query Service agent là MCP client — liệt kê + gọi tool qua MCP; inject `document_ids`/`user_id` (không để LLM tự điền)
-- [ ] `rag_search` self-contained: NATS rag.search → rerank BGE-Reranker → Top-3; `hr_query` gọi HR Service nội bộ và không sở hữu HR data
+- [ ] `rag_search` self-contained: embed query → đọc Qdrant trực tiếp → rerank (`none`/`lexical`/`llm`, fallback an toàn) → Top-3; `hr_query` HTTP proxy gọi HR Service nội bộ và không sở hữu HR data
 - [ ] `create_leave_request` chỉ chạy sau user confirmation; Query Service lưu draft tạm bằng Redis `pending_action:{user_id}` TTL ~10 phút
 
 _Admin Dashboard + Analytics (FE — Admin app `frontend/admin`)_

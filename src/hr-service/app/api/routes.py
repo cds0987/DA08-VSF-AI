@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import logging
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,7 +11,30 @@ from app.api.auth import require_internal_token
 from app.core.config import HrSettings, get_settings as load_hr_settings
 from app.domain.repositories.hr_repository import HrRepository
 
+logger = logging.getLogger("hr-service")
+
+# Intent độ nhạy Cao: mỗi lần truy cập phải ghi audit (self-access — chỉ data của
+# chính user, lọc cứng theo user_id từ token). KHÔNG log payload/số liệu.
+SENSITIVE_INTENTS = {"payroll", "benefits", "performance"}
+
 router = APIRouter(dependencies=[Depends(require_internal_token)])
+
+
+def _mask_user_id(user_id: str) -> str:
+    value = user_id.strip()
+    if not value:
+        return "unknown"
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+
+def _audit(intent: str, user_id: str, found: bool) -> None:
+    if intent in SENSITIVE_INTENTS:
+        logger.info(
+            "hr_audit intent=%s user=%s result=%s",
+            intent,
+            _mask_user_id(user_id),
+            "found" if found else "not_found",
+        )
 
 
 def get_settings() -> HrSettings:
@@ -24,7 +49,15 @@ def get_repo(settings: HrSettings = Depends(get_settings)) -> HrRepository:
 
 class HrQueryRequest(BaseModel):
     user_id: str
-    intent: Literal["leave_balance", "leave_requests", "attendance", "onboarding"]
+    intent: Literal[
+        "leave_balance",
+        "leave_requests",
+        "attendance",
+        "onboarding",
+        "payroll",
+        "benefits",
+        "performance",
+    ]
 
 
 def _leave_balance_summary(annual_remaining: int, sick_remaining: int) -> str:
@@ -50,6 +83,24 @@ def _attendance_summary(work_days: int, late_count: int, absent_count: int) -> s
 
 def _onboarding_summary(status: str, completed: int, total: int) -> str:
     return f"Trạng thái onboarding: {status}, đã hoàn thành {completed}/{total} mục."
+
+
+def _payroll_summary(period: str, gross: float, deductions: float, net: float) -> str:
+    return (
+        f"Kỳ lương {period}: lương gross {gross:,.0f}, "
+        f"khấu trừ {deductions:,.0f}, thực nhận {net:,.0f}."
+    )
+
+
+def _benefits_summary(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "Bạn chưa có phúc lợi nào được ghi nhận."
+    names = ", ".join(str(item.get("name", "")) for item in items)
+    return f"Bạn có các phúc lợi: {names}."
+
+
+def _performance_summary(period: str, rating: str) -> str:
+    return f"Đánh giá hiệu suất kỳ {period}: xếp loại {rating}."
 
 
 @router.post("/hr/query")
@@ -109,19 +160,73 @@ async def hr_query(
             "summary": _attendance_summary(dto.work_days, dto.late_count, dto.absent_count),
         }
 
-    dto = await repo.get_onboarding(body.user_id)
+    if body.intent == "onboarding":
+        dto = await repo.get_onboarding(body.user_id)
+        if dto is None:
+            raise HTTPException(status_code=404, detail="no HR data for this user")
+        data = {
+            "status": dto.status,
+            "checklist": [{"task": item.task, "done": item.done} for item in dto.checklist],
+            "completed_count": dto.completed_count,
+            "total_count": dto.total_count,
+        }
+        return {
+            "intent": body.intent,
+            "data": data,
+            "summary": _onboarding_summary(dto.status, dto.completed_count, dto.total_count),
+        }
+
+    if body.intent == "payroll":
+        dtos = await repo.get_payroll(body.user_id)
+        _audit(body.intent, body.user_id, bool(dtos))
+        if not dtos:
+            raise HTTPException(status_code=404, detail="no HR data for this user")
+        latest = dtos[0]
+        data = {
+            "payroll": [
+                {
+                    "period": item.period,
+                    "gross_salary": item.gross_salary,
+                    "deductions": item.deductions,
+                    "net_salary": item.net_salary,
+                }
+                for item in dtos
+            ]
+        }
+        return {
+            "intent": body.intent,
+            "data": data,
+            "summary": _payroll_summary(
+                latest.period, latest.gross_salary, latest.deductions, latest.net_salary
+            ),
+        }
+
+    if body.intent == "benefits":
+        dto = await repo.get_benefits(body.user_id)
+        _audit(body.intent, body.user_id, dto is not None)
+        if dto is None:
+            raise HTTPException(status_code=404, detail="no HR data for this user")
+        items = [{"name": item.name, "value": item.value} for item in dto.items]
+        return {
+            "intent": body.intent,
+            "data": {"items": items},
+            "summary": _benefits_summary(items),
+        }
+
+    dto = await repo.get_performance(body.user_id)
+    _audit(body.intent, body.user_id, dto is not None)
     if dto is None:
         raise HTTPException(status_code=404, detail="no HR data for this user")
     data = {
-        "status": dto.status,
-        "checklist": [{"task": item.task, "done": item.done} for item in dto.checklist],
-        "completed_count": dto.completed_count,
-        "total_count": dto.total_count,
+        "period": dto.period,
+        "rating": dto.rating,
+        "kpi": dto.kpi,
+        "reviewer_user_id": dto.reviewer_user_id,
     }
     return {
         "intent": body.intent,
         "data": data,
-        "summary": _onboarding_summary(dto.status, dto.completed_count, dto.total_count),
+        "summary": _performance_summary(dto.period, dto.rating),
     }
 
 

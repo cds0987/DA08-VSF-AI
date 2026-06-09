@@ -60,6 +60,25 @@ class OnboardingDTO:
 
 
 @dataclass(frozen=True)
+class BenefitItemDTO:
+    name: str
+    value: str
+
+
+@dataclass(frozen=True)
+class BenefitsDTO:
+    items: list[BenefitItemDTO] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class PerformanceReviewDTO:
+    period: str
+    rating: str
+    kpi: list[Any] = field(default_factory=list)
+    reviewer_user_id: str | None = None
+
+
+@dataclass(frozen=True)
 class HrQueryResult:
     intent: str
     data: dict[str, Any]
