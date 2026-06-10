@@ -8,9 +8,23 @@ from typing import Any, Callable
 from app.domain.repositories.artifact_store import ArtifactStore
 from app.infrastructure.external.s3_parser import (
     _default_client_factory,
+    current_s3_endpoint_url,
     current_source_bucket,
     parse_s3_uri,
 )
+
+
+def _artifact_uri_scheme() -> str:
+    """Scheme cho artifact_uri đồng nhất với backend thật.
+
+    boto3 nói giao thức S3 nhưng endpoint quyết định dịch vụ: GCS (S3-interop) ->
+    `gs://` để khớp source_uri do document-service ghi; MinIO/R2/AWS -> `s3://`.
+    parse_s3_uri đọc lại được cả hai scheme nên đây chỉ là nhãn lineage cho đúng nguồn.
+    """
+    endpoint = current_s3_endpoint_url().lower()
+    if "googleapis.com" in endpoint:
+        return "gs"
+    return "s3"
 
 
 def _safe_document_id(document_id: str) -> str:
@@ -54,7 +68,7 @@ class S3ArtifactStore(ArtifactStore):
             Body=markdown.encode("utf-8"),
             ContentType="text/markdown; charset=utf-8",
         )
-        return f"s3://{self._bucket}/{key}"
+        return f"{_artifact_uri_scheme()}://{self._bucket}/{key}"
 
     async def read_markdown(self, artifact_uri: str) -> str:
         bucket, key = parse_s3_uri(artifact_uri)
