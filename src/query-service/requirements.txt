@@ -16,7 +16,6 @@ langgraph>=0.2.0
 langgraph-checkpoint>=0.2.0
 langchain-openai>=0.3.0
 langchain-mcp-adapters>=0.1.0
-pybreaker>=1.2.0
 llm-guard>=0.3.0
 langfuse>=2.0.0
 newrelic>=9.0.0

@@ -32,18 +32,22 @@ Mọi lỗi network/console đã hết (full UI review: **network 0, console 0, 
   5. RAG threshold hardcode 0.70/0.75 trong `act_node` → config-driven qua `AgentState.rag_score_threshold` + hạ default 0.35.
 - **NGOẠI LỆ (sửa tay trên VM, KHÔNG qua CI):** `MCP_INTERNAL_TOKEN` trong `deploy/env/query-service.env` rỗng → mcp-service trả 401 → đã set = token mcp-service (43 ký tự). **Lỗ hổng:** env của user/document/query KHÔNG provision qua CI (chỉ rag/mcp/hr). Nên vá: đưa 3 env này vào GitHub secret như rag/mcp/hr.
 
-## 4. VẤN ĐỀ ĐANG MỞ — RAG retrieval không ra kết quả
-Chat hỏi (vd "số ngày nghỉ phép năm") → trả lời **"Mình không tìm thấy thông tin phù hợp trong tài liệu nội bộ"**, sources=0.
-- Hạ threshold KHÔNG đủ vì: (a) **`RAG_SCORE_THRESHOLD=0.70` set trong env VM `query-service.env`** override default code 0.35 — cần đổi env (hoặc xoá dòng đó) HOẶC quan trọng hơn:
-- **`langgraph_act_error` lặp lại trong log query-service** → `act_node` GỌI rag_search nhưng **execution throw exception** (bị bắt ở `langgraph_nodes.py:545`). mcp-service chỉ thấy `ListToolsRequest`, KHÔNG có `CallToolRequest` → lỗi xảy ra TRƯỚC khi chạm mcp.
-- `allowed_doc_ids` KHÔNG rỗng (admin bypass `can_access_document` → 13 docs; bảng `query_svc.document_access` có 13 rows).
+## 4. RAG retrieval — ROOT CAUSE TÌM RA + ĐÃ FIX (2026-06-10, chưa deploy verify)
+Triệu chứng cũ: chat hỏi → "Mình không tìm thấy thông tin phù hợp trong tài liệu nội bộ", sources=0; log lặp `langgraph_act_error`; mcp-service chỉ thấy `ListToolsRequest`, KHÔNG có `CallToolRequest`.
 
-### Bước tiếp theo (làm ngay ở session mới):
-1. **Lấy nội dung lỗi `langgraph_act_error`** — error string nằm trong `extra={"error": str(exc)}` (logger line 548), docker plain log KHÔNG hiện. Cách lấy:
-   - Xem New Relic (NEW_RELIC_* đã cấu hình, app `vsf-query-service`), HOẶC
-   - Tạm sửa `act_node` except (line 545-549) thêm `logger.error("act_err_detail", exc_info=True)` hoặc `import traceback; logger.error(traceback.format_exc())` → deploy → query → đọc traceback.
-2. Khả năng cao lỗi ở `_make_rag_search._rag_search` → `client.rag_search(...)` (MCPStreamableHttpClient ở `mcp_client.py`) — parse/serialize/session error. Warmup cũng fail (`mcp_tools_warmup_failed`: `MultiServerMCPClient` dùng như context manager — API langchain-mcp-adapters 0.1.0 đổi; ở `langchain_mcp_client.py:83`) nhưng đó chỉ là warmup mô tả tool, KHÔNG phải đường execute. Vẫn nên sửa cho sạch: `client = MultiServerMCPClient(...); tools = await client.get_tools()`.
-3. Sau khi rag_search chạy được: chỉnh `RAG_SCORE_THRESHOLD` (env VM hiện 0.70) xuống ~0.35 để chunk lọt; verify "số ngày nghỉ phép" ra câu trả lời + sources từ `leave_policy.md`.
+**ROOT CAUSE (xác định qua phân tích dependency, KHÔNG cần đọc traceback VM):**
+`pybreaker>=1.2.0` resolve thành **pybreaker 1.4.1**, mà `CircuitBreaker.call_async()` của nó được cài đặt **trên Tornado** (`@gen.coroutine`). Service này chạy pure-asyncio, KHÔNG có tornado → `call_async` ném ngay `NameError: name 'gen' is not defined` TRƯỚC khi gọi MCP. Vì `_call_tool()` đi qua breaker còn `list_tool_specs()` thì KHÔNG → khớp 100%: ListTools tới mcp, CallTool thì không; mọi rag_search/hr_query/call_tool đều chết, bị bắt thành `langgraph_act_error`.
+
+**FIX (đã sửa, 2 file query-service):**
+1. `mcp_client.py`: bỏ pybreaker, thay bằng class tự chứa `_AsyncCircuitBreaker` (asyncio-native, 3 state closed/open/half-open; `current_state` + `call_async` raise `MCPCircuitOpenError`). `_call_tool` gọi thẳng `self._breaker.call_async(...)`. Đã unit-test logic 3-state PASS. Gỡ `pybreaker` khỏi `requirements.txt`.
+2. `langchain_mcp_client.py` warmup: `async with MultiServerMCPClient(...) as client: client.get_tools()` (sai, get_tools là coroutine không await → warmup luôn fail) → `client = MultiServerMCPClient(cfg); raw_tools = await client.get_tools()` (đúng API 0.3.0 đã verify).
+
+`allowed_doc_ids` KHÔNG rỗng (admin bypass → 13 docs). Code mới py_compile OK; full pytest cần langgraph (chưa cài local) → để CI chạy.
+
+### Bước tiếp theo:
+1. **Commit 2 file + push `nguyendev:develop`** → CI build+deploy query-service (~3-4 phút).
+2. Query "số ngày nghỉ phép năm" / câu HR + câu tra tài liệu → verify hết `langgraph_act_error`, mcp-service thấy `CallToolRequest`, sources > 0.
+3. **Nếu vẫn sources=0 do threshold:** env VM `deploy/env/query-service.env` có `RAG_SCORE_THRESHOLD=0.70` override default code 0.35 → chunk ~0.3-0.6 bị lọc sạch. Xoá/hạ dòng đó (sửa tay VM — env query-service KHÔNG qua CI; xem §3 lỗ hổng provision env) rồi `sudo docker restart da08-vsf-query-service-1`.
 
 ## 5. Kiến trúc nhanh (tham chiếu)
 - Query flow: FE `/api/query/query` (SSE) → query-service LangGraph agent (`orchestration.py` → `langgraph_nodes.py`: triage→think→act→answer) → `act_node` gọi MCP `rag_search`/`hr_query` → mcp-service → Qdrant (index `rag_chatbot__te3s__d1536`, embedding text-embedding-3-small). RERANK_PROVIDER=none.

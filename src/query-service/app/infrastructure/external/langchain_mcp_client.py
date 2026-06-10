@@ -80,8 +80,13 @@ class LangChainMCPToolsLoader:
         Swallows errors so a down mcp-service never blocks app startup.
         """
         try:
-            async with MultiServerMCPClient(self._client_config) as client:
-                raw_tools: list[BaseTool] = client.get_tools()
+            # langchain-mcp-adapters >=0.2: MultiServerMCPClient is no longer an
+            # async context manager and get_tools() is a coroutine that opens its
+            # own transient session per call — must be awaited, not used via
+            # `async with`. The old 0.1.0 form silently returned a coroutine
+            # object here, making every warmup fall through to the except branch.
+            client = MultiServerMCPClient(self._client_config)
+            raw_tools: list[BaseTool] = await client.get_tools()
             self._descriptions = {t.name: t.description for t in raw_tools}
             logger.info(
                 "mcp_tools_discovered",
