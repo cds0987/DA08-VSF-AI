@@ -20,8 +20,7 @@ from langchain_core.tools import BaseTool, StructuredTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from pydantic import BaseModel, Field
 
-from app.application.ports import MCPToolClient
-from app.application.tools import ACL_WHITELIST
+from app.application.ports import MCPToolClient, ToolSpec
 from app.infrastructure.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -96,35 +95,48 @@ class LangChainMCPToolsLoader:
         self,
         user_id: str,
         allowed_doc_ids: frozenset[str],
-    ) -> list[BaseTool]:
+    ) -> list[BaseTool | dict]:
         """
-        Return per-request ACL-guarded StructuredTools.
+        Return per-request ACL-guarded tools for model.bind_tools().
 
-        Descriptions come from the MCP server (auto-discovered).
-        Execution is delegated to self._mcp_client with backend-injected
-        user_id and document_ids — the LLM cannot override these values.
+        Tool list is built dynamically from list_tool_specs() so a new tool
+        added to mcp-service is automatically discovered — no code change needed.
+
+        Routing rules:
+          • rag_search  → bespoke StructuredTool (ACL doc_ids, score filter, sources)
+          • hr_query    → bespoke StructuredTool (inject user_id, typed schema)
+          • any other   → generic dict schema  (call_tool + summary-style in act_node)
         """
-        if self._descriptions is None:
-            await self.warmup()
+        specs: list[ToolSpec] = await self._mcp_client.list_tool_specs()
 
-        descriptions: dict[str, str] = self._descriptions or {}
-        tools: list[BaseTool] = []
+        # Rebuild description cache from freshly discovered specs.
+        self._descriptions = {s.name: s.description for s in specs}
 
-        if "rag_search" in ACL_WHITELIST:
-            tools.append(
-                self._make_rag_search(
-                    description=descriptions.get("rag_search", _DEFAULT_RAG_DESC),
-                    allowed_doc_ids=allowed_doc_ids,
+        tools: list[BaseTool | dict] = []
+        for spec in specs:
+            if spec.name == "rag_search":
+                tools.append(
+                    self._make_rag_search(
+                        description=spec.description or _DEFAULT_RAG_DESC,
+                        allowed_doc_ids=allowed_doc_ids,
+                    )
                 )
-            )
-
-        if "hr_query" in ACL_WHITELIST:
-            tools.append(
-                self._make_hr_query(
-                    description=descriptions.get("hr_query", _DEFAULT_HR_DESC),
-                    user_id=user_id,
+            elif spec.name == "hr_query":
+                tools.append(
+                    self._make_hr_query(
+                        description=spec.description or _DEFAULT_HR_DESC,
+                        user_id=user_id,
+                    )
                 )
-            )
+            else:
+                tools.append(self._make_generic_tool(spec))
+
+        # Fallback: if mcp-service returned nothing, provide hardcoded defaults so
+        # the agent is never left with an empty tool list.
+        if not tools:
+            logger.warning("mcp_tools_empty_fallback: no specs returned, using hardcoded defaults")
+            tools.append(self._make_rag_search(_DEFAULT_RAG_DESC, allowed_doc_ids))
+            tools.append(self._make_hr_query(_DEFAULT_HR_DESC, user_id))
 
         return tools
 
@@ -133,8 +145,27 @@ class LangChainMCPToolsLoader:
         self._descriptions = None
 
     # ------------------------------------------------------------------
-    # Private factory methods (one per whitelisted tool)
+    # Private factory methods
     # ------------------------------------------------------------------
+
+    def _make_generic_tool(self, spec: ToolSpec) -> dict:
+        """
+        Build an OpenAI function-tool schema dict for any non-rag, non-hr tool.
+
+        Returns a plain dict — the OpenAIResponsesChatModel adapter passes it
+        through _bind_tools_schema verbatim so the model sees the correct schema.
+        Execution is handled by act_node via mcp_client.call_tool() (summary-style).
+
+        NOTE: reserved params (user_id, document_ids, top_k) are already stripped
+        from spec.input_schema by MCPStreamableHttpClient._strip_reserved_params().
+        user_id is re-injected at execution time in act_node.
+        """
+        return {
+            "type": "function",
+            "name": spec.name,
+            "description": spec.description,
+            "parameters": spec.input_schema or {"type": "object", "properties": {}},
+        }
 
     def _make_rag_search(
         self,

@@ -169,6 +169,22 @@ class QueryOrchestrationUseCase:
                     yield event
             return
 
+        # Generic tool: discovered from mcp-service but not rag_search or hr_query.
+        # Routed here when route_decision returns a tool name that is not one of the
+        # two bespoke tools. Executed via call_tool() + summary-style response.
+        if decision.decision not in {"rag_search", "hr_query"}:
+            arguments = {**decision.tool_arguments, "user_id": user.id}
+            async for event in self._handle_generic_tool(
+                tool_name=decision.decision,
+                arguments=arguments,
+                user=user,
+                session_id=session_id,
+                started=started,
+                outcome=decision.outcome,
+            ):
+                yield event
+            return
+
         async for event in self._handle_rag(
             question=question,
             search_query=str(decision.tool_arguments.get("query") or question),
@@ -461,6 +477,7 @@ class QueryOrchestrationUseCase:
     ) -> RouteDecision:
         try:
             available_tools = await self._mcp_client.list_tools()
+            discovered_tools = set(available_tools)
             choose_route = getattr(self._route_decision_provider, "choose_route", None)
             if choose_route is not None:
                 raw_decision = await choose_route(
@@ -482,7 +499,11 @@ class QueryOrchestrationUseCase:
                 confidence=0.0,
             )
 
-        return coerce_route_decision(raw_decision, default_query=question)
+        return coerce_route_decision(
+            raw_decision,
+            default_query=question,
+            discovered_tools=discovered_tools,
+        )
 
     async def _handle_rag(
         self,

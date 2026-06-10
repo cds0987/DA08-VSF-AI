@@ -164,6 +164,7 @@ class QueryRouter:
             return coerce_route_decision(
                 self._forced_decisions.pop(0),
                 default_query=question,
+                discovered_tools=set(available_tools),
             )
 
         shortcut = self._shortcut_route(question)
