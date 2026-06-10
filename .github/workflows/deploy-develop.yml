@@ -46,6 +46,7 @@ jobs:
       run_rag: ${{ steps.matrix.outputs.run_rag }}
       run_hr: ${{ steps.matrix.outputs.run_hr }}
       run_e2e_cloud: ${{ steps.matrix.outputs.run_e2e_cloud }}
+      run_frontend: ${{ steps.matrix.outputs.run_frontend }}
       run_deploy: ${{ steps.matrix.outputs.run_deploy }}
     steps:
       - uses: actions/checkout@v4
@@ -62,6 +63,8 @@ jobs:
             user-service: 'src/user-service/**'
             document-service: 'src/document-service/**'
             query-service: 'src/query-service/**'
+            frontend: 'src/frontend/**'
+            nginx: 'nginx/nginx.conf'
             base: 'docker-compose.yml'
             e2e-extra:
               - 'docker-compose.localtest.yml'
@@ -81,21 +84,23 @@ jobs:
           fi
           has() { echo "$CH" | jq -e "any(.[]; $1)" >/dev/null && echo true || echo false; }
           if $FORCE; then
-            rrag=true; rhr=true; rec=true; rd=true
+            rrag=true; rhr=true; rec=true; rfe=true; rd=true
           else
             rrag=$(has '.=="rag-worker" or .=="mcp-service"')
             rhr=$(has '.=="hr-service" or .=="mcp-hr"')
             rec=$(has '.=="rag-worker" or .=="mcp-service" or .=="document-service" or .=="e2e-extra"')
-            rd=$(has '.=="rag-worker" or .=="mcp-service" or .=="hr-service" or .=="user-service" or .=="document-service" or .=="query-service" or .=="base"')
+            rfe=$(has '.=="frontend"')
+            rd=$(has '.=="rag-worker" or .=="mcp-service" or .=="hr-service" or .=="user-service" or .=="document-service" or .=="query-service" or .=="frontend" or .=="nginx" or .=="base"')
           fi
           {
             echo "services=$SVC"
             echo "run_rag=$rrag"
             echo "run_hr=$rhr"
             echo "run_e2e_cloud=$rec"
+            echo "run_frontend=$rfe"
             echo "run_deploy=$rd"
           } >> "$GITHUB_OUTPUT"
-          echo "→ services=$SVC run_rag=$rrag run_hr=$rhr run_e2e_cloud=$rec run_deploy=$rd"
+          echo "→ services=$SVC run_rag=$rrag run_hr=$rhr run_e2e_cloud=$rec run_frontend=$rfe run_deploy=$rd"
 
   # ───────────────────── Phase 1a: CONTRACT ────────────────────────
   # Guard lớp A: chặn lệch vectorstore contract giữa rag-worker (producer) và
@@ -574,17 +579,49 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,scope=${{ matrix.service }},mode=max
 
+  # ──────────────── Phase 3b: BUILD + PUSH FRONTEND ────────────────
+  # FE nằm ở src/frontend/<app> (context KHÁC 6 backend service nên tách job riêng).
+  # 2 app Nuxt: admin + chat. Image: frontend-<app>:develop + :<git-sha>.
+  build-push-frontend:
+    needs: [detect, gate]
+    if: always() && needs.detect.result == 'success' && needs.gate.result == 'success' && needs.detect.outputs.run_frontend == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [admin, chat]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build & push frontend-${{ matrix.app }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ./src/frontend/${{ matrix.app }}
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/frontend-${{ matrix.app }}:develop
+            ${{ secrets.DOCKERHUB_USERNAME }}/frontend-${{ matrix.app }}:${{ github.sha }}
+          cache-from: type=gha,scope=frontend-${{ matrix.app }}
+          cache-to: type=gha,scope=frontend-${{ matrix.app }},mode=max
+
   # ──────────────────────── Phase 4: DEPLOY ────────────────────────
   # Chỉ chạy khi gate pass, run_deploy=true, và build-push success/skipped.
   # Deploy dùng tag :develop — service không build lần này vẫn giữ image cũ.
   deploy:
-    needs: [detect, gate, build-push]
+    needs: [detect, gate, build-push, build-push-frontend]
     if: |
       always()
       && needs.detect.result == 'success'
       && needs.gate.result == 'success'
       && needs.detect.outputs.run_deploy == 'true'
       && (needs.build-push.result == 'success' || needs.build-push.result == 'skipped')
+      && (needs.build-push-frontend.result == 'success' || needs.build-push-frontend.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - name: Deploy + healthcheck via SSH
@@ -615,10 +652,12 @@ jobs:
 
             echo "==> 3) Login Docker Hub + PULL image (KHÔNG build trên VM)"
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-            docker compose pull qdrant rag-worker mcp-service hr-service user-service document-service query-service
+            docker compose pull qdrant rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin
 
             echo "==> 4) Up image đã pull (deps: nats, rag-migrate, hr-migrate one-shot alembic)"
-            docker compose up -d --no-build qdrant rag-worker mcp-service hr-service user-service document-service query-service
+            #     nginx recreate để nạp nginx.conf mới (đã sync ở bước git reset --hard).
+            docker compose up -d --no-build qdrant rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin
+            docker compose up -d --no-build --force-recreate nginx
 
             echo "==> 5) HEALTH GATE (fail deploy nếu service không khỏe)"
             ok=0
@@ -627,8 +666,13 @@ jobs:
               hr=$(docker inspect -f '{{.State.Health.Status}}' da08-vsf-hr-service-1   2>/dev/null || echo none)
               mc=$(docker inspect -f '{{.State.Status}}'        da08-vsf-mcp-service-1  2>/dev/null || echo none)
               mr=$(docker inspect -f '{{.RestartCount}}'        da08-vsf-mcp-service-1  2>/dev/null || echo 99)
-              echo "  [$i] rag-worker=$rw hr-service=$hr mcp-service=$mc(restarts=$mr)"
-              if [ "$rw" = healthy ] && [ "$hr" = healthy ] && [ "$mc" = running ] && [ "$mr" -le 2 ]; then
+              fc=$(docker inspect -f '{{.State.Status}}'        da08-vsf-frontend-chat-1  2>/dev/null || echo none)
+              fcr=$(docker inspect -f '{{.RestartCount}}'       da08-vsf-frontend-chat-1  2>/dev/null || echo 99)
+              fa=$(docker inspect -f '{{.State.Status}}'        da08-vsf-frontend-admin-1 2>/dev/null || echo none)
+              far=$(docker inspect -f '{{.RestartCount}}'       da08-vsf-frontend-admin-1 2>/dev/null || echo 99)
+              echo "  [$i] rag-worker=$rw hr-service=$hr mcp-service=$mc(restarts=$mr) frontend-chat=$fc(restarts=$fcr) frontend-admin=$fa(restarts=$far)"
+              if [ "$rw" = healthy ] && [ "$hr" = healthy ] && [ "$mc" = running ] && [ "$mr" -le 2 ] \
+                 && [ "$fc" = running ] && [ "$fcr" -le 2 ] && [ "$fa" = running ] && [ "$far" -le 2 ]; then
                 ok=1; break
               fi
               sleep 5
@@ -636,12 +680,22 @@ jobs:
 
             if [ "$ok" != 1 ]; then
               echo "::error::Health gate FAILED — dump logs:"
-              for s in rag-worker mcp-service hr-service hr-migrate rag-migrate qdrant; do
+              for s in rag-worker mcp-service hr-service hr-migrate rag-migrate qdrant frontend-chat frontend-admin nginx; do
                 echo "----- $s -----"
                 docker compose -f "$APP_DIR/docker-compose.yml" logs --no-color --tail 60 "$s" 2>/dev/null || true
               done
               exit 1
             fi
+
+            echo "==> 5b) SMOKE qua nginx (cùng origin FE + /api/*): healthz + root + /admin/"
+            for path in /healthz / /admin/; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost${path}" || echo 000)
+              echo "  GET ${path} -> ${code}"
+              case "$code" in
+                2*|3*) : ;;
+                *) echo "::error::nginx route ${path} trả ${code}"; docker compose logs --no-color --tail 60 nginx frontend-chat frontend-admin || true; exit 1 ;;
+              esac
+            done
 
             echo "==> 6) OK. Dọn image rác."
             docker image prune -f

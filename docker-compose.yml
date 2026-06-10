@@ -176,6 +176,46 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  # ───────────── Frontend (Nuxt 4 SSR Node) — image pull từ Docker Hub như backend ─────────────
+  # KHÔNG expose host port: chỉ nginx (cùng compose network) proxy tới. Browser luôn đi
+  # qua nginx :80 -> FE và /api/* CÙNG origin -> KHÔNG phát sinh CORS.
+  # API_GATEWAY_URL để rỗng -> axios gọi path tương đối (/api/...) theo origin hiện tại.
+  frontend-chat:
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/frontend-chat:${IMAGE_TAG:-develop}
+    environment:
+      <<: *newrelic
+      NEW_RELIC_APP_NAME: vsf-frontend-chat
+      NITRO_HOST: 0.0.0.0
+      NITRO_PORT: "3000"
+      NUXT_PUBLIC_API_GATEWAY_URL: ""
+      NUXT_PUBLIC_USER_SERVICE_PATH: /api/user
+      NUXT_PUBLIC_DOCUMENT_SERVICE_PATH: /api/documents
+      NUXT_PUBLIC_QUERY_SERVICE_PATH: /api/query
+      NUXT_PUBLIC_HR_SERVICE_PATH: /api/hr
+      NUXT_PUBLIC_MCP_SERVICE_PATH: /api/mcp
+      NUXT_PUBLIC_CHAT_APP_URL: /
+      NUXT_PUBLIC_ADMIN_APP_URL: /admin/
+    restart: unless-stopped
+
+  frontend-admin:
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/frontend-admin:${IMAGE_TAG:-develop}
+    environment:
+      <<: *newrelic
+      NEW_RELIC_APP_NAME: vsf-frontend-admin
+      NITRO_HOST: 0.0.0.0
+      NITRO_PORT: "3001"
+      # Nuxt phục vụ dưới sub-path /admin/ (override runtime, không cần build lại).
+      NUXT_APP_BASE_URL: /admin/
+      NUXT_PUBLIC_API_GATEWAY_URL: ""
+      NUXT_PUBLIC_USER_SERVICE_PATH: /api/user
+      NUXT_PUBLIC_DOCUMENT_SERVICE_PATH: /api/documents
+      NUXT_PUBLIC_QUERY_SERVICE_PATH: /api/query
+      NUXT_PUBLIC_HR_SERVICE_PATH: /api/hr
+      NUXT_PUBLIC_MCP_SERVICE_PATH: /api/mcp
+      NUXT_PUBLIC_CHAT_APP_URL: /
+      NUXT_PUBLIC_ADMIN_APP_URL: /admin/
+    restart: unless-stopped
+
   nginx:
     image: nginx:1.27-alpine
     depends_on:
@@ -185,6 +225,8 @@ services:
       - mcp-service
       - hr-service
       - rag-worker
+      - frontend-chat
+      - frontend-admin
     ports:
       - "80:80"
     volumes:
