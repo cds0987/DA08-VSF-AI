@@ -844,7 +844,7 @@ jobs:
             SMOKE_UID=$(python3 -c 'import sys,base64,json;t="'"$TOK"'".split(".")[1];t+="="*(-len(t)%4);print(json.loads(base64.urlsafe_b64decode(t)).get("user_id",""))' 2>/dev/null || echo "")
 
             if [ "$SMOKE_DOC" = "true" ]; then
-              dcode=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 -H "Authorization: Bearer $TOK" http://localhost/api/documents)
+              dcode=$(curl -sL -o /dev/null -w '%{http_code}' --max-time 25 -H "Authorization: Bearer $TOK" http://localhost/api/documents)
               echo "  [DOC] GET /api/documents -> $dcode"
               case "$dcode" in 2*) : ;; *) echo "::error::SMOKE documents FAIL ($dcode)"; docker compose logs --no-color --tail 80 document-service || true; exit 1 ;; esac
             fi
