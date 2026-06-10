@@ -76,20 +76,24 @@ class OpenAIToolDecisionClient:
         recent_messages: list[tuple[str, str]],
         available_tools: Sequence[str],
     ) -> ToolDecision:
-        allowed_tools = sorted(set(available_tools) & VALID_TOOL_NAMES)
+        # Use full discovered tool list; no longer restricted to VALID_TOOL_NAMES.
+        all_tool_names = sorted(set(available_tools)) if available_tools else sorted(VALID_TOOL_NAMES)
         history = "\n".join(f"{role}: {content}" for role, content in recent_messages[-5:])
+        tool_list_str = ", ".join(all_tool_names)
         try:
             response = await self._client.responses.create(
                 model=self._settings.openai_llm_model,
                 instructions=(
                     "You route one internal chatbot question to exactly one tool. "
-                    "Return only JSON. Valid shapes are "
-                    '{"tool_name":"rag_search","arguments":{}} or '
-                    '{"tool_name":"hr_query","arguments":{"intent":"leave_balance|leave_requests|payroll"}}. '
-                    f"Available tools: {', '.join(allowed_tools)}. "
-                    "Use hr_query only for the current user's personal HR data: leave balance, leave requests, "
-                    "or payroll. Use rag_search for policies, procedures, internal documents, or unclear questions. "
-                    "Never include user_id, document_ids, top_k, or authorization data."
+                    "Return only JSON: {\"tool_name\": \"<name>\", \"arguments\": {<args>}}. "
+                    f"Available tools: {tool_list_str}. "
+                    "Rules: use hr_query only for the current user's personal HR data "
+                    "(leave balance / leave requests / payroll) with argument "
+                    "{\"intent\": \"leave_balance|leave_requests|payroll\"}. "
+                    "Use rag_search for policies, procedures, internal documents, or unclear questions "
+                    "(argument: {\"query\": \"<search query>\"}). "
+                    "For any other listed tool, use its name and pass only the arguments it needs. "
+                    "Never include user_id, document_ids, top_k, or authorization data in arguments."
                 ),
                 input=f"Recent messages:\n{history or '(empty)'}\n\nQuestion:\n{question}",
             )
@@ -108,12 +112,33 @@ class OpenAIToolDecisionClient:
         arguments = payload.get("arguments", {})
         if not isinstance(arguments, dict):
             arguments = {}
-        if tool_name == "hr_query" and str(arguments.get("intent", "")) in VALID_HR_INTENTS:
+
+        # Bespoke validation for known typed tools.
+        if tool_name == "hr_query":
+            intent = str(arguments.get("intent", ""))
+            if intent in VALID_HR_INTENTS:
+                return ToolDecision(
+                    tool_name="hr_query",
+                    arguments={"intent": intent},
+                    reason="openai decision",
+                )
+            return ToolDecision(tool_name="rag_search", arguments={}, reason="invalid hr intent")
+
+        if tool_name == "rag_search":
             return ToolDecision(
-                tool_name="hr_query",
-                arguments={"intent": str(arguments["intent"])},
+                tool_name="rag_search",
+                arguments={"query": str(arguments.get("query", question))},
                 reason="openai decision",
             )
+
+        # Generic discovered tool: accept if it is in the available list.
+        if tool_name in all_tool_names:
+            return ToolDecision(
+                tool_name=tool_name,
+                arguments=arguments,
+                reason="openai decision (generic tool)",
+            )
+
         return ToolDecision(tool_name="rag_search", arguments={}, reason="openai decision fallback")
 
 

@@ -13,6 +13,9 @@ VALID_ROUTE_DECISIONS = {
     "out_of_scope",
 }
 
+# Decisions that are handled by shortcut / LLM-generated responses (not tools).
+_NON_TOOL_DECISIONS = {"clarification", "identity_shortcut", "out_of_scope", "off_topic"}
+
 VALID_HR_INTENTS = {"leave_balance", "leave_requests", "payroll"}
 
 
@@ -30,16 +33,22 @@ def coerce_route_decision(
     decision: RouteDecision | ToolDecision,
     *,
     default_query: str,
+    discovered_tools: set[str] | None = None,
 ) -> RouteDecision:
     if isinstance(decision, ToolDecision):
-        return _from_legacy_tool_decision(decision, default_query=default_query)
-    return normalize_route_decision(decision, default_query=default_query)
+        return _from_legacy_tool_decision(
+            decision, default_query=default_query, discovered_tools=discovered_tools
+        )
+    return normalize_route_decision(
+        decision, default_query=default_query, discovered_tools=discovered_tools
+    )
 
 
 def normalize_route_decision(
     decision: RouteDecision,
     *,
     default_query: str,
+    discovered_tools: set[str] | None = None,
 ) -> RouteDecision:
     route_name = str(decision.decision).strip()
     confidence = min(1.0, max(0.0, float(decision.confidence)))
@@ -108,6 +117,21 @@ def normalize_route_decision(
             outcome=Outcome.OFF_TOPIC,
         )
 
+    # Dynamic tool: if the route name matches a tool discovered from mcp-service
+    # and it is not a shortcut/response decision, accept it as a generic tool call.
+    if (
+        discovered_tools
+        and route_name in discovered_tools
+        and route_name not in _NON_TOOL_DECISIONS
+    ):
+        return RouteDecision(
+            decision=route_name,
+            tool_arguments=decision.tool_arguments,
+            reason=reason,
+            confidence=confidence,
+            outcome=Outcome.SUCCESS,
+        )
+
     return RouteDecision(
         decision="rag_search",
         tool_arguments={"query": default_query},
@@ -117,7 +141,12 @@ def normalize_route_decision(
     )
 
 
-def _from_legacy_tool_decision(decision: ToolDecision, *, default_query: str) -> RouteDecision:
+def _from_legacy_tool_decision(
+    decision: ToolDecision,
+    *,
+    default_query: str,
+    discovered_tools: set[str] | None = None,
+) -> RouteDecision:
     if decision.tool_name == "hr_query":
         intent = str(decision.arguments.get("intent", "")).strip()
         if intent in VALID_HR_INTENTS:
@@ -135,6 +164,15 @@ def _from_legacy_tool_decision(decision: ToolDecision, *, default_query: str) ->
             tool_arguments={"query": query},
             reason=decision.reason,
             confidence=0.0,
+        )
+    # Dynamic tool: accept if it was discovered from mcp-service.
+    if discovered_tools and decision.tool_name in discovered_tools:
+        return RouteDecision(
+            decision=decision.tool_name,
+            tool_arguments=decision.arguments,
+            reason=decision.reason,
+            confidence=0.0,
+            outcome=Outcome.SUCCESS,
         )
     return RouteDecision(
         decision="rag_search",

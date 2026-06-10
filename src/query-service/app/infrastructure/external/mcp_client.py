@@ -109,16 +109,35 @@ class HrQueryResult:
 class MockMCPClient:
     def __init__(self) -> None:
         self.last_tool_calls: list[ToolCallRecord] = []
+        # Extra tools registered via register_tool() for testing/extension.
+        # Maps tool name → (ToolSpec, fixed response dict).
+        self._extra_tools: dict[str, tuple[ToolSpec, dict[str, Any]]] = {}
 
     @property
     def is_circuit_open(self) -> bool:
         return False
 
+    def register_tool(self, spec: ToolSpec, response: dict[str, Any]) -> None:
+        """Register an extra summary-style tool for testing or local extension.
+
+        This is the hook that fulfils Issue #43 Acceptance #1:
+        adding a tool here is sufficient for the full query-service pipeline
+        to discover, bind, and execute it — no routing code change needed.
+
+        Args:
+            spec: Tool specification (name, description, input_schema).
+            response: Fixed response dict returned by call_tool (must include
+                a 'summary', 'answer', or 'text' key for summary-style streaming).
+        """
+        self._extra_tools[spec.name] = (spec, response)
+
     async def list_tools(self) -> list[str]:
-        return ["rag_search", "hr_query"]
+        base = ["rag_search", "hr_query"]
+        return base + [name for name in self._extra_tools if name not in base]
 
     async def list_tool_specs(self) -> list[ToolSpec]:
-        return list(_MOCK_TOOL_SPECS)
+        extra_specs = [spec for spec, _ in self._extra_tools.values()]
+        return list(_MOCK_TOOL_SPECS) + extra_specs
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name == "rag_search":
@@ -145,6 +164,10 @@ class MockMCPClient:
             intent = str(arguments.get("intent", "leave_balance"))
             result = await self.hr_query(user_id=user_id, intent=intent)
             return {"summary": result.summary, "intent": result.intent}
+        # Generic registered tool: return the fixed response.
+        if name in self._extra_tools:
+            self.last_tool_calls.append(ToolCallRecord(tool_name=name, arguments=dict(arguments)))
+            return self._extra_tools[name][1]
         return {"error": f"Unknown tool: {name}"}
 
     async def rag_search(
@@ -266,6 +289,7 @@ class MockMCPClient:
 
     def reset(self) -> None:
         self.last_tool_calls.clear()
+        self._extra_tools.clear()
 
 
 class MCPCircuitOpenError(RuntimeError):
