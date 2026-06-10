@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 
 from app.domain.repositories.document_access_repository import DocumentAccessRepository
@@ -93,7 +94,9 @@ class PostgresDocumentAccessRepository(DocumentAccessRepository):
 
 
 def _asyncpg_url(database_url: str) -> str:
-    return database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+    """Bỏ phần dialect SQLAlchemy (+asyncpg, +psycopg, ...) -> asyncpg chỉ nhận
+    scheme 'postgresql://' / 'postgres://'. Env trên VM dùng postgresql+psycopg://."""
+    return re.sub(r"^postgresql\+[a-z0-9_]+://", "postgresql://", database_url, count=1)
 
 
 def _import_asyncpg():
