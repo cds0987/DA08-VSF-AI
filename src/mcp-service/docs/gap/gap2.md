@@ -2,7 +2,7 @@
 
 > Phạm vi: tool `hr_query` ở mcp-service ([app/tools/hr_query.py](../../app/tools/hr_query.py)) — HTTP proxy sang hr-service `POST /hr/query`.
 > Đối chiếu với thiết kế [docs/maintool/hr_query.md](../maintool/hr_query.md) + code thật hai phía.
-> Trạng thái tool: 🟢 đã chạy được 4 intent MVP (read-only); 🔴 thiếu phần phi-happy-path, bảo mật và độ phủ intent.
+> Trạng thái tool: 🟢 đã chạy đủ **7 intent** (read-only, self-access + audit cho payroll/benefits/performance), publish enum qua interface MCP (`list_tools()`/schema) — client discover qua interface, không hard-code.
 > Các runtime bug (lệch shape response, 404 làm vỡ chat...) **không** ghi ở đây theo yêu cầu — file này chỉ liệt kê gap về thiết kế/độ hoàn thiện của tool.
 
 > ## Trạng thái tổng (cập nhật `85e0926`)
@@ -19,7 +19,7 @@
 
 ### ✅ Đã đúng (không phải gap)
 - Boundary an toàn: chỉ nhận `user_id` (client inject từ JWT) + `intent`; không có tham số chọn-người-khác. ✔ ([maintool §Boundary](../maintool/hr_query.md))
-- 4 intent MVP `leave_balance / leave_requests / attendance / onboarding` có đủ route + repo + model ở hr-service. ✔ ([src/hr-service/app/api/routes.py](../../../hr-service/app/api/routes.py))
+- 7 intent `leave_balance / leave_requests / attendance / onboarding / payroll / benefits / performance` có đủ route + repo + model ở hr-service (`payroll/benefits/performance` = self-access + audit). ✔ ([src/hr-service/app/api/routes.py](../../../hr-service/app/api/routes.py))
 - Auth `X-Internal-Token` truyền qua header ở cả proxy lẫn `verify()`. ✔
 - Đăng ký qua registry, mặc định TẮT (`TOOL_HR_QUERY_ENABLED=0`) — không footgun. ✔ ([config.yaml](../../config.yaml))
 
@@ -92,15 +92,15 @@ Trước đây `verify()` gọi `GET /health` lúc startup; hr-service down → 
 
 ---
 
-## Gap 2.7 — Lệch tập intent query-service ↔ hr-service (contract drift) — 🟡 ĐANG XỬ LÝ
+## Gap 2.7 — Nguồn sự thật cho tập intent `hr_query` — ✅ DONE (chốt ở lớp interface MCP)
 
-> Ghi nhận ở mức contract (không phải runtime): query-service phát `{leave_balance, leave_requests, payroll}` còn hr-service chấp nhận `{leave_balance, leave_requests, attendance, onboarding}`. Hai đầu chỉ trùng 2/5; `payroll` và `attendance`/`onboarding` không khớp chiều nào.
+> **Nguyên tắc ranh giới:** tool `hr_query` do **mcp-service sở hữu**; service ngoài (query-service) không can thiệp định nghĩa tool, **chỉ tương tác qua lớp interface MCP** (`list_tools()` + JSON schema). Vì vậy "nguồn sự thật" của tập intent là enum **mcp publish qua interface** — không phải thứ mỗi client tự khai.
 
-**Gốc rễ:** intent không có **nguồn sự thật duy nhất** — proxy `hr_query` trước đây khai `intent: str` (không publish enum ra MCP schema), nên mỗi phía tự định nghĩa lại → lệch.
+**Gốc rễ (cũ):** proxy `hr_query` trước đây khai `intent: str` (không publish enum ra MCP schema), nên client phải tự đoán/định nghĩa lại → mỗi nơi một kiểu.
 
-**Đã làm (mcp-service):** đổi `intent: str` → `intent: HrIntent = Literal["leave_balance","leave_requests","attendance","onboarding"]` ([hr_query.py](../../app/tools/hr_query.py)) → enum giờ **được publish qua `list_tools()`**; `MVP_INTENTS` giữ làm chốt runtime, đồng bộ với Literal. Đây là **nguồn chuẩn** để client discover (chốt tập = 4 intent MVP, **không** payroll).
+**Đã làm (mcp-service + hr-service):** đổi `intent: str` → `intent: HrIntent = Literal[...7 intent...]` ([hr_query.py](../../app/tools/hr_query.py)) → enum **được publish qua `list_tools()`/schema**; `MVP_INTENTS` là chốt runtime, đồng bộ `Literal` ở hr-service `routes.py`. `payroll/benefits/performance` giữ qua mô hình **self-access** (không role-gate — data của chính user) + audit (Gap 2.4 khép theo).
 
-**Còn lại (query-service, gắn với [1.4](#gap-14--tool_routing_mode-vẫn-mặc-định-legacy--🔴-open)):** bật `native` để query-service đọc enum từ schema thay vì hard-code; gỡ `payroll` khỏi đường legacy. Việc "giữ hay bỏ payroll" nếu SA muốn giữ → phải kèm role-gate (2.4) + thêm payroll vào Literal/hr-service.
+**Đóng từ phía mcp/hr:** contract = interface đã công bố đủ 7 intent. Bất kỳ client nào (query-service hay khác) **discover qua interface** sẽ thấy đủ 7 — việc client nội bộ ánh xạ/hard-code bao nhiêu intent là **chuyện riêng của client**, không phải gap do mcp/hr sở hữu. (query-service bật `native` để đọc enum từ schema → gắn 1.4, thuộc file khác.)
 
 ---
 

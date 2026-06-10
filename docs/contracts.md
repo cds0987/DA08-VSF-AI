@@ -264,13 +264,15 @@ class RagSearchInput:
 > **MCP tool — chữ ký & output thật (theo code):**
 > - `rag_search(query: str, document_ids: list[str] | None = None, top_k: int | None = None) -> dict`
 >   → `{"results": [SearchHit-as-dict, ...]}` (đã rerank, top-k). Đăng ký tại `app/tools/rag_search.py`.
-> - `hr_query(user_id: str, intent: str) -> dict` → **proxy** POST `/hr/query` sang hr-service,
+> - `hr_query(user_id: str, intent: HrIntent) -> dict` → **proxy** POST `/hr/query` sang hr-service,
 >   trả thẳng body `{"intent": ..., "data": {...}, "summary": ...}`. Đăng ký tại `app/tools/hr_query.py`.
->   mcp-service KHÔNG typed output này; envelope do hr-service quyết.
+>   `HrIntent = Literal["leave_balance","leave_requests","attendance","onboarding","payroll","benefits","performance"]`
+>   (PHẢI khớp `Literal` ở hr-service `routes.py`). mcp-service KHÔNG typed output này; envelope do hr-service quyết.
 > - Tham số nhạy cảm (`document_ids`, `user_id`) do MCP client inject từ ACL/JWT, **không tin LLM**.
 > - `hr_query` mặc định **TẮT** (`TOOL_HR_QUERY_ENABLED=0`); bật khi hr-service sẵn sàng.
-> - Tool tạo đơn nghỉ phép (`create_leave_request`) **chưa đăng ký là MCP tool** trong mcp-service — hr-service
->   đã có endpoint leave-request nhưng chưa expose qua MCP. (Roadmap/SA narrative còn ghi 3 tool — chưa khớp code.)
+> - Tool tạo đơn nghỉ phép (`create_leave_request`) **chưa đăng ký là MCP tool** trong mcp-service, và
+>   hr-service **cũng chưa có endpoint** leave-request (chỉ `POST /hr/query` + `GET /health`). **Thiết kế WRITE flow đã chốt**
+>   (endpoint + NATS event) — xem section hr-service bên dưới + [`docs/api-spec.md`](api-spec.md).
 
 ---
 
@@ -305,7 +307,7 @@ class LeaveRequestDTO:                   # bản MVP đơn giản hóa (không c
     status: str
 
 @dataclass(frozen=True)
-class PayrollDTO:                        # schema có sẵn nhưng intent payroll CHƯA expose (chờ SA-3)
+class PayrollDTO:                        # intent payroll ĐÃ expose (self-access + audit log)
     period: str                         # 'YYYY-MM'
     gross_salary: float
     deductions: float
@@ -331,6 +333,22 @@ class OnboardingDTO:
     total_count: int = 0
 
 @dataclass(frozen=True)
+class BenefitItemDTO:
+    name: str
+    value: str
+
+@dataclass(frozen=True)
+class BenefitsDTO:
+    items: list[BenefitItemDTO] = field(default_factory=list)
+
+@dataclass(frozen=True)
+class PerformanceReviewDTO:
+    period: str                         # 'YYYY-MM'
+    rating: str
+    kpi: list = field(default_factory=list)
+    reviewer_user_id: Optional[str] = None
+
+@dataclass(frozen=True)
 class HrQueryResult:                     # envelope chung — data là dict tùy intent (KHÔNG phải union typed field)
     intent: str
     data: dict
@@ -346,17 +364,36 @@ class HrRepository(ABC):
     async def get_leave_requests(self, user_id: str) -> List[LeaveRequestDTO]: ...
     async def get_attendance(self, user_id: str) -> Optional[AttendanceDTO]: ...
     async def get_onboarding(self, user_id: str) -> Optional[OnboardingDTO]: ...
-    async def get_payroll(self, user_id: str) -> List[PayrollDTO]: ...   # chưa expose qua endpoint
+    async def get_payroll(self, user_id: str) -> List[PayrollDTO]: ...
+    async def get_benefits(self, user_id: str) -> Optional[BenefitsDTO]: ...
+    async def get_performance(self, user_id: str) -> Optional[PerformanceReviewDTO]: ...
     async def aclose(self) -> None: ...
+
+    # ── WRITE (leave request) — 🟡 THIẾT KẾ ĐÃ CHỐT, chưa implement ──────────────
+    # create: resolve approver = manager_user_id OR HR_DEFAULT_APPROVER; days_count server tính (ngày lịch);
+    #         INSERT status='pending'. approve: TRANSACTION update + trừ leave_balance (annual/sick).
+    # async def create_leave_request(self, user_id, leave_type, start_date, end_date, reason) -> LeaveRequestRecord: ...
+    # async def list_pending_approval(self, approver_user_id) -> List[...]: ...
+    # async def update_leave_status(self, request_id, approver_user_id, action: "approve"|"reject", reason=None) -> ...: ...
 ```
 
 > **HTTP contract (hr-service, theo `app/api/routes.py`):**
-> - `POST /hr/query` — body `{"user_id": str, "intent": Literal["leave_balance","leave_requests","attendance","onboarding"]}`,
+> - `POST /hr/query` — body `{"user_id": str, "intent": Literal["leave_balance","leave_requests","attendance","onboarding","payroll","benefits","performance"]}`,
 >   header `X-Internal-Token`. Trả `{"intent", "data", "summary"}`. Intent không hợp lệ → 422; user không có HR data → 404.
-> - `GET /health` → `{"status": "ok"}` (dùng bởi `HrQueryTool.verify()` lúc startup, fail-closed).
-> - `payroll` schema có sẵn nhưng **chưa nằm trong `Literal` intent** — chặn bởi SA-3.
-> - **Leave request MVP**: AI tạo draft, chỉ gọi tool tạo đơn sau khi user xác nhận; HR Service set `status='pending'`,
->   `approver_user_id = employees.manager_user_id`. (Endpoint tạo/duyệt đơn còn ở giai đoạn thiết kế, xem `src/hr-service/docs/intent.md`.)
+> - `GET /health` → `{"status": "ok"}` (dùng bởi `HrQueryTool.verify()` lúc startup, best-effort — hr-service down KHÔNG sập mcp-service).
+> - **Intent nhạy cảm** (`payroll`/`benefits`/`performance`) = self-access (chỉ data của chính user, lọc cứng `WHERE user_id`),
+>   **không cần role-gate**; hr-service ghi **audit log** mỗi lần truy cập (mask user_id, KHÔNG log số liệu) — `SENSITIVE_INTENTS` ở `routes.py`.
+> - **Leave request WRITE (🟡 thiết kế đã chốt, chưa implement)** — endpoint + flow đầy đủ ở [`docs/api-spec.md`](api-spec.md) (section "Leave request WRITE flow") + [`src/hr-service/docs/intent.md`](../src/hr-service/docs/intent.md):
+>   - `POST /hr/leave-requests` (mcp gọi qua tool `create_leave_request`) → ghi `pending`, approver = `manager_user_id` OR `HR_DEFAULT_APPROVER` → publish `hr.leave_request.created`.
+>   - `GET /hr/leave-requests/pending-approval` + `POST /hr/leave-requests/{id}/approve|reject` (HTTP `X-Internal-Token`, **không** phải MCP tool). approve trừ `leave_balance` trong transaction → publish `hr.leave_request.approved|rejected`.
+>   - Quyền duyệt = `đơn.approver_user_id == current AND status='pending'` (KHÔNG dùng app-role).
+
+> **NATS event contract (hr-service publish → query-service subscribe)** — bàn giao cho query-service tự consume:
+> - `hr.leave_request.created` → `{event_id, occurred_at, request_id, requester_user_id, approver_user_id, leave_type, start_date, end_date, days_count, status}` → báo **sếp** (`approver_user_id`).
+> - `hr.leave_request.approved` → `{event_id, occurred_at, request_id, requester_user_id, approver_user_id, status}` → báo **nhân viên** (`requester_user_id`).
+> - `hr.leave_request.rejected` → thêm `rejected_reason` → báo **nhân viên**.
+> - hr-service publish **sau commit**, `event_id` idempotent. hr-service KHÔNG đẩy thẳng tới user; SSE do query-service Notification Center lo. ⏳ Cả 2 phía chưa implement.
+> - **Tool MCP duy nhất cho write**: `create_leave_request(user_id, leave_type, start_date, end_date, reason)` (mcp-service proxy, `user_id` từ JWT). approve/reject KHÔNG là tool.
 
 ---
 
@@ -431,7 +468,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 @dataclass
-class SearchResult:           # = contract NATS reply rag.search (Top-K chunks sau threshold)
+class SearchResult:           # shape chunk trả về (CÙNG field với SearchHit của mcp-service; mcp đọc từ Qdrant payload, KHÔNG qua NATS)
     chunk_id: str
     document_id: str
     document_name: str
@@ -450,23 +487,11 @@ class VectorRepository(ABC):
         """Lưu vector (embed từ child_text) + metadata Parent-Child vào Qdrant."""
 
     @abstractmethod
-    async def hybrid_search(
-        self,
-        vector: List[float],
-        query_text: str,
-        top_k: int = 5,
-        document_ids: Optional[List[str]] = None,
-    ) -> List[SearchResult]:
-        """Hybrid search (vector + BM25 RRF) trên child_text.
-        document_ids: filter chỉ search trong các doc này. None = chỉ public docs (fail-secure default).
-        document_ids do **mcp-service** truyền vào (Query Service đã lọc ACL từ projection
-        `query_db.document_access` và inject qua MCP — rag-worker không biết logic ACL).
-        """
-
-    @abstractmethod
     async def delete_by_document(self, document_id: str) -> None:
         """Xóa toàn bộ vectors của một document."""
 ```
+
+> ⚠️ **Theo code**: rag-worker là **ingest-only** — `VectorRepository` chỉ có `upsert`/`delete_by_document`, **KHÔNG có `hybrid_search`/search**. Retrieval (vector search + rerank) do **mcp-service** đọc Qdrant trực tiếp (`app/core/vectorstore.py` + `search.py`). `SearchResult` ở đây chỉ là shape tham chiếu (cùng field với `SearchHit` của mcp-service).
 
 ---
 
