@@ -64,7 +64,7 @@ jobs:
             document-service: 'src/document-service/**'
             query-service: 'src/query-service/**'
             frontend: 'src/frontend/**'
-            nginx: 'nginx/nginx.conf'
+            nginx: 'nginx/**'
             base: 'docker-compose.yml'
             e2e-extra:
               - 'docker-compose.localtest.yml'
@@ -610,11 +610,38 @@ jobs:
           cache-from: type=gha,scope=frontend-${{ matrix.app }}
           cache-to: type=gha,scope=frontend-${{ matrix.app }},mode=max
 
+  # ───────────────── Phase 3c: BUILD + PUSH NGINX ──────────────────
+  # nginx config nướng vào image (nginx/Dockerfile COPY nginx.conf). Build MỖI lần
+  # deploy để image :develop luôn tồn tại + khớp git. Bỏ bind-mount -> chống sửa tay VM.
+  build-push-nginx:
+    needs: [detect, gate]
+    if: always() && needs.detect.result == 'success' && needs.gate.result == 'success' && needs.detect.outputs.run_deploy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build & push nginx
+        uses: docker/build-push-action@v6
+        with:
+          context: ./nginx
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/nginx:develop
+            ${{ secrets.DOCKERHUB_USERNAME }}/nginx:${{ github.sha }}
+          cache-from: type=gha,scope=nginx
+          cache-to: type=gha,scope=nginx,mode=max
+
   # ──────────────────────── Phase 4: DEPLOY ────────────────────────
   # Chỉ chạy khi gate pass, run_deploy=true, và build-push success/skipped.
   # Deploy dùng tag :develop — service không build lần này vẫn giữ image cũ.
   deploy:
-    needs: [detect, gate, build-push, build-push-frontend]
+    needs: [detect, gate, build-push, build-push-frontend, build-push-nginx]
     if: |
       always()
       && needs.detect.result == 'success'
@@ -622,6 +649,7 @@ jobs:
       && needs.detect.outputs.run_deploy == 'true'
       && (needs.build-push.result == 'success' || needs.build-push.result == 'skipped')
       && (needs.build-push-frontend.result == 'success' || needs.build-push-frontend.result == 'skipped')
+      && needs.build-push-nginx.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Deploy + healthcheck via SSH
@@ -652,10 +680,10 @@ jobs:
 
             echo "==> 3) Login Docker Hub + PULL image (KHÔNG build trên VM)"
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-            docker compose pull qdrant rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin
+            docker compose pull qdrant rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin nginx
 
             echo "==> 4) Up image đã pull (deps: nats, rag-migrate, hr-migrate one-shot alembic)"
-            #     nginx recreate để nạp nginx.conf mới (đã sync ở bước git reset --hard).
+            #     nginx = image config-nướng-sẵn (không bind-mount) -> recreate để lấy image mới.
             docker compose up -d --no-build qdrant rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin
             docker compose up -d --no-build --force-recreate nginx
 
@@ -687,14 +715,26 @@ jobs:
               exit 1
             fi
 
-            echo "==> 5b) SMOKE qua nginx (cùng origin FE + /api/*): healthz + root + /admin/"
+            echo "==> 5b) SMOKE qua nginx: status + NỘI DUNG (bắt placeholder / FE chưa serve)"
+            # /healthz chỉ cần 2xx. / và /admin/ phải là FE thật: KHÔNG chứa chuỗi placeholder
+            # và PHẢI có dấu hiệu Nuxt (__NUXT/_nuxt). Tránh pass giả khi nginx về placeholder cũ.
             for path in /healthz / /admin/; do
-              code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost${path}" || echo 000)
+              body=$(curl -sL --compressed --max-time 15 "http://localhost${path}")
+              code=$(curl -sL -o /dev/null -w '%{http_code}' --max-time 15 "http://localhost${path}" || echo 000)
               echo "  GET ${path} -> ${code}"
-              case "$code" in
-                2*|3*) : ;;
-                *) echo "::error::nginx route ${path} trả ${code}"; docker compose logs --no-color --tail 60 nginx frontend-chat frontend-admin || true; exit 1 ;;
+              case "$code" in 2*|3*) : ;; *)
+                echo "::error::nginx route ${path} trả ${code}"; docker compose logs --no-color --tail 80 nginx frontend-chat frontend-admin || true; exit 1 ;;
               esac
+              if [ "$path" != "/healthz" ]; then
+                if echo "$body" | grep -qi "chưa được containerize"; then
+                  echo "::error::nginx route ${path} VẪN trả placeholder cũ (FE không được serve)"
+                  docker compose logs --no-color --tail 80 nginx || true; exit 1
+                fi
+                if ! echo "$body" | grep -qiE "__NUXT|/_nuxt/|/admin/_nuxt/"; then
+                  echo "::error::nginx route ${path} không có markup Nuxt (FE không render)"
+                  docker compose logs --no-color --tail 80 nginx frontend-chat frontend-admin || true; exit 1
+                fi
+              fi
             done
 
             echo "==> 6) OK. Dọn image rác."
