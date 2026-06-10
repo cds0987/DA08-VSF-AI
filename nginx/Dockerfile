@@ -4,5 +4,7 @@
 # Nguồn chuẩn DUY NHẤT = nginx/nginx.conf trong git -> CI build -> VM pull.
 FROM nginx:1.27-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-# Fail-fast: build hỏng nếu config sai cú pháp.
-RUN nginx -t -c /etc/nginx/nginx.conf
+# KHÔNG `nginx -t` ở build: proxy_pass dùng hostname literal (user-service, ...) ->
+# nginx resolve DNS ngay lúc test -> emerg "host not found" trong build container.
+# Cú pháp được kiểm khi container start trong compose network (hostname resolve được),
+# và smoke test sau deploy bắt lỗi runtime.
