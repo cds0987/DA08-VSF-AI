@@ -383,8 +383,14 @@ async def think_node(
         )
         response: AIMessage = await model.ainvoke(messages)
     else:
-        # Bind tools and invoke model
-        bound_model = model.bind_tools(tools, tool_choice="auto")
+        # Bind tools and invoke model. On the FIRST ReAct iteration force a tool
+        # call ("required") so a weak model (gpt-4o-mini) cannot skip retrieval and
+        # emit a premature "no info" answer — triage_node has already filtered out
+        # off-topic / clarify / greeting questions, so an in_scope question here
+        # always warrants rag_search or hr_query. Later iterations use "auto" so the
+        # model can synthesise the final answer from gathered tool results.
+        tool_choice = "required" if state["iteration"] == 0 else "auto"
+        bound_model = model.bind_tools(tools, tool_choice=tool_choice)
         response: AIMessage = await bound_model.ainvoke(messages)
 
     tool_names = [tc["name"] for tc in (response.tool_calls or [])]
@@ -471,6 +477,7 @@ async def act_node(
                 # quá cao cho text-embedding-3-small (chunk liên quan ~0.3-0.6) -> lọc sạch.
                 threshold = state.get("rag_score_threshold", 0.70)
                 qualified = [r for r in results if r.score >= threshold]
+
                 if qualified:
                     data = json.dumps({
                         "results": [
