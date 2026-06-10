@@ -246,6 +246,7 @@ class QueryOrchestrationUseCase:
             session_id=session_id,
             max_iterations=self._settings.agent_max_iterations,
             recent_messages=recent_lc_messages,
+            rag_score_threshold=self._settings.rag_score_threshold,
         )
 
         answer_accumulator: list[str] = []

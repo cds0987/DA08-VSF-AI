@@ -60,6 +60,8 @@ class AgentState(TypedDict):
     user_role: str
     user_department: str
     allowed_doc_ids: list[str]
+    # Ngưỡng điểm RAG (config-driven) để act_node lọc kết quả — trước hardcode 0.70.
+    rag_score_threshold: float
 
     # --- Loop termination guards ---
     # force_answer: set True by observe_node (iteration cap) or act_node (duplicate tool call)
@@ -83,6 +85,7 @@ def create_initial_state(
     session_id: str,
     max_iterations: int = 3,
     recent_messages: list | None = None,
+    rag_score_threshold: float = 0.70,
 ) -> AgentState:
     """
     recent_messages: optional list of LangChain BaseMessage objects representing
@@ -105,6 +108,7 @@ def create_initial_state(
         user_role=user_role,
         user_department=user_department,
         allowed_doc_ids=allowed_doc_ids,
+        rag_score_threshold=rag_score_threshold,
         session_id=session_id,
         question=question,
     )

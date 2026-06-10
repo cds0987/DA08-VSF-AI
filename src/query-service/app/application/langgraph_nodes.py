@@ -467,8 +467,10 @@ async def act_node(
                     top_k=tool_args.get("top_k", 5),
                 )
                 # Only pass results that meet the relevance threshold to the LLM.
-                # Low-score chunks cause hallucination; empty results trigger NO_INFO path.
-                qualified = [r for r in results if r.score >= 0.70]
+                # Ngưỡng config-driven (state["rag_score_threshold"]) — trước hardcode 0.70
+                # quá cao cho text-embedding-3-small (chunk liên quan ~0.3-0.6) -> lọc sạch.
+                threshold = state.get("rag_score_threshold", 0.70)
+                qualified = [r for r in results if r.score >= threshold]
                 if qualified:
                     data = json.dumps({
                         "results": [
@@ -495,7 +497,7 @@ async def act_node(
                             source_gcs_uri=r.source_gcs_uri,
                         )
                         for r in qualified
-                        if r.score >= 0.75
+                        if r.score >= threshold
                     ]
                 else:
                     data = json.dumps({
