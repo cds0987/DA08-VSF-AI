@@ -21,6 +21,16 @@ on:
       - "docs/**"
       - "**.md"
   workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: "Bỏ qua Phase 1 validate (chỉ build + deploy lại) — dùng khi chỉ build lại"
+        type: boolean
+        default: false
+
+# TĂNG TỐC:
+#  - Detect so commit TRƯỚC của push (github.event.before), KHÔNG so main -> push chỉ-FE/
+#    chỉ-nginx tự SKIP toàn bộ backend validate (chỉ build phần đổi + deploy).
+#  - Bỏ hẳn validate: dispatch tick skip_tests=true, hoặc nhét [skip-tests] vào commit msg.
 
 # Serialize: 2 merge sát nhau xếp hàng (không deploy chồng, không đụng cloud e2e dùng chung).
 concurrency:
@@ -53,6 +63,9 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: f
         with:
+          # So với commit TRƯỚC của push (không phải main) -> detect đúng file thực đổi.
+          # dispatch: before rỗng -> paths-filter về mặc định (vô hại vì dispatch luôn FORCE).
+          base: ${{ github.event.before }}
           filters: |
             rag-worker: 'src/rag-worker/**'
             mcp-service: 'src/mcp-service/**'
@@ -74,6 +87,8 @@ jobs:
         run: |
           EV='${{ github.event_name }}'
           CH='${{ steps.f.outputs.changes }}'
+          # SKIP validate: dispatch tick skip_tests, hoặc [skip-tests] trong commit message.
+          SKIP='${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.skip_tests == 'true') || contains(github.event.head_commit.message, '[skip-tests]') }}'
           ALL='["rag-worker","mcp-service","hr-service","user-service","document-service","query-service"]'
           # FORCE all khi chạy tay hoặc workflow tự đổi
           if [ "$EV" = "workflow_dispatch" ] || echo "$CH" | jq -e 'any(.[]; .=="wf")' >/dev/null; then
@@ -91,6 +106,11 @@ jobs:
             rec=$(has '.=="rag-worker" or .=="mcp-service" or .=="document-service" or .=="e2e-extra"')
             rfe=$(has '.=="frontend"')
             rd=$(has '.=="rag-worker" or .=="mcp-service" or .=="hr-service" or .=="user-service" or .=="document-service" or .=="query-service" or .=="frontend" or .=="nginx" or .=="base"')
+          fi
+          # Bỏ qua validate nhưng GIỮ build + deploy.
+          if [ "$SKIP" = "true" ]; then
+            rrag=false; rhr=false; rec=false
+            echo "::notice::skip-tests bật -> BỎ QUA Phase 1 validate, chỉ build + deploy"
           fi
           {
             echo "services=$SVC"
