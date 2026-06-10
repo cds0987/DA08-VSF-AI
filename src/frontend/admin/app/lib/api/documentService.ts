@@ -15,7 +15,9 @@ const documentService = {
     limit?: number
     offset?: number
   }): Promise<DocumentListResponse> {
-    const response = await axiosClient.get<DocumentListResponse>('', {
+    // '/' (không phải '') để interceptor ghép prefix -> /api/documents/ (url rỗng bị
+    // interceptor bỏ qua, request lạc về '/').
+    const response = await axiosClient.get<DocumentListResponse>('/', {
       params,
       service: 'document',
     })
