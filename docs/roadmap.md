@@ -70,7 +70,7 @@ _HR Personal Q&A_
 _MCP Tool Service_
 - [ ] mcp-service chạy như MCP server riêng (port 8003), expose 3 tool: `rag_search`, `hr_query`, `create_leave_request`
 - [ ] Query Service agent là MCP client — liệt kê + gọi tool qua MCP; inject `document_ids`/`user_id` (không để LLM tự điền)
-- [ ] `rag_search` self-contained: NATS rag.search → rerank BGE-Reranker → Top-3; `hr_query` gọi HR Service nội bộ và không sở hữu HR data
+- [ ] `rag_search` self-contained: embed query → đọc Qdrant trực tiếp → rerank (`none`/`lexical`/`llm`, fallback an toàn) → Top-3; `hr_query` HTTP proxy gọi HR Service nội bộ và không sở hữu HR data
 - [ ] `create_leave_request` chỉ chạy sau user confirmation; Query Service lưu draft tạm bằng Redis `pending_action:{user_id}` TTL ~10 phút
 
 _Admin Dashboard + Analytics (FE — Admin app `frontend/admin`)_
@@ -101,7 +101,7 @@ _Cloud Deployment_
 - [ ] Cloud SQL PostgreSQL thay thế local DB — data không mất khi restart
 - [ ] File upload lưu vào Cloud Storage (GCS), không lưu local
 - [ ] Qdrant self-hosted trên GCP, có persistent volume
-- [ ] HTTPS hoạt động qua Nginx + Let's Encrypt (hoặc domain nội bộ)
+- [ ] HTTPS hoạt động qua Nginx + Let's Encrypt trên domain **vsfchat.com** (mua trên Namecheap, trỏ A record về GCE External IP)
 - [ ] Langfuse self-hosted trên GCP, IT/DevOps truy cập được
 - [ ] Cloud Monitoring alarm hoạt động — cảnh báo IT/DevOps khi GCE CPU > 80% hoặc service không phản hồi
 - [ ] Smoke test sau mỗi deploy: 10 câu hỏi mẫu pass toàn bộ trước khi tuyên bố production-ready

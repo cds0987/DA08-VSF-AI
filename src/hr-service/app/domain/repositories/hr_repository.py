@@ -5,10 +5,12 @@ from typing import List, Optional
 
 from app.domain.entities.dtos import (
     AttendanceDTO,
+    BenefitsDTO,
     LeaveBalanceDTO,
     LeaveRequestDTO,
     OnboardingDTO,
     PayrollDTO,
+    PerformanceReviewDTO,
 )
 
 
@@ -35,6 +37,14 @@ class HrRepository(ABC):
 
     @abstractmethod
     async def get_payroll(self, user_id: str) -> List[PayrollDTO]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_benefits(self, user_id: str) -> Optional[BenefitsDTO]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_performance(self, user_id: str) -> Optional[PerformanceReviewDTO]:
         raise NotImplementedError
 
     @abstractmethod

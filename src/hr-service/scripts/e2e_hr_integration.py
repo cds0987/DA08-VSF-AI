@@ -198,6 +198,22 @@ def phase1_hr_direct() -> None:
         chk(f"{intent} → 200", r.status_code == 200)
         chk(f"{intent} shape ok", set(r.json().keys()) == {"intent", "data", "summary"})
 
+    # 1.5b self-access intents nhạy cảm (payroll/benefits/performance) — seed 0001+0002
+    r = client.post(f"{HR_URL}/hr/query", json={"user_id": USER_HR, "intent": "payroll"})
+    chk("payroll USER_HR → 200", r.status_code == 200, str(r.text))
+    chk("payroll has payroll[] with net_salary",
+        bool(r.json().get("data", {}).get("payroll")) and
+        "net_salary" in r.json()["data"]["payroll"][0],
+        str(r.json().get("data")))
+
+    r = client.post(f"{HR_URL}/hr/query", json={"user_id": USER_HR, "intent": "benefits"})
+    chk("benefits USER_HR → 200", r.status_code == 200)
+    chk("benefits has items list", isinstance(r.json().get("data", {}).get("items"), list))
+
+    r = client.post(f"{HR_URL}/hr/query", json={"user_id": USER_HR, "intent": "performance"})
+    chk("performance USER_HR → 200", r.status_code == 200)
+    chk("performance has rating", bool(r.json().get("data", {}).get("rating")))
+
     # 1.6 Auth — wrong token → 401
     r_bad = httpx.post(f"{HR_URL}/hr/query",
                        json={"user_id": USER_HR, "intent": "leave_balance"},
@@ -216,10 +232,10 @@ def phase1_hr_direct() -> None:
                         json={"user_id": USER_UNKNOWN, "intent": "leave_balance"})
     chk("unknown user → 404", r_unk.status_code == 404, str(r_unk.text))
 
-    # 1.9 Invalid intent (payroll not in MVP Literal) → 422
+    # 1.9 Invalid intent (recruitment chưa hỗ trợ — cross-user, ngoài self-access) → 422
     r_inv = client.post(f"{HR_URL}/hr/query",
-                        json={"user_id": USER_HR, "intent": "payroll"})
-    chk("intent=payroll → 422", r_inv.status_code == 422)
+                        json={"user_id": USER_HR, "intent": "recruitment"})
+    chk("intent=recruitment → 422", r_inv.status_code == 422)
 
     client.close()
 
@@ -269,21 +285,17 @@ def phase2_mcp_proxy() -> None:
     except Exception as exc:
         chk("mcp cross-user isolation ok", False, str(exc))
 
-    # 2.4 Unknown user qua MCP → 404 từ hr-service → mcp bubble up 5xx
+    # 2.4 Unknown user qua MCP → hr-service trả 404 → proxy MỀM HÓA thành
+    #     envelope rỗng có summary (Gap 2.2), KHÔNG vỡ luồng chat.
     try:
         res_unk = mcp_call_tool("hr_query",
                                 {"user_id": USER_UNKNOWN, "intent": "leave_balance"},
                                 session_id=session_id)
-        # mcp-service nhận 404 từ hr-service → raise_for_status → MCP returns error
-        chk("mcp unknown user → error propagated (no silent 200)",
-            res_unk is None or "error" in str(res_unk).lower() or
-            res_unk.get("intent") is None,
+        chk("mcp unknown user → soft envelope (data rỗng + có summary)",
+            bool(res_unk) and res_unk.get("data") == {} and bool(res_unk.get("summary")),
             str(res_unk))
-    except httpx.HTTPStatusError as exc:
-        chk("mcp unknown user → HTTP error propagated", True, str(exc))
     except Exception as exc:
-        # MCP error response is also acceptable
-        chk("mcp unknown user → error propagated (no silent 200)", True, str(exc))
+        chk("mcp unknown user → soft envelope", False, str(exc))
 
     # 2.5 attendance qua MCP (test thêm intent)
     try:

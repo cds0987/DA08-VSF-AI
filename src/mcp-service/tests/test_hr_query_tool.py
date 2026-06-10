@@ -207,6 +207,43 @@ def test_proxy_raises_on_http_error(monkeypatch) -> None:
         asyncio.run(fn(USER_HR, "leave_balance"))
 
 
+def test_proxy_rejects_unknown_intent(monkeypatch) -> None:
+    _, fn, client = _tool(monkeypatch)
+
+    result = asyncio.run(fn(USER_HR, "recruitment"))
+
+    assert result == {
+        "intent": "recruitment",
+        "data": {},
+        "summary": "Intent 'recruitment' chưa được hỗ trợ.",
+    }
+    assert client.calls == []
+
+
+def test_proxy_soft_404(monkeypatch) -> None:
+    _, fn, _ = _tool(monkeypatch, post_response=FakeResponse(404, {"detail": "no HR data"}))
+
+    result = asyncio.run(fn(USER_HR, "leave_balance"))
+
+    assert result["intent"] == "leave_balance"
+    assert result["data"] == {}
+    assert result["summary"] == "Bạn chưa có dữ liệu HR cho mục này."
+
+
+def test_proxy_logs_masked_user_id(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+    import app.tools.hr_query as hr_module
+
+    _, fn, _ = _tool(monkeypatch, post_response=FakeResponse(200, {"intent": "attendance", "data": {}, "summary": "ok"}))
+    masked_user = hr_module._mask_user_id(USER_HR)
+
+    with caplog.at_level("INFO", logger="mcp-service"):
+        asyncio.run(fn(USER_HR, "attendance"))
+
+    assert "hr_query intent=attendance" in caplog.text
+    assert masked_user in caplog.text
+    assert USER_HR not in caplog.text
+
+
 def test_verify_hits_health_endpoint(monkeypatch) -> None:
     tool, _, client = _tool(monkeypatch)
 
@@ -215,6 +252,16 @@ def test_verify_hits_health_endpoint(monkeypatch) -> None:
     assert client.calls[0][0] == "GET"
     assert client.calls[0][1] == "/health"
     assert client.calls[0][3] == {"X-Internal-Token": "test-token"}
+
+
+def test_verify_degraded_does_not_raise(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+    # hr-service /health trả 503 -> verify KHÔNG được raise (best-effort), chỉ warning.
+    tool, _, _ = _tool(monkeypatch, get_response=FakeResponse(503, {"detail": "down"}, url="http://hr-service:8004/health"))
+
+    with caplog.at_level("WARNING", logger="mcp-service"):
+        asyncio.run(tool.verify())  # phải không ném
+
+    assert "hr_query verify degraded" in caplog.text
 
 
 def test_aclose_closes_client(monkeypatch) -> None:

@@ -308,13 +308,14 @@ Response 503:  { "status": "degraded", "degraded_reasons": ["rag_worker unreacha
 ## RAG Worker — NATS Internal Only
 
 > Không expose HTTP. Chỉ giao tiếp qua NATS :4222.
-> **Subject contract do Backend Dev làm chủ** (đăng ký ở `infra/nats/subjects.md`); riêng payload `rag.search` do RAG Eng định nghĩa.
+> **Subject contract do Backend Dev làm chủ** (đăng ký ở `infra/nats/subjects.md`).
+>
+> ⚠️ **Theo code:** RAG Worker là **ingest-only** — chỉ subscribe `doc.ingest` và publish `doc.status`. KHÔNG có subject `rag.search`/request-reply retrieval. Retrieval do mcp-service đọc Qdrant trực tiếp (ghép với RAG Worker chỉ qua Qdrant).
 
 | Subject | Type | Payload | Mô tả |
 |---------|------|---------|-------|
 | `doc.ingest` | Subscribe | `{ doc_id, gcs_key, file_type, classification, allowed_departments, allowed_user_ids }` | Document Service publish khi Admin upload. RAG Worker nhận → chạy pipeline ingestion. |
 | `doc.status` | Publish | `{ doc_id, status: "indexed"\|"failed", chunk_count?, error? }` | RAG Worker publish sau khi ingestion xong. Document Service subscribe để cập nhật PostgreSQL. |
-| `rag.search` | Request-Reply | Request: `{ query_text, document_ids, top_k }` → Reply: `{ results: [...] }` | mcp-service gửi request (Query Service inject document_ids qua MCP call), RAG Worker xử lý và reply. Timeout 10s. |
 
 ---
 

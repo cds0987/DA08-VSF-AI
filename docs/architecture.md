@@ -134,27 +134,25 @@ src/rag-worker/                     ← Container 4: Ingestion + Retrieval (NATS
 │   │
 │   └── main.py                     # NATS subscriber — không có HTTP server, không có DB
 
-src/mcp-service/                    ← Container 5: MCP Tool Service (:8003)
+src/mcp-service/                    ← Container 5: MCP Tool Service (:8003) — search-only routing
 ├── app/
+│   ├── core/                       # logic search self-contained (KHÔNG dùng NATS; đọc Qdrant trực tiếp)
+│   │   ├── config.py               # McpSettings + load_settings (config.yaml + ${ENV})
+│   │   ├── vectorstore.py          # SearchHit + reader Qdrant (chỉ ĐỌC; rag-worker là bên ghi)
+│   │   ├── embedding.py            # embed query (text-embedding-3-small)
+│   │   ├── rerank.py               # Reranker Protocol: none | lexical | llm (fallback NoopReranker)
+│   │   ├── search.py               # SearchService: embed → retrieve Qdrant → rerank → top-k
+│   │   └── contract.py             # verify_contract fail-closed (fingerprint khớp rag-worker)
 │   ├── domain/
-│   │   ├── entities/
-│   │   │   └── tool_io.py          # RagSearchInput/Result, HrQueryInput
-│   │   └── repositories/
-│   │       └── rerank_service.py           # Abstract RerankService (BGE-Reranker)
-│   ├── application/
-│   │   └── tools/
-│   │       ├── rag_search.py       # (rewrite) → NATS rag.search → rerank → Top-3
-│   │       └── hr_query.py         # call HR Service, filter by current user_id
-│   ├── infrastructure/
-│   │   ├── clients/
-│   │   │   └── hr_client.py                # internal client to HR Service
-│   │   ├── db/
-│   │   │   └── models.py                   # tool metadata/config only, if needed
-│   │   ├── nats_rag_client.py      # NATS request-reply rag.search → RAG Worker
-│   │   └── bge_reranker_client.py  # BGE-Reranker-v2-m3 (loaded inline, Top-5→Top-3)
+│   │   └── entities/
+│   │       └── tool_io.py          # CHỈ RagSearchInput (DTO HR đã chuyển sang hr-service)
+│   ├── tools/                      # registry tool pluggable (OCP)
+│   │   ├── registry.py, base.py    # Registry + McpTool Protocol + register/resolve_tool
+│   │   ├── rag_search.py           # RagSearchTool → {"results": [...]}
+│   │   └── hr_query.py             # HrQueryTool → HTTP proxy POST /hr/query sang hr-service
 │   ├── interfaces/
-│   │   └── mcp_server.py           # Expose tool qua MCP (Streamable HTTP/SSE)
-│   └── main.py                     # MCP server :8003
+│   │   └── mcp_server.py           # build_mcp lái bằng registry; expose qua MCP Streamable HTTP
+│   └── main.py                     # MCP server :8003 (verify_contract trước khi serve)
 
 src/hr-service/                     ← Container 6: HR Service (:8004, internal only)
 ├── app/
@@ -224,7 +222,7 @@ class QdrantVectorRepository(VectorRepository):  # implement interface từ doma
 
 FastAPI router nhận use case qua `Depends()` — use case nhận repository qua constructor.
 
-> **Lưu ý Microservices:** Query Service không gọi Qdrant/RAG Worker trực tiếp — nó là **MCP client**, gọi tool ở mcp-service (`MCPClient`). Chính mcp-service mới giao tiếp với RAG Worker qua NATS request-reply (`rag.search`). User Service không gọi RAG Worker — chỉ xử lý auth/user data.
+> **Lưu ý Microservices:** Query Service không gọi Qdrant/RAG Worker trực tiếp — nó là **MCP client**, gọi tool ở mcp-service (`MCPClient`). mcp-service (tool `rag_search`) **đọc Qdrant trực tiếp** để retrieve (KHÔNG gọi RAG Worker qua NATS; ghép với RAG Worker chỉ qua Qdrant). User Service không gọi RAG Worker — chỉ xử lý auth/user data.
 
 ```python
 # src/user-service/app/interfaces/api/dependencies.py
@@ -240,11 +238,12 @@ def get_orchestration_use_case() -> OrchestrationUseCase:
     openai_client = OpenAIClient()                        # OpenAI GPT-4o mini — streaming + tool_call
     return OrchestrationUseCase(mcp_client, conversation_repo, doc_access_repo, openai_client)
 
-# src/mcp-service/app/interfaces/mcp_server.py  (tool dependencies)
-def get_rag_search_tool() -> RagSearchTool:
-    nats_client = NatsClient(url=settings.NATS_URL)   # NATS request-reply rag.search → RAG Worker
-    reranker = BGERerankerClient()                    # implement RerankService
-    return RagSearchTool(nats_client, reranker)
+# src/mcp-service/app/interfaces/mcp_server.py  (build_mcp lái bằng registry)
+def build_mcp(settings: McpSettings) -> tuple[FastMCP, list[McpTool]]:
+    # mỗi tool enabled → resolve_tool → tool.register(mcp). rag_search build SearchService:
+    #   embed query → đọc Qdrant trực tiếp → rerank (none|lexical|llm) → top-k
+    # KHÔNG có NATS, KHÔNG có BGEReranker self-host.
+    ...
 
 # src/rag-worker/app/interfaces/api/dependencies.py
 def get_retrieval_use_case() -> RetrievalUseCase:

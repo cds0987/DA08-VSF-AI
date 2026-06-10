@@ -262,11 +262,34 @@ CREATE TABLE hr_svc.payroll_summary (
 );
 
 CREATE INDEX idx_payroll_user ON hr_svc.payroll_summary(user_id, period DESC);
+
+-- Phúc lợi (benefits) — self-access, item linh hoạt dạng JSONB
+CREATE TABLE hr_svc.benefits (
+    user_id    UUID PRIMARY KEY,
+    items      JSONB NOT NULL DEFAULT '[]',     -- [{"name": ..., "value": ...}]
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
+-- Đánh giá hiệu suất (performance) — self-access, theo kỳ 'YYYY-MM'
+CREATE TABLE hr_svc.performance_reviews (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id          UUID NOT NULL,
+    period           VARCHAR(7) NOT NULL,        -- 'YYYY-MM'
+    rating           VARCHAR(20) NOT NULL,
+    kpi              JSONB NOT NULL DEFAULT '[]',
+    reviewer_user_id UUID,                        -- ai đánh giá (nullable)
+    created_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    UNIQUE(user_id, period)
+);
+
+CREATE INDEX idx_performance_user ON hr_svc.performance_reviews(user_id, period DESC);
 ```
 
-> **MVP scope (Giai đoạn 1):** `leave_balance`, `leave_requests`, `attendance`, `onboarding`.
-> `payroll_summary` tạo sẵn schema nhưng chưa expose qua tool — chờ SA-3 (nguồn role) chốt.
+> **Intent đã expose qua `hr_query`:** `leave_balance`, `leave_requests`, `attendance`, `onboarding`, **`payroll`**, **`benefits`**, **`performance`**.
+> **Mô hình truy cập = self-access:** mọi query lọc cứng `WHERE user_id = <token user>`. Intent nhạy cảm (`payroll`/`benefits`/`performance`) **không cần role-gate** vì là data của chính user; hr-service ghi **audit log** mỗi lần truy cập (không log số liệu). Mở rộng manager-xem-cấp-dưới (dùng `employees.manager_user_id`) để dành cho giai đoạn sau — additive, không phá contract hiện tại.
+> `recruitment` **hoãn** — vốn là dữ liệu cross-user (ứng viên), không hợp mô hình self-access.
 > `employee_profile` / `org_structure` **không tạo bảng** — lấy từ JWT claim (user-service sở hữu data đó).
+> Migration: `0001_create_hr_schema` (7 bảng đầu) + `0002_add_benefits_performance` (benefits, performance_reviews).
 
 ---
 

@@ -176,43 +176,48 @@ LANGFUSE_HOST=http://langfuse:3100
 ## MCP Tool Service — `src/mcp-service/.env.example`
 
 ```env
-# Database (Cloud SQL — mcp_db, chỉ chứa tool metadata/config nếu cần)
-DATABASE_URL=postgresql+asyncpg://user:password@<cloud-sql-ip>:5432/mcp_db
-
-# JWT (verify token nội bộ do Query Service truyền — optional)
-JWT_SECRET_KEY=your-secret-key-change-in-production
-JWT_ALGORITHM=HS256
-
-# NATS (request-reply rag.search tới RAG Worker)
-NATS_URL=nats://nats:4222
-NATS_JETSTREAM_ENABLED=true
-
-# OpenAI (query rewrite trong tool rag_search)
-OPENAI_API_KEY=...
-OPENAI_LLM_MODEL=gpt-4o-mini
-
-# BGE-Reranker-v2-m3 (load inline trong container)
-RERANKER_MODEL=BAAI/bge-reranker-v2-m3
-RERANKER_TOP_N=3
-
-# HR Service (tool hr_query gọi nội bộ)
-HR_SERVICE_URL=http://hr-service:8004
-HR_SERVICE_TIMEOUT_SECONDS=5
-
-# MCP server
-MCP_TRANSPORT=streamable-http
+# MCP server / auth (mcp-service KHÔNG dùng PostgreSQL/NATS — search-only + hr proxy)
+MCP_HOST=0.0.0.0
 MCP_PORT=8003
+MCP_INTERNAL_TOKEN=                 # shared secret cho header X-Internal-Token (trống = auth TẮT)
+LOG_LEVEL=INFO
+
+# Tool rag_search — embed query
+EMBED_MODEL=text-embedding-3-small
+EMBED_BASE_URL=
+OPENAI_API_KEY=...
+EMBED_DIMENSION=
+
+# Tool rag_search — vector store (đọc Qdrant TRỰC TIẾP, không qua NATS/RAG Worker)
+VECTOR_DB_PROVIDER=qdrant
+VECTOR_COLLECTION=rag_chatbot
+VECTOR_DB_URL=http://qdrant:6333
+VECTOR_DB_API_KEY=
+
+# Tool rag_search — reranker: none | lexical | llm (KHÔNG self-host BGE)
+RERANK_PROVIDER=none
+RERANK_MODEL=gpt-4o-mini            # chỉ dùng khi RERANK_PROVIDER=llm
+RERANK_TIMEOUT_SECONDS=30
+SEARCH_TOP_K=20                     # số candidates đọc từ Qdrant
+RERANK_TOP_K=3                      # số kết quả sau rerank
+RERANK_THRESHOLD=0.7
+
+# Tool hr_query — HTTP proxy sang hr-service (mặc định TẮT)
+TOOL_HR_QUERY_ENABLED=0
+HR_SERVICE_URL=http://hr-service:8004
+HR_SERVICE_INTERNAL_TOKEN=
 ```
 
 | Biến | Mô tả | Lấy ở đâu |
 |------|-------|-----------|
-| `DATABASE_URL` | Connection string PostgreSQL | Cloud SQL IP — database `mcp_db` (tool metadata/config nếu cần) |
-| `JWT_SECRET_KEY` | Phải khớp với User Service (nếu verify token nội bộ) | Dùng cùng key đã generate |
-| `NATS_URL` | URL kết nối NATS (gọi rag.search tới RAG Worker) | `nats://nats:4222` |
-| `OPENAI_API_KEY` | Key gọi OpenAI (query rewrite) | platform.openai.com → API keys |
-| `RERANKER_MODEL` | Model rerank cross-encoder | `BAAI/bge-reranker-v2-m3` |
-| `HR_SERVICE_URL` | Endpoint HR Service nội bộ cho tool `hr_query` | `http://hr-service:8004` |
-| `MCP_TRANSPORT` / `MCP_PORT` | Transport + port MCP server | `streamable-http` / `8003` |
+| `MCP_HOST` / `MCP_PORT` | Host + port MCP server (Streamable HTTP, path `/mcp`) | `0.0.0.0` / `8003` |
+| `MCP_INTERNAL_TOKEN` | Shared secret cho `X-Internal-Token`; trống = auth tắt (fail-open) | Tự generate |
+| `EMBED_MODEL` / `OPENAI_API_KEY` | Model + key embed query | `text-embedding-3-small` |
+| `VECTOR_DB_URL` / `VECTOR_COLLECTION` | Qdrant mcp-service đọc trực tiếp (cùng collection rag-worker ghi) | `http://qdrant:6333` / `rag_chatbot` |
+| `RERANK_PROVIDER` | `none` \| `lexical` \| `llm` (fallback NoopReranker khi llm lỗi) | `none` |
+| `RERANK_TOP_K` / `RERANK_THRESHOLD` | Số kết quả sau rerank + ngưỡng score | `3` / `0.7` |
+| `TOOL_HR_QUERY_ENABLED` | Bật/tắt tool `hr_query` | `0` (tắt) |
+| `HR_SERVICE_URL` / `HR_SERVICE_INTERNAL_TOKEN` | Endpoint + token hr-service cho tool `hr_query` | `http://hr-service:8004` |
 
 ---
 

@@ -1,13 +1,48 @@
 """HR query tool - HTTP proxy sang hr-service."""
 from __future__ import annotations
 
+import hashlib
+import logging
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
 from app.core.config import McpSettings
 from app.tools.base import register_tool
+
+logger = logging.getLogger("mcp-service")
+
+# Nguồn sự thật cho tập intent hr_query. `HrIntent` được publish ra MCP schema
+# (qua list_tools) để client discover được; `MVP_INTENTS` là chốt chặn runtime
+# server-side. Hai cái PHẢI khớp nhau — đổi 1 cái nhớ đổi cái kia, và khớp với
+# `Literal` ở hr-service routes.py (POST /hr/query). payroll/benefits/performance
+# là self-access (chỉ data của chính user), hr-service ghi audit mỗi lần truy cập.
+HrIntent = Literal[
+    "leave_balance",
+    "leave_requests",
+    "attendance",
+    "onboarding",
+    "payroll",
+    "benefits",
+    "performance",
+]
+MVP_INTENTS = {
+    "leave_balance",
+    "leave_requests",
+    "attendance",
+    "onboarding",
+    "payroll",
+    "benefits",
+    "performance",
+}
+
+
+def _mask_user_id(user_id: str) -> str:
+    value = user_id.strip()
+    if not value:
+        return "unknown"
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
 
 
 class HrQueryTool:
@@ -29,13 +64,37 @@ class HrQueryTool:
             self._client = httpx.AsyncClient(base_url=self._base_url, timeout=10.0)
         return self._client
 
+    def _unsupported_intent_response(self, intent: str) -> dict[str, Any]:
+        return {
+            "intent": intent,
+            "data": {},
+            "summary": f"Intent '{intent}' chưa được hỗ trợ.",
+        }
+
+    def _not_found_response(self, intent: str) -> dict[str, Any]:
+        return {
+            "intent": intent,
+            "data": {},
+            "summary": "Bạn chưa có dữ liệu HR cho mục này.",
+        }
+
     async def _call(self, user_id: str, intent: str) -> dict[str, Any]:
+        masked_user = _mask_user_id(user_id)
+        if intent not in MVP_INTENTS:
+            logger.warning("hr_query intent=%s user=%s status=unsupported_intent", intent, masked_user)
+            return self._unsupported_intent_response(intent)
+
         client = self._get_client()
         response = await client.post(
             "/hr/query",
             json={"user_id": user_id, "intent": intent},
             headers=self._headers(),
         )
+        if response.status_code == 404:
+            logger.info("hr_query intent=%s user=%s status=404", intent, masked_user)
+            return self._not_found_response(intent)
+
+        logger.info("hr_query intent=%s user=%s status=%s", intent, masked_user, response.status_code)
         response.raise_for_status()
         body = response.json()
         if not isinstance(body, dict):
@@ -44,13 +103,34 @@ class HrQueryTool:
 
     def register(self, mcp: Any) -> None:
         @mcp.tool()
-        async def hr_query(user_id: str, intent: str) -> dict[str, Any]:
+        async def hr_query(user_id: str, intent: HrIntent) -> dict[str, Any]:
+            """Truy vấn dữ liệu HR cá nhân của user hiện tại (chỉ đọc, luôn lọc theo user_id).
+
+            intent: leave_balance | leave_requests | attendance | onboarding
+                    | payroll | benefits | performance.
+            """
             return await self._call(user_id, intent)
 
     async def verify(self) -> None:
-        client = self._get_client()
-        response = await client.get("/health", headers=self._headers())
-        response.raise_for_status()
+        # Best-effort: hr-service tạm down KHÔNG được làm sập mcp-service (và kéo
+        # theo rag_search). Health chỉ là probe khởi động — lỗi thì log cảnh báo
+        # và để tool vẫn đăng ký; lúc serve client sẽ lazy reconnect, mỗi call tự
+        # xử lý lỗi (5xx raise / 404 mềm). Contract fail-closed của rag_search nằm
+        # ở RagSearchTool.verify, không liên quan tool này.
+        if not self._base_url:
+            logger.warning("hr_query verify skipped: hr_service_url chưa cấu hình")
+            return
+        try:
+            client = self._get_client()
+            response = await client.get("/health", headers=self._headers())
+            response.raise_for_status()
+            logger.info("hr_query verify ok hr_service=%s", self._base_url)
+        except Exception as exc:  # noqa: BLE001 — chủ ý nuốt mọi lỗi health (best-effort)
+            logger.warning(
+                "hr_query verify degraded: hr-service không reachable (%s) — "
+                "tool vẫn đăng ký, call sẽ best-effort",
+                exc,
+            )
 
     async def aclose(self) -> None:
         if self._client is not None:
