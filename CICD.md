@@ -80,15 +80,26 @@ Chạy khi: gate success **&&** `run_deploy=true` **&&** build-push(+frontend) s
 
 SSH vào VM (`appleboy/ssh-action@v1.2.0`, `command_timeout: 20m`). Deploy dùng tag `:develop` — service không build lần này vẫn giữ image cũ.
 
+**STAGE-GATE + AUTO-ROLLBACK** (mục tiêu: bản hỏng KHÔNG phục vụ production). Ngay đầu script đặt `trap` rollback; **2b** ghi điểm rollback = image ID đang chạy (trước khi pull). BẤT KỲ gate nào (health/FE/luồng-vàng) fail → `exit 1` → trap **tự retag image cũ về `:develop` + recreate** → production giữ bản trước đang chạy được, pipeline = đỏ. (Fail TRƯỚC khi pull/up → chưa có điểm rollback → prod chưa bị đụng.)
+
 Các bước script trên VM:
 
-1. **Sync code = origin/develop**: `git fetch ... develop` + `git reset --hard FETCH_HEAD` → production phản ánh đúng git, **ghi đè mọi sửa tay trên VM**.
-2. **Provision env** từ GitHub Secrets vào `deploy/env/*.env`: `rag-worker.env`, `mcp-service.env`, `hr-service.env`. Riêng **`query-service.env` CHỈ ghi đè khi secret `QUERY_SERVICE_ENV` có nội dung** (guard chống wipe config DB/auth/redis khiến service không boot).
+1. **Sync code = origin/develop**: `git reset --hard FETCH_HEAD` → ghi đè mọi sửa tay trên VM (gồm `deploy/env/*.env`).
+2. **Env đến TỪ git** (không provision từ secret). FAIL-FAST đủ 7 file env. Xem [§8](#8-kiến-trúc-env-common--per-service). `deploy/secrets/gcp-sa.json` đặt 1 lần trên VM.
 3. **Login Docker Hub + `docker compose pull`** (KHÔNG build trên VM).
-4. **`up -d --no-build`** tất cả service (deps: nats, rag-migrate, hr-migrate one-shot alembic); nginx `--force-recreate` để lấy image mới.
-5. **HEALTH GATE**: poll tối đa 60 lần (`sleep 5`), `docker inspect` health/restart-count: `rag-worker`=healthy, `hr-service`=healthy, `mcp-service`=running (restarts≤2), `frontend-chat`/`frontend-admin`=running (restarts≤2). Fail → dump logs + `exit 1`.
-6. **SMOKE qua nginx**: GET `/healthz`, `/`, `/admin/`. Không chỉ check 2xx/3xx mà còn **check nội dung**: không chứa placeholder cũ ("chưa được containerize") + phải có markup Nuxt (`__NUXT`/`/_nuxt/`/`/admin/_nuxt/`). Tránh pass giả khi nginx về placeholder cũ.
-7. `docker image prune -f` dọn rác.
+4. **`up -d --no-build`** + nginx `--force-recreate`.
+5. **HEALTH GATE** (luôn): `docker inspect` health/restart-count rag-worker/hr=healthy, mcp/FE=running (restarts≤2). Fail → rollback.
+6. **SMOKE nginx/FE** (luôn): GET `/healthz` `/` `/admin/` — check 2xx + markup Nuxt (`__NUXT`/`/_nuxt/`), không còn placeholder cũ. Fail → rollback.
+7. **SMOKE LUỒNG-VÀNG — CHỌN LỌC theo `detect` (KHÔNG test hết mỗi lần)**, mô phỏng FE gửi qua nginx (env prod thật + Cloud SQL + Qdrant nội bộ — phần CI local-docker không đụng):
+
+   | Smoke | Chạy KHI service đổi | Kiểm |
+   |---|---|---|
+   | **DOC** | document-service \| user-service | login + `GET /api/documents` 2xx |
+   | **RAG** | rag-worker \| mcp-service \| query-service | `POST /api/query/query` → query→mcp→rag→qdrant, **sources>0**, outcome≠ERROR |
+   | **HR** | hr-service \| mcp-hr \| mcp-service \| query-service | query→mcp→hr_query (outcome≠ERROR) + `hr-service /health` 2xx |
+
+   Login chạy khi có ≥1 trong DOC/RAG/HR. Không service tầng-dưới nào đổi (chỉ FE/nginx) → **bỏ qua bước 7**. `workflow_dispatch` / đổi workflow → detect FORCE → smoke hết. Fail bất kỳ → rollback.
+8. `docker image prune -f` (chỉ khi mọi gate pass; trước đó set `DEPLOY_OK=1` để trap không rollback).
 
 ---
 
@@ -97,12 +108,31 @@ Các bước script trên VM:
 - **VM**: `vsf-rag-demo-vm` (34.158.47.236). SSH qua gcloud IAP tunnel, cần `sudo docker`. Project GCP `vsf-rag-chatbot-dev` chạy trên **VM (KHÔNG Cloud Run)**, Cloud SQL postgres-18, GCS bucket.
 - **Container naming trên VM**: prefix `da08-vsf-<service>-1` (ví dụ `da08-vsf-rag-worker-1`).
 - **Env Qdrant nội bộ**: trên VM phải trỏ `qdrant:6333` (nội bộ compose), KHÔNG phải Qdrant cloud — trỏ cloud gây 404 crash. (e2e-cloud trong CI mới dùng Qdrant Cloud thật.)
-- **Đổi model LLM của query-service** = sửa GitHub Secret `QUERY_SERVICE_ENV` + deploy lại, KHÔNG sửa code.
-- **CI secrets** set qua PyNaCl encrypt API (máy dev không có `gh` CLI). Kiểm Actions bằng `git credential fill` (mượn PAT) + curl REST.
+- **Đổi cấu hình vận hành** (model LLM, threshold, mode, key...) = sửa `deploy/env/*.env` (hoặc `common.env`) + commit + deploy. KHÔNG sửa code (default trong code chỉ phục vụ local). Git là nguồn duy nhất.
+- **CI secrets** (e2e-cloud: `OPENAI_API_KEY`, `QDRANT_*`, `GCS_HMAC_*`...) vẫn set qua PyNaCl encrypt API (máy dev không có `gh` CLI). Đây là secret cho JOB CI, KHÁC với env runtime (đã nằm trong git).
 - **Cảnh báo smoke test**: trước đây smoke chỉ check 2xx nên pass giả; bản hiện tại đã thêm check nội dung Nuxt/placeholder để bắt FE chưa serve.
 
 ---
 
-## 8. Tóm tắt 1 dòng
+## 8. Kiến trúc env (common + per-service)
 
-**detect (so commit trước) → validate chọn lọc theo path → gate chặn nếu fail → build chỉ phần đổi lên Docker Hub (2 tag) → SSH VM: reset hard origin/develop + provision env từ secret + pull + up + health gate + smoke nội dung.**
+**Nguyên tắc: một nguồn sự thật = git.** `deploy/env/*.env` commit thẳng (repo private). Mỗi service load **2 file** theo thứ tự (file sau ĐÈ file trước):
+
+```yaml
+env_file:
+  - ./deploy/env/common.env      # biến dùng chung — cascade
+  - ./deploy/env/<service>.env    # chỉ phần riêng (override khi cần)
+```
+
+- **`common.env`**: biến nhiều service dùng + **contract-critical** (rag-worker producer == mcp-service consumer): `AI_PROVIDER`, `OPENAI_API_KEY`, `EMBED_BASE_URL`, `EMBED_MODEL`, `EMBED_DIMENSION`, `VECTOR_DB_PROVIDER`, `VECTOR_COLLECTION`, `VECTOR_DB_URL`. Để chung 1 chỗ → **không service nào lệch** → mcp không fail-closed do drift. Ngoài ra: `JWT_SECRET_KEY`, `JWT_ALGORITHM`, `CORS_ORIGINS`, `QDRANT_URL/COLLECTION` (alias query đọc), `NATS_URL`, `REDIS_URL`, Langfuse.
+- **Per-service `.env`**: chỉ biến riêng. `DATABASE_URL` per-service (db name + driver KHÁC nhau: rag/hr = `psycopg` sync, còn lại = `asyncpg`). mcp giữ reranker/retrieval; rag giữ parser/S3/caption; query giữ mode/agent; v.v.
+
+**Bỏ bẫy cũ:** compose không còn `environment: DATABASE_URL` override (khối `environment` đè `env_file`, từng gây "sửa .env không ăn"). hr-service: alembic + runtime cùng đọc `HR_DATABASE_URL` (hết split-brain). Bind-mount SA đổi `/home/<user>/...` → `./deploy/secrets/gcp-sa.json`.
+
+**Cần điền `<FILL_...>` trong env** (key/token thật): `JWT_SECRET_KEY`, `CORS_ORIGINS`, `OPENAI_API_KEY` (common); `MCP_INTERNAL_TOKEN` (mcp+query phải khớp); `HR_INTERNAL_TOKEN` (hr+mcp phải khớp); `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` GCS HMAC (rag-worker). Và đặt `deploy/secrets/gcp-sa.json` 1 lần trên VM.
+
+---
+
+## 9. Tóm tắt 1 dòng
+
+**detect (so commit trước) → validate chọn lọc theo path → gate chặn nếu fail → build chỉ phần đổi lên Docker Hub (2 tag) → SSH VM: reset hard origin/develop (kéo cả env) + ghi điểm rollback + pull + up + health gate + smoke FE + smoke luồng-vàng CHỌN LỌC theo detect (RAG/HR/DOC) → fail bất kỳ = AUTO-ROLLBACK về image trước, prod không hỏng.**
