@@ -347,14 +347,20 @@ jobs:
             postgres:16-alpine
       - name: Wait for PostgreSQL ready
         run: |
-          for i in $(seq 1 30); do
-            if docker exec postgres pg_isready -U ${{ env.POSTGRES_USER }} -q; then
-              echo "postgres ready after ${i}s"; break
+          # postgres image init CHẠY 2 LẦN: server tạm (init script) -> shutdown -> server thật.
+          # pg_isready dễ pass ở server tạm rồi "rejecting" lúc restart -> flaky. Vì vậy poll
+          # TRUY VẤN THẬT vào DB đích + yêu cầu ỔN ĐỊNH 3 lần liên tiếp (vượt cú restart).
+          ok=0; streak=0
+          for i in $(seq 1 60); do
+            if docker exec postgres psql -U ${{ env.POSTGRES_USER }} -d ${{ env.POSTGRES_DB }} -tAc 'SELECT 1' 2>/dev/null | grep -q '^1$'; then
+              streak=$((streak+1))
+            else
+              streak=0
             fi
+            if [ "$streak" -ge 3 ]; then ok=1; echo "postgres ready & stable sau ~$((i*2))s"; break; fi
             sleep 2
           done
-          docker exec postgres pg_isready -U ${{ env.POSTGRES_USER }} || \
-            { echo "postgres did not become ready" >&2; exit 1; }
+          [ "$ok" = 1 ] || { echo "postgres did not become ready" >&2; docker logs postgres 2>&1 | tail -30; exit 1; }
       - name: Build hr-service image
         run: docker build -t hr-service:ci src/hr-service
       - name: Run Alembic migration (hr_svc schema + seed data)
