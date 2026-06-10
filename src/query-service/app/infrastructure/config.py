@@ -102,16 +102,15 @@ class Settings(BaseSettings):
                     raise ValueError(f"{name}=mock is not allowed in production")
             if self.rate_limiter_mode.strip().lower() != "redis":
                 raise ValueError("RATE_LIMITER_MODE=redis is required in production")
-            if self.guardrails_mode.strip().lower() != "llm_guard":
-                raise ValueError("GUARDRAILS_MODE=llm_guard is required in production")
-            if self.observability_mode.strip().lower() != "langfuse":
-                raise ValueError("OBSERVABILITY_MODE=langfuse is required in production")
-            if self.observability_mode.strip().lower() == "langfuse" and (
-                not self.langfuse_public_key or not self.langfuse_secret_key
-            ):
-                raise ValueError(
-                    "LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are required when OBSERVABILITY_MODE=langfuse"
-                )
+
+        # Cơ chế LINH HOẠT (mọi môi trường): tích hợp tùy chọn (observability/guardrails)
+        # chỉ bật khi có đủ thông tin; thiếu -> tự OFF thay vì crash. Trước đây production
+        # BẮT BUỘC llm_guard + langfuse -> không có key Langfuse là service không boot.
+        if self.observability_mode.strip().lower() == "langfuse" and (
+            not self.langfuse_public_key or not self.langfuse_secret_key
+        ):
+            # Yêu cầu langfuse nhưng thiếu key -> tắt observability thay vì dừng app.
+            self.observability_mode = "off"
 
         return self
 
