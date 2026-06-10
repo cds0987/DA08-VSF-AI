@@ -1,0 +1,89 @@
+<script setup lang="ts">
+import { Send } from '@lucide/vue'
+import { cn } from '~/lib/utils'
+
+interface Props {
+  input: string
+  isProcessing: boolean
+}
+
+const props = defineProps<Props>()
+const emit = defineEmits<{
+  (e: 'update:input', val: string): void
+  (e: 'send', q: string): void
+}>()
+
+const isMultiline = ref(false)
+const textareaRef = ref<HTMLTextAreaElement | null>(null)
+
+function handleInput(event: Event) {
+  const value = (event.target as HTMLTextAreaElement).value
+  emit('update:input', value)
+}
+
+function sendMessage() {
+  if (!props.input.trim() || props.isProcessing) return
+  emit('send', props.input)
+}
+
+function handleKeyDown(event: KeyboardEvent) {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    sendMessage()
+  }
+}
+
+watch(() => props.input, (value) => {
+  const textarea = textareaRef.value
+  if (!textarea) return
+  requestAnimationFrame(() => {
+    textarea.style.height = 'auto'
+    textarea.style.height = value ? `${textarea.scrollHeight}px` : 'auto'
+    isMultiline.value = value ? textarea.scrollHeight > 44 : false
+  })
+})
+</script>
+
+<template>
+  <div class="mx-auto max-w-[860px]">
+    <form
+      @submit.prevent="sendMessage"
+      :class="cn(
+        'flex w-full rounded-2xl border border-slate-200 bg-white shadow-lg focus-within:border-blue-400/50 focus-within:ring-2 focus-within:ring-blue-100',
+        isMultiline ? 'flex-col' : 'flex-row items-center gap-2 p-2',
+      )"
+    >
+      <textarea
+        ref="textareaRef"
+        :value="input"
+        @input="handleInput"
+        @keydown="handleKeyDown"
+        :rows="1"
+        maxlength="500"
+        placeholder="Ask a question about FeatureMind policies, procedures, or knowledge..."
+        :class="cn(
+          'max-h-[200px] w-full resize-none bg-transparent text-[14px] text-slate-800 outline-none placeholder:text-slate-400',
+          isMultiline ? 'min-h-[60px] px-4 pb-2 pt-4' : 'min-h-[36px] flex-1 px-3 py-2',
+        )"
+      />
+      <div :class="cn(isMultiline && 'flex justify-end border-t border-slate-50 p-2')">
+        <button
+          type="submit"
+          :disabled="!input.trim() || isProcessing"
+          :class="cn(
+            'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full disabled:cursor-not-allowed',
+            input.trim() && !isProcessing
+              ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20 hover:bg-purple-700'
+              : 'bg-slate-200 text-slate-400',
+          )"
+          aria-label="Send"
+        >
+          <Send class="h-4 w-4" />
+        </button>
+      </div>
+    </form>
+    <div class="mt-2 text-center text-[11px] text-slate-400">
+      Questions are limited to 500 characters. File attachments are not supported.
+    </div>
+  </div>
+</template>

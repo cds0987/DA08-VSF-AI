@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Nuxt build output
+.nuxt/
+.output/
+
+# Environment variables
+.env
+.env.*
+!.env.local.example
+
+# Test results
+test-results/
+playwright-report/
+blob-report/
+
+# Agent data
+.agents/
+.superpowers/
