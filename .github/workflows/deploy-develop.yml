@@ -57,6 +57,7 @@ jobs:
       run_hr: ${{ steps.matrix.outputs.run_hr }}
       run_e2e_cloud: ${{ steps.matrix.outputs.run_e2e_cloud }}
       run_frontend: ${{ steps.matrix.outputs.run_frontend }}
+      run_langfuse: ${{ steps.matrix.outputs.run_langfuse }}
       run_deploy: ${{ steps.matrix.outputs.run_deploy }}
     steps:
       - uses: actions/checkout@v4
@@ -79,6 +80,9 @@ jobs:
             frontend: 'src/frontend/**'
             nginx: 'nginx/**'
             base: 'docker-compose.yml'
+            langfuse:
+              - 'docker-compose.yml'
+              - 'infra/localtest/ci_langfuse.py'
             e2e-extra:
               - 'docker-compose.localtest.yml'
               - 'infra/localtest/ci_e2e.py'
@@ -99,17 +103,18 @@ jobs:
           fi
           has() { echo "$CH" | jq -e "any(.[]; $1)" >/dev/null && echo true || echo false; }
           if $FORCE; then
-            rrag=true; rhr=true; rec=true; rfe=true; rd=true
+            rrag=true; rhr=true; rec=true; rfe=true; rlf=true; rd=true
           else
             rrag=$(has '.=="rag-worker" or .=="mcp-service"')
             rhr=$(has '.=="hr-service" or .=="mcp-hr"')
             rec=$(has '.=="rag-worker" or .=="mcp-service" or .=="document-service" or .=="e2e-extra"')
             rfe=$(has '.=="frontend"')
+            rlf=$(has '.=="langfuse"')
             rd=$(has '.=="rag-worker" or .=="mcp-service" or .=="hr-service" or .=="user-service" or .=="document-service" or .=="query-service" or .=="frontend" or .=="nginx" or .=="base"')
           fi
           # Bỏ qua validate nhưng GIỮ build + deploy.
           if [ "$SKIP" = "true" ]; then
-            rrag=false; rhr=false; rec=false
+            rrag=false; rhr=false; rec=false; rlf=false
             echo "::notice::skip-tests bật -> BỎ QUA Phase 1 validate, chỉ build + deploy"
           fi
           {
@@ -118,9 +123,10 @@ jobs:
             echo "run_hr=$rhr"
             echo "run_e2e_cloud=$rec"
             echo "run_frontend=$rfe"
+            echo "run_langfuse=$rlf"
             echo "run_deploy=$rd"
           } >> "$GITHUB_OUTPUT"
-          echo "→ services=$SVC run_rag=$rrag run_hr=$rhr run_e2e_cloud=$rec run_frontend=$rfe run_deploy=$rd"
+          echo "→ services=$SVC run_rag=$rrag run_hr=$rhr run_e2e_cloud=$rec run_frontend=$rfe run_langfuse=$rlf run_deploy=$rd"
 
   # ───────────────────── Phase 1a: CONTRACT ────────────────────────
   # Guard lớp A: chặn lệch vectorstore contract giữa rag-worker (producer) và
@@ -543,11 +549,79 @@ jobs:
         if: always()
         run: docker compose -f docker-compose.localtest.yml down -v || true
 
+  # ──────────────────── Phase 1f: LANGFUSE-TEST ────────────────────
+  # Langfuse self-host SẴN SÀNG nhận data chưa: dựng langfuse + postgres docker, gửi 1
+  # trace THẬT qua public API -> verify hiện ra -> XÓA NGAY -> verify đã xóa. Container
+  # ephemeral, teardown sau job. Chỉ chạy khi compose/script langfuse đổi.
+  langfuse-test:
+    needs: detect
+    if: needs.detect.outputs.run_langfuse == 'true'
+    runs-on: ubuntu-latest
+    env:
+      LF_PUBLIC_KEY: pk-lf-ci-smoke
+      LF_SECRET_KEY: sk-lf-ci-smoke
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install test client deps
+        run: python -m pip install --upgrade pip && pip install requests
+      - name: Create Docker network lf-net
+        run: docker network create lf-net
+      - name: Start PostgreSQL (langfuse db)
+        run: |
+          docker run -d --name lf-db --network lf-net \
+            -e POSTGRES_USER=langfuse -e POSTGRES_PASSWORD=langfuse -e POSTGRES_DB=langfuse \
+            postgres:16-alpine
+      - name: Wait for PostgreSQL ready
+        run: |
+          for i in $(seq 1 30); do
+            docker exec lf-db pg_isready -U langfuse -q && { echo "pg ready ${i}s"; break; }
+            sleep 2
+          done
+          docker exec lf-db pg_isready -U langfuse || { echo "pg not ready" >&2; exit 1; }
+      - name: Start Langfuse (headless init project + keys)
+        run: |
+          docker run -d --name langfuse --network lf-net -p 3000:3000 \
+            -e DATABASE_URL=postgresql://langfuse:langfuse@lf-db:5432/langfuse \
+            -e NEXTAUTH_SECRET=ci-nextauth-secret \
+            -e SALT=ci-salt \
+            -e ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000 \
+            -e NEXTAUTH_URL=http://localhost:3000 \
+            -e TELEMETRY_ENABLED=false \
+            -e LANGFUSE_INIT_PROJECT_ID=ci \
+            -e LANGFUSE_INIT_PROJECT_PUBLIC_KEY=${{ env.LF_PUBLIC_KEY }} \
+            -e LANGFUSE_INIT_PROJECT_SECRET_KEY=${{ env.LF_SECRET_KEY }} \
+            -e LANGFUSE_INIT_USER_EMAIL=ci@company.com \
+            -e LANGFUSE_INIT_USER_PASSWORD=ci-password-123 \
+            langfuse/langfuse:2
+      - name: Wait for Langfuse /api/public/health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/api/public/health >/dev/null 2>&1; then
+              echo "langfuse ready after ${i}s"; exit 0
+            fi
+            sleep 3
+          done
+          echo "langfuse not ready" >&2; docker logs langfuse || true; exit 1
+      - name: Smoke ingest + verify + delete + confirm-deleted
+        env:
+          LANGFUSE_HOST: http://localhost:3000
+          LANGFUSE_PUBLIC_KEY: ${{ env.LF_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ env.LF_SECRET_KEY }}
+        run: python infra/localtest/ci_langfuse.py
+      - name: Container logs on failure
+        if: failure()
+        run: |
+          echo "=== langfuse ===" && docker logs langfuse 2>&1 | tail -120 || true
+          echo "=== lf-db ===" && docker logs lf-db 2>&1 | tail -40 || true
+
   # ───────────────────────── Phase 2: GATE ─────────────────────────
   # Chốt chặn: fail nếu BẤT KỲ validate nào failure/cancelled. Job skipped (do path
   # không khớp) coi như pass. build-push + deploy đều needs gate -> không qua gate = dừng.
   gate:
-    needs: [contract, rag-test, search-semantic, hr-integration, e2e-cloud]
+    needs: [contract, rag-test, search-semantic, hr-integration, e2e-cloud, langfuse-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -558,7 +632,8 @@ jobs:
             "rag-test=${{ needs.rag-test.result }}" \
             "search-semantic=${{ needs.search-semantic.result }}" \
             "hr-integration=${{ needs.hr-integration.result }}" \
-            "e2e-cloud=${{ needs.e2e-cloud.result }}"; do
+            "e2e-cloud=${{ needs.e2e-cloud.result }}" \
+            "langfuse-test=${{ needs.langfuse-test.result }}"; do
             name="${nr%%=*}"; res="${nr#*=}"
             echo "  $name = $res"
             if [ "$res" = "failure" ] || [ "$res" = "cancelled" ]; then
@@ -732,12 +807,30 @@ jobs:
 
             echo "==> 3) Login Docker Hub + PULL image (KHÔNG build trên VM)"
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-            docker compose pull qdrant rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin nginx
+            docker compose pull qdrant langfuse-db langfuse rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin nginx
 
             echo "==> 4) Up image đã pull (deps: nats, rag-migrate, hr-migrate one-shot alembic)"
             #     nginx = image config-nướng-sẵn (không bind-mount) -> recreate để lấy image mới.
-            docker compose up -d --no-build qdrant rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin
+            # langfuse + langfuse-db: hạ tầng observability, KHÔNG nằm trong health-gate/rollback
+            # (giống qdrant) -> langfuse chết cũng không kéo sập / rollback app.
+            docker compose up -d --no-build qdrant langfuse-db langfuse rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin
             docker compose up -d --no-build --force-recreate nginx
+
+            echo "==> 4b) LANGFUSE readiness (NON-FATAL — chỉ cảnh báo, KHÔNG fail/rollback)"
+            # Langfuse = hạ tầng observability phụ trợ. Cố ý KHÔNG nằm trong health-gate:
+            # langfuse chậm boot / lỗi cũng KHÔNG được kéo sập hay rollback app production.
+            lf_ok=0
+            for i in $(seq 1 12); do
+              if curl -fsS --max-time 5 http://localhost:3100/api/public/health >/dev/null 2>&1; then
+                lf_ok=1; break
+              fi
+              sleep 5
+            done
+            if [ "$lf_ok" = 1 ]; then
+              echo "  Langfuse OK (http://langfuse:3000 nội bộ — dashboard qua SSH tunnel :3100)"
+            else
+              echo "::warning::Langfuse chưa sẵn sàng sau ~60s — KHÔNG chặn deploy (app không phụ thuộc). Kiểm tra: docker compose logs langfuse"
+            fi
 
             echo "==> 5) HEALTH GATE (fail deploy nếu service không khỏe)"
             ok=0

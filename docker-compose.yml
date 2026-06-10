@@ -37,6 +37,53 @@ services:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
 
+  # ───────────── Langfuse (LLM observability — self-host "Cloud thu nhỏ" trong VM) ─────────────
+  # Pattern GIỐNG qdrant: chạy nội bộ compose, data bền qua volume. KHÁC qdrant ở chỗ
+  # CÓ mở host port 3100 -> chỉ để xem dashboard qua SSH tunnel (firewall VM chỉ 80/443/22
+  # nên cổng này KHÔNG ra Internet). Service nội bộ gọi nhau qua http://langfuse:3000.
+  #
+  # ⚠ AN TOÀN PROD: KHÔNG service app nào depends_on langfuse; langfuse KHÔNG nằm trong
+  #   health-gate/rollback của CI -> langfuse chết cũng KHÔNG kéo sập / rollback app.
+  #   Các service chỉ TÙY CHỌN gửi trace (OBSERVABILITY_MODE=langfuse). Mặc định off.
+  #
+  # Langfuse v2 (gọn, hợp VM 8GB). Lên v3 = migration 1 chiều sang ClickHouse -> nên
+  # dựng VM riêng khi scale, rồi chỉ đổi LANGFUSE_HOST. Pin minor thật ở prod (vd :2.95.x).
+  langfuse-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ***REDACTED-LANGFUSE-DB-PW***
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse_pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  langfuse:
+    image: langfuse/langfuse:2
+    depends_on:
+      - langfuse-db
+    ports:
+      - "127.0.0.1:3100:3000"   # CHỈ loopback VM -> không lộ Internet; xem dashboard qua SSH tunnel.
+                                 # Service nội bộ compose dùng http://langfuse:3000 (không qua cổng này).
+    environment:
+      DATABASE_URL: postgresql://langfuse:***REDACTED-LANGFUSE-DB-PW***@langfuse-db:5432/langfuse
+      NEXTAUTH_SECRET: "***REDACTED-NEXTAUTH-SECRET***"
+      SALT: "***REDACTED-LANGFUSE-SALT***"
+      ENCRYPTION_KEY: ***REDACTED-ENCRYPTION-KEY***
+      # Truy cập dashboard qua: ssh -L 3100:localhost:3100 <vm> rồi mở http://localhost:3100
+      NEXTAUTH_URL: http://localhost:3100
+      TELEMETRY_ENABLED: "true"
+      # Bootstrap headless: boot lần đầu tự tạo project + ĐÓNG ĐINH cặp key (= common.env).
+      # Dev khác KHÔNG cần vào UI tạo key — dùng thẳng cặp key dưới đây ở service của mình.
+      LANGFUSE_INIT_PROJECT_ID: rag-chatbot
+      LANGFUSE_INIT_PROJECT_NAME: VSF RAG Chatbot
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ***REDACTED-LANGFUSE-PUBLIC***
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ***REDACTED-LANGFUSE-SECRET***
+      LANGFUSE_INIT_USER_EMAIL: admin@company.com
+      LANGFUSE_INIT_USER_NAME: VSF Admin
+      LANGFUSE_INIT_USER_PASSWORD: ***REDACTED-LANGFUSE-DB-PW***
+    restart: unless-stopped
+
   # Image kéo từ Docker Hub (KHÔNG build trên VM). CI build+push ở Phase 2; VM chỉ pull.
   # DOCKERHUB_USERNAME + IMAGE_TAG do deploy workflow truyền qua SSH env (mặc định: develop).
   user-service:
@@ -238,3 +285,4 @@ volumes:
   nats_data:
   redis_data:
   qdrant_data:
+  langfuse_pg_data:
