@@ -20,9 +20,16 @@ target_metadata = Base.metadata
 
 
 def _database_url() -> str:
-    url = os.getenv("DATABASE_URL") or config.get_main_option("sqlalchemy.url") or ""
+    # Runtime hr-service đọc HR_DATABASE_URL (config.yaml). Alembic ưu tiên CÙNG biến
+    # đó -> migrate + runtime luôn cùng 1 DB. Fallback DATABASE_URL cho tương thích cũ.
+    url = (
+        os.getenv("HR_DATABASE_URL")
+        or os.getenv("DATABASE_URL")
+        or config.get_main_option("sqlalchemy.url")
+        or ""
+    )
     if not url:
-        raise RuntimeError("Missing DATABASE_URL for migration.")
+        raise RuntimeError("Missing HR_DATABASE_URL (or DATABASE_URL) for migration.")
     return url
 
 

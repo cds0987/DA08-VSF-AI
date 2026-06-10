@@ -680,7 +680,7 @@ jobs:
           key: ${{ secrets.VM_SSH_KEY }}
           port: ${{ secrets.VM_SSH_PORT || 22 }}
           command_timeout: 20m
-          envs: APP_DIR,RAG_WORKER_ENV,MCP_SERVICE_ENV,HR_SERVICE_ENV,QUERY_SERVICE_ENV,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN
+          envs: APP_DIR,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN
           script: |
             set -euo pipefail
             APP_DIR="${{ secrets.APP_DIR }}"
@@ -688,21 +688,47 @@ jobs:
             export IMAGE_TAG="develop"
             cd "$APP_DIR"
 
+            # ── STAGE-GATE + AUTO-ROLLBACK ─────────────────────────────────────
+            # Mục tiêu: bản hỏng KHÔNG phục vụ production. Deploy xong chạy smoke
+            # luồng-vàng THẬT trên VM (đúng image+env prod+Cloud SQL+Qdrant). BẤT KỲ
+            # health/smoke nào fail -> trap tự rollback image trước -> prod giữ bản cũ.
+            ROLLBACK_SVCS="rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin nginx"
+            DEPLOY_OK=0; ROLLBACK_DONE=0
+            rollback() {
+              [ "$ROLLBACK_DONE" = 1 ] && return 0; ROLLBACK_DONE=1
+              [ -s /tmp/rollback_images.txt ] || { echo "::warning::Chưa có điểm rollback (fail sớm) — prod chưa bị đổi."; return 0; }
+              echo "::warning::DEPLOY FAIL -> ROLLBACK image về bản trước khi deploy"
+              while read -r svc img; do
+                [ -n "$img" ] && docker tag "$img" "$DOCKERHUB_USERNAME/$svc:develop" || true
+              done < /tmp/rollback_images.txt
+              docker compose up -d --no-build --force-recreate $ROLLBACK_SVCS || true
+              echo "::warning::ROLLBACK xong — production giữ bản trước đó. Pipeline = FAIL."
+            }
+            trap '[ "$DEPLOY_OK" = 1 ] || rollback' EXIT
+
             echo "==> 1) Sync code = origin/develop (production phản ánh đúng git)"
             git fetch "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" develop
             git reset --hard FETCH_HEAD
 
-            echo "==> 2) Provision env files từ GitHub Secrets (không nằm trong git)"
-            mkdir -p deploy/env
-            printf '%s\n' "${{ secrets.RAG_WORKER_ENV }}"  > deploy/env/rag-worker.env
-            printf '%s\n' "${{ secrets.MCP_SERVICE_ENV }}" > deploy/env/mcp-service.env
-            printf '%s\n' "${{ secrets.HR_SERVICE_ENV }}"  > deploy/env/hr-service.env
-            # query-service.env: chỉ ghi đè khi secret QUERY_SERVICE_ENV có nội dung.
-            # Secret rỗng/chưa set -> GIỮ file đặt tay sẵn trên VM (tránh xoá sạch
-            # config DB/auth/redis của query-service khiến service không boot).
-            if [ -n "${{ secrets.QUERY_SERVICE_ENV }}" ]; then
-              printf '%s\n' "${{ secrets.QUERY_SERVICE_ENV }}" > deploy/env/query-service.env
-            fi
+            echo "==> 2) Env đến TỪ git (đã reset --hard ở bước 1) — deploy/env/*.env commit thẳng."
+            # KHÔNG provision từ secret nữa: env đi CÙNG code -> sửa biến = commit + deploy,
+            # git reset --hard đồng bộ luôn. common.env load trước file riêng (xem compose).
+            # FAIL-FAST: đủ 7 file env. (gcp-sa.json KHÔNG nằm trong git -> đặt 1 lần trên VM.)
+            mkdir -p deploy/secrets
+            miss=0
+            for f in common rag-worker mcp-service hr-service query-service user-service document-service; do
+              [ -s "deploy/env/$f.env" ] || { echo "::error::deploy/env/$f.env THIẾU/RỖNG trong git"; miss=1; }
+            done
+            [ -s deploy/secrets/gcp-sa.json ] || { echo "::error::deploy/secrets/gcp-sa.json thiếu — đặt file SA 1 LẦN trên VM tại \$APP_DIR/deploy/secrets/gcp-sa.json"; miss=1; }
+            [ "$miss" = 0 ] || { echo "::error::Thiếu cấu hình -> DỪNG deploy"; exit 1; }
+
+            echo "==> 2b) Ghi ĐIỂM ROLLBACK = image ID đang chạy (trước khi pull bản mới)"
+            : > /tmp/rollback_images.txt
+            for svc in $ROLLBACK_SVCS; do
+              img=$(docker inspect -f '{{.Image}}' "da08-vsf-$svc-1" 2>/dev/null || echo "")
+              [ -n "$img" ] && echo "$svc $img" >> /tmp/rollback_images.txt
+            done
+            echo "  $(wc -l < /tmp/rollback_images.txt) service có điểm rollback"
 
             echo "==> 3) Login Docker Hub + PULL image (KHÔNG build trên VM)"
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
@@ -763,6 +789,89 @@ jobs:
               fi
             done
 
-            echo "==> 6) OK. Dọn image rác."
+            echo "==> 5c) SMOKE LUỒNG-VÀNG — CHỌN LỌC theo service đổi (detect), mô phỏng FE gửi"
+            # KHÔNG test hết mỗi lần. Chỉ smoke path có service THAY ĐỔI (như Phase 1 validate):
+            #   RAG (query->mcp->rag->qdrant): khi rag-worker|mcp-service|query-service đổi.
+            #   HR  (query->mcp->hr_query->hr-service): khi hr-service|mcp-hr|mcp-service|query-service đổi.
+            #   DOC (document-service list): khi document-service|user-service đổi.
+            # workflow_dispatch / đổi workflow -> detect FORCE run_rag/run_hr=true + services=ALL -> smoke hết.
+            RUN_RAG="${{ needs.detect.outputs.run_rag }}"
+            RUN_HR="${{ needs.detect.outputs.run_hr }}"
+            SVCS='${{ needs.detect.outputs.services }}'
+            has_svc() { echo "$SVCS" | grep -q "\"$1\""; }
+            SMOKE_RAG=false; SMOKE_HR=false; SMOKE_DOC=false
+            if [ "$RUN_RAG" = "true" ] || has_svc query-service; then SMOKE_RAG=true; fi
+            if [ "$RUN_HR" = "true" ] || has_svc query-service || has_svc mcp-service; then SMOKE_HR=true; fi
+            if has_svc document-service || has_svc user-service; then SMOKE_DOC=true; fi
+            echo "  -> smoke chọn: RAG=$SMOKE_RAG HR=$SMOKE_HR DOC=$SMOKE_DOC | services=$SVCS"
+
+            if [ "$SMOKE_RAG" != "true" ] && [ "$SMOKE_HR" != "true" ] && [ "$SMOKE_DOC" != "true" ]; then
+            echo "  Không service tầng-dưới nào đổi -> BỎ QUA smoke luồng-vàng (đã có health 5 + FE 5b)."
+            else
+            # Parser SSE (file riêng -> tránh quote-hell). Outcome enum: 5=SUCCESS, 6=ERROR.
+            cat > /tmp/smoke_parse.py <<'PYEOF'
+            import sys, json
+            label, need = sys.argv[1], sys.argv[2] == "1"
+            done = None
+            for line in sys.stdin:
+                line = line.strip()
+                if not line.startswith("data:"):
+                    continue
+                try:
+                    d = json.loads(line[5:].strip())
+                except Exception:
+                    continue
+                if d.get("done") or d.get("phase") == "done" or "outcome" in d:
+                    done = d
+            if done is None:
+                print("  [%s] FAIL: khong nhan event done (stream crash/treo?)" % label); sys.exit(1)
+            outcome = done.get("outcome")
+            src = len(done.get("sources") or [])
+            print("  [%s] done OK  outcome=%s  sources=%s" % (label, outcome, src))
+            if outcome in (6, "ERROR"):
+                print("  [%s] FAIL: outcome=ERROR (wiring query->mcp / mcp->hr dut?)" % label); sys.exit(1)
+            if need and src < 1:
+                print("  [%s] FAIL: can sources>0 (query->mcp->rag->qdrant tra rong)" % label); sys.exit(1)
+            PYEOF
+            # Login (FE-like) — cần cho mọi smoke có auth.
+            SMOKE_EMAIL="admin@company.com"; SMOKE_PW="***REDACTED-SEED-ADMIN-PW***"
+            TOK=$(curl -s --max-time 25 -X POST http://localhost/api/user/auth/login \
+                    -H 'Content-Type: application/json' \
+                    -d "{\"email\":\"$SMOKE_EMAIL\",\"password\":\"$SMOKE_PW\"}" \
+                  | python3 -c 'import sys,json;print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null || echo "")
+            [ -n "$TOK" ] || { echo "::error::SMOKE login FAIL (user-service/Cloud SQL?)"; docker compose logs --no-color --tail 80 user-service || true; exit 1; }
+            echo "  login OK"
+            SMOKE_UID=$(python3 -c 'import sys,base64,json;t="'"$TOK"'".split(".")[1];t+="="*(-len(t)%4);print(json.loads(base64.urlsafe_b64decode(t)).get("user_id",""))' 2>/dev/null || echo "")
+
+            if [ "$SMOKE_DOC" = "true" ]; then
+              dcode=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 -H "Authorization: Bearer $TOK" http://localhost/api/documents)
+              echo "  [DOC] GET /api/documents -> $dcode"
+              case "$dcode" in 2*) : ;; *) echo "::error::SMOKE documents FAIL ($dcode)"; docker compose logs --no-color --tail 80 document-service || true; exit 1 ;; esac
+            fi
+
+            if [ "$SMOKE_RAG" = "true" ]; then
+              curl -s --max-time 90 -X POST http://localhost/api/query/query \
+                -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' \
+                -d "{\"question\":\"chính sách nghỉ phép của công ty\",\"user_id\":\"$SMOKE_UID\"}" \
+                | python3 /tmp/smoke_parse.py "RAG query->mcp->rag" 1 \
+                || { echo "::error::SMOKE RAG FAIL"; docker compose logs --no-color --tail 100 query-service mcp-service rag-worker || true; exit 1; }
+            fi
+
+            if [ "$SMOKE_HR" = "true" ]; then
+              curl -s --max-time 90 -X POST http://localhost/api/query/query \
+                -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' \
+                -d "{\"question\":\"Tôi còn bao nhiêu ngày phép?\",\"user_id\":\"$SMOKE_UID\"}" \
+                | python3 /tmp/smoke_parse.py "HR query->mcp->hr_query" 0 \
+                || { echo "::error::SMOKE HR query FAIL"; docker compose logs --no-color --tail 100 query-service mcp-service hr-service || true; exit 1; }
+              HR_TOKEN=$(grep -E '^HR_INTERNAL_TOKEN=' deploy/env/hr-service.env | cut -d= -f2-)
+              hrc=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "X-Internal-Token: $HR_TOKEN" http://localhost:8004/health)
+              echo "  [HR] hr-service /health -> $hrc"
+              case "$hrc" in 2*) : ;; *) echo "::error::SMOKE hr-service health FAIL ($hrc)"; docker compose logs --no-color --tail 80 hr-service || true; exit 1 ;; esac
+            fi
+            echo "  SMOKE luồng-vàng PASS (RAG=$SMOKE_RAG HR=$SMOKE_HR DOC=$SMOKE_DOC)"
+            fi
+
+            echo "==> 6) OK (mọi gate pass). Dọn image rác."
+            DEPLOY_OK=1
             docker image prune -f
             echo "Deploy develop -> production: DONE (tag=$IMAGE_TAG)."
