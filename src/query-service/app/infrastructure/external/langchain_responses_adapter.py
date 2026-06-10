@@ -108,21 +108,32 @@ class OpenAIResponsesChatModel(BaseChatModel):
         return "\n\n".join(parts) if parts else "Tong dai"
 
     def _bind_tools_schema(self, tools: Sequence[BaseTool | dict]) -> list[dict]:
-        """Convert LangChain tools to OpenAI function schema."""
+        """Convert LangChain tools to OpenAI Responses API function tool schema.
+
+        Responses API wants the flat form {type, name, description, parameters}.
+        For BaseTool objects we delegate to convert_to_openai_function so the
+        args_schema (e.g. rag_search's required `query`) is serialised correctly —
+        the previous code read the wrong attribute (`t.schema`, a bound pydantic
+        method) and emitted `parameters: {}`, so the model never saw the `query`
+        param and called rag_search with an empty query → 0 relevant chunks.
+        """
+        from langchain_core.utils.function_calling import convert_to_openai_function
+
         result = []
         for t in tools:
             if isinstance(t, dict):
                 result.append(t)
                 continue
-            if hasattr(t, "schema") and t.schema:
-                schema = t.schema
-                if hasattr(schema, "model_json_schema"):
-                    schema = schema.model_json_schema()
+            try:
+                fn = convert_to_openai_function(t)  # {name, description, parameters}
+                result.append({"type": "function", **fn})
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                logger.warning("bind_tools_schema_convert_failed for %s: %s", getattr(t, "name", "?"), exc)
                 result.append({
                     "type": "function",
                     "name": getattr(t, "name", "unnamed"),
                     "description": getattr(t, "description", ""),
-                    "parameters": schema if isinstance(schema, dict) else {},
+                    "parameters": {"type": "object", "properties": {}},
                 })
         return result
 
