@@ -391,13 +391,7 @@ class MCPStreamableHttpClient:
         return _hr_result_from_payload(payload, intent)
 
     async def _call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
-        pybreaker = _import_pybreaker()
-        try:
-            return await self._breaker.call_async(self._call_tool_inner, name, arguments)
-        except pybreaker.CircuitBreakerError as exc:
-            raise MCPCircuitOpenError(
-                f"MCP circuit breaker is open — calls to {name} are blocked"
-            ) from exc
+        return await self._breaker.call_async(self._call_tool_inner, name, arguments)
 
     async def _call_tool_inner(self, name: str, arguments: dict[str, Any]) -> Any:
         async with self._session() as session:
@@ -551,17 +545,55 @@ def _strip_reserved_params(schema: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _import_pybreaker():
-    try:
-        import pybreaker
-    except ImportError as exc:
-        raise RuntimeError("pybreaker is required for the MCP circuit breaker") from exc
-    return pybreaker
+class _AsyncCircuitBreaker:
+    """Minimal asyncio-native circuit breaker.
+
+    Replaces pybreaker, whose async support (``call_async``) is implemented on
+    top of Tornado's ``gen.coroutine`` and raises ``NameError: name 'gen' is not
+    defined`` at call time unless Tornado is installed — silently breaking every
+    MCP tool call in this pure-asyncio service. The state machine here is the
+    classic three-state breaker: ``closed`` → ``open`` (after ``fail_max``
+    consecutive failures) → ``half-open`` (after ``reset_timeout`` seconds, one
+    trial call is allowed; success closes it, failure re-opens it).
+    """
+
+    def __init__(self, fail_max: int, reset_timeout: int) -> None:
+        self._fail_max = max(1, int(fail_max))
+        self._reset_timeout = max(0.0, float(reset_timeout))
+        self._fail_count = 0
+        self._opened_at: float | None = None
+
+    @property
+    def current_state(self) -> str:
+        if self._opened_at is None:
+            return "closed"
+        if time.monotonic() - self._opened_at >= self._reset_timeout:
+            return "half-open"
+        return "open"
+
+    async def call_async(self, func, *args: Any, **kwargs: Any) -> Any:
+        if self.current_state == "open":
+            raise MCPCircuitOpenError("MCP circuit breaker is open — call blocked")
+        try:
+            result = await func(*args, **kwargs)
+        except BaseException:
+            self._record_failure()
+            raise
+        self._record_success()
+        return result
+
+    def _record_failure(self) -> None:
+        self._fail_count += 1
+        if self._fail_count >= self._fail_max:
+            self._opened_at = time.monotonic()
+
+    def _record_success(self) -> None:
+        self._fail_count = 0
+        self._opened_at = None
 
 
-def _build_circuit_breaker(fail_max: int, reset_timeout: int):
-    pybreaker = _import_pybreaker()
-    return pybreaker.CircuitBreaker(fail_max=fail_max, reset_timeout=reset_timeout)
+def _build_circuit_breaker(fail_max: int, reset_timeout: int) -> _AsyncCircuitBreaker:
+    return _AsyncCircuitBreaker(fail_max=fail_max, reset_timeout=reset_timeout)
 
 
 def _mcp_endpoint_url(service_url: str) -> str:

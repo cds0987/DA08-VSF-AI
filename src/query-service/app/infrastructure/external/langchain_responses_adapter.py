@@ -49,6 +49,7 @@ class OpenAIResponsesChatModel(BaseChatModel):
 
     _client: Any = None  # type: ignore[assignment]
     _bound_tools: Any = None  # type: ignore[assignment]
+    _tool_choice: Any = None  # type: ignore[assignment]
     _response_format: Any = None  # type: ignore[assignment]
 
     @property
@@ -107,21 +108,32 @@ class OpenAIResponsesChatModel(BaseChatModel):
         return "\n\n".join(parts) if parts else "Tong dai"
 
     def _bind_tools_schema(self, tools: Sequence[BaseTool | dict]) -> list[dict]:
-        """Convert LangChain tools to OpenAI function schema."""
+        """Convert LangChain tools to OpenAI Responses API function tool schema.
+
+        Responses API wants the flat form {type, name, description, parameters}.
+        For BaseTool objects we delegate to convert_to_openai_function so the
+        args_schema (e.g. rag_search's required `query`) is serialised correctly —
+        the previous code read the wrong attribute (`t.schema`, a bound pydantic
+        method) and emitted `parameters: {}`, so the model never saw the `query`
+        param and called rag_search with an empty query → 0 relevant chunks.
+        """
+        from langchain_core.utils.function_calling import convert_to_openai_function
+
         result = []
         for t in tools:
             if isinstance(t, dict):
                 result.append(t)
                 continue
-            if hasattr(t, "schema") and t.schema:
-                schema = t.schema
-                if hasattr(schema, "model_json_schema"):
-                    schema = schema.model_json_schema()
+            try:
+                fn = convert_to_openai_function(t)  # {name, description, parameters}
+                result.append({"type": "function", **fn})
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                logger.warning("bind_tools_schema_convert_failed for %s: %s", getattr(t, "name", "?"), exc)
                 result.append({
                     "type": "function",
                     "name": getattr(t, "name", "unnamed"),
                     "description": getattr(t, "description", ""),
-                    "parameters": schema if isinstance(schema, dict) else {},
+                    "parameters": {"type": "object", "properties": {}},
                 })
         return result
 
@@ -144,6 +156,12 @@ class OpenAIResponsesChatModel(BaseChatModel):
         }
         if self._bound_tools:
             params["tools"] = self._bound_tools
+            # tool_choice ("auto" | "required" | "none") is only meaningful when
+            # tools are present. think_node forces "required" on the first ReAct
+            # iteration so gpt-4o-mini cannot short-circuit to a "no info" answer
+            # without first calling rag_search/hr_query.
+            if self._tool_choice:
+                params["tool_choice"] = self._tool_choice
         if self._response_format:
             params["response_format"] = self._response_format
         return params
@@ -245,6 +263,9 @@ class OpenAIResponsesChatModel(BaseChatModel):
         """
         bound = self.copy()
         bound._bound_tools = self._bind_tools_schema(tools)  # type: ignore[attr-defined]
+        # Honor tool_choice (previously dropped silently). OpenAI Responses API
+        # accepts "auto" | "required" | "none" | {"type":"function","name":...}.
+        bound._tool_choice = kwargs.get("tool_choice")  # type: ignore[attr-defined]
         return bound
 
     def with_structured_output(

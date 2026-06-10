@@ -156,21 +156,22 @@ src/mcp-service/                    ← Container 5: MCP Tool Service (:8003) �
 
 src/hr-service/                     ← Container 6: HR Service (:8004, internal only)
 ├── app/
-│   ├── domain/
-│   │   ├── entities/
-│   │   │   └── employee.py         # EmployeeProfile, Department, HR records
-│   │   └── repositories/
-│   │       └── employee_repository.py
+│   ├── api/
+│   │   ├── auth.py                 # require_internal_token (X-Internal-Token)
+│   │   └── routes.py              # READ path: POST /hr/query + GET /health
 │   ├── application/
 │   │   └── services/
-│   │       └── employee_profile_service.py  # publish hr.employee_profile.updated
+│   │       └── employee_profile_service.py  # WRITE path scaffold: publish hr.employee_profile.updated (CHƯA wire)
+│   ├── core/
+│   │   └── config.py              # HrSettings
+│   ├── domain/
+│   │   ├── entities/dtos.py       # DTO HR (9 loại)
+│   │   └── repositories/hr_repository.py  # ABC, 7 getter (READ)
 │   ├── infrastructure/
 │   │   ├── db/
-│   │   │   └── models.py           # hr_svc.* (hr_db)
-│   │   └── nats_publisher.py       # NATS event publisher
-│   ├── interfaces/
-│   │   └── api/
-│   │       └── routes.py           # internal HR data endpoints
+│   │   │   ├── models.py          # hr_svc.* (9 bảng, hr_db)
+│   │   │   └── postgres_hr_repository.py
+│   │   └── nats_publisher.py      # WRITE path scaffold: NatsPublisher stub (no-op, chưa connect NATS)
 │   └── main.py                     # FastAPI :8004
 
 src/frontend/base/                  ← Nuxt Layer dùng chung (useAuth + useApi + middleware/auth + design system) — build-time, KHÔNG container

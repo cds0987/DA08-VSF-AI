@@ -14,7 +14,10 @@ from app.application.use_cases.documents.get_document_use_case import GetDocumen
 from app.application.use_cases.documents.list_documents_use_case import ListDocumentsUseCase
 from app.application.use_cases.documents.upload_document_use_case import UploadDocumentUseCase
 from app.domain.entities.document import Document, DocumentStatus
+from app.infrastructure.db.models import AuditLogModel
+from app.infrastructure.db.postgres_audit_log_repository import PostgresAuditLogRepository
 from app.interfaces.api.dependencies import (
+    get_audit_logger,
     get_current_user,
     get_delete_document_use_case,
     get_get_document_file_use_case,
@@ -23,6 +26,7 @@ from app.interfaces.api.dependencies import (
     get_upload_document_use_case,
     require_admin,
 )
+from app.interfaces.api.schemas.audit import AuditLogItem, AuditLogList
 from app.interfaces.api.schemas.document import (
     DocumentDetail,
     DocumentFileResponse,
@@ -95,6 +99,19 @@ async def list_documents(
         items=[_to_item(document) for document in result.items],
         total=result.total,
     )
+
+
+# PHẢI khai báo TRƯỚC "/{document_id}" — nếu không "/documents/audit-logs" sẽ khớp
+# nhầm vào /{document_id} (document_id="audit-logs") -> parse UUID fail -> 500.
+@router.get("/audit-logs", response_model=AuditLogList)
+async def list_audit_logs(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    _admin: CurrentUser = Depends(require_admin),
+    repo: PostgresAuditLogRepository = Depends(get_audit_logger),
+) -> AuditLogList:
+    rows, total = await repo.list(limit=limit, offset=offset)
+    return AuditLogList(items=[_to_audit_item(row) for row in rows], total=total)
 
 
 @router.get("/{document_id}", response_model=DocumentDetail)
@@ -175,4 +192,18 @@ def _to_detail(document: Document) -> DocumentDetail:
         error_message=document.error_message,
         allowed_departments=document.allowed_departments,
         allowed_user_ids=document.allowed_user_ids,
+    )
+
+
+def _to_audit_item(row: AuditLogModel) -> AuditLogItem:
+    return AuditLogItem(
+        id=str(row.id),
+        actor_id=str(row.actor_id),
+        actor_role=row.actor_role,
+        action=row.action,
+        resource_type=row.resource_type,
+        resource_id=str(row.resource_id) if row.resource_id else None,
+        detail=row.detail,
+        ip_address=row.ip_address,
+        created_at=row.created_at.isoformat(),
     )

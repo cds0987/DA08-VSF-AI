@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     llm_mode: str = "openai"
     openai_api_key: str | None = None
-    openai_llm_model: str = "gpt-4o-mini"
+    openai_llm_model: str = "gpt-5.4-mini"
     openai_embedding_model: str = "text-embedding-3-small"
     openai_timeout_seconds: int = 30
 
@@ -53,7 +53,7 @@ class Settings(BaseSettings):
 
     semantic_cache_ttl_seconds: int = 3600
     semantic_cache_threshold: float = 0.95
-    rag_score_threshold: float = 0.70
+    rag_score_threshold: float = 0.35  # hạ từ 0.70: quá cao cho text-embedding-3-small
     rag_result_limit: int = 3
     llm_max_output_tokens: int = 1500
     rag_context_max_chars: int = 10000
@@ -102,16 +102,15 @@ class Settings(BaseSettings):
                     raise ValueError(f"{name}=mock is not allowed in production")
             if self.rate_limiter_mode.strip().lower() != "redis":
                 raise ValueError("RATE_LIMITER_MODE=redis is required in production")
-            if self.guardrails_mode.strip().lower() != "llm_guard":
-                raise ValueError("GUARDRAILS_MODE=llm_guard is required in production")
-            if self.observability_mode.strip().lower() != "langfuse":
-                raise ValueError("OBSERVABILITY_MODE=langfuse is required in production")
-            if self.observability_mode.strip().lower() == "langfuse" and (
-                not self.langfuse_public_key or not self.langfuse_secret_key
-            ):
-                raise ValueError(
-                    "LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are required when OBSERVABILITY_MODE=langfuse"
-                )
+
+        # Cơ chế LINH HOẠT (mọi môi trường): tích hợp tùy chọn (observability/guardrails)
+        # chỉ bật khi có đủ thông tin; thiếu -> tự OFF thay vì crash. Trước đây production
+        # BẮT BUỘC llm_guard + langfuse -> không có key Langfuse là service không boot.
+        if self.observability_mode.strip().lower() == "langfuse" and (
+            not self.langfuse_public_key or not self.langfuse_secret_key
+        ):
+            # Yêu cầu langfuse nhưng thiếu key -> tắt observability thay vì dừng app.
+            self.observability_mode = "off"
 
         return self
 

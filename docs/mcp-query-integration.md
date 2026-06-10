@@ -189,7 +189,7 @@ Field tên `*_gcs_uri` nhưng **value bên trong vẫn `s3://...`**. Vô hại c
 
 ## 8. Docs cần cập nhật theo
 
-- [`docs/contracts.md`](contracts.md) — ✅ **đã sửa khớp code**: section `mcp-service` mô tả search-only (`SearchHit` ở `app/core/vectorstore.py`, reranker Protocol `none|lexical|llm` ở `app/core/rerank.py`, `tool_io.py` chỉ còn `RagSearchInput`); thêm section `hr-service` cho DTO HR + `HrRepository` + contract `POST /hr/query`; `hr_query` ở mcp-service là HTTP proxy.
+- [`docs/contracts.md`](contracts.md) — ✅ **đã sửa khớp code** (đồng bộ 7 intent hr_query: leave_balance/leave_requests/attendance/onboarding/payroll/benefits/performance): section `mcp-service` mô tả search-only (`SearchHit` ở `app/core/vectorstore.py`, reranker Protocol `none|lexical|llm` ở `app/core/rerank.py`, `tool_io.py` chỉ còn `RagSearchInput`); section `hr-service` đủ DTO HR (gồm `BenefitsDTO`/`PerformanceReviewDTO`) + `HrRepository` (gồm `get_benefits`/`get_performance`) + contract `POST /hr/query`; `hr_query` ở mcp-service là HTTP proxy.
 - [`src/mcp-service/README.md`](../src/mcp-service/README.md) — ✅ đã cập nhật: runtime contract, tool shape, `hr_query chua implement`.
 - File này — ✅ đã cập nhật field `gcs` (mục 3/4) + trạng thái mcp xong + CI e2e (mục 11).
 
@@ -210,7 +210,7 @@ Field tên `*_gcs_uri` nhưng **value bên trong vẫn `s3://...`**. Vô hại c
 
 ## 10. Ngoài phạm vi (ghi để khỏi quên)
 
-- `hr_query` (tool HR: leave_balance / leave_requests / attendance / onboarding) — **đã implement** ở mcp-service như HTTP proxy sang hr-service, mặc định TẮT. Tích hợp phía query-service (real client cho `hr_query`) nằm ngoài tài liệu `rag_search` này.
+- `hr_query` (tool HR, 7 intent: leave_balance / leave_requests / attendance / onboarding / payroll / benefits / performance) — **đã implement** ở mcp-service như HTTP proxy sang hr-service, mặc định TẮT. Tích hợp phía query-service (real client cho `hr_query`) nằm ngoài tài liệu `rag_search` này.
 - Hybrid search (vector + BM25 RRF) — mcp-service v1 hiện chỉ vector + rerank.
 
 > **Reranker**: chốt dùng **LLM đánh giá lại** (mục 5.5) — đây là việc IN-SCOPE, không phải để sau.

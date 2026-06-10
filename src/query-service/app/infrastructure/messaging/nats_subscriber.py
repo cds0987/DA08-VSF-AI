@@ -26,27 +26,52 @@ class NatsSubscriberManager:
         self._logger = logger or logging.getLogger(__name__)
         self._connection = None
 
+    # (subject, durable, tên-stream-fallback, callback). Stream-fallback chỉ dùng khi
+    # CHƯA có stream nào phủ subject (vd hr.employee_profile.updated — hr-service hiện
+    # publish no-op nên không ai tạo stream). doc.access/notify.doc_new đã có stream sẵn.
+    _SUBSCRIPTIONS = (
+        ("doc.access", "QUERY_SERVICE_DOC_ACCESS", "QUERY_DOC_ACCESS"),
+        ("notify.doc_new", "QUERY_SERVICE_NOTIFY_DOC_NEW", "QUERY_NOTIFY_DOC_NEW"),
+        ("hr.employee_profile.updated", "QUERY_SERVICE_HR_PROFILE", "QUERY_HR_PROFILE"),
+    )
+
     async def start(self) -> None:
         if self._connection is not None:
             return
         nats_module = self._nats_module or _import_nats()
         self._connection = await nats_module.connect(self._settings.nats_url)
         jetstream = self._connection.jetstream()
-        await jetstream.subscribe(
-            "doc.access",
-            durable="QUERY_SERVICE_DOC_ACCESS",
-            cb=self._doc_access_callback,
-        )
-        await jetstream.subscribe(
-            "notify.doc_new",
-            durable="QUERY_SERVICE_NOTIFY_DOC_NEW",
-            cb=self._notify_doc_new_callback,
-        )
-        await jetstream.subscribe(
-            "hr.employee_profile.updated",
-            durable="QUERY_SERVICE_HR_PROFILE",
-            cb=self._hr_employee_profile_callback,
-        )
+        callbacks = {
+            "doc.access": self._doc_access_callback,
+            "notify.doc_new": self._notify_doc_new_callback,
+            "hr.employee_profile.updated": self._hr_employee_profile_callback,
+        }
+        # Resilient: lỗi 1 subscription (stream chưa sẵn) KHÔNG được làm chết startup —
+        # query-service vẫn phải phục vụ HTTP (chat/query/dashboard).
+        for subject, durable, stream_name in self._SUBSCRIPTIONS:
+            try:
+                await self._ensure_subject_stream(jetstream, subject, stream_name)
+                await jetstream.subscribe(subject, durable=durable, cb=callbacks[subject])
+            except Exception as exc:  # noqa: BLE001 - degrade gracefully thay vì crash
+                self._logger.warning(
+                    "nats_subscribe_skipped subject=%s error=%s", subject, exc,
+                )
+
+    async def _ensure_subject_stream(self, jetstream, subject: str, stream_name: str) -> None:
+        """Tạo stream cho subject nếu CHƯA có stream nào phủ nó (idempotent, không đụng
+        stream sẵn của subject khác)."""
+        from nats.js.api import StreamConfig
+        from nats.js.errors import NotFoundError
+
+        try:
+            await jetstream.find_stream_name_by_subject(subject)
+            return  # đã có stream phủ subject này
+        except NotFoundError:
+            pass
+        try:
+            await jetstream.add_stream(StreamConfig(name=stream_name, subjects=[subject]))
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning("nats_ensure_stream_failed subject=%s error=%s", subject, exc)
 
     async def stop(self) -> None:
         if self._connection is not None:

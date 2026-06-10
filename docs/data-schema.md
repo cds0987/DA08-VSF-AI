@@ -111,9 +111,11 @@ CREATE TABLE query_svc.document_access (
 CREATE INDEX idx_doc_access_classification ON query_svc.document_access(classification);
 
 -- Projection hồ sơ truy cập user, cập nhật từ HR Service qua event NATS
--- `hr.employee_profile.updated`. Query Service dùng bảng này để lọc tài liệu
--- theo account_type/department/employment_status mà không gọi trực tiếp HR Service
--- trên hot path chat.
+-- `hr.employee_profile.updated` (WRITE/propagation path — KHÔNG phải read hr_query).
+-- Query Service dùng bảng này để lọc tài liệu theo account_type/department/
+-- employment_status mà không gọi trực tiếp HR Service trên hot path chat.
+-- ⏳ Nguồn publish hiện là scaffold (NatsPublisher stub ở hr-service, chưa wire) —
+--    bảng tồn tại nhưng chưa nhận event thật cho tới khi nhánh NATS được implement.
 CREATE TABLE query_svc.user_access_profile (
     user_id           UUID PRIMARY KEY,
     account_type      VARCHAR(20) NOT NULL,       -- internal | external
@@ -250,6 +252,24 @@ CREATE INDEX idx_leave_req_user ON hr_svc.leave_requests(user_id);
 CREATE INDEX idx_leave_req_status ON hr_svc.leave_requests(status);
 CREATE INDEX idx_leave_req_approver ON hr_svc.leave_requests(approver_user_id, status);
 
+-- Chấm công theo kỳ 'YYYY-MM' — self-access (intent attendance)
+CREATE TABLE hr_svc.attendance (
+    user_id     UUID PRIMARY KEY,
+    period      VARCHAR(7) NOT NULL,        -- 'YYYY-MM'
+    work_days   INTEGER NOT NULL DEFAULT 0,
+    late_count  INTEGER NOT NULL DEFAULT 0,
+    absent_count INTEGER NOT NULL DEFAULT 0,
+    updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
+-- Onboarding checklist — self-access (intent onboarding), item linh hoạt dạng JSONB
+CREATE TABLE hr_svc.onboarding (
+    user_id     UUID PRIMARY KEY,
+    status      VARCHAR(20) NOT NULL DEFAULT 'in_progress',
+    checklist   JSONB NOT NULL DEFAULT '[]',     -- [{"task": ..., "done": bool}]
+    updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
 CREATE TABLE hr_svc.payroll_summary (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id      UUID NOT NULL,
@@ -320,7 +340,7 @@ Collection name: `rag_chatbot`
 }
 ```
 
-> Vector dimension: 1536 (text-embedding-3-small). Chỉ embed `child_text`. `parent_text` lưu trong payload để đưa vào LLM context. `source_gcs_uri` (file gốc) + `markdown_gcs_uri` (full Markdown) lưu trong payload để RAG Worker populate trực tiếp `SearchResult` khi reply `rag.search` — **không cần tra DB** (rag-worker không dùng PostgreSQL). `section_title` → map sang `caption`, `heading_path` (breadcrumb) → map thẳng sang SearchResult. `ocr_confidence` chỉ có với PDF scan, dùng để flag low-quality chunks. Chunk size: Parent-Child (LlamaIndex HierarchicalNodeParser) — config TBD sau khi implement.
+> Vector dimension: 1536 (text-embedding-3-small). Chỉ embed `child_text`. `parent_text` lưu trong payload để đưa vào LLM context. `source_gcs_uri` (file gốc) + `markdown_gcs_uri` (full Markdown) lưu trong payload để **mcp-service đọc trực tiếp từ Qdrant** dựng `SearchHit` khi search (KHÔNG qua NATS) — **không cần tra DB**. `section_title` → map sang `caption`, `heading_path` (breadcrumb) → map thẳng sang SearchResult. `ocr_confidence` chỉ có với PDF scan, dùng để flag low-quality chunks. Chunk size: Parent-Child (LlamaIndex HierarchicalNodeParser) — config TBD sau khi implement.
 
 ---
 
