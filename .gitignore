@@ -21,8 +21,6 @@ src\rag-worker\deploy\standalone\docker-compose.standalone.yml
 # Chỉ KHÔNG push file khởi tạo DB (schema tạo tay theo docs); phần còn lại push bình thường.
 infra/localtest/init-db.sql
 
-# Ignore per-deploy environment files containing secrets
-deploy/env/*.env
-deploy/env/*.env.local
-deploy/env/*.secret
+# deploy/env/*.env: COMMIT thẳng vào git (repo private) -> env đi cùng code, deploy
+# `git reset --hard` đồng bộ luôn. KHÔNG ignore. Nguồn sự thật DUY NHẤT = git.
 .codegraph

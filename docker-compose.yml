@@ -1,5 +1,3 @@
-version: "3.9"
-
 # New Relic APM dùng chung cho mọi service. License key là region EU (prefix eu01) ->
 # agent tự detect collector EU, không cần set NEW_RELIC_HOST. Mỗi service tự đặt
 # NEW_RELIC_APP_NAME riêng (merge anchor này + override app name).
@@ -46,6 +44,7 @@ services:
     ports:
       - "8000:8000"
     env_file:
+      - ./deploy/env/common.env
       - ./deploy/env/user-service.env
     environment:
       <<: *newrelic
@@ -57,6 +56,7 @@ services:
     ports:
       - "8002:8002"
     env_file:
+      - ./deploy/env/common.env
       - ./deploy/env/document-service.env
     environment:
       <<: *newrelic
@@ -65,13 +65,14 @@ services:
       - nats
     restart: unless-stopped
     volumes:
-        - /home/tranhuugiahuynb/secrets/gcp-sa.json:/secrets/gcp-sa.json:ro
+        - ./deploy/secrets/gcp-sa.json:/secrets/gcp-sa.json:ro
 
   query-service:
     image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/query-service:${IMAGE_TAG:-develop}
     ports:
       - "8001:8001"
     env_file:
+      - ./deploy/env/common.env
       - ./deploy/env/query-service.env
     environment:
       <<: *newrelic
@@ -92,22 +93,20 @@ services:
     command: ["alembic", "upgrade", "head"]
     working_dir: /app
     env_file:
+      - ./deploy/env/common.env
       - ./deploy/env/rag-worker.env
-    # 1 biến Cloud SQL URL duy nhất cho cả deploy + dev/test (RAG_DATABASE_URL):
-    # default = Cloud SQL (deploy chạy ngay); DevOps/dev đặt RAG_DATABASE_URL trong
-    # .env để rag-worker + DevOps phát triển song song trên CÙNG 1 Cloud SQL.
-    environment:
-      DATABASE_URL: ${RAG_DATABASE_URL:-postgresql+psycopg://postgres:***REDACTED-DB-PW***@34.87.63.152:5432/rag_db}
+    # DATABASE_URL đến TỪ rag-worker.env (nguồn DUY NHẤT). KHÔNG override ở đây:
+    # khối `environment` của compose ĐÈ env_file, từng gây "sửa .env không ăn".
     restart: "no"
 
   rag-worker:
     image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/rag-worker:${IMAGE_TAG:-develop}
     env_file:
+      - ./deploy/env/common.env
       - ./deploy/env/rag-worker.env
     environment:
       <<: *newrelic
       NEW_RELIC_APP_NAME: vsf-rag-worker
-      DATABASE_URL: ${RAG_DATABASE_URL:-postgresql+psycopg://postgres:***REDACTED-DB-PW***@34.87.63.152:5432/rag_db}
     depends_on:
       nats:
         condition: service_started
@@ -117,13 +116,14 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
     volumes:
-        - /home/tranhuugiahuynb/secrets/gcp-sa.json:/secrets/gcp-sa.json:ro
+        - ./deploy/secrets/gcp-sa.json:/secrets/gcp-sa.json:ro
 
   mcp-service:
     image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/mcp-service:${IMAGE_TAG:-develop}
     ports:
       - "8003:8003"
     env_file:
+      - ./deploy/env/common.env
       - ./deploy/env/mcp-service.env
     environment:
       <<: *newrelic
@@ -140,17 +140,17 @@ services:
     restart: unless-stopped
 
   # Migration one-shot hr_db (alembic upgrade head). Cùng pattern rag-migrate: build
-  # dùng CHUNG image hr-service (pull từ Docker Hub). alembic env.py đọc DATABASE_URL;
-  # runtime hr-service đọc HR_DATABASE_URL -> map qua environment ở đây.
+  # dùng CHUNG image hr-service (pull từ Docker Hub). alembic env.py đọc HR_DATABASE_URL
+  # (fallback DATABASE_URL) — CÙNG biến runtime hr-service đọc, KHÔNG override compose
+  # nữa -> migrate + runtime luôn cùng 1 DB (hết split-brain). Biến đến từ hr-service.env.
   # DevOps phải CREATE DATABASE hr_db trên Cloud SQL trước (xem deploy-develop.yml notes).
   hr-migrate:
     image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/hr-service:${IMAGE_TAG:-develop}
     command: ["alembic", "upgrade", "head"]
     working_dir: /app
     env_file:
+      - ./deploy/env/common.env
       - ./deploy/env/hr-service.env
-    environment:
-      DATABASE_URL: ${HR_DATABASE_URL:-postgresql+psycopg://postgres:***REDACTED-DB-PW***@34.87.63.152:5432/hr_db}
     restart: "no"
 
   hr-service:
@@ -158,6 +158,7 @@ services:
     ports:
       - "8004:8004"
     env_file:
+      - ./deploy/env/common.env
       - ./deploy/env/hr-service.env
     environment:
       <<: *newrelic
