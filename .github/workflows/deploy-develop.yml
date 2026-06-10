@@ -830,21 +830,46 @@ jobs:
             docker compose up -d --no-build qdrant langfuse-db langfuse rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin
             docker compose up -d --no-build --force-recreate nginx
 
-            echo "==> 4b) LANGFUSE readiness (NON-FATAL — chỉ cảnh báo, KHÔNG fail/rollback)"
-            # Langfuse = hạ tầng observability phụ trợ. Cố ý KHÔNG nằm trong health-gate:
-            # langfuse chậm boot / lỗi cũng KHÔNG được kéo sập hay rollback app production.
-            lf_ok=0
-            for i in $(seq 1 12); do
-              if curl -fsS --max-time 5 http://localhost:3100/api/public/health >/dev/null 2>&1; then
-                lf_ok=1; break
-              fi
-              sleep 5
-            done
-            if [ "$lf_ok" = 1 ]; then
-              echo "  Langfuse OK (http://langfuse:3000 nội bộ — dashboard qua SSH tunnel :3100)"
-            else
-              echo "::warning::Langfuse chưa sẵn sàng sau ~60s — KHÔNG chặn deploy (app không phụ thuộc). Kiểm tra: docker compose logs langfuse"
-            fi
+            echo "==> 4b) LANGFUSE readiness PROD bằng KEY THẬT (NON-FATAL — chỉ cảnh báo)"
+            # Smoke THẬT trên langfuse production với cặp key thật trong common.env:
+            #   health -> ingest 1 trace -> verify NHẬN -> XÓA qua psql (v2 không có API
+            #   delete) -> confirm. MỌI lỗi -> chỉ ::warning::, KHÔNG fail/rollback (app
+            #   không phụ thuộc langfuse). Bọc trong hàm + `|| true` -> set -e bị vô hiệu
+            #   suốt hàm nên không có nhánh nào làm tụt deploy.
+            lf_warn() { echo "::warning::LANGFUSE prod: $1 — kiểm tra: docker compose logs langfuse"; }
+            lf_check() {
+              ok=0
+              for i in $(seq 1 12); do
+                curl -fsS --max-time 5 http://localhost:3100/api/public/health >/dev/null 2>&1 && { ok=1; break; }
+                sleep 5
+              done
+              [ "$ok" = 1 ] || { lf_warn "health chưa sẵn sàng sau ~60s"; return 0; }
+
+              PK=$(grep -E '^LANGFUSE_PUBLIC_KEY=' deploy/env/common.env | cut -d= -f2-)
+              SK=$(grep -E '^LANGFUSE_SECRET_KEY=' deploy/env/common.env | cut -d= -f2-)
+              [ -n "$PK" ] && [ -n "$SK" ] || { lf_warn "thiếu LANGFUSE_PUBLIC_KEY/SECRET_KEY trong common.env"; return 0; }
+              TID="prod-readiness-$(date +%s)-$RANDOM"
+
+              code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -u "$PK:$SK" \
+                -X POST http://localhost:3100/api/public/ingestion -H 'Content-Type: application/json' \
+                -d "{\"batch\":[{\"id\":\"$TID-ev\",\"type\":\"trace-create\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"body\":{\"id\":\"$TID\",\"name\":\"prod-readiness-smoke\"}}]}" || echo 000)
+              case "$code" in 200|201|207) : ;; *) lf_warn "ingest KEY THẬT trả $code (headless init project/key chưa đúng?)"; return 0 ;; esac
+
+              seen=0
+              for i in $(seq 1 10); do
+                g=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -u "$PK:$SK" "http://localhost:3100/api/public/traces/$TID" || echo 000)
+                [ "$g" = 200 ] && { seen=1; break; }
+                sleep 2
+              done
+              [ "$seen" = 1 ] || { lf_warn "trace không hiện ra sau ingest (xử lý treo?)"; return 0; }
+
+              docker exec da08-vsf-langfuse-db-1 psql -U langfuse -d langfuse \
+                -c "DELETE FROM observations WHERE trace_id='$TID';" \
+                -c "DELETE FROM scores WHERE trace_id='$TID';" \
+                -c "DELETE FROM traces WHERE id='$TID';" >/dev/null 2>&1 || lf_warn "xóa trace test thất bại (còn rác nhỏ)"
+              echo "  Langfuse PROD OK: ingest KEY THẬT -> NHẬN -> đã xóa (nội bộ http://langfuse:3000; dashboard SSH tunnel :3100)"
+            }
+            lf_check || true
 
             echo "==> 5) HEALTH GATE (fail deploy nếu service không khỏe)"
             ok=0
