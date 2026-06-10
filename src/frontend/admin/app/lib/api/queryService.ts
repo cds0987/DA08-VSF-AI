@@ -1,28 +1,19 @@
+import axiosClient from './axiosClient'
 import type { AdminMetrics } from '~/types'
-import { ACCESS_TOKEN_COOKIE, getClientCookie } from '../cookie'
 
-function authHeaders(): Record<string, string> {
-  const token = getClientCookie(ACCESS_TOKEN_COOKIE)
-  if (!token) {
-    throw new Error('Not authenticated')
-  }
-  return { Authorization: `Bearer ${token}` }
-}
-
+// Dùng axiosClient (resolve theo origin trình duyệt) thay vì Nuxt $fetch — $fetch ghép
+// app.baseURL (/admin/) vào path tương đối -> /admin/api/query/... -> 404 khi chạy dưới
+// sub-path. axiosClient.get với service:'query' ra đúng /api/query/admin/metrics same-origin.
 export function useQueryService() {
-  const config = useRuntimeConfig()
-  const gatewayUrl = String(config.public.apiGatewayUrl || '').replace(/\/$/, '')
-  const queryPath = config.public.queryServicePath || '/api/query'
-  const baseUrl = `${gatewayUrl}${queryPath}`
-
-  async function getAdminMetrics(from?: string, to?: string) {
-    return await $fetch<AdminMetrics>(`${baseUrl}/admin/metrics`, {
-      headers: authHeaders(),
-      query: {
+  async function getAdminMetrics(from?: string, to?: string): Promise<AdminMetrics> {
+    const res = await axiosClient.get<AdminMetrics>('/admin/metrics', {
+      service: 'query',
+      params: {
         ...(from ? { from } : {}),
         ...(to ? { to } : {}),
       },
     })
+    return res.data
   }
 
   return { getAdminMetrics }

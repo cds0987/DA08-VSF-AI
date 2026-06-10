@@ -5,7 +5,7 @@ from sqlalchemy import literal, select
 
 from app.core.config import get_settings
 from app.infrastructure.db.session import engine
-from app.interfaces.api.routers import auth, users
+from app.interfaces.api.routers import audit_logs, auth, users
 
 
 settings = get_settings()
@@ -21,6 +21,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(users.router)
+app.include_router(audit_logs.router)
 
 
 @app.get("/health")

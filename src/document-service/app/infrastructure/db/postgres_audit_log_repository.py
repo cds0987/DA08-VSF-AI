@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.db.models import AuditLogModel
@@ -8,6 +9,22 @@ from app.infrastructure.db.models import AuditLogModel
 class PostgresAuditLogRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def list(
+        self,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[AuditLogModel], int]:
+        total = await self.session.scalar(
+            select(func.count()).select_from(AuditLogModel),
+        )
+        result = await self.session.execute(
+            select(AuditLogModel)
+            .order_by(AuditLogModel.created_at.desc())
+            .limit(limit)
+            .offset(offset),
+        )
+        return list(result.scalars().all()), int(total or 0)
 
     async def log(
         self,
