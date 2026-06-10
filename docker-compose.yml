@@ -73,8 +73,11 @@ services:
       # Truy cập dashboard qua: ssh -L 3100:localhost:3100 <vm> rồi mở http://localhost:3100
       NEXTAUTH_URL: http://localhost:3100
       TELEMETRY_ENABLED: "true"
-      # Bootstrap headless: boot lần đầu tự tạo project + ĐÓNG ĐINH cặp key (= common.env).
+      # Bootstrap headless: boot lần đầu tự tạo org + project + ĐÓNG ĐINH cặp key (= common.env).
+      # ⚠ LANGFUSE_INIT_ORG_ID là CỜ KÍCH HOẠT — thiếu nó thì init KHÔNG chạy (key không tạo -> 401).
       # Dev khác KHÔNG cần vào UI tạo key — dùng thẳng cặp key dưới đây ở service của mình.
+      LANGFUSE_INIT_ORG_ID: vsf
+      LANGFUSE_INIT_ORG_NAME: VSF
       LANGFUSE_INIT_PROJECT_ID: rag-chatbot
       LANGFUSE_INIT_PROJECT_NAME: VSF RAG Chatbot
       LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ***REDACTED-LANGFUSE-PUBLIC***
