@@ -680,7 +680,7 @@ jobs:
           key: ${{ secrets.VM_SSH_KEY }}
           port: ${{ secrets.VM_SSH_PORT || 22 }}
           command_timeout: 20m
-          envs: APP_DIR,RAG_WORKER_ENV,MCP_SERVICE_ENV,HR_SERVICE_ENV,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN
+          envs: APP_DIR,RAG_WORKER_ENV,MCP_SERVICE_ENV,HR_SERVICE_ENV,QUERY_SERVICE_ENV,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN
           script: |
             set -euo pipefail
             APP_DIR="${{ secrets.APP_DIR }}"
@@ -697,6 +697,12 @@ jobs:
             printf '%s\n' "${{ secrets.RAG_WORKER_ENV }}"  > deploy/env/rag-worker.env
             printf '%s\n' "${{ secrets.MCP_SERVICE_ENV }}" > deploy/env/mcp-service.env
             printf '%s\n' "${{ secrets.HR_SERVICE_ENV }}"  > deploy/env/hr-service.env
+            # query-service.env: chỉ ghi đè khi secret QUERY_SERVICE_ENV có nội dung.
+            # Secret rỗng/chưa set -> GIỮ file đặt tay sẵn trên VM (tránh xoá sạch
+            # config DB/auth/redis của query-service khiến service không boot).
+            if [ -n "${{ secrets.QUERY_SERVICE_ENV }}" ]; then
+              printf '%s\n' "${{ secrets.QUERY_SERVICE_ENV }}" > deploy/env/query-service.env
+            fi
 
             echo "==> 3) Login Docker Hub + PULL image (KHÔNG build trên VM)"
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin

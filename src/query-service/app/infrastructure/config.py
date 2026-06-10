@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     llm_mode: str = "openai"
     openai_api_key: str | None = None
-    openai_llm_model: str = "gpt-4o-mini"
+    openai_llm_model: str = "gpt-5.4-mini"
     openai_embedding_model: str = "text-embedding-3-small"
     openai_timeout_seconds: int = 30
 
