@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-CI smoke: Langfuse sẵn sàng NHẬN DATA chưa.
+CI smoke: Langfuse self-host SẴN SÀNG nhận data chưa + dọn sạch sau test.
 
-Luồng (giống các validate khác — fail-closed, exit != 0 nếu hỏng):
-  1) POST /api/public/ingestion  -> tạo 1 trace test (basic auth = public:secret key).
-  2) Poll GET /api/public/traces/{id} -> chờ ingestion xử lý xong (trace hiện ra).
-  3) DELETE /api/public/traces (bulk) -> XÓA NGAY trace test vừa tạo.
-  4) GET lại -> phải 404 (xác nhận đã xóa, không để rác).
+Langfuse v2 KHÔNG có public API xóa trace (chỉ từ v3) -> việc XÓA do workflow làm
+trực tiếp ở tầng Postgres (CI làm chủ container DB), script chỉ lo phần HTTP:
 
-ENV:
-  LANGFUSE_HOST        (vd http://localhost:3000)
-  LANGFUSE_PUBLIC_KEY  (pk-lf-...)
-  LANGFUSE_SECRET_KEY  (sk-lf-...)
+  ingest          : POST /api/public/ingestion -> tạo trace -> poll GET tới khi hiện
+                    ra (chứng minh Langfuse NHẬN + xử lý data). Trace id = $SMOKE_TRACE_ID.
+  confirm-deleted : GET /api/public/traces/{id} -> phải 404 (xác nhận đã bị xóa sạch).
+
+Chạy fail-closed (exit != 0 nếu sai) — giống các validate khác.
+
+ENV: LANGFUSE_HOST, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, SMOKE_TRACE_ID
 """
 from __future__ import annotations
 
@@ -25,22 +25,19 @@ import requests
 
 HOST = os.environ["LANGFUSE_HOST"].rstrip("/")
 AUTH = (os.environ["LANGFUSE_PUBLIC_KEY"], os.environ["LANGFUSE_SECRET_KEY"])
+TRACE_ID = os.environ["SMOKE_TRACE_ID"]
 TIMEOUT = 15
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def ingest_trace(trace_id: str) -> None:
+def ingest() -> None:
     payload = {
         "batch": [
             {
                 "id": str(uuid.uuid4()),
                 "type": "trace-create",
-                "timestamp": _now(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "body": {
-                    "id": trace_id,
+                    "id": TRACE_ID,
                     "name": "ci-langfuse-smoke",
                     "userId": "ci",
                     "metadata": {"source": "ci_langfuse.py"},
@@ -49,17 +46,14 @@ def ingest_trace(trace_id: str) -> None:
         ]
     }
     r = requests.post(f"{HOST}/api/public/ingestion", json=payload, auth=AUTH, timeout=TIMEOUT)
-    # 207 Multi-Status = batch nhận; 200/201 cũng coi như OK.
     if r.status_code not in (200, 201, 207):
         print(f"  FAIL ingestion: HTTP {r.status_code} {r.text[:300]}")
         sys.exit(1)
     print(f"  ingestion OK (HTTP {r.status_code})")
 
-
-def wait_trace(trace_id: str, retries: int = 30) -> None:
-    for i in range(1, retries + 1):
-        r = requests.get(f"{HOST}/api/public/traces/{trace_id}", auth=AUTH, timeout=TIMEOUT)
-        if r.status_code == 200:
+    for i in range(1, 31):
+        g = requests.get(f"{HOST}/api/public/traces/{TRACE_ID}", auth=AUTH, timeout=TIMEOUT)
+        if g.status_code == 200:
             print(f"  trace hiện ra sau {i} lần poll -> Langfuse NHẬN DATA OK")
             return
         time.sleep(2)
@@ -67,24 +61,10 @@ def wait_trace(trace_id: str, retries: int = 30) -> None:
     sys.exit(1)
 
 
-def delete_trace(trace_id: str) -> None:
-    # Bulk delete (rộng tương thích hơn DELETE /traces/{id}).
-    r = requests.delete(
-        f"{HOST}/api/public/traces",
-        json={"traceIds": [trace_id]},
-        auth=AUTH,
-        timeout=TIMEOUT,
-    )
-    if r.status_code not in (200, 202):
-        print(f"  FAIL delete: HTTP {r.status_code} {r.text[:300]}")
-        sys.exit(1)
-    print(f"  delete OK (HTTP {r.status_code})")
-
-
-def confirm_deleted(trace_id: str, retries: int = 15) -> None:
-    for _ in range(retries):
-        r = requests.get(f"{HOST}/api/public/traces/{trace_id}", auth=AUTH, timeout=TIMEOUT)
-        if r.status_code == 404:
+def confirm_deleted() -> None:
+    for _ in range(15):
+        g = requests.get(f"{HOST}/api/public/traces/{TRACE_ID}", auth=AUTH, timeout=TIMEOUT)
+        if g.status_code == 404:
             print("  xác nhận đã XÓA (GET -> 404) -> không để lại rác")
             return
         time.sleep(2)
@@ -93,13 +73,15 @@ def confirm_deleted(trace_id: str, retries: int = 15) -> None:
 
 
 def main() -> None:
-    trace_id = f"ci-smoke-{uuid.uuid4()}"
-    print(f"== Langfuse readiness smoke (trace_id={trace_id}) ==")
-    ingest_trace(trace_id)
-    wait_trace(trace_id)
-    delete_trace(trace_id)
-    confirm_deleted(trace_id)
-    print("== PASS: Langfuse sẵn sàng nhận data + xóa sạch ==")
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    print(f"== Langfuse smoke [{cmd}] (trace_id={TRACE_ID}) ==")
+    if cmd == "ingest":
+        ingest()
+    elif cmd == "confirm-deleted":
+        confirm_deleted()
+    else:
+        print("usage: ci_langfuse.py <ingest|confirm-deleted>")
+        sys.exit(2)
 
 
 if __name__ == "__main__":

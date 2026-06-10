@@ -560,6 +560,7 @@ jobs:
     env:
       LF_PUBLIC_KEY: pk-lf-ci-smoke
       LF_SECRET_KEY: sk-lf-ci-smoke
+      SMOKE_TRACE_ID: ci-smoke-fixed-trace
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -606,12 +607,24 @@ jobs:
             sleep 3
           done
           echo "langfuse not ready" >&2; docker logs langfuse || true; exit 1
-      - name: Smoke ingest + verify + delete + confirm-deleted
+      - name: Ingest + verify NHẬN data
         env:
           LANGFUSE_HOST: http://localhost:3000
           LANGFUSE_PUBLIC_KEY: ${{ env.LF_PUBLIC_KEY }}
           LANGFUSE_SECRET_KEY: ${{ env.LF_SECRET_KEY }}
-        run: python infra/localtest/ci_langfuse.py
+        run: python infra/localtest/ci_langfuse.py ingest
+      - name: XÓA NGAY trace test (DB — v2 không có API xóa trace)
+        run: |
+          docker exec lf-db psql -U langfuse -d langfuse -v ON_ERROR_STOP=1 \
+            -c "DELETE FROM observations WHERE trace_id='${{ env.SMOKE_TRACE_ID }}';" \
+            -c "DELETE FROM scores WHERE trace_id='${{ env.SMOKE_TRACE_ID }}';" \
+            -c "DELETE FROM traces WHERE id='${{ env.SMOKE_TRACE_ID }}';"
+      - name: Confirm đã xóa sạch (GET -> 404)
+        env:
+          LANGFUSE_HOST: http://localhost:3000
+          LANGFUSE_PUBLIC_KEY: ${{ env.LF_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ env.LF_SECRET_KEY }}
+        run: python infra/localtest/ci_langfuse.py confirm-deleted
       - name: Container logs on failure
         if: failure()
         run: |
