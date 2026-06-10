@@ -117,7 +117,27 @@ async def build_langgraph_tools(
         )
         return result.summary
 
-    return [rag_search, hr_query]
+    tools: list = [rag_search, hr_query]
+
+    # Dynamic discovery: any additional tools from mcp-service are exposed as
+    # generic dict schemas so the model can call them; act_node executes them
+    # via mcp_client.call_tool() (summary-style). No code change needed when
+    # new tools are added to mcp-service.
+    try:
+        specs = await mcp_client.list_tool_specs()
+        for spec in specs:
+            if spec.name in {"rag_search", "hr_query"}:
+                continue
+            tools.append({
+                "type": "function",
+                "name": spec.name,
+                "description": spec.description,
+                "parameters": spec.input_schema or {"type": "object", "properties": {}},
+            })
+    except Exception as _exc:
+        logger.warning("build_langgraph_tools_discovery_failed: %s", _exc)
+
+    return tools
 
 
 # ---------------------------------------------------------------------------
@@ -495,8 +515,20 @@ async def act_node(
             new_sources = []
 
         else:
-            data = f"Unknown tool: {tool_name}"
-            success = False
+            # Generic tool (summary-style): call_tool + extract summary.
+            # user_id is injected server-side; mcp-service tools should ignore
+            # unknown kwargs they don't declare.
+            raw = await mcp_client.call_tool(
+                tool_name,
+                {**tool_args, "user_id": user_id},
+            )
+            summary = str(
+                raw.get("summary") or raw.get("answer") or raw.get("text") or ""
+            )
+            if not summary and isinstance(raw, dict):
+                summary = json.dumps(raw, ensure_ascii=False)
+            data = summary
+            success = bool(summary and summary not in ("{}", "null", ""))
             new_sources = []
 
     except MCPCircuitOpenError as exc:
