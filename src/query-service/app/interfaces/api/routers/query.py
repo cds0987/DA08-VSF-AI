@@ -77,7 +77,7 @@ async def query(
 
     # Smoke CI gửi header X-CI-Smoke=1 -> dán trace vào session "ci-smoke" (gom 1 chỗ,
     # deploy kế tự xóa). Query user thật KHÔNG có header -> session_id uuid bình thường.
-    trace_session = "ci-smoke" if x_ci_smoke else None
+    trace_session = "ci-smoke" if x_ci_smoke else request.trace_session
 
     async def events():
         async for event in use_case.stream(request.question, user, trace_session=trace_session):

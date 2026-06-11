@@ -2,17 +2,23 @@ export type Theme = 'light' | 'dark' | 'system'
 
 export function useTheme() {
   const theme = useState<Theme>('theme', () => 'system')
+  const route = useRoute()
 
   const setTheme = (newTheme: Theme) => {
     theme.value = newTheme
-    if (process.client) {
+    if (import.meta.client) {
       localStorage.setItem('theme', newTheme)
       applyTheme()
     }
   }
 
   const applyTheme = () => {
-    if (!process.client) return
+    if (!import.meta.client) return
+
+    if (route.path === '/login') {
+      document.documentElement.classList.remove('dark')
+      return
+    }
 
     const isDark = 
       theme.value === 'dark' || 
@@ -26,7 +32,7 @@ export function useTheme() {
   }
 
   const initTheme = () => {
-    if (process.client) {
+    if (import.meta.client) {
       const savedTheme = localStorage.getItem('theme') as Theme | null
       if (savedTheme) {
         theme.value = savedTheme

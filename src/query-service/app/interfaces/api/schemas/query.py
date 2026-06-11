@@ -14,6 +14,7 @@ class Source(BaseModel):
 class QueryRequest(BaseModel):
     question: str = Field(min_length=1, max_length=500)
     user_id: str
+    trace_session: str | None = None
 
 
 class QueryResponse(BaseModel):

@@ -46,6 +46,7 @@ export interface Citation {
 export interface QueryRequest {
   question: string
   user_id: string
+  trace_session?: string
 }
 
 export interface QuerySource {
