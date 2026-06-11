@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 import hashlib
@@ -580,6 +581,7 @@ class QueryOrchestrationUseCase:
                                     "session_id": session_id,
                                     "iterations": 0,
                                 }
+                                await asyncio.sleep(0)
                             answer = shortcut_response
                         else:
                             # answer_accumulator is empty when the model adapter uses non-streaming
@@ -597,8 +599,10 @@ class QueryOrchestrationUseCase:
                                         if not clean:
                                             # Sanitizer removed everything — treat as no answer.
                                             break
-                                        # Stream the recovered answer as token events so the UI
-                                        # receives incremental updates, matching the shortcut path.
+                                        # Stream the recovered answer word-by-word.
+                                        # asyncio.sleep(0) yields control to the event loop so
+                                        # each SSE chunk is flushed before the next word is sent —
+                                        # without this the tight loop sends all words in one burst.
                                         for token in _word_chunks(clean):
                                             yield {
                                                 "token": token,
@@ -607,6 +611,7 @@ class QueryOrchestrationUseCase:
                                                 "session_id": session_id,
                                                 "iterations": last_iteration,
                                             }
+                                            await asyncio.sleep(0)
                                         answer_accumulator.append(clean)
                                         break
 
