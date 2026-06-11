@@ -132,18 +132,18 @@ function createHtmlDocument(content: string, caption: string): string {
 
   const style = document.createElement("style")
   style.textContent = `
-    html, body { 
-      margin: 0; 
-      min-height: 100%; 
-      background: ${isDark ? '#0f172a' : 'white'}; 
-      color: ${isDark ? '#f1f5f9' : '#1e293b'}; 
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: ${isDark ? '#131314' : 'white'};
+      color: ${isDark ? '#ececec' : '#1e293b'};
     }
     body { box-sizing: border-box; padding: 24px; font: 14px/1.6 ui-sans-serif, system-ui, sans-serif; }
     * { box-sizing: border-box; max-width: 100%; }
     img { height: auto; }
     table { width: max-content; min-width: 100%; border-collapse: collapse; }
-    th, td { border: 1px solid ${isDark ? '#1e293b' : '#cbd5e1'}; padding: 8px 12px; vertical-align: top; }
-    th { background: ${isDark ? '#1e293b' : '#f1f5f9'}; font-weight: 600; }
+    th, td { border: 1px solid ${isDark ? '#2f3036' : '#cbd5e1'}; padding: 8px 12px; vertical-align: top; }
+    th { background: ${isDark ? '#222327' : '#f1f5f9'}; font-weight: 600; }
     mark { border-radius: 3px; background: ${isDark ? '#3b82f640' : '#fde68a'}; padding: 0 2px; color: inherit; }
   `
   document.head.appendChild(style)
@@ -242,23 +242,23 @@ onBeforeUnmount(() => loadController?.abort())
 </script>
 
 <template>
-  <div class="flex h-full flex-col bg-slate-50/50 dark:bg-slate-900/50">
-    <div class="shrink-0 border-b border-slate-200/50 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-4">
+  <div class="flex h-full flex-col bg-slate-50/50 dark:bg-background">
+    <div class="shrink-0 border-b border-slate-200/50 dark:border-border bg-white dark:bg-card px-6 py-4">
       <div class="flex items-start justify-between gap-3">
         <div class="flex min-w-0 items-start gap-3">
           <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
             <FileText class="h-5 w-5" />
           </div>
           <div class="min-w-0">
-            <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+            <div class="truncate text-sm font-semibold text-slate-900 dark:text-foreground">
               {{ citation?.caption || citation?.document || 'No source selected' }}
             </div>
-            <div v-if="citation?.heading_path?.length" class="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+            <div v-if="citation?.heading_path?.length" class="mt-1 text-xs font-medium text-slate-500 dark:text-muted-foreground">
               {{ citation.heading_path.join(' › ') }}
             </div>
-            <div class="mt-1 flex items-center gap-2 truncate text-[11px] text-slate-400 dark:text-slate-500">
+            <div class="mt-1 flex items-center gap-2 truncate text-[11px] text-slate-400 dark:text-muted-foreground">
               <span class="truncate">{{ citation?.document || '—' }}</span>
-              <span v-if="fileTypeLabel" class="rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 font-semibold text-slate-500 dark:text-slate-400">
+              <span v-if="fileTypeLabel" class="rounded bg-slate-100 dark:bg-muted px-1.5 py-0.5 font-semibold text-slate-500 dark:text-muted-foreground">
                 {{ fileTypeLabel }}
               </span>
               <span v-if="citation?.page_number">Page {{ citation.page_number }}</span>
@@ -271,7 +271,7 @@ onBeforeUnmount(() => loadController?.abort())
             :href="sourceUrl"
             target="_blank"
             rel="noopener noreferrer"
-            class="rounded-full p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-100"
+            class="rounded-full p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-accent hover:text-slate-900 dark:hover:text-accent-foreground"
             title="Open original document"
           >
             <ExternalLink class="h-4 w-4" />
@@ -280,23 +280,23 @@ onBeforeUnmount(() => loadController?.abort())
             v-if="sourceUrl"
             :href="sourceUrl"
             :download="citation?.document"
-            class="rounded-full p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-100"
+            class="rounded-full p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-accent hover:text-slate-900 dark:hover:text-accent-foreground"
             title="Download document"
           >
             <Download class="h-4 w-4" />
           </a>
-          <button class="rounded-full p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-100" @click="emit('close')">
+          <button class="rounded-full p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-accent hover:text-slate-900 dark:hover:text-accent-foreground" @click="emit('close')">
             <X class="h-5 w-5" />
           </button>
         </div>
       </div>
     </div>
 
-    <div v-if="citation" class="relative flex-1 overflow-hidden bg-slate-200 dark:bg-slate-950">
-      <div v-if="isLoading" class="absolute inset-0 z-10 flex items-center justify-center bg-white/80 dark:bg-slate-900/80">
-        <div class="text-sm text-slate-500 dark:text-slate-400">Loading document...</div>
+    <div v-if="citation" class="relative flex-1 overflow-hidden bg-slate-200 dark:bg-background">
+      <div v-if="isLoading" class="absolute inset-0 z-10 flex items-center justify-center bg-white/80 dark:bg-background/80">
+        <div class="text-sm text-slate-500 dark:text-muted-foreground">Loading document...</div>
       </div>
-      <div v-else-if="errorMsg" class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white dark:bg-slate-900 p-6 text-center">
+      <div v-else-if="errorMsg" class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white dark:bg-card p-6 text-center">
         <div class="text-sm text-red-500">{{ errorMsg }}</div>
         <a
           v-if="sourceUrl"
@@ -318,18 +318,18 @@ onBeforeUnmount(() => loadController?.abort())
         v-else-if="viewerMode === 'html'"
         :srcdoc="htmlContent"
         sandbox="allow-popups allow-popups-to-escape-sandbox"
-        class="h-full w-full border-none bg-white dark:bg-slate-900"
+        class="h-full w-full border-none bg-white dark:bg-card"
         title="Document preview"
       />
       <pre
         v-else-if="viewerMode === 'text'"
-        class="h-full overflow-auto whitespace-pre-wrap break-words bg-white dark:bg-slate-900 p-6 font-mono text-sm leading-6 text-slate-800 dark:text-slate-200"
+        class="h-full overflow-auto whitespace-pre-wrap break-words bg-white dark:bg-card p-6 font-mono text-sm leading-6 text-slate-800 dark:text-foreground"
       >{{ textContent }}</pre>
-      <div v-else class="absolute inset-0 flex items-center justify-center bg-white dark:bg-slate-900 text-sm text-slate-400 dark:text-slate-500">
+      <div v-else class="absolute inset-0 flex items-center justify-center bg-white dark:bg-card text-sm text-slate-400 dark:text-muted-foreground">
         Preview not available
       </div>
     </div>
-    <div v-else class="flex flex-1 items-center justify-center p-6 text-sm text-slate-400 dark:text-slate-500">
+    <div v-else class="flex flex-1 items-center justify-center p-6 text-sm text-slate-400 dark:text-muted-foreground">
       Select a citation from an answer to inspect its metadata.
     </div>
   </div>

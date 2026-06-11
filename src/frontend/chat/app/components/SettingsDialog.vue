@@ -12,10 +12,10 @@ const themes: { value: Theme; label: string; icon: any }[] = [
 </script>
 
 <template>
-  <DialogContent class="sm:max-w-[425px] bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
+  <DialogContent class="sm:max-w-[425px] bg-white dark:bg-card border-slate-200 dark:border-border">
     <DialogHeader>
-      <DialogTitle class="text-slate-900 dark:text-slate-100">Settings</DialogTitle>
-      <DialogDescription class="text-slate-500 dark:text-slate-400">
+      <DialogTitle class="text-slate-900 dark:text-foreground">Settings</DialogTitle>
+      <DialogDescription class="text-slate-500 dark:text-muted-foreground">
         Manage your application preferences.
       </DialogDescription>
     </DialogHeader>
@@ -23,8 +23,8 @@ const themes: { value: Theme; label: string; icon: any }[] = [
     <div class="py-6">
       <div class="flex items-center justify-between">
         <div class="space-y-1">
-          <h4 class="text-sm font-medium leading-none text-slate-900 dark:text-slate-100">Appearance</h4>
-          <p class="text-sm text-slate-500 dark:text-slate-400">
+          <h4 class="text-sm font-medium leading-none text-slate-900 dark:text-foreground">Appearance</h4>
+          <p class="text-sm text-slate-500 dark:text-muted-foreground">
             Customize how the chat looks on your device.
           </p>
         </div>
@@ -39,7 +39,7 @@ const themes: { value: Theme; label: string; icon: any }[] = [
             'flex flex-col items-center justify-center gap-2 rounded-lg border-2 p-3 transition-all',
             theme === item.value
               ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-              : 'border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
+              : 'border-slate-100 dark:border-border bg-white dark:bg-muted text-slate-500 dark:text-muted-foreground hover:bg-slate-50 dark:hover:bg-accent'
           ]"
         >
           <component :is="item.icon" class="h-5 w-5" />

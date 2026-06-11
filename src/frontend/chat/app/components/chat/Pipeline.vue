@@ -12,8 +12,8 @@ const props = defineProps<Props>()
 </script>
 
 <template>
-  <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-    <div class="mb-3 flex items-center gap-2 text-[12px] font-medium text-slate-800">
+  <div class="rounded-xl border border-slate-200 dark:border-border bg-white dark:bg-chat-response p-4 shadow-sm dark:shadow-none">
+    <div class="mb-3 flex items-center gap-2 text-[12px] font-medium text-slate-800 dark:text-foreground">
       <Sparkles class="h-3.5 w-3.5 text-blue-500" />
       Retrieval pipeline
     </div>
@@ -23,17 +23,17 @@ const props = defineProps<Props>()
         :key="s.label"
         :class="cn(
           'flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[12.5px]',
-          i === stage && 'bg-blue-50 text-slate-900',
-          i < stage && 'text-slate-500',
-          i > stage && 'text-slate-400',
+          i === stage && 'bg-blue-50 dark:bg-blue-500/10 text-slate-900 dark:text-foreground',
+          i < stage && 'text-slate-500 dark:text-muted-foreground',
+          i > stage && 'text-slate-400 dark:text-muted-foreground/70',
         )"
       >
         <span
           :class="cn(
             'flex h-5 w-5 items-center justify-center rounded-full border',
-            i < stage && 'border-emerald-500/50 bg-emerald-50 text-emerald-600',
+            i < stage && 'border-emerald-500/50 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
             i === stage && 'border-blue-400 text-blue-600 shadow-[0_0_8px_rgba(37,99,235,0.2)]',
-            i > stage && 'border-slate-200 text-slate-300',
+            i > stage && 'border-slate-200 dark:border-border text-slate-300 dark:text-muted-foreground/50',
           )"
         >
           <template v-if="i < stage">

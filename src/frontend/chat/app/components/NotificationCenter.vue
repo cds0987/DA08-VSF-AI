@@ -41,7 +41,7 @@ async function handleNotificationClick(item: NotificationItem) {
   <DropdownMenu @update:open="handleOpen">
     <DropdownMenuTrigger as-child>
       <button
-        class="flex h-9 w-full shrink-0 cursor-pointer items-center justify-start rounded-md px-0 text-slate-600 transition-all hover:bg-slate-100 hover:text-slate-900"
+        class="flex h-9 w-full shrink-0 cursor-pointer items-center justify-start rounded-md px-0 text-slate-600 dark:text-muted-foreground transition-all hover:bg-slate-100 dark:hover:bg-sidebar-accent hover:text-slate-900 dark:hover:text-sidebar-accent-foreground"
         aria-label="Thông báo"
         :title="isCollapsed ? 'Thông báo' : undefined"
       >
@@ -67,12 +67,12 @@ async function handleNotificationClick(item: NotificationItem) {
       side="right"
       align="end"
       :side-offset="12"
-      class="w-[360px] border-slate-200 bg-white p-0 text-slate-900 shadow-xl"
+      class="w-[360px] border-slate-200 dark:border-border bg-white dark:bg-popover p-0 text-slate-900 dark:text-popover-foreground shadow-xl"
     >
-      <div class="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+      <div class="flex items-center justify-between border-b border-slate-100 dark:border-border px-4 py-3">
         <div>
           <p class="text-sm font-bold">Thông báo</p>
-          <p class="text-xs text-slate-500">
+          <p class="text-xs text-slate-500 dark:text-muted-foreground">
             {{ notifications.unreadCount }} chưa đọc
           </p>
         </div>
@@ -88,39 +88,39 @@ async function handleNotificationClick(item: NotificationItem) {
         </span>
       </div>
 
-      <div v-if="notifications.isLoading" class="px-4 py-8 text-center text-sm text-slate-500">
+      <div v-if="notifications.isLoading" class="px-4 py-8 text-center text-sm text-slate-500 dark:text-muted-foreground">
         Đang tải thông báo...
       </div>
       <div
         v-else-if="notifications.items.length === 0"
-        class="flex flex-col items-center gap-2 px-4 py-8 text-center text-sm text-slate-500"
+        class="flex flex-col items-center gap-2 px-4 py-8 text-center text-sm text-slate-500 dark:text-muted-foreground"
       >
-        <WifiOff class="h-5 w-5 text-slate-400" />
+        <WifiOff class="h-5 w-5 text-slate-400 dark:text-muted-foreground" />
         Chưa có thông báo mới.
       </div>
       <div v-else class="max-h-[420px] overflow-y-auto p-1.5">
         <DropdownMenuItem
           v-for="item in notifications.items"
           :key="item.id"
-          class="items-start gap-3 rounded-lg px-3 py-3 focus:bg-slate-50"
+          class="items-start gap-3 rounded-lg px-3 py-3 focus:bg-slate-50 dark:focus:bg-accent"
           @select="handleNotificationClick(item)"
         >
           <span
             class="mt-1.5 h-2 w-2 shrink-0 rounded-full"
-            :class="item.is_read ? 'bg-slate-200' : 'bg-blue-600'"
+            :class="item.is_read ? 'bg-slate-200 dark:bg-muted' : 'bg-blue-600'"
           />
           <span class="min-w-0 flex-1">
             <span
               class="block text-sm leading-5"
-              :class="item.is_read ? 'font-normal text-slate-600' : 'font-semibold text-slate-900'"
+              :class="item.is_read ? 'font-normal text-slate-600 dark:text-muted-foreground' : 'font-semibold text-slate-900 dark:text-foreground'"
             >
               {{ item.message }}
             </span>
-            <span class="mt-1 block text-xs text-slate-400">
+            <span class="mt-1 block text-xs text-slate-400 dark:text-muted-foreground">
               {{ formatCreatedAt(item.created_at) }}
             </span>
           </span>
-          <Check v-if="item.is_read" class="mt-0.5 h-4 w-4 shrink-0 text-slate-300" />
+          <Check v-if="item.is_read" class="mt-0.5 h-4 w-4 shrink-0 text-slate-300 dark:text-muted-foreground/50" />
         </DropdownMenuItem>
       </div>
     </DropdownMenuContent>

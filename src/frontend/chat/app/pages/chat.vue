@@ -89,7 +89,7 @@ watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText
 
     <aside
       :class="cn(
-        'fixed inset-y-0 right-0 z-50 h-full w-full border-l border-slate-200 bg-white transition-transform duration-300 ease-out lg:w-[min(40vw,480px)]',
+        'fixed inset-y-0 right-0 z-50 h-full w-full border-l border-slate-200 dark:border-border bg-white dark:bg-background transition-transform duration-300 ease-out lg:w-[min(40vw,480px)]',
         chat.isPanelOpen ? 'translate-x-0' : 'translate-x-full',
       )"
     >
