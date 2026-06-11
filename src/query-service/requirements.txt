@@ -17,8 +17,5 @@ langgraph-checkpoint>=0.2.0
 langchain-openai>=0.3.0
 langchain-mcp-adapters>=0.1.0
 llm-guard>=0.3.0
-# Langfuse self-host server = v2 -> GHIM SDK v2 (v3/v4 dùng OTLP, server v2 không nhận).
-# CallbackHandler của langfuse v2 cần full `langchain` (langchain-core chưa đủ).
-langfuse>=2.0.0,<3
-langchain>=0.1,<0.4
+langfuse>=2.0.0
 newrelic>=9.0.0
