@@ -5,11 +5,17 @@ import { useTheme } from './composables/useTheme'
 
 const session = useSessionStore()
 const notifications = useNotificationStore()
-const { initTheme } = useTheme()
+const route = useRoute()
+const { initTheme, applyTheme } = useTheme()
 let stopSessionWatch: (() => void) | null = null
+let stopRouteWatch: (() => void) | null = null
 
 onMounted(() => {
   initTheme()
+  stopRouteWatch = watch(
+    () => route.path,
+    () => applyTheme(),
+  )
   stopSessionWatch = watch(
     () => session.user,
     (user) => {
@@ -24,6 +30,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  stopRouteWatch?.()
   stopSessionWatch?.()
   notifications.stop()
 })
