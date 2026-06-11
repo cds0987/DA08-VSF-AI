@@ -58,6 +58,7 @@ jobs:
       run_e2e_cloud: ${{ steps.matrix.outputs.run_e2e_cloud }}
       run_frontend: ${{ steps.matrix.outputs.run_frontend }}
       run_langfuse: ${{ steps.matrix.outputs.run_langfuse }}
+      run_langsmith: ${{ steps.matrix.outputs.run_langsmith }}
       run_deploy: ${{ steps.matrix.outputs.run_deploy }}
     steps:
       - uses: actions/checkout@v4
@@ -83,6 +84,9 @@ jobs:
             langfuse:
               - 'docker-compose.yml'
               - 'infra/localtest/ci_langfuse.py'
+            langsmith:
+              - 'infra/localtest/ci_langsmith.py'
+              - 'src/query-service/app/infrastructure/observability/**'
             e2e-extra:
               - 'docker-compose.localtest.yml'
               - 'infra/localtest/ci_e2e.py'
@@ -103,18 +107,19 @@ jobs:
           fi
           has() { echo "$CH" | jq -e "any(.[]; $1)" >/dev/null && echo true || echo false; }
           if $FORCE; then
-            rrag=true; rhr=true; rec=true; rfe=true; rlf=true; rd=true
+            rrag=true; rhr=true; rec=true; rfe=true; rlf=true; rls=true; rd=true
           else
             rrag=$(has '.=="rag-worker" or .=="mcp-service"')
             rhr=$(has '.=="hr-service" or .=="mcp-hr"')
             rec=$(has '.=="rag-worker" or .=="mcp-service" or .=="document-service" or .=="e2e-extra"')
             rfe=$(has '.=="frontend"')
             rlf=$(has '.=="langfuse"')
+            rls=$(has '.=="langsmith"')
             rd=$(has '.=="rag-worker" or .=="mcp-service" or .=="hr-service" or .=="user-service" or .=="document-service" or .=="query-service" or .=="frontend" or .=="nginx" or .=="base"')
           fi
           # Bỏ qua validate nhưng GIỮ build + deploy.
           if [ "$SKIP" = "true" ]; then
-            rrag=false; rhr=false; rec=false; rlf=false
+            rrag=false; rhr=false; rec=false; rlf=false; rls=false
             echo "::notice::skip-tests bật -> BỎ QUA Phase 1 validate, chỉ build + deploy"
           fi
           {
@@ -124,9 +129,10 @@ jobs:
             echo "run_e2e_cloud=$rec"
             echo "run_frontend=$rfe"
             echo "run_langfuse=$rlf"
+            echo "run_langsmith=$rls"
             echo "run_deploy=$rd"
           } >> "$GITHUB_OUTPUT"
-          echo "→ services=$SVC run_rag=$rrag run_hr=$rhr run_e2e_cloud=$rec run_frontend=$rfe run_langfuse=$rlf run_deploy=$rd"
+          echo "→ services=$SVC run_rag=$rrag run_hr=$rhr run_e2e_cloud=$rec run_frontend=$rfe run_langfuse=$rlf run_langsmith=$rls run_deploy=$rd"
 
   # ───────────────────── Phase 1a: CONTRACT ────────────────────────
   # Guard lớp A: chặn lệch vectorstore contract giữa rag-worker (producer) và
@@ -637,11 +643,55 @@ jobs:
           echo "=== langfuse ===" && docker logs langfuse 2>&1 | tail -120 || true
           echo "=== lf-db ===" && docker logs lf-db 2>&1 | tail -40 || true
 
+  # ──────────────────── Phase 1g: LANGSMITH-TEST ───────────────────
+  # LangSmith là SaaS cloud (KHÔNG self-host) -> không dựng docker. Gửi 1 run THẬT bằng
+  # KEY THẬT (đọc từ deploy/env/query-service.env, giống langfuse đọc common.env) vào 1
+  # PROJECT EPHEMERAL duy nhất mỗi run -> verify NHẬN -> XÓA NGUYÊN PROJECT -> verify đã
+  # xóa. Dùng RunTree low-level y như runtime. Chỉ chạy khi script/observability đổi.
+  langsmith-test:
+    needs: detect
+    if: needs.detect.outputs.run_langsmith == 'true'
+    runs-on: ubuntu-latest
+    env:
+      SMOKE_PROJECT: ci-langsmith-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install langsmith client
+        run: python -m pip install --upgrade pip && pip install langsmith
+      - name: Đọc KEY THẬT từ deploy/env/query-service.env
+        id: lskey
+        run: |
+          K=$(grep -E '^LANGSMITH_API_KEY=' deploy/env/query-service.env | cut -d= -f2-)
+          E=$(grep -E '^LANGSMITH_ENDPOINT=' deploy/env/query-service.env | cut -d= -f2-)
+          [ -n "$K" ] || { echo "::error::thiếu LANGSMITH_API_KEY trong query-service.env"; exit 1; }
+          echo "::add-mask::$K"
+          echo "key=$K" >> "$GITHUB_OUTPUT"
+          echo "endpoint=${E:-https://api.smith.langchain.com}" >> "$GITHUB_OUTPUT"
+      - name: Ingest + verify NHẬN data
+        env:
+          LANGSMITH_API_KEY: ${{ steps.lskey.outputs.key }}
+          LANGSMITH_ENDPOINT: ${{ steps.lskey.outputs.endpoint }}
+        run: python infra/localtest/ci_langsmith.py ingest
+      - name: XÓA NGAY project test
+        if: always()
+        env:
+          LANGSMITH_API_KEY: ${{ steps.lskey.outputs.key }}
+          LANGSMITH_ENDPOINT: ${{ steps.lskey.outputs.endpoint }}
+        run: python infra/localtest/ci_langsmith.py purge
+      - name: Verify đã XÓA (không để lại rác)
+        env:
+          LANGSMITH_API_KEY: ${{ steps.lskey.outputs.key }}
+          LANGSMITH_ENDPOINT: ${{ steps.lskey.outputs.endpoint }}
+        run: python infra/localtest/ci_langsmith.py confirm-deleted
+
   # ───────────────────────── Phase 2: GATE ─────────────────────────
   # Chốt chặn: fail nếu BẤT KỲ validate nào failure/cancelled. Job skipped (do path
   # không khớp) coi như pass. build-push + deploy đều needs gate -> không qua gate = dừng.
   gate:
-    needs: [contract, rag-test, search-semantic, hr-integration, e2e-cloud, langfuse-test]
+    needs: [contract, rag-test, search-semantic, hr-integration, e2e-cloud, langfuse-test, langsmith-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -653,7 +703,8 @@ jobs:
             "search-semantic=${{ needs.search-semantic.result }}" \
             "hr-integration=${{ needs.hr-integration.result }}" \
             "e2e-cloud=${{ needs.e2e-cloud.result }}" \
-            "langfuse-test=${{ needs.langfuse-test.result }}"; do
+            "langfuse-test=${{ needs.langfuse-test.result }}" \
+            "langsmith-test=${{ needs.langsmith-test.result }}"; do
             name="${nr%%=*}"; res="${nr#*=}"
             echo "  $name = $res"
             if [ "$res" = "failure" ] || [ "$res" = "cancelled" ]; then
@@ -890,6 +941,53 @@ jobs:
             }
             lf_check || true
 
+            echo "==> 4c) LANGSMITH readiness PROD bằng KEY THẬT (NON-FATAL — chỉ cảnh báo)"
+            # LangSmith = SaaS cloud -> không có loopback nội bộ như langfuse. Chạy THẲNG TỪ
+            # TRONG container query-service (có sẵn langsmith + LANGSMITH_API_KEY trong env):
+            # ingest 1 run THẬT vào project 'prod-readiness-smoke' -> verify NHẬN -> XÓA NGUYÊN
+            # project (delete_project). Cover luôn gap "container có outbound tới cloud + key
+            # đúng chưa". Mọi lỗi -> ::warning:: thôi (app KHÔNG phụ thuộc langsmith).
+            ls_warn() { echo "::warning::LANGSMITH prod: $1 — kiểm tra: docker compose logs query-service"; }
+            if grep -qE '^OBSERVABILITY_MODE=.*langsmith' deploy/env/query-service.env; then
+              cat > /tmp/ls_ready.py <<'PYEOF'
+            import os, sys, time
+            from datetime import datetime, timezone
+            key = (os.environ.get("LANGSMITH_API_KEY") or "").strip()
+            if not key:
+                print("thieu LANGSMITH_API_KEY trong env container"); sys.exit(1)
+            endpoint = os.environ.get("LANGSMITH_ENDPOINT") or "https://api.smith.langchain.com"
+            proj = "prod-readiness-smoke"
+            from langsmith import Client
+            from langsmith.run_trees import RunTree
+            c = Client(api_key=key, api_url=endpoint)
+            rt = RunTree(name="prod-readiness-smoke", run_type="chain",
+                         inputs={"q": "ping"}, project_name=proj, client=c)
+            rt.post(); rt.end(outputs={"ok": True}, end_time=datetime.now(timezone.utc)); rt.patch()
+            f = getattr(c, "flush", None)
+            if callable(f): f()
+            seen = False
+            for _ in range(15):
+                try:
+                    if list(c.list_runs(project_name=proj, limit=1)): seen = True; break
+                except Exception: pass
+                time.sleep(2)
+            try:
+                if c.has_project(project_name=proj): c.delete_project(project_name=proj)
+            except Exception as e:
+                print("cleanup warn:", str(e)[:150])
+            if not seen:
+                print("run khong hien ra sau ingest (outbound cloud / key sai?)"); sys.exit(1)
+            print("ingest KEY THAT -> NHAN -> da xoa project prod-readiness-smoke")
+            PYEOF
+              if docker exec -i da08-vsf-query-service-1 python - < /tmp/ls_ready.py; then
+                echo "  LangSmith PROD OK (container -> cloud THÔNG, observe thật bật được)"
+              else
+                ls_warn "container query-service KHÔNG ingest được LangSmith cloud (outbound/key?)"
+              fi
+            else
+              echo "  OBSERVABILITY_MODE không chứa langsmith -> bỏ qua readiness langsmith"
+            fi
+
             echo "==> 5) HEALTH GATE (fail deploy nếu service không khỏe)"
             ok=0
             for i in $(seq 1 60); do
@@ -967,7 +1065,31 @@ jobs:
               -c "DELETE FROM observations WHERE trace_id IN (SELECT id FROM traces WHERE session_id='ci-smoke');" \
               -c "DELETE FROM scores WHERE trace_id IN (SELECT id FROM traces WHERE session_id='ci-smoke');" \
               -c "DELETE FROM traces WHERE session_id='ci-smoke';" >/dev/null 2>&1 \
-              && echo "  ci-smoke: đã dọn trace smoke deploy trước" || echo "::warning::ci-smoke purge skip (langfuse-db chưa sẵn?)"
+              && echo "  ci-smoke: đã dọn trace smoke langfuse deploy trước" || echo "::warning::ci-smoke purge langfuse skip (langfuse-db chưa sẵn?)"
+
+            # B' (langsmith): smoke ci-smoke ghi sang PROJECT RIÊNG '{project}-ci-smoke'
+            # (xem LangSmithTracer.start). Xóa nguyên project đó -> KHÔNG đụng 'rag-query' thật.
+            # Chạy từ trong container query-service (có langsmith + key). Best-effort.
+            if grep -qE '^OBSERVABILITY_MODE=.*langsmith' deploy/env/query-service.env; then
+              cat > /tmp/ls_purge.py <<'PYEOF'
+            import os, sys
+            key = (os.environ.get("LANGSMITH_API_KEY") or "").strip()
+            if not key: sys.exit(0)
+            endpoint = os.environ.get("LANGSMITH_ENDPOINT") or "https://api.smith.langchain.com"
+            proj = (os.environ.get("LANGSMITH_PROJECT") or "rag-query") + "-ci-smoke"
+            from langsmith import Client
+            c = Client(api_key=key, api_url=endpoint)
+            try:
+                if c.has_project(project_name=proj):
+                    c.delete_project(project_name=proj); print("da xoa project", proj)
+                else:
+                    print("project", proj, "khong ton tai")
+            except Exception as e:
+                print("purge warn:", str(e)[:150])
+            PYEOF
+              docker exec -i da08-vsf-query-service-1 python - < /tmp/ls_purge.py 2>&1 \
+                | sed 's/^/  ci-smoke langsmith: /' || echo "::warning::ci-smoke purge langsmith skip"
+            fi
 
             # Parser SSE (file riêng -> tránh quote-hell). Outcome enum: 5=SUCCESS, 6=ERROR.
             cat > /tmp/smoke_parse.py <<'PYEOF'

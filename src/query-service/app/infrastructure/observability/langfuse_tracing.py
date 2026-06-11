@@ -116,11 +116,12 @@ class LangfuseTracer:
 
 def build_langfuse_tracer(settings: Any) -> LangfuseTracer | None:
     """
-    Build LangfuseTracer khi OBSERVABILITY_MODE=langfuse và có đủ key, ngược lại None.
+    Build LangfuseTracer khi 'langfuse' nằm trong observability backends + có đủ key.
 
-    None = observability tắt → orchestration bỏ qua hoàn toàn (dev/test offline OK).
+    None = backend langfuse tắt → orchestration bỏ qua (dev/test offline OK). Backend
+    khác (langsmith) vẫn có thể bật song song — xem tracing.build_tracer.
     """
-    if settings.observability_mode.strip().lower() != "langfuse":
+    if "langfuse" not in settings.observability_backends:
         return None
 
     public_key = (settings.langfuse_public_key or "").strip()
