@@ -40,15 +40,24 @@ class LangfuseTracer:
         self._client = client
         self._prices = price_catalog
 
-    def start(self, question: str, user: Any, session_id: str | None) -> _TraceHandle | None:
+    def start(
+        self,
+        question: str,
+        user: Any,
+        session_id: str | None,
+        conversation_title: str | None = None,
+    ) -> _TraceHandle | None:
         """Tạo 1 trace cho 1 lượt query. Trả None nếu lỗi (query vẫn chạy bình thường)."""
         try:
+            metadata: dict[str, Any] = {"role": getattr(user, "role", None)}
+            if conversation_title:
+                metadata["conversation_title"] = conversation_title
             trace = self._client.trace(
                 name="rag-query",
                 user_id=getattr(user, "id", None),
                 session_id=session_id,
                 input=question,
-                metadata={"role": getattr(user, "role", None)},
+                metadata=metadata,
             )
             return _TraceHandle(trace, datetime.now(timezone.utc), question)
         except Exception as exc:  # noqa: BLE001 — tracing không được phép làm vỡ query

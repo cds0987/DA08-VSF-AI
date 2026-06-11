@@ -87,6 +87,7 @@ class QueryOrchestrationUseCase:
         question: str,
         user: AuthenticatedUser,
         trace_session: str | None = None,
+        conversation_title: str | None = None,
     ) -> AsyncIterator[dict]:
         """Wrapper mỏng: bọc luồng thật bằng 1 langfuse trace + node spans (best-effort,
         low-level client — KHÔNG callback).
@@ -97,7 +98,7 @@ class QueryOrchestrationUseCase:
         session_id = str(uuid4())
         # Tạo trace eagerly (trước event loop) để span_start() trong _stream_langgraph
         # có trace object ngay từ event đầu tiên.
-        trace = tracer.start(question, user, trace_session or session_id) if tracer else None
+        trace = tracer.start(question, user, trace_session or session_id, conversation_title=conversation_title) if tracer else None
         last_done: dict | None = None
         usage_meta: dict | None = None
         try:

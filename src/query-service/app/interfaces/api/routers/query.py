@@ -80,7 +80,7 @@ async def query(
     trace_session = "ci-smoke" if x_ci_smoke else request.trace_session
 
     async def events():
-        async for event in use_case.stream(request.question, user, trace_session=trace_session):
+        async for event in use_case.stream(request.question, user, trace_session=trace_session, conversation_title=request.conversation_title):
             yield format_sse(event)
 
     return StreamingResponse(

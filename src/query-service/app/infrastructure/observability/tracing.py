@@ -28,11 +28,17 @@ class CompositeTracer:
     def __init__(self, tracers: list[Any]) -> None:
         self._tracers = tracers
 
-    def start(self, question: str, user: Any, session_id: str | None) -> list | None:
+    def start(
+        self,
+        question: str,
+        user: Any,
+        session_id: str | None,
+        conversation_title: str | None = None,
+    ) -> list | None:
         handles = []
         for tracer in self._tracers:
             try:
-                handles.append((tracer, tracer.start(question, user, session_id)))
+                handles.append((tracer, tracer.start(question, user, session_id, conversation_title=conversation_title)))
             except Exception as exc:  # noqa: BLE001 — 1 backend lỗi không kéo theo cái khác
                 logger.warning("composite_trace_start_failed", extra={"error": str(exc)[:200]})
         return handles or None
