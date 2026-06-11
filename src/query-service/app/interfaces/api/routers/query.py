@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 _SSE_RESPONSES = {
@@ -55,6 +55,7 @@ async def query(
     user: AuthenticatedUser = Depends(get_current_user),
     use_case: QueryOrchestrationUseCase = Depends(get_orchestration_use_case),
     rate_limiter=Depends(get_rate_limiter),
+    x_ci_smoke: str | None = Header(default=None),
 ) -> StreamingResponse:
     if request.user_id != user.id:
         raise HTTPException(
@@ -74,8 +75,12 @@ async def query(
             detail="Rate limit exceeded. Max 20 requests/minute.",
         )
 
+    # Smoke CI gửi header X-CI-Smoke=1 -> dán trace vào session "ci-smoke" (gom 1 chỗ,
+    # deploy kế tự xóa). Query user thật KHÔNG có header -> session_id uuid bình thường.
+    trace_session = "ci-smoke" if x_ci_smoke else None
+
     async def events():
-        async for event in use_case.stream(request.question, user):
+        async for event in use_case.stream(request.question, user, trace_session=trace_session):
             yield format_sse(event)
 
     return StreamingResponse(

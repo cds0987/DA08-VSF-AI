@@ -49,12 +49,12 @@ export interface QueryRequest {
 }
 
 export interface QuerySource {
-  document_id: string
+  document_id?: string
   document_name: string
   caption: string
   heading_path: string[]
   score: number
-  source_gcs_uri: string
+  source_gcs_uri?: string
   page_number?: number | null
 }
 

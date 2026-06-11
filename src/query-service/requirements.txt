@@ -17,5 +17,13 @@ langgraph-checkpoint>=0.2.0
 langchain-openai>=0.3.0
 langchain-mcp-adapters>=0.1.0
 llm-guard>=0.3.0
-langfuse>=2.0.0
+# Langfuse self-host server = v2 -> GHIM SDK v2 (>=3 dùng OTLP, server v2 không nhận).
+# Dùng LOW-LEVEL client (langfuse.Langfuse), KHÔNG dùng CallbackHandler -> KHÔNG cần
+# `langchain` (thêm langchain sẽ hạ cấp langchain-core 1.x -> vỡ langgraph).
+langfuse>=2.0.0,<3
+# LangSmith chạy SONG SONG langfuse (OBSERVABILITY_MODE=langfuse,langsmith). Dùng LOW-LEVEL
+# RunTree (KHÔNG callback, KHÔNG import langchain) -> không đụng langchain-core 1.x.
+langsmith>=0.1.0
+# Model-price catalog: runtime CHỈ đọc model_prices.json đã bundle vào image (xem
+# Dockerfile stage price-builder + requirements-build.txt). KHÔNG cần hf/pyarrow ở runtime.
 newrelic>=9.0.0

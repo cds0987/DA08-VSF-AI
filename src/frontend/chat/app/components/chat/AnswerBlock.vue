@@ -57,7 +57,7 @@ function selectSource(citation: Citation) {
     <div class="px-5 pb-5 pt-4 text-slate-800">
       <div 
         v-if="data.content"
-        class="prose prose-sm prose-slate max-w-none prose-p:leading-relaxed prose-pre:bg-slate-50 prose-pre:text-slate-800 prose-pre:border prose-pre:border-slate-200 [overflow-wrap:anywhere]"
+        class="ai-response-markdown prose prose-sm prose-slate max-w-none text-slate-900 prose-p:leading-relaxed prose-pre:bg-slate-50 prose-pre:border prose-pre:border-slate-200 [overflow-wrap:anywhere]"
         v-html="renderedContent"
       />
       <ActionableCard v-if="data.action" :action="data.action" />
@@ -123,3 +123,20 @@ function selectSource(citation: Citation) {
     </div>
   </div>
 </template>
+
+<style scoped>
+.ai-response-markdown {
+  --tw-prose-body: #0f172a;
+  --tw-prose-headings: #0f172a;
+  --tw-prose-lead: #0f172a;
+  --tw-prose-links: #0f172a;
+  --tw-prose-bold: #0f172a;
+  --tw-prose-counters: #0f172a;
+  --tw-prose-bullets: #0f172a;
+  --tw-prose-quotes: #0f172a;
+  --tw-prose-captions: #0f172a;
+  --tw-prose-kbd: #0f172a;
+  --tw-prose-code: #0f172a;
+  --tw-prose-pre-code: #0f172a;
+}
+</style>

@@ -11,6 +11,7 @@ import type {
   PipelineStage,
   QueryDoneEvent,
   QueryRequest,
+  QuerySource,
   QueryTokenEvent,
 } from '~/types'
 import {
@@ -23,12 +24,6 @@ import {
 const HISTORY_KEY = 'eka.chat.conversations'
 const CURRENT_CONVERSATION_KEY = 'eka.chat.current-conversation'
 const BACKEND_CONVERSATION_ID = 'backend-conversation'
-const STREAM_RENDER_INITIAL_INTERVAL_MS = 46
-const STREAM_RENDER_MID_INTERVAL_MS = 24
-const STREAM_RENDER_FAST_INTERVAL_MS = 12
-const STREAM_RENDER_INITIAL_CHUNK_SIZE = 2
-const STREAM_RENDER_MID_CHUNK_SIZE = 4
-const STREAM_RENDER_FAST_CHUNK_SIZE = 7
 
 function createConversationId() {
   return 'conversation-' + crypto.randomUUID()
@@ -52,20 +47,38 @@ function createTitle(text: string) {
   return normalized.length > 48 ? `${normalized.slice(0, 48)}...` : normalized
 }
 
+function sourceDocumentId(source: QuerySource): string {
+  const explicitId = source.document_id?.trim()
+  if (explicitId) return explicitId
+
+  const uri = source.source_gcs_uri || ''
+  const marker = '/raw/'
+  const markerIndex = uri.indexOf(marker)
+  if (markerIndex < 0) return ''
+  return uri.slice(markerIndex + marker.length).split('/')[0] || ''
+}
+
+function toCitation(source: QuerySource, id: string): Citation {
+  return {
+    id,
+    document_id: sourceDocumentId(source),
+    document: source.document_name,
+    caption: source.caption,
+    heading_path: source.heading_path,
+    page_number: source.page_number,
+  }
+}
+
 function toChatMessage(message: ConversationHistoryMessage, index: number): ChatMessage {
   const createdAt = new Date(message.created_at)
   return {
     id: 'history-' + createdAt.getTime() + '-' + index,
     role: message.role,
     content: message.content,
-    citations: message.sources?.map((source, sIndex) => ({
-      id: `history-${createdAt.getTime()}-${index}-source-${sIndex}`,
-      document_id: source.document_id,
-      document: source.document_name,
-      caption: source.caption,
-      heading_path: source.heading_path,
-      page_number: source.page_number,
-    })),
+    citations: message.sources?.map((source, sIndex) => toCitation(
+      source,
+      'history-' + createdAt.getTime() + '-' + index + '-source-' + sIndex,
+    )),
     timestamp: Number.isNaN(createdAt.getTime())
       ? message.created_at
       : createdAt.toLocaleString(),
@@ -97,31 +110,6 @@ function errorMessage(error: unknown) {
     return error.message
   }
   return 'The answer stream ended before it completed. Please try again.'
-}
-
-function streamChunkSize(renderedLength: number) {
-  if (renderedLength < 48) return STREAM_RENDER_INITIAL_CHUNK_SIZE
-  if (renderedLength < 220) return STREAM_RENDER_MID_CHUNK_SIZE
-  return STREAM_RENDER_FAST_CHUNK_SIZE
-}
-
-function streamRenderInterval(renderedLength: number) {
-  if (renderedLength < 48) return STREAM_RENDER_INITIAL_INTERVAL_MS
-  if (renderedLength < 220) return STREAM_RENDER_MID_INTERVAL_MS
-  return STREAM_RENDER_FAST_INTERVAL_MS
-}
-
-function splitStreamToken(token: string, renderedLength: number): string[] {
-  const chunkSize = streamChunkSize(renderedLength)
-  if (token.length <= chunkSize) return [token]
-
-  const units: string[] = []
-  let index = 0
-  while (index < token.length) {
-    units.push(token.slice(index, index + chunkSize))
-    index += chunkSize
-  }
-  return units
 }
 
 export const useChatStore = defineStore('chat', () => {
@@ -373,70 +361,6 @@ export const useChatStore = defineStore('chat', () => {
     let fullContent = ''
     let completed = false
     let donePayload: QueryDoneEvent | null = null
-    const pendingTokens: string[] = []
-    let renderTimer: number | null = null
-    let resolveRender: (() => void) | null = null
-    let renderPromise: Promise<void> | null = null
-    let renderedLength = 0
-
-    function finishTokenRender() {
-      resolveRender?.()
-      resolveRender = null
-      renderPromise = null
-    }
-
-    function flushPendingTokens() {
-      if (renderTimer !== null) {
-        window.clearTimeout(renderTimer)
-        renderTimer = null
-      }
-      if (pendingTokens.length > 0) {
-        const rest = pendingTokens.join('')
-        streamingText.value += rest
-        renderedLength += rest.length
-        pendingTokens.length = 0
-      }
-      finishTokenRender()
-    }
-
-    function scheduleTokenRender() {
-      if (renderTimer !== null || controller.signal.aborted) return
-
-      if (!renderPromise) {
-        renderPromise = new Promise<void>((resolve) => {
-          resolveRender = resolve
-        })
-      }
-
-      renderTimer = window.setTimeout(() => {
-        renderTimer = null
-        const token = pendingTokens.shift()
-        if (token) {
-          streamingText.value += token
-          renderedLength += token.length
-        }
-
-        if (completed && pendingTokens.length > 0) {
-          flushPendingTokens()
-          return
-        }
-
-        if (pendingTokens.length > 0) {
-          scheduleTokenRender()
-          return
-        }
-
-        finishTokenRender()
-      }, streamRenderInterval(renderedLength))
-    }
-
-    async function waitForTokenRender() {
-      if (completed) {
-        flushPendingTokens()
-      }
-      if (renderPromise) await renderPromise
-    }
-
     const request: QueryRequest = {
       question,
       user_id: String(userId),
@@ -476,10 +400,8 @@ export const useChatStore = defineStore('chat', () => {
 
             if (payload.token) {
               fullContent += payload.token
-              pendingTokens.push(...splitStreamToken(payload.token, renderedLength + pendingTokens.join('').length))
-              // Switch to the streaming text block once tokens start arriving
+              streamingText.value += payload.token
               pipeline.value = pipelineStages.length
-              scheduleTokenRender()
             }
             return
           }
@@ -498,8 +420,8 @@ export const useChatStore = defineStore('chat', () => {
         },
       })
 
-      await waitForTokenRender()
       if (donePayload) {
+        await nextTick()
         const result = donePayload as QueryDoneEvent
         
         // Attempt to extract JSON action from fullContent if it looks like JSON
@@ -521,14 +443,10 @@ export const useChatStore = defineStore('chat', () => {
           role: 'assistant',
           content: actionPayload ? '' : fullContent, // Hide raw JSON if it's an action
           action: actionPayload,
-          citations: result.sources.map((source, index) => ({
-            id: result.session_id + '-source-' + index,
-            document_id: source.document_id,
-            document: source.document_name,
-            caption: source.caption,
-            heading_path: source.heading_path,
-            page_number: source.page_number,
-          })),
+          citations: result.sources.map((source, index) => toCitation(
+            source,
+            result.session_id + '-source-' + index,
+          )),
           sessionId: result.session_id,
           timestamp: new Date().toLocaleString(),
         }
@@ -554,7 +472,6 @@ export const useChatStore = defineStore('chat', () => {
         isUsingHistoryFallback.value = true
       }
     } finally {
-      if (renderTimer !== null) window.clearTimeout(renderTimer)
       if (abortController === controller) abortController = null
       streamingText.value = ''
       pipeline.value = -1

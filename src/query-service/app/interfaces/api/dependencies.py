@@ -34,7 +34,7 @@ from app.infrastructure.messaging.nats_events import QueryNatsEventHandler
 from app.infrastructure.messaging.nats_subscriber import NatsSubscriberManager
 from app.infrastructure.messaging.notification_service import NotificationService
 from app.infrastructure.guardrails.llm_guard_service import build_guardrails
-from app.infrastructure.observability.langfuse_tracing import build_langfuse_callback
+from app.infrastructure.observability.tracing import build_tracer
 from app.infrastructure.sse.connection_manager import ConnectionManager
 
 bearer_scheme = HTTPBearer(auto_error=False, scheme_name="BearerAuth")
@@ -174,8 +174,9 @@ def get_openai_client() -> OpenAIStreamingClient:
 
 
 @lru_cache
-def get_langfuse_callback():
-    return build_langfuse_callback(get_settings())
+def get_observability_tracer():
+    # Gộp langfuse + langsmith (composite) theo OBSERVABILITY_MODE. Xem tracing.build_tracer.
+    return build_tracer(get_settings())
 
 
 @lru_cache
@@ -193,7 +194,7 @@ def get_orchestration_use_case() -> QueryOrchestrationUseCase:
         openai_client=get_openai_client(),
         route_decision_provider=get_query_router(),
         langgraph_agent=get_langgraph_agent(),
-        langfuse_callback=get_langfuse_callback(),
+        langfuse_tracer=get_observability_tracer(),
         guardrails=get_guardrails(),
     )
 
@@ -300,6 +301,6 @@ def reset_state_for_tests() -> None:
     get_langchain_model.cache_clear()
     get_langchain_mcp_tools_loader.cache_clear()
     get_langgraph_agent.cache_clear()
-    get_langfuse_callback.cache_clear()
+    get_observability_tracer.cache_clear()
     get_guardrails.cache_clear()
     get_openai_client.cache_clear()
