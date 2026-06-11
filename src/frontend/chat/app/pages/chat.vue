@@ -22,10 +22,43 @@ const chat = useChatStore()
 const router = useRouter()
 const scrollRef = ref<HTMLDivElement | null>(null)
 const hasConversation = computed(() => chat.messages.length > 0 || chat.pipeline >= 0)
+let requiresInstantScroll = false
+let instantScrollScheduled = false
 
-const scrollToBottom = useDebounceFn(() => {
-  if (scrollRef.value) scrollRef.value.scrollTop = scrollRef.value.scrollHeight
+function scrollToBottom(behavior: ScrollBehavior) {
+  scrollRef.value?.scrollTo({
+    top: scrollRef.value.scrollHeight,
+    behavior,
+  })
+}
+
+const smoothScrollToBottom = useDebounceFn(() => {
+  if (requiresInstantScroll || chat.isHistoryLoading) return
+  scrollToBottom("smooth")
 }, 16)
+
+function markForInstantScroll() {
+  requiresInstantScroll = true
+  smoothScrollToBottom.cancel()
+}
+
+function scheduleInstantScroll() {
+  markForInstantScroll()
+  if (instantScrollScheduled) return
+
+  instantScrollScheduled = true
+  // Double rAF to ensure browser has updated DOM and height is available
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      scrollToBottom("auto")
+      // Short delay to wait for any trailing reactive updates
+      setTimeout(() => {
+        requiresInstantScroll = false
+        instantScrollScheduled = false
+      }, 50)
+    })
+  })
+}
 
 async function submitFeedback(messageId: string, score: 1 | -1) {
   try {
@@ -49,8 +82,32 @@ onMounted(async () => {
   }
 })
 
+watch(
+  () => chat.isHistoryLoading,
+  (isLoading) => {
+    if (isLoading) {
+      markForInstantScroll()
+      return
+    }
+
+    if (requiresInstantScroll) scheduleInstantScroll()
+  },
+  { flush: "sync" },
+)
+
+watch(
+  () => chat.currentConversationId,
+  () => scheduleInstantScroll(),
+  { flush: "sync" },
+)
+
 watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText], () => {
-  nextTick(scrollToBottom)
+  if (requiresInstantScroll || chat.isHistoryLoading) {
+    scheduleInstantScroll()
+    return
+  }
+
+  nextTick(smoothScrollToBottom)
 })
 </script>
 
@@ -59,7 +116,7 @@ watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText
     <div
       :class="cn('relative flex h-full flex-1 flex-col', chat.isPanelOpen && 'lg:pr-[min(40vw,480px)]')"
     >
-      <div ref="scrollRef" class="flex-1 overflow-y-auto scroll-smooth custom-scrollbar">
+      <div ref="scrollRef" class="flex-1 overflow-y-auto custom-scrollbar">
         <div class="mx-auto flex min-h-full w-full max-w-[860px] flex-col px-8 pb-32 pt-4">
           <ChatMessages
             v-if="hasConversation"

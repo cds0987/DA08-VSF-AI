@@ -98,7 +98,7 @@ async function handleNotificationClick(item: NotificationItem) {
         <WifiOff class="h-5 w-5 text-slate-400 dark:text-muted-foreground" />
         Chưa có thông báo mới.
       </div>
-      <div v-else class="max-h-[420px] overflow-y-auto p-1.5">
+      <div v-else class="notification-scrollbar max-h-[420px] overflow-y-auto p-1.5">
         <DropdownMenuItem
           v-for="item in notifications.items"
           :key="item.id"
@@ -126,3 +126,29 @@ async function handleNotificationClick(item: NotificationItem) {
     </DropdownMenuContent>
   </DropdownMenu>
 </template>
+
+<style scoped>
+:global(.dark .notification-scrollbar) {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 18%) #1b1b1f;
+}
+
+:global(.dark .notification-scrollbar::-webkit-scrollbar) {
+  width: 6px;
+}
+
+:global(.dark .notification-scrollbar::-webkit-scrollbar-track) {
+  background: #1b1b1f;
+  border-radius: 9999px;
+}
+
+:global(.dark .notification-scrollbar::-webkit-scrollbar-thumb) {
+  background-color: rgb(255 255 255 / 18%);
+  border: 1px solid #1b1b1f;
+  border-radius: 9999px;
+}
+
+:global(.dark .notification-scrollbar::-webkit-scrollbar-thumb:hover) {
+  background-color: rgb(255 255 255 / 28%);
+}
+</style>
