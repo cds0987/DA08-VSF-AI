@@ -158,17 +158,21 @@ jobs:
           cache: pip
           cache-dependency-path: src/${{ matrix.service }}/requirements.txt
       - name: Install deps
-        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+        # httpx: starlette/fastapi TestClient cần (vài service có trong test mà
+        # KHÔNG khai trong requirements runtime) -> cài thêm cho test, không bloat image.
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt httpx
       - name: Run unit + behavior tests (infra off)
         env:
           APP_ENV: development
           AI_PROVIDER: offline
         run: |
+          # `python -m pytest` (KHÔNG `pytest` trần): thêm CWD vào sys.path -> service
+          # không có pytest.ini/conftest set path (user/query) vẫn `import app` được.
           # rag-worker: tests/e2e cần NATS+MinIO+Qdrant THẬT -> để Phase 2 lo, bỏ ở đây.
           if [ "${{ matrix.service }}" = "rag-worker" ]; then
-            pytest tests -q -ra --ignore=tests/e2e
+            python -m pytest tests -q -ra --ignore=tests/e2e
           else
-            pytest tests -q -ra
+            python -m pytest tests -q -ra
           fi
 
   # ─────────────────── Phase 1b: CONTRACT PARITY ──────────────────────
