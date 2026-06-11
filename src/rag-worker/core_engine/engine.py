@@ -113,6 +113,27 @@ class HaystackRagEngine:
                 metadata=metadata,
             )
 
+    def _safe_model(self, component: object | None, capability: str, fallback: str) -> str:
+        with contextlib.suppress(Exception):
+            provider = getattr(component, "_provider", None)
+            if provider is None or not hasattr(provider, "cap"):
+                return fallback
+            config = provider.cap(capability)
+            model = getattr(config, "model", "")
+            if isinstance(model, str) and model.strip():
+                return model
+        return fallback
+
+    def _safe_collection_name(self) -> str:
+        with contextlib.suppress(Exception):
+            config = getattr(self.vectors, "config", None)
+            if config is None or not hasattr(config, "index_id"):
+                return ""
+            name = config.index_id()
+            if isinstance(name, str):
+                return name
+        return ""
+
     async def ingest(self, doc: IngestInput) -> int:
         request_correlation_id = doc.correlation_id or str(uuid4())
         total_sw = Stopwatch()
@@ -192,9 +213,7 @@ class HaystackRagEngine:
             self._generation(
                 trace,
                 name="caption",
-                model=getattr(self.captioner, "_provider", None).cap("caption").model
-                if hasattr(getattr(self.captioner, "_provider", None), "cap")
-                else "caption",
+                model=self._safe_model(self.captioner, "caption", "caption"),
                 start_time=caption_start,
                 input_data={"sections": len(sections)},
                 output={"captions": len(caption_results), "fallback_count": caption_fallbacks},
@@ -282,9 +301,7 @@ class HaystackRagEngine:
         self._generation(
             trace,
             name="embed",
-            model=getattr(self.embedder, "_provider", None).cap("embed").model
-            if hasattr(getattr(self.embedder, "_provider", None), "cap")
-            else "embed",
+            model=self._safe_model(self.embedder, "embed", "embed"),
             start_time=embed_start,
             input_data={"chunks": len(embed_texts)},
             output={"vectors": len(vectors), "dimension": settings.embed_dimension},
@@ -302,7 +319,7 @@ class HaystackRagEngine:
             trace,
             "qdrant-write",
             {
-                "collection": getattr(getattr(self.vectors, "config", None), "index_id", lambda: "")(),
+                "collection": self._safe_collection_name(),
                 "num_vectors": len(records),
             },
         )

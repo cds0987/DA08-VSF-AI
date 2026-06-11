@@ -334,6 +334,11 @@ class IngestDocumentUseCase:
                     "ingest produced 0 chunks; source is empty or OCR is required"
                 )
         except LeaseLostError:
+            await self._finish_trace(
+                trace,
+                "LEASE_LOST",
+                {"stage": "ingest", "error": "claim lease lost"},
+            )
             return await self._jobs.get_job(job.id)
         except Exception as exc:
             await self._finish_trace(

@@ -50,6 +50,22 @@ class _StubCaptioner:
         return type("CaptionResult", (), {"text": f"caption:{text[:5]}", "used_fallback": False})()
 
 
+class _ExplodingProvider:
+    @staticmethod
+    def cap(capability: str):
+        raise RuntimeError(f"{capability} provider metadata down")
+
+
+class _ExplodingModelEmbedder(_StubEmbedder):
+    def __init__(self) -> None:
+        self._provider = _ExplodingProvider()
+
+
+class _ExplodingModelCaptioner(_StubCaptioner):
+    def __init__(self) -> None:
+        self._provider = _ExplodingProvider()
+
+
 class _RecordingTracer:
     def __init__(self) -> None:
         self.events: list[str] = []
@@ -106,3 +122,34 @@ async def test_engine_emits_langfuse_stages_in_order() -> None:
         "start:qdrant-write",
         "ok:qdrant-write",
     ]
+
+
+@pytest.mark.asyncio
+async def test_engine_survives_model_metadata_lookup_failure() -> None:
+    tracer = _RecordingTracer()
+    engine = HaystackRagEngine(
+        settings=HaystackSettings(
+            embed_dimension=3,
+            parent_max_words=100,
+            child_max_words=4,
+            child_overlap_words=1,
+        ),
+        embedder=_ExplodingModelEmbedder(),
+        vectors=_StubVectors(),
+        captioner=_ExplodingModelCaptioner(),
+        tracer=tracer,
+    )
+
+    chunk_count = await engine.ingest(
+        IngestInput(
+            document_id="doc-trace-safe-model",
+            document_name="Doc",
+            file_type="md",
+            markdown="# Title\none two three four five six seven eight",
+            trace_handle=object(),
+        )
+    )
+
+    assert chunk_count > 0
+    assert "gen:caption" in tracer.events
+    assert "gen:embed" in tracer.events

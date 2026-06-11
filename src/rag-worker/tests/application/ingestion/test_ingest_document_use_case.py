@@ -195,6 +195,9 @@ class EnqueueFailingDocuments(InMemoryDocumentRepository):
 
 
 class ExplodingTracer:
+    def __init__(self) -> None:
+        self.finished: list[tuple[str, dict]] = []
+
     def start_job(self, *args, **kwargs):
         raise RuntimeError("trace start down")
 
@@ -212,6 +215,29 @@ class ExplodingTracer:
 
     async def finish_job(self, *args, **kwargs):
         raise RuntimeError("trace finish down")
+
+
+class RecordingTracer:
+    def __init__(self) -> None:
+        self.finished: list[tuple[str, dict]] = []
+
+    def start_job(self, *args, **kwargs):
+        return object()
+
+    def span_start(self, *args, **kwargs):
+        return object()
+
+    def span_ok(self, *args, **kwargs):
+        return None
+
+    def span_error(self, *args, **kwargs):
+        return None
+
+    def generation(self, *args, **kwargs):
+        return None
+
+    async def finish_job(self, trace, status, payload):
+        self.finished.append((status, payload))
 
 
 def test_ingest_use_case_enqueues_and_processes_markdown_job() -> None:
@@ -581,6 +607,36 @@ def test_ingest_use_case_marks_transient_failures_for_reconcile() -> None:
         assert processed is not None
         assert processed.status is IngestJobStatus.FAILED
         assert processed.error_class == "transient"
+
+    asyncio.run(scenario())
+
+
+def test_ingest_use_case_finishes_trace_when_lease_is_lost() -> None:
+    async def scenario() -> None:
+        tracer = RecordingTracer()
+        engine = SlowEngine()
+        documents = LeaseLosingDocuments()
+        use_case = IngestDocumentUseCase(
+            engine,
+            documents,
+            documents,
+            StubParser(),
+            StubArtifactStore(),
+            claim_heartbeat_interval_seconds=0.01,
+            tracer=tracer,
+        )
+
+        await use_case.enqueue(
+            document_id="doc-lease-lost-trace",
+            document_name="Guide",
+            file_type="md",
+            markdown="# Title\nBody",
+        )
+        processed = await use_case.process_next_job()
+
+        assert processed is not None
+        assert processed.status is IngestJobStatus.PROCESSING
+        assert tracer.finished == [("LEASE_LOST", {"stage": "ingest", "error": "claim lease lost"})]
 
     asyncio.run(scenario())
 
