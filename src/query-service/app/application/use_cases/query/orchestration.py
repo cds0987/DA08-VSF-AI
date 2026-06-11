@@ -292,8 +292,11 @@ class QueryOrchestrationUseCase:
         last_iteration = 0
         # Track if we already emitted the shortcut acting event
         shortcut_acting_emitted = False
-        # Langfuse node spans: run_id -> span object (best-effort)
-        _active_spans: dict[str, Any] = {}
+        # Langfuse node spans: name -> [span, ...] (LIFO stack per name).
+        # Dùng name thay vì run_id vì LangGraph có thể emit on_chain_end với run_id
+        # khác on_chain_start (dispatcher wrapper). LangGraph chạy node tuần tự nên
+        # LIFO stack là đủ chính xác.
+        _active_spans: dict[str, list] = {}
         _SPAN_NODES = {"shortcut", "triage", "think", "act", "observe", "answer"}
 
         # recursion_limit is a defence-in-depth net; Part 1 (force_answer + act→observe→think
@@ -324,13 +327,12 @@ class QueryOrchestrationUseCase:
                         last_iteration = max(last_iteration, 1)
                     # NOTE: do NOT increment for "think" or "answer" — shortcut path has 0 iterations
                     if node_name in _SPAN_NODES and tracer and trace_handle:
-                        _run_id = event.get("run_id", "")
                         _span = tracer.span_start(
                             trace_handle, name=node_name,
                             input_data={"iteration": last_iteration},
                         )
-                        if _span and _run_id:
-                            _active_spans[_run_id] = _span
+                        if _span:
+                            _active_spans.setdefault(node_name, []).append(_span)
 
                 # Token stream from LLM
                 elif event_type == "on_chat_model_stream":
@@ -357,13 +359,12 @@ class QueryOrchestrationUseCase:
                     tool_name = event["name"]
                     input_data = event.get("data", {}).get("input", {})
                     if tracer and trace_handle:
-                        _run_id = event.get("run_id", "")
                         _span = tracer.span_start(
                             trace_handle, name=f"tool:{tool_name}",
                             input_data={"tool": tool_name, "args": input_data},
                         )
-                        if _span and _run_id:
-                            _active_spans[_run_id] = _span
+                        if _span:
+                            _active_spans.setdefault(f"tool:{tool_name}", []).append(_span)
                     yield {
                         "phase": "acting",
                         "agent_mode": "langgraph",
@@ -378,9 +379,9 @@ class QueryOrchestrationUseCase:
                     tool_name = event["name"]
                     output_data = event.get("data", {}).get("output", "")
                     if tracer:
-                        _run_id = event.get("run_id", "")
-                        _span = _active_spans.pop(_run_id, None)
-                        if _span:
+                        _tool_stack = _active_spans.get(f"tool:{tool_name}")
+                        if _tool_stack:
+                            _span = _tool_stack.pop()
                             tracer.span_end(_span, output_data={"result_preview": str(output_data)[:300]})
                     yield {
                         "phase": "observing",
@@ -419,11 +420,11 @@ class QueryOrchestrationUseCase:
                 elif event_type == "on_chain_end":
                     run_name = event.get("name", "")
                     if run_name not in ("VinSmartFutureReActAgent", "VinSmartFutureAgent"):
-                        # Sub-node completed — close its Langfuse span
+                        # Sub-node completed — close its Langfuse span (LIFO pop by name)
                         if tracer:
-                            _run_id = event.get("run_id", "")
-                            _span = _active_spans.pop(_run_id, None)
-                            if _span:
+                            _node_stack = _active_spans.get(run_name)
+                            if _node_stack:
+                                _span = _node_stack.pop()
                                 _out = event.get("data", {}).get("output") or {}
                                 tracer.span_end(_span, output_data=_node_output_summary(_out))
                         continue
