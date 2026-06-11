@@ -8,6 +8,7 @@ from app.domain.entities.document import DocumentStatus
 from app.infrastructure.db.postgres_document_repository import PostgresDocumentRepository
 from app.infrastructure.db.session import AsyncSessionLocal
 from app.infrastructure.messaging.nats_publisher import NatsPublisher
+from app.infrastructure.messaging.nats_publisher import ensure_jetstream_streams
 
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ async def start_status_subscriber(
 
         if settings.nats_jetstream_enabled:
             js = nc.jetstream()
+            await ensure_jetstream_streams(js)
             await js.subscribe(
                 "doc.status",
                 durable="document-service-status",

@@ -100,7 +100,10 @@ class UploadDocumentUseCase:
         try:
             await self.storage.upload_file(gcs_key, content, content_type=content_type)
         except Exception as exc:
-            raise StorageError() from exc
+            raise StorageError(
+                "Storage upload failed. Check GOOGLE_APPLICATION_CREDENTIALS, bucket name, "
+                "and service account object permissions."
+            ) from exc
         document = await self.document_repository.create(
             Document(
                 id=document_id,

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -32,9 +33,9 @@ class DocumentList(BaseModel):
 
 
 class DocumentFileResponse(BaseModel):
-    url: str
-    file_type: str
-    expires_in: int = 300
+    url: str = Field(min_length=1)
+    file_type: Literal["pdf", "docx", "txt", "xlsx", "csv", "pptx", "md"]
+    expires_in: int = Field(default=300, gt=0)
 
 
 class MessageResponse(BaseModel):
