@@ -810,7 +810,11 @@ def _nats_config() -> dict | None:
         return None
     return {
         "url": url,
-        "stream": os.getenv("NATS_STREAM", "DOCS"),
+        # Stream chuẩn theo contract infra/nats/subjects.md = DOC_EVENTS (chứa
+        # doc.ingest/doc.status/doc.access). KHÔNG dùng "DOCS" — document-service
+        # tạo DOC_EVENTS theo contract; 2 stream khác tên cùng subject = JetStream
+        # "subjects overlap with an existing stream" -> rag-worker không subscribe được.
+        "stream": os.getenv("NATS_STREAM", "DOC_EVENTS"),
         # Mặc định verify-only (fail-closed): stream do DevOps provision trước
         # (infra/nats/jetstream.conf). Dev/CI bật =1 để rag-worker tự dựng stream.
         "auto_create_stream": os.getenv("NATS_STREAM_AUTO_CREATE", "").strip().lower()
