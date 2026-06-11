@@ -24,3 +24,4 @@ infra/localtest/init-db.sql
 # deploy/env/*.env: COMMIT thẳng vào git (repo private) -> env đi cùng code, deploy
 # `git reset --hard` đồng bộ luôn. KHÔNG ignore. Nguồn sự thật DUY NHẤT = git.
 .codegraph
+local-stack/

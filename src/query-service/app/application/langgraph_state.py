@@ -71,6 +71,12 @@ class AgentState(TypedDict):
     # act_node can detect duplicate calls and set force_answer before the loop repeats.
     tool_call_signatures: list[str]
 
+    # --- Observability accumulator ---
+    # rag_search_events: list of JSON-safe dicts written by act_node per rag_search call.
+    # Each entry: {query, top_k, allowed_count, threshold, total, qualified, scores, doc_names,
+    #              start (ISO), end (ISO)}.  Consumed by orchestration to build Langfuse spans.
+    rag_search_events: list
+
     # --- Metadata ---
     session_id: str
     question: str
@@ -104,6 +110,7 @@ def create_initial_state(
         sources=[],
         force_answer=False,
         tool_call_signatures=[],
+        rag_search_events=[],
         user_id=user_id,
         user_role=user_role,
         user_department=user_department,

@@ -12,6 +12,7 @@ Architecture:
 import json
 import logging
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 from typing import Literal
 
 from langchain_core.language_models import BaseChatModel
@@ -67,49 +68,40 @@ async def build_langgraph_tools(
     from langchain_core.tools import tool
 
     @tool
-    async def rag_search(query: str, top_k: int = 5) -> str:
+    async def rag_search(top_k: int = 5) -> str:
         """
         Search internal company documents, policies, and procedures.
 
+        The user's question is automatically used as the search query — do NOT pass a query
+        parameter.  Just call this tool; act_node injects the raw question server-side (same
+        pattern as user_id / document_ids).
+
         Args:
-            query: Search query in Vietnamese or English.
-            top_k: Number of results to return (default 5, max 20).
+            top_k: Number of results to return (default 5, max 5).
         """
-        results = await mcp_client.rag_search(
-            query=query,
-            document_ids=list(allowed_doc_ids),
-            top_k=top_k,
-        )
-        return json.dumps({
-            "results": [
-                {
-                    "chunk_id": r.chunk_id,
-                    "document_id": r.document_id,
-                    "document_name": r.document_name,
-                    "caption": r.caption,
-                    "parent_text": r.parent_text,
-                    "heading_path": r.heading_path,
-                    "score": r.score,
-                    "page_number": r.page_number,
-                    "source_gcs_uri": r.source_gcs_uri,
-                }
-                for r in results
-            ]
-        })
+        # Schema-only stub: act_node is the sole execution point for rag_search.
+        # It calls mcp_client.rag_search(query=state["question"], ...) directly,
+        # so this coroutine is never invoked at runtime.
+        _ = (mcp_client, allowed_doc_ids, top_k)  # suppress unused-variable warnings
+        return json.dumps({"results": []})
 
     @tool
-    async def hr_query(intent: Literal["leave_balance", "leave_requests", "payroll"]) -> str:
+    async def hr_query(intent: Literal["leave_balance", "leave_requests", "attendance", "onboarding", "payroll", "benefits", "performance"]) -> str:
         """
-        Query the authenticated user's personal HR data.
+        Query the authenticated user's personal HR data (read-only, filtered by user_id).
 
-        NOTE: user_id is automatically injected from authentication — the LLM
-        cannot override this.
+        NOTE: user_id is automatically injected — the LLM cannot override this.
 
         Args:
-            intent: Type of HR data to query.
-                - leave_balance: remaining leave days
-                - leave_requests: leave request history
-                - payroll: salary/payroll information
+            intent: HR data type to query:
+                - leave_balance: remaining leave days (annual/sick)
+                - leave_requests: leave request history and status
+                - attendance: attendance records
+                - onboarding: personal onboarding info
+                - payroll: salary, deductions, net pay
+                - benefits: personal benefits
+                - performance: performance reviews
+        Do NOT use for general policy questions — use rag_search for those.
         """
         result = await mcp_client.hr_query(
             user_id=user_id,  # ACL enforced — LLM cannot override
@@ -149,18 +141,47 @@ _TRIAGE_FALLBACK_CLARIFY = (
     "Ví dụ: bạn muốn biết về chính sách gì, hoặc dữ liệu HR nào?"
 )
 
+# Backward-compat alias map: old 8-label names → new 5-label canonical names.
+# Accepted on both sides so a mixed-version model output still routes correctly.
+_ROUTE_ALIAS: dict[str, str] = {
+    # old safety labels → SAFETY
+    "emergency": "safety",
+    "injury": "safety",
+    "distress": "safety",
+    # old allow labels → ALLOW
+    "in_scope": "allow",
+    "it_support": "allow",
+    # old refuse label → REFUSE
+    "off_topic": "refuse",
+    # old meta label → META
+    "meta_conversation": "meta",
+    # new labels pass through unchanged (lowercase match)
+    "safety": "safety",
+    "allow": "allow",
+    "refuse": "refuse",
+    "clarify": "clarify",
+    "meta": "meta",
+}
+
 
 async def triage_node(state: AgentState, model: BaseChatModel) -> dict:
     """
     triage_node: Classify the question BEFORE calling any MCP tool.
 
-    Returns one of three routes via shortcut_response / shortcut_outcome:
-      - off_topic  -> shortcut_response = OFFTOPIC_ANSWER, shortcut_outcome = "OFF_TOPIC"
-      - clarify    -> shortcut_response = LLM-generated clarify question, shortcut_outcome = "CLARIFY"
-      - in_scope   -> returns {} (falls through to think_node)
+    Routes (5 labels, allow-first principle):
+      - SAFETY   -> shortcut_response = EMERGENCY/INJURY/DISTRESS_ANSWER (per safety_type),
+                    shortcut_outcome = "SUCCESS"
+      - META     -> shortcut_response = prior question from history, shortcut_outcome = "SUCCESS"
+      - REFUSE   -> shortcut_response = next_offtopic_answer(), shortcut_outcome = "OFF_TOPIC"
+      - CLARIFY  -> shortcut_response = LLM clarify question, shortcut_outcome = "CLARIFY"
+      - ALLOW    -> returns {} (falls through to think_node)
+
+    Old label aliases accepted for backward compatibility:
+      emergency/injury/distress → SAFETY, in_scope/it_support → ALLOW,
+      off_topic → REFUSE, meta_conversation → META.
 
     Uses TRIAGE_SYSTEM_PROMPT without bind_tools (classification only — no MCP call).
-    On any parse/network error: defaults to in_scope (never wrongly refuse a real question).
+    On any parse/network error: defaults to ALLOW (never wrongly refuse a real question).
     """
     from langchain_core.messages import SystemMessage, HumanMessage
 
@@ -187,7 +208,7 @@ async def triage_node(state: AgentState, model: BaseChatModel) -> dict:
             ).strip()
 
         payload = json.loads(raw)
-        route = str(payload.get("route", "in_scope")).strip().lower()
+        route = str(payload.get("route", "allow")).strip().lower()
         reason = str(payload.get("reason", ""))
 
     except Exception as exc:
@@ -203,7 +224,7 @@ async def triage_node(state: AgentState, model: BaseChatModel) -> dict:
                 "raw_output": raw_preview,
             },
         )
-        route = "in_scope"
+        route = "allow"
         reason = f"parse_error_fallback: {exc}"
 
     logger.info(
@@ -211,28 +232,36 @@ async def triage_node(state: AgentState, model: BaseChatModel) -> dict:
         extra={"session_id": state["session_id"], "route": route, "reason": reason[:120]},
     )
 
-    if route == "emergency":
+    # Normalise to canonical 5-label set using backward-compat alias map.
+    # New label names (ALLOW/CLARIFY/REFUSE/SAFETY/META) pass through unchanged.
+    canonical = _ROUTE_ALIAS.get(route, route)
+
+    if canonical == "safety":
+        # Read safety_type to select the correct pre-written canned answer.
+        # When aliased from an old label name, override safety_type from the route itself
+        # so old-label model outputs still dispatch to the right answer constant.
+        safety_type = str(payload.get("safety_type", "")).strip().lower()  # type: ignore[possibly-undefined]
+        if route == "emergency":
+            safety_type = "emergency"
+        elif route == "injury":
+            safety_type = "injury"
+        elif route == "distress":
+            safety_type = "distress"
+
+        if safety_type == "injury":
+            safety_answer = INJURY_ANSWER
+        elif safety_type == "distress":
+            safety_answer = DISTRESS_ANSWER
+        else:  # "emergency" or missing/unrecognised — default to emergency protocol
+            safety_answer = EMERGENCY_ANSWER
+
         return {
-            "shortcut_response": EMERGENCY_ANSWER,
+            "shortcut_response": safety_answer,
             "shortcut_outcome": "SUCCESS",
             "phase": AgentPhase.DONE,
         }
 
-    if route == "distress":
-        return {
-            "shortcut_response": DISTRESS_ANSWER,
-            "shortcut_outcome": "SUCCESS",
-            "phase": AgentPhase.DONE,
-        }
-
-    if route == "injury":
-        return {
-            "shortcut_response": INJURY_ANSWER,
-            "shortcut_outcome": "SUCCESS",
-            "phase": AgentPhase.DONE,
-        }
-
-    if route == "meta_conversation":
+    if canonical == "meta":
         # Look up the most recent prior user message in conversation history.
         # Skip any message that equals the current question — the save-ordering fix
         # ensures state["messages"] holds only prior turns, but the guard prevents
@@ -247,30 +276,23 @@ async def triage_node(state: AgentState, model: BaseChatModel) -> dict:
                     prev_q = cand
                     break
         if prev_q:
-            answer = f'Câu hỏi trước của bạn là: "{prev_q}".'
+            meta_answer = f'Câu hỏi trước của bạn là: "{prev_q}".'
         else:
-            answer = "Mình không tìm thấy câu hỏi nào trước đó trong lịch sử hội thoại."
+            meta_answer = "Mình không tìm thấy câu hỏi nào trước đó trong lịch sử hội thoại."
         return {
-            "shortcut_response": answer,
+            "shortcut_response": meta_answer,
             "shortcut_outcome": "SUCCESS",
             "phase": AgentPhase.DONE,
         }
 
-    if route == "off_topic":
+    if canonical == "refuse":
         return {
             "shortcut_response": next_offtopic_answer(),
             "shortcut_outcome": "OFF_TOPIC",
             "phase": AgentPhase.DONE,
         }
 
-    if route == "it_support":
-        return {
-            "shortcut_response": IT_SUPPORT_ANSWER,
-            "shortcut_outcome": "SUCCESS",
-            "phase": AgentPhase.DONE,
-        }
-
-    if route == "clarify":
+    if canonical == "clarify":
         clarify_q = str(payload.get("clarify_question", "")).strip()  # type: ignore[possibly-undefined]
         return {
             "shortcut_response": clarify_q or _TRIAGE_FALLBACK_CLARIFY,
@@ -278,7 +300,7 @@ async def triage_node(state: AgentState, model: BaseChatModel) -> dict:
             "phase": AgentPhase.DONE,
         }
 
-    # in_scope (including unknown routes via fallback) — proceed to think_node
+    # ALLOW (and any unrecognised label) — proceed to think_node
     return {}
 
 
@@ -437,12 +459,16 @@ async def act_node(
     tool_args = tool_call.get("args", {})
     tool_call_id = tool_call.get("id", f"call_{tool_name}")
 
+    # For rag_search: log the actual query being sent (state["question"]), not the LLM-suggested
+    # tool arg (which is ignored).  This makes traces unambiguous in Langfuse.
+    actual_query = state["question"] if tool_name == "rag_search" else None
     logger.info(
         "langgraph_act",
         extra={
             "session_id": state["session_id"],
             "tool": tool_name,
             "args_keys": list(tool_args.keys()),
+            **({"query": actual_query} if actual_query is not None else {}),
         },
     )
 
@@ -460,6 +486,9 @@ async def act_node(
     is_duplicate = sig in existing_sigs
     new_sigs = existing_sigs + [sig]
 
+    # Observability: filled by rag_search branch, None for all other tools.
+    _rag_event: dict | None = None
+
     try:
         if tool_name == "rag_search":
             if not allowed_doc_ids:
@@ -467,16 +496,33 @@ async def act_node(
                 success = False
                 new_sources = []
             else:
+                _rag_start_dt = datetime.now(timezone.utc)
                 results = await mcp_client.rag_search(
-                    query=tool_args.get("query", ""),
+                    query=state["question"],  # raw question — server-injected, like user_id
                     document_ids=list(allowed_doc_ids),
                     top_k=tool_args.get("top_k", 5),
                 )
+                _rag_end_dt = datetime.now(timezone.utc)
                 # Only pass results that meet the relevance threshold to the LLM.
                 # Ngưỡng config-driven (state["rag_score_threshold"]) — trước hardcode 0.70
                 # quá cao cho text-embedding-3-small (chunk liên quan ~0.3-0.6) -> lọc sạch.
                 threshold = state.get("rag_score_threshold", 0.70)
                 qualified = [r for r in results if r.score >= threshold]
+
+                # Ghi debug event (JSON-safe) vào state để orchestration dựng Langfuse span.
+                # Tất cả giá trị là scalar/list[str/float] — an toàn với checkpointer.
+                _rag_event = {
+                    "query": state["question"],
+                    "top_k": tool_args.get("top_k", 5),
+                    "allowed_count": len(allowed_doc_ids),
+                    "threshold": threshold,
+                    "total": len(results),
+                    "qualified": len(qualified),
+                    "scores": [round(r.score, 4) for r in results[:10]],
+                    "doc_names": sorted({r.document_name for r in qualified}),
+                    "start": _rag_start_dt.isoformat(),
+                    "end": _rag_end_dt.isoformat(),
+                }
 
                 if qualified:
                     data = json.dumps({
@@ -593,6 +639,10 @@ async def act_node(
             s for s in new_sources if s["document_name"] not in seen_docs
         ]
         new_state["sources"] = deduped
+
+    # Observability accumulator: append rag_search debug event if recorded above.
+    if _rag_event is not None:
+        new_state["rag_search_events"] = list(state.get("rag_search_events") or []) + [_rag_event]
 
     return new_state
 

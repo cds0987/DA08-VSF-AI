@@ -1,0 +1,551 @@
+# =============================================================================
+# LOCAL STACK — self-contained, build từ source, KHÔNG cần Docker Hub / Cloud SQL / GCS.
+#
+#   docker compose -f docker-compose.local.yml up -d --build
+#
+# Yêu cầu:
+#   - Docker Desktop ≥ 4.x
+#   - OPENAI_API_KEY điền trong .env (root repo) — dùng cho LLM + embeddings
+#
+# Thay thế cloud:
+#   Cloud SQL     → Postgres  :5432 (container)
+#   GCS bucket    → MinIO     :9000 (container, S3-compatible)
+#   Qdrant Cloud  → Qdrant    :6333 (container)
+#   New Relic     → tắt (NEW_RELIC_ENABLED=false)
+#   Langfuse      → self-host container :3100 (OBSERVABILITY_MODE=langfuse)
+#   Microsoft SSO → tắt (dùng đăng nhập email/password)
+#
+# JWT_SECRET_KEY dùng chung cho tất cả service verify token.
+# Giá trị dưới chỉ dùng cho DEV LOCAL — thay bằng secret thực khi lên staging/prod.
+# =============================================================================
+
+x-jwt: &jwt
+  JWT_SECRET_KEY: "local-dev-jwt-secret-change-in-staging-32ch"
+  JWT_ALGORITHM: HS256
+
+x-newrelic-off: &newrelic-off
+  # Tắt New Relic agent: không gửi telemetry ra ngoài khi dev local
+  NEW_RELIC_AGENT_ENABLED: "false"
+  NEW_RELIC_ENABLED: "false"
+
+x-minio-creds: &minio-creds
+  S3_ENDPOINT_URL: http://minio:9000
+  S3_ACCESS_KEY_ID: minioadmin
+  S3_SECRET_ACCESS_KEY: minioadmin
+  S3_REGION: auto
+
+x-openai: &openai
+  OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env (root repo)}
+
+x-nats: &nats
+  NATS_URL: nats://nats:4222
+  NATS_JETSTREAM_ENABLED: "true"
+
+services:
+
+  # ─────────────────────────────── Infra ──────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - ./infra/local-stack/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  nats:
+    image: nats:2.10
+    command: ["-js", "-c", "/etc/nats/jetstream.conf"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - ./infra/nats/jetstream.conf:/etc/nats/jetstream.conf:ro
+      - nats_data:/data
+    restart: unless-stopped
+
+  # ── Langfuse v3 self-host stack — LLM observability (trace LangGraph agent) ──
+  # UI: http://localhost:3100  |  Login: admin@local.dev / Admin@123456
+  # Kiến trúc v3: langfuse-web (ingestion API + UI) + langfuse-worker (async processor)
+  #              + ClickHouse (OLAP trace store) + langfuse-redis (BullMQ queue)
+  #              + MinIO bucket "langfuse" (blob events/media)
+  # query-service gửi span qua OTLP → LANGFUSE_HOST=http://langfuse-web:3000
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24
+    environment:
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  langfuse-redis:
+    # Redis riêng cho Langfuse BullMQ — dùng noeviction tránh drop jobs
+    # KHÔNG gộp với app redis (port 6379) để tránh đụng key rate-limiter
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory-policy", "noeviction"]
+    restart: unless-stopped
+
+  langfuse-web:
+    image: langfuse/langfuse:3
+    ports:
+      - "3100:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/langfuse_db
+      SALT: "local-dev-langfuse-salt-value-32ch"
+      # ENCRYPTION_KEY: 64-char hex (dev cố định — thay bằng openssl rand -hex 32 khi staging)
+      ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      NEXTAUTH_URL: http://localhost:3100
+      NEXTAUTH_SECRET: "local-dev-langfuse-nextauth-secret-32ch"
+      TELEMETRY_ENABLED: "false"
+      # ClickHouse
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      # Redis (BullMQ)
+      REDIS_HOST: langfuse-redis
+      REDIS_PORT: "6379"
+      # Blob storage → MinIO (bucket "langfuse", path-style S3)
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minioadmin
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: minioadmin
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minioadmin
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: minioadmin
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      # Headless bootstrap — tạo sẵn org/project/key tất định; không cần tạo tay qua UI
+      LANGFUSE_INIT_ORG_ID: "local-org"
+      LANGFUSE_INIT_ORG_NAME: "Local Dev"
+      LANGFUSE_INIT_PROJECT_ID: "local-project"
+      LANGFUSE_INIT_PROJECT_NAME: "DA08-VSF RAG Chatbot"
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: "pk-lf-local-dev"
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: "sk-lf-local-dev"
+      LANGFUSE_INIT_USER_EMAIL: "admin@local.dev"
+      LANGFUSE_INIT_USER_NAME: "Admin"
+      LANGFUSE_INIT_USER_PASSWORD: "Admin@123456"
+    restart: unless-stopped
+
+  langfuse-worker:
+    # Worker xử lý ingestion async từ BullMQ → ghi vào ClickHouse
+    image: langfuse/langfuse-worker:3
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/langfuse_db
+      SALT: "local-dev-langfuse-salt-value-32ch"
+      ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: langfuse-redis
+      REDIS_PORT: "6379"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minioadmin
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: minioadmin
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+    restart: unless-stopped
+
+  # MinIO — S3-compatible object storage thay GCS
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console: http://localhost:9001  (admin/minioadmin)
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # One-shot: tạo bucket vsf-rag-chatbot-docs-dev trong MinIO
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 minioadmin minioadmin &&
+        mc mb --ignore-existing local/vsf-rag-chatbot-docs-dev &&
+        mc mb --ignore-existing local/langfuse &&
+        echo 'MinIO buckets ready'
+      "
+    restart: "no"
+
+  # ──────────────────────────── DB Migrations ────────────────────────────
+
+  rag-migrate:
+    build:
+      context: ./src/rag-worker
+    command: ["alembic", "upgrade", "head"]
+    working_dir: /app
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/rag_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  hr-migrate:
+    build:
+      context: ./src/hr-service
+    command: ["alembic", "upgrade", "head"]
+    working_dir: /app
+    environment:
+      # Alembic dùng SQLAlchemy sync engine -> phải dùng psycopg (sync), không phải asyncpg
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/hr_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # ──────────────────────────── Backend Services ─────────────────────────
+
+  user-service:
+    build:
+      context: ./src/user-service
+    ports:
+      - "8000:8000"
+    environment:
+      <<: [*jwt, *newrelic-off]
+      # user-service đọc USER_SERVICE_DATABASE_URL (xem config.py)
+      USER_SERVICE_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/user_db
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/user_db
+      REDIS_URL: redis://redis:6379/0
+      ALLOWED_ORIGINS: "http://localhost,http://localhost:3000,http://localhost:3001"
+      ACCESS_TOKEN_TTL_MINUTES: "480"
+      REFRESH_TOKEN_TTL_DAYS: "7"
+      FAILED_LOGIN_THRESHOLD: "5"
+      LOCKOUT_MINUTES: "15"
+      # Microsoft SSO: để trống = tắt (không redirect sang Azure AD)
+      MICROSOFT_CLIENT_ID: ""
+      MICROSOFT_CLIENT_SECRET: ""
+      MICROSOFT_TENANT_ID: "common"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  document-service:
+    build:
+      context: ./src/document-service
+    ports:
+      - "8002:8002"
+    environment:
+      <<: [*jwt, *minio-creds, *nats, *newrelic-off]
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/doc_db
+      # S3 thay GCS: STORAGE_BACKEND=s3 → dùng boto3 S3 client (trỏ MinIO)
+      STORAGE_BACKEND: s3
+      S3_BUCKET: vsf-rag-chatbot-docs-dev
+      CORS_ORIGINS: "http://localhost,http://localhost:3000,http://localhost:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  hr-service:
+    build:
+      context: ./src/hr-service
+    ports:
+      - "8004:8004"
+    environment:
+      <<: *newrelic-off
+      # hr-service đọc từ HR_DATABASE_URL (config.yaml) và dùng sync SQLAlchemy + psycopg
+      HR_DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/hr_db
+      HR_HOST: "0.0.0.0"
+      HR_PORT: "8004"
+      HR_INTERNAL_TOKEN: ""
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      hr-migrate:
+        condition: service_completed_successfully
+      nats:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c",
+        "import urllib.request; urllib.request.urlopen('http://localhost:8004/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  rag-worker:
+    build:
+      context: ./src/rag-worker
+    environment:
+      <<: [*openai, *minio-creds, *nats, *newrelic-off]
+      APP_ENV: production
+      LOG_LEVEL: INFO
+      AI_PROVIDER: openai
+      EMBED_MODEL: text-embedding-3-small
+      EMBED_DIMENSION: "1536"
+      CAPTION_MODEL: gpt-4o-mini
+      CAPTION_ENABLED: "true"
+      RERANK_PROVIDER: none
+      # Parser đọc file từ MinIO (S3 protocol)
+      PARSER_IMPL: s3
+      S3_SOURCE_BUCKET: vsf-rag-chatbot-docs-dev
+      SOURCE_ROOT: /tmp/rag-sources
+      ARTIFACT_ROOT: /tmp/rag-artifacts
+      # Qdrant local
+      VECTOR_DB_PROVIDER: qdrant
+      VECTOR_DB_URL: http://qdrant:6333
+      VECTOR_DB_API_KEY: ""
+      VECTOR_COLLECTION: rag_chatbot
+      # Postgres metadata DB
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/rag_db
+      NATS_STREAM: DOCS
+      NATS_STREAM_AUTO_CREATE: "1"
+      INGEST_WORKER_COUNT: "1"
+      # Gemini — OCR cho PDF scan (ảnh không có text layer). Để trống = tắt OCR.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OCR_API_KEY: ${GEMINI_API_KEY:-}
+    depends_on:
+      qdrant:
+        condition: service_started
+      nats:
+        condition: service_started
+      rag-migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  mcp-service:
+    build:
+      context: ./src/mcp-service
+    ports:
+      - "8003:8003"
+    environment:
+      <<: [*openai, *newrelic-off]
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8003"
+      LOG_LEVEL: INFO
+      AI_PROVIDER: openai
+      EMBED_MODEL: text-embedding-3-small
+      EMBED_DIMENSION: "1536"
+      VECTOR_DB_PROVIDER: qdrant
+      VECTOR_DB_URL: http://qdrant:6333
+      VECTOR_DB_API_KEY: ""
+      VECTOR_COLLECTION: rag_chatbot
+      RERANK_PROVIDER: llm
+      RERANK_MODEL: gpt-4o-mini
+      RERANK_THRESHOLD: "0.0"
+      # hr_query tool bật để test HR queries
+      TOOL_HR_QUERY_ENABLED: "1"
+      HR_SERVICE_URL: http://hr-service:8004
+      HR_SERVICE_INTERNAL_TOKEN: ""
+      # Internal token auth: để trống = tắt (dev local)
+      MCP_INTERNAL_TOKEN: ""
+    depends_on:
+      qdrant:
+        condition: service_started
+      hr-service:
+        condition: service_healthy
+      rag-worker:
+        condition: service_started
+    # Quan trọng: mcp verify Qdrant vectorstore contract lúc boot.
+    # Nếu collection chưa tồn tại (chưa có tài liệu nào) → exit 1 → restart.
+    # Sau khi upload tài liệu đầu tiên và rag-worker ingest xong → mcp tự khỏe.
+    restart: unless-stopped
+
+  query-service:
+    build:
+      context: ./src/query-service
+    ports:
+      - "8001:8001"
+    environment:
+      <<: [*jwt, *openai, *nats, *newrelic-off]
+      SERVICE_NAME: query-service
+      APP_ENV: production
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/query_db
+      REDIS_URL: redis://redis:6379/0
+      RATE_LIMITER_MODE: redis
+      # Auth: verify JWT locally (cùng JWT_SECRET_KEY với user-service)
+      AUTH_MODE: jwt
+      USER_SERVICE_URL: http://user-service:8000
+      # LLM + Agent
+      LLM_MODE: openai
+      OPENAI_LLM_MODEL: gpt-4o-mini
+      OPENAI_EMBEDDING_MODEL: text-embedding-3-small
+      OPENAI_TIMEOUT_SECONDS: "30"
+      USE_LANGGRAPH: "true"
+      AGENT_MAX_ITERATIONS: "3"
+      # MCP client
+      MCP_MODE: real
+      MCP_SERVICE_URL: http://mcp-service:8003
+      MCP_TIMEOUT_SECONDS: "20"
+      MCP_INTERNAL_TOKEN: ""
+      MCP_CIRCUIT_FAIL_MAX: "5"
+      MCP_CIRCUIT_RESET_TIMEOUT_SECONDS: "30"
+      TOOL_ROUTING_MODE: native
+      MCP_TOOL_CACHE_TTL_SECONDS: "60"
+      # NATS subscriber
+      NATS_MODE: nats
+      # Qdrant semantic cache
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: rag_chatbot
+      # Observability: Langfuse v3 self-host (web UI ở localhost:3100)
+      # UI: http://localhost:3100  |  Login: admin@local.dev / Admin@123456
+      # SDK v4 gửi OTLP span qua langfuse-web:3000 (nội bộ docker network)
+      OBSERVABILITY_MODE: langfuse
+      LANGFUSE_PUBLIC_KEY: "pk-lf-local-dev"
+      LANGFUSE_SECRET_KEY: "sk-lf-local-dev"
+      LANGFUSE_HOST: "http://langfuse-web:3000"
+      GUARDRAILS_MODE: off
+      ALLOWED_ORIGINS: "http://localhost,http://localhost:3000,http://localhost:3001"
+      SEMANTIC_CACHE_TTL_SECONDS: "3600"
+      SEMANTIC_CACHE_THRESHOLD: "0.95"
+      RAG_SCORE_THRESHOLD: "0.70"
+      RAG_RESULT_LIMIT: "3"
+      QUERY_RATE_LIMIT_PER_MINUTE: "20"
+      NOTIFICATION_KEEPALIVE_SECONDS: "25"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      nats:
+        condition: service_started
+      mcp-service:
+        condition: service_started
+      langfuse-web:
+        condition: service_started
+    restart: unless-stopped
+
+  # ──────────────────────────── Frontend (Nuxt 4 SSR) ───────────────────
+
+  frontend-chat:
+    build:
+      context: ./src/frontend/chat
+    environment:
+      <<: *newrelic-off
+      NITRO_HOST: 0.0.0.0
+      NITRO_PORT: "3000"
+      # Chạy cùng nginx → same-origin → path tương đối, không cần host tuyệt đối
+      NUXT_PUBLIC_API_GATEWAY_URL: ""
+      NUXT_PUBLIC_USER_SERVICE_PATH: /api/user
+      NUXT_PUBLIC_DOCUMENT_SERVICE_PATH: /api/documents
+      NUXT_PUBLIC_QUERY_SERVICE_PATH: /api/query
+      NUXT_PUBLIC_HR_SERVICE_PATH: /api/hr
+      NUXT_PUBLIC_MCP_SERVICE_PATH: /api/mcp
+      NUXT_PUBLIC_CHAT_APP_URL: /
+      NUXT_PUBLIC_ADMIN_APP_URL: /admin/
+    depends_on:
+      - user-service
+      - query-service
+    restart: unless-stopped
+
+  frontend-admin:
+    build:
+      context: ./src/frontend/admin
+    environment:
+      <<: *newrelic-off
+      NITRO_HOST: 0.0.0.0
+      NITRO_PORT: "3001"
+      NUXT_APP_BASE_URL: /admin/
+      NUXT_PUBLIC_API_GATEWAY_URL: ""
+      NUXT_PUBLIC_USER_SERVICE_PATH: /api/user
+      NUXT_PUBLIC_DOCUMENT_SERVICE_PATH: /api/documents
+      NUXT_PUBLIC_QUERY_SERVICE_PATH: /api/query
+      NUXT_PUBLIC_HR_SERVICE_PATH: /api/hr
+      NUXT_PUBLIC_MCP_SERVICE_PATH: /api/mcp
+      NUXT_PUBLIC_CHAT_APP_URL: /
+      NUXT_PUBLIC_ADMIN_APP_URL: /admin/
+    depends_on:
+      - user-service
+      - document-service
+    restart: unless-stopped
+
+  # Nginx — reverse proxy, entry point duy nhất (:80)
+  nginx:
+    build:
+      context: ./nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - user-service
+      - document-service
+      - query-service
+      - mcp-service
+      - hr-service
+      - frontend-chat
+      - frontend-admin
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  nats_data:
+  minio_data:
+  clickhouse_data:
+  clickhouse_logs:

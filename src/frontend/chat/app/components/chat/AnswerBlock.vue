@@ -55,7 +55,7 @@ function selectSource(citation: Citation) {
     </div>
 
     <div class="px-5 pb-5 pt-4 text-slate-900 dark:text-foreground">
-      <div 
+      <div
         v-if="data.content"
         class="ai-response-markdown prose prose-base prose-slate dark:prose-invert max-w-none font-medium text-slate-900 dark:text-foreground prose-p:font-medium prose-p:leading-relaxed prose-pre:bg-slate-50 dark:prose-pre:bg-background/50 prose-pre:border prose-pre:border-slate-200 dark:prose-pre:border-white/5 [overflow-wrap:anywhere]"
         v-html="renderedContent"
