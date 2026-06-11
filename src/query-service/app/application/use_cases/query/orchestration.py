@@ -347,6 +347,26 @@ class QueryOrchestrationUseCase:
                                 if _tspan:
                                     _active_spans.setdefault(f"tool.{_tc['name']}", []).append(_tspan)
 
+                # Model call bắt đầu — bắt ĐÚNG prompt model NHẬN (system + context +
+                # tool results + history). Mở span llm.<node> để thấy "model nhận gì".
+                elif event_type == "on_chat_model_start":
+                    if tracer and trace_handle:
+                        _node = (event.get("metadata") or {}).get("langgraph_node") or "call"
+                        _mspan = tracer.span_start(
+                            trace_handle, name=f"llm.{_node}",
+                            input_data=_render_chat_input(event),
+                        )
+                        if _mspan:
+                            _active_spans.setdefault("llm.call", []).append(_mspan)
+
+                # Model call xong — bắt output THẬT (reasoning/answer + tool_calls quyết
+                # định gọi tool nào). Đóng span để thấy "model nghĩ gì".
+                elif event_type == "on_chat_model_end":
+                    if tracer:
+                        _mstack = _active_spans.get("llm.call")
+                        if _mstack:
+                            tracer.span_end(_mstack.pop(), output_data=_render_chat_output(event))
+
                 # Token stream from LLM
                 elif event_type == "on_chat_model_stream":
                     token = event["data"]["chunk"].content
@@ -1048,6 +1068,48 @@ def _extract_tool_call(event: Any) -> dict | None:
         return {"name": name, "args": args} if name else None
     except Exception:  # noqa: BLE001 — tracing best-effort
         return None
+
+
+def _msg_brief(msg: Any) -> dict:
+    """1 message -> {role, content, [tool_calls]} đọc được trên Langfuse. Cap content để
+    tránh payload khổng lồ (system prompt dài)."""
+    role = getattr(msg, "type", None) or type(msg).__name__
+    content = getattr(msg, "content", msg)
+    out: dict[str, Any] = {"role": role, "content": str(content)[:4000]}
+    tcs = getattr(msg, "tool_calls", None)
+    if tcs:
+        out["tool_calls"] = [
+            {
+                "name": t.get("name") if isinstance(t, dict) else getattr(t, "name", None),
+                "args": t.get("args") if isinstance(t, dict) else getattr(t, "args", None),
+            }
+            for t in tcs
+        ]
+    return out
+
+
+def _render_chat_input(event: Any) -> dict:
+    """on_chat_model_start.data.input.messages = [[msg, msg, ...]] -> list message phẳng
+    = ĐÚNG prompt model nhận. Best-effort."""
+    try:
+        msgs = ((event.get("data") or {}).get("input") or {}).get("messages") or []
+        flat = msgs[0] if msgs and isinstance(msgs[0], (list, tuple)) else msgs
+        return {"messages": [_msg_brief(m) for m in flat]}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _render_chat_output(event: Any) -> dict:
+    """on_chat_model_end.data.output = AIMessage (hoặc LLMResult) -> content + tool_calls
+    = model nghĩ/quyết định gì. Best-effort."""
+    try:
+        out = (event.get("data") or {}).get("output")
+        if hasattr(out, "generations"):
+            gens = out.generations
+            out = gens[0][0].message if gens and gens[0] else out
+        return _msg_brief(out)
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def _node_output_summary(output: Any) -> dict:
