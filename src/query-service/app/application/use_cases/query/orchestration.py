@@ -85,17 +85,21 @@ class QueryOrchestrationUseCase:
         self,
         question: str,
         user: AuthenticatedUser,
+        trace_session: str | None = None,
     ) -> AsyncIterator[dict]:
         """Wrapper mỏng: bọc luồng thật bằng 1 langfuse trace (best-effort, low-level
         client — KHÔNG callback). Tạo trace lazily ở event đầu (đã có session_id), bắt
-        event `done` để ghi outcome/sources, finalize ở finally (phủ cả khi client ngắt)."""
+        event `done` để ghi outcome/sources, finalize ở finally (phủ cả khi client ngắt).
+
+        trace_session: nếu set (vd "ci-smoke" do smoke CI), dùng làm session_id của TRACE
+        thay cho session_id ngẫu nhiên -> gom trace smoke 1 chỗ để deploy kế tự xóa."""
         tracer = self._tracer
         trace = None
         last_done: dict | None = None
         try:
             async for event in self._stream_inner(question, user):
                 if trace is None and tracer is not None:
-                    trace = tracer.start(question, user, event.get("session_id"))
+                    trace = tracer.start(question, user, trace_session or event.get("session_id"))
                 if event.get("done"):
                     last_done = event
                 yield event
