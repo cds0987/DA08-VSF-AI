@@ -57,7 +57,7 @@ class QueryOrchestrationUseCase:
         route_decision_provider: RouteDecisionProvider | ToolDecisionClient | None = None,
         tool_decision_client: ToolDecisionClient | None = None,
         langgraph_agent=None,
-        langfuse_callback=None,
+        langfuse_tracer=None,
         guardrails=None,
     ) -> None:
         self._settings = settings
@@ -67,7 +67,7 @@ class QueryOrchestrationUseCase:
         self._mcp_client = mcp_client
         self._openai_client = openai_client
         self._langgraph_agent = langgraph_agent
-        self._langfuse_callback = langfuse_callback
+        self._tracer = langfuse_tracer
         # guardrails is a (InputGuardrail, OutputGuardrail) tuple or None
         if guardrails is not None:
             self._input_guardrail, self._output_guardrail = guardrails
@@ -82,6 +82,28 @@ class QueryOrchestrationUseCase:
         self._route_decision_provider = route_decision_provider or tool_decision_client
 
     async def stream(
+        self,
+        question: str,
+        user: AuthenticatedUser,
+    ) -> AsyncIterator[dict]:
+        """Wrapper mỏng: bọc luồng thật bằng 1 langfuse trace (best-effort, low-level
+        client — KHÔNG callback). Tạo trace lazily ở event đầu (đã có session_id), bắt
+        event `done` để ghi outcome/sources, finalize ở finally (phủ cả khi client ngắt)."""
+        tracer = self._tracer
+        trace = None
+        last_done: dict | None = None
+        try:
+            async for event in self._stream_inner(question, user):
+                if trace is None and tracer is not None:
+                    trace = tracer.start(question, user, event.get("session_id"))
+                if event.get("done"):
+                    last_done = event
+                yield event
+        finally:
+            if tracer is not None and trace is not None:
+                tracer.finish(trace, last_done)
+
+    async def _stream_inner(
         self,
         question: str,
         user: AuthenticatedUser,
@@ -255,20 +277,14 @@ class QueryOrchestrationUseCase:
         # Track if we already emitted the shortcut acting event
         shortcut_acting_emitted = False
 
-        langfuse_callbacks = [self._langfuse_callback] if self._langfuse_callback is not None else []
         # recursion_limit is a defence-in-depth net; Part 1 (force_answer + act→observe→think
         # wiring) provides the logical hard cap.  Set to 3 * max_iterations + overhead.
+        # NOTE: langfuse tracing giờ làm ở wrapper stream() bằng low-level client (KHÔNG
+        # còn callback gắn vào run_config — callback v2 xung đột langchain-core 1.x).
         _recursion_limit = max(12, self._settings.agent_max_iterations * 4 + 4)
         run_config: dict = {
             "recursion_limit": _recursion_limit,
         }
-        if langfuse_callbacks:
-            run_config["callbacks"] = langfuse_callbacks
-            run_config["metadata"] = {
-                "session_id": session_id,
-                "user_id": user.id,
-                "agent_mode": self._settings.agent_mode,
-            }
 
         _GRACEFUL_CRASH_MSG = (
             "Mình chưa xử lý được yêu cầu này, bạn thử diễn đạt lại ngắn gọn hơn nhé."
