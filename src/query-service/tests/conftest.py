@@ -69,22 +69,33 @@ async def client() -> AsyncClient:
         yield ac
 
 
-@pytest_asyncio.fixture
-async def hr_client(client: AsyncClient) -> AsyncClient:
-    client.headers.update(auth(HR_TOKEN))
-    return client
+# MỖI role 1 AsyncClient RIÊNG (KHÔNG share 1 `client` rồi update headers): test
+# nào dùng 2 role cùng lúc (isolated/wrong-user/per-user) thì header role sau sẽ
+# KHÔNG đè role trước -> hết 403/assert False do auth lẫn.
+def _client_for(token: str) -> AsyncClient:
+    return AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+        headers=auth(token),
+    )
 
 
 @pytest_asyncio.fixture
-async def finance_client(client: AsyncClient) -> AsyncClient:
-    client.headers.update(auth(FINANCE_TOKEN))
-    return client
+async def hr_client() -> AsyncClient:
+    async with _client_for(HR_TOKEN) as ac:
+        yield ac
 
 
 @pytest_asyncio.fixture
-async def admin_client(client: AsyncClient) -> AsyncClient:
-    client.headers.update(auth(ADMIN_TOKEN))
-    return client
+async def finance_client() -> AsyncClient:
+    async with _client_for(FINANCE_TOKEN) as ac:
+        yield ac
+
+
+@pytest_asyncio.fixture
+async def admin_client() -> AsyncClient:
+    async with _client_for(ADMIN_TOKEN) as ac:
+        yield ac
 
 
 # ---------------------------------------------------------------------------
