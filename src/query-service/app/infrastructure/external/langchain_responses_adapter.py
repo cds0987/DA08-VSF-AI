@@ -19,7 +19,7 @@ Key translation:
 
 import json
 import logging
-from typing import Any, Iterator, Sequence, Union
+from typing import Any, AsyncIterator, Iterator, Sequence, Union
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
@@ -269,6 +269,124 @@ class OpenAIResponsesChatModel(BaseChatModel):
         response = await self.openai_client.responses.create(**params)
         ai_msg = self._parse_response(response)
         return ChatResult(generations=[ChatGeneration(message=ai_msg)])
+
+    def _should_stream(  # type: ignore[override]
+        self,
+        *,
+        async_api: bool = False,
+        run_manager: Any = None,
+        **kwargs,
+    ) -> bool:
+        """Luôn dùng streaming cho async path (chúng ta implement _astream).
+
+        langchain-core 1.x _should_stream() trả True chỉ khi: streaming callback được
+        gắn, hoặc streaming=True trong model_fields_set, hoặc stream=True kwarg. Không
+        có điều kiện nào trên thì trả False dù _astream đã override.
+        Override này bật streaming khi async_api=True và _astream tồn tại, vẫn tôn trọng
+        _streaming_disabled() (disable_streaming=True / "tool_calling" vẫn tắt).
+        """
+        if self._streaming_disabled(**kwargs):
+            return False
+        return async_api  # True → _astream; False → _generate (sync, không dùng async streaming)
+
+    async def _astream(  # type: ignore[override]
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs,
+    ) -> AsyncIterator["ChatGenerationChunk"]:  # type: ignore[type-arg]
+        """Async streaming — yields ChatGenerationChunk for LangGraph astream_events.
+
+        Text tokens are forwarded via on_llm_new_token → on_chat_model_stream fires
+        inside orchestration's astream_events loop → real-time SSE token events.
+
+        Tool-call iterations yield ONE final chunk carrying tool_call_chunks so
+        LangGraph reconstructs the AIMessage and routes to act_node correctly.
+
+        LUÔN yield ≥1 ChatGenerationChunk để tránh 'No generations found in stream':
+        BaseChatModel._should_stream() trả True khi _astream tồn tại; nếu _astream
+        không yield gì thì ainvoke ném ValueError.
+        """
+        from langchain_core.messages import AIMessageChunk
+        from langchain_core.outputs import ChatGenerationChunk
+
+        params = self._build_params(list(messages))
+        params["stream"] = True
+
+        # Accumulate function-call argument chunks: call_id → {name, id, args_buf}
+        fn_calls: dict[str, dict] = {}
+        fn_call_order: list[str] = []
+        yielded = False
+
+        async_stream = await self.openai_client.responses.create(**params)
+        async for event in async_stream:
+            etype = getattr(event, "type", None)
+
+            if etype == "response.output_text.delta":
+                delta = getattr(event, "delta", "") or ""
+                if delta:
+                    chunk = ChatGenerationChunk(message=AIMessageChunk(content=delta))
+                    if run_manager is not None:
+                        await run_manager.on_llm_new_token(delta, chunk=chunk)
+                    yield chunk
+                    yielded = True
+
+            elif etype == "response.output_item.added":
+                # New output item — capture function_call name + call_id for accumulation
+                item = getattr(event, "item", None)
+                if item and getattr(item, "type", None) == "function_call":
+                    call_id = getattr(item, "call_id", None) or getattr(item, "id", "") or ""
+                    name = getattr(item, "name", "") or ""
+                    if call_id:
+                        fn_calls[call_id] = {"name": name, "id": call_id, "args_buf": []}
+                        fn_call_order.append(call_id)
+
+            elif etype == "response.function_call_arguments.delta":
+                call_id = getattr(event, "call_id", None) or ""
+                delta = getattr(event, "delta", "") or ""
+                if call_id in fn_calls and delta:
+                    fn_calls[call_id]["args_buf"].append(delta)
+
+            elif etype == "response.completed":
+                # Final event: emit tool_call_chunks (tool path) or usage chunk (text path)
+                final_resp = getattr(event, "response", None)
+                usage_metadata = self._usage_metadata(final_resp) if final_resp is not None else None
+
+                if fn_calls:
+                    # Tool-call response — gather all function calls into tool_call_chunks
+                    tool_call_chunks = [
+                        {
+                            "name": fn_calls[cid]["name"],
+                            "args": "".join(fn_calls[cid]["args_buf"]),
+                            "id": fn_calls[cid]["id"],
+                            "index": idx,
+                        }
+                        for idx, cid in enumerate(fn_call_order)
+                    ]
+                    extra: dict[str, Any] = {}
+                    if usage_metadata is not None:
+                        extra["usage_metadata"] = usage_metadata
+                        extra["response_metadata"] = {"model_name": self.model}
+                    yield ChatGenerationChunk(
+                        message=AIMessageChunk(content="", tool_call_chunks=tool_call_chunks, **extra)
+                    )
+                    yielded = True
+                elif usage_metadata is not None:
+                    # Text-only answer — emit final usage-carrying chunk
+                    yield ChatGenerationChunk(
+                        message=AIMessageChunk(
+                            content="",
+                            usage_metadata=usage_metadata,
+                            response_metadata={"model_name": self.model},
+                        )
+                    )
+                    yielded = True
+
+        # Safety net: always yield ≥1 chunk (handles edge cases like empty model response
+        # or missing response.completed) to prevent "No generations found in stream".
+        if not yielded:
+            yield ChatGenerationChunk(message=AIMessageChunk(content=""))
 
     def invoke(
         self,

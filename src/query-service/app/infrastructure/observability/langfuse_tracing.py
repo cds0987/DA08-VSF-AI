@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
-from typing import Any
+from typing import Any, Sequence
 
 from app.infrastructure.observability.price_catalog import PriceCatalog, load_price_catalog
 
@@ -112,6 +112,78 @@ class LangfuseTracer:
             self._client.flush()  # bắt buộc — không flush thì trace chưa gửi
         except Exception as exc:  # noqa: BLE001
             logger.warning("langfuse_trace_finish_failed", extra={"error": str(exc)[:200]})
+
+    # ------------------------------------------------------------------
+    # Per-node enrichment (gọi từ orchestration sau mỗi LLM call / tool)
+    # ------------------------------------------------------------------
+
+    def on_llm(
+        self,
+        handle: _TraceHandle | None,
+        node: str | None,
+        model: str | None,
+        input_text: str | None,
+        output_text: str | None,
+        usage_metadata: dict | None,
+        start_dt: datetime,
+        end_dt: datetime,
+    ) -> None:
+        """Tạo 1 generation con (per-node LLM call) gắn vào trace. Best-effort.
+
+        Gọi sau mỗi on_chat_model_end event trong astream_events. node = langgraph_node
+        (vd 'triage', 'think') từ event metadata. Tái dùng _build_usage để tính cost.
+        """
+        if handle is None:
+            return
+        try:
+            usage: dict | None = None
+            if usage_metadata:
+                cached = (usage_metadata.get("input_token_details") or {}).get("cache_read", 0)
+                usage = self._build_usage({
+                    "model": model,
+                    "input_tokens": usage_metadata.get("input_tokens", 0),
+                    "output_tokens": usage_metadata.get("output_tokens", 0),
+                    "cached_tokens": cached,
+                })
+            handle.trace.generation(
+                name=node or "llm",
+                model=model or "",
+                start_time=start_dt,
+                end_time=end_dt,
+                input=input_text or "",
+                output=output_text or "",
+                usage=usage,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("langfuse_on_llm_failed", extra={"node": node, "error": str(exc)[:200]})
+
+    def on_tool(
+        self,
+        handle: _TraceHandle | None,
+        name: str,
+        input_args: Any,
+        output: Any,
+        start_dt: datetime,
+        end_dt: datetime,
+    ) -> None:
+        """Tạo 1 span con cho tool call (vd rag_search) gắn vào trace. Best-effort.
+
+        input_args = dict tham số gọi tool (vd query, allowed_doc_ids).
+        output = kết quả tool (cắt bớt nếu quá dài để không làm phình payload langfuse).
+        """
+        if handle is None:
+            return
+        try:
+            out_str = str(output)[:3000] if output is not None else ""
+            handle.trace.span(
+                name=name,
+                start_time=start_dt,
+                end_time=end_dt,
+                input=input_args,
+                output=out_str,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("langfuse_on_tool_failed", extra={"tool": name, "error": str(exc)[:200]})
 
 
 def build_langfuse_tracer(settings: Any) -> LangfuseTracer | None:

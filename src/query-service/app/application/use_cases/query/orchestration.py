@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 import hashlib
 import json
 import logging
@@ -89,19 +90,24 @@ class QueryOrchestrationUseCase:
         trace_session: str | None = None,
     ) -> AsyncIterator[dict]:
         """Wrapper mỏng: bọc luồng thật bằng 1 langfuse trace (best-effort, low-level
-        client — KHÔNG callback). Tạo trace lazily ở event đầu (đã có session_id), bắt
-        event `done` để ghi outcome/sources, finalize ở finally (phủ cả khi client ngắt).
+        client — KHÔNG callback). Tạo trace TRƯỚC _stream_inner để _stream_langgraph có
+        thể tạo child span/generation ngay từ đầu (node triage, think, rag_search).
 
         trace_session: nếu set (vd "ci-smoke" do smoke CI), dùng làm session_id của TRACE
         thay cho session_id ngẫu nhiên -> gom trace smoke 1 chỗ để deploy kế tự xóa."""
         tracer = self._tracer
-        trace = None
+        # Pre-generate session_id để trace có thể tạo trước khi _stream_inner bắt đầu.
+        # _stream_inner nhận session_id này thay vì tự sinh uuid4 mới.
+        pre_session_id = str(uuid4())
+        trace = tracer.start(question, user, trace_session or pre_session_id) if tracer is not None else None
         last_done: dict | None = None
         usage_meta: dict | None = None
         try:
-            async for event in self._stream_inner(question, user):
-                if trace is None and tracer is not None:
-                    trace = tracer.start(question, user, trace_session or event.get("session_id"))
+            async for event in self._stream_inner(
+                question, user,
+                _session_id=pre_session_id,
+                _lang_trace=trace,
+            ):
                 if event.get("done"):
                     # _usage là kênh nội bộ (token/model cho langfuse) — pop ra để KHÔNG
                     # rò xuống SSE/frontend; chỉ tracer dùng.
@@ -116,9 +122,13 @@ class QueryOrchestrationUseCase:
         self,
         question: str,
         user: AuthenticatedUser,
+        _session_id: str | None = None,
+        _lang_trace: Any = None,
     ) -> AsyncIterator[dict]:
         started = perf_counter()
-        session_id = str(uuid4())
+        # Dùng session_id được truyền từ stream() (đã tạo trước trace) để trace con
+        # khớp với trace cha. Legacy path tự sinh mới nếu không có.
+        session_id = _session_id or str(uuid4())
 
         # Input guardrail — block prompt injection before touching the LLM or MCP.
         blocked, reason = await self._input_guardrail.scan(question)
@@ -144,7 +154,9 @@ class QueryOrchestrationUseCase:
         # Falls through to the legacy direct-orchestration path when no agent is available
         # (e.g. mock mode / no OpenAI key).
         if self._langgraph_agent is not None:
-            async for event in self._stream_langgraph(question, user, session_id, started):
+            async for event in self._stream_langgraph(
+                question, user, session_id, started, _lang_trace=_lang_trace
+            ):
                 yield event
             return
 
@@ -233,6 +245,7 @@ class QueryOrchestrationUseCase:
         user: AuthenticatedUser,
         session_id: str,
         started: float,
+        _lang_trace: Any = None,
     ) -> AsyncIterator[dict]:
         """
         Stream responses using the LangGraph agent.
@@ -241,6 +254,9 @@ class QueryOrchestrationUseCase:
           - token events with phase, agent_mode, session_id, iterations
           - tool events (acting/observing) with phase, agent_mode, session_id, iterations
           - done event with outcome numeric enum, sources, agent_mode, iterations
+
+        _lang_trace: trace handle từ stream() — dùng để tạo child span/generation
+        cho langfuse enriched tracing (per-node LLM call + tool call). Best-effort.
         """
         from langchain_core.messages import HumanMessage, AIMessage as LCAIMessage
 
@@ -286,10 +302,17 @@ class QueryOrchestrationUseCase:
         # Track if we already emitted the shortcut acting event
         shortcut_acting_emitted = False
 
+        # Langfuse enriched tracing: per run_id accumulate start time + input for LLM
+        # calls and tool calls → create child generation/span after each call completes.
+        # _lang_trace=None (no tracer or guardrail blocked) → these dicts stay empty.
+        _llm_runs: dict[str, dict] = {}   # run_id → {node, start_dt, input_text}
+        _tool_runs: dict[str, dict] = {}  # run_id → {name, input_args, start_dt}
+        _tracer = self._tracer  # LangfuseTracer | None
+
         # recursion_limit is a defence-in-depth net; Part 1 (force_answer + act→observe→think
         # wiring) provides the logical hard cap.  Set to 3 * max_iterations + overhead.
-        # NOTE: langfuse tracing giờ làm ở wrapper stream() bằng low-level client (KHÔNG
-        # còn callback gắn vào run_config — callback v2 xung đột langchain-core 1.x).
+        # NOTE: langfuse enriched tracing dùng low-level client gọi per event (KHÔNG
+        # dùng callback — callback v2 xung đột langchain-core 1.x).
         _recursion_limit = max(12, self._settings.agent_max_iterations * 4 + 4)
         run_config: dict = {
             "recursion_limit": _recursion_limit,
@@ -314,8 +337,28 @@ class QueryOrchestrationUseCase:
                         last_iteration = max(last_iteration, 1)
                     # NOTE: do NOT increment for "think" or "answer" — shortcut path has 0 iterations
 
-                # Token stream from LLM
+                # LLM call started — record start time + input for langfuse enriched trace
+                elif event_type == "on_chat_model_start":
+                    if _lang_trace is not None and _tracer is not None:
+                        run_id = event.get("run_id", "")
+                        if run_id:
+                            meta = event.get("metadata") or {}
+                            node = meta.get("langgraph_node")
+                            # Flatten input messages into a compact string for langfuse UI
+                            raw_input = event.get("data", {}).get("input", "")
+                            input_text = str(raw_input)[:1000]
+                            _llm_runs[run_id] = {
+                                "node": node,
+                                "start_dt": datetime.now(timezone.utc),
+                                "input_text": input_text,
+                            }
+
+                # Token stream from LLM — filter triage (JSON) to avoid leaking to SSE
                 elif event_type == "on_chat_model_stream":
+                    node = (event.get("metadata") or {}).get("langgraph_node")
+                    if node == "triage":
+                        # JSON phân loại nội bộ — KHÔNG đẩy ra SSE/frontend
+                        continue
                     token = event["data"]["chunk"].content
                     if token:
                         answer_accumulator.append(token)
@@ -334,10 +377,46 @@ class QueryOrchestrationUseCase:
                             "iterations": last_iteration,
                         }
 
-                # Tool call started
+                # LLM call completed — create langfuse generation child span
+                elif event_type == "on_chat_model_end":
+                    if _lang_trace is not None and _tracer is not None:
+                        run_id = event.get("run_id", "")
+                        if run_id and run_id in _llm_runs:
+                            run_info = _llm_runs.pop(run_id)
+                            try:
+                                end_dt = datetime.now(timezone.utc)
+                                out_msg = event.get("data", {}).get("output")
+                                output_text = getattr(out_msg, "content", "") or ""
+                                usage_meta_ev = getattr(out_msg, "usage_metadata", None) or {}
+                                model_ev = (
+                                    (getattr(out_msg, "response_metadata", None) or {}).get("model_name")
+                                    or self._settings.openai_llm_model
+                                )
+                                _tracer.on_llm(
+                                    _lang_trace,
+                                    node=run_info["node"],
+                                    model=model_ev,
+                                    input_text=run_info["input_text"],
+                                    output_text=output_text[:2000],
+                                    usage_metadata=usage_meta_ev,
+                                    start_dt=run_info["start_dt"],
+                                    end_dt=end_dt,
+                                )
+                            except Exception:  # noqa: BLE001 — tracing never breaks stream
+                                pass
+
+                # Tool call started — record start time for langfuse span
                 elif event_type == "on_tool_start":
                     tool_name = event["name"]
                     input_data = event.get("data", {}).get("input", {})
+                    if _lang_trace is not None and _tracer is not None:
+                        run_id = event.get("run_id", "")
+                        if run_id:
+                            _tool_runs[run_id] = {
+                                "name": tool_name,
+                                "input_args": input_data,
+                                "start_dt": datetime.now(timezone.utc),
+                            }
                     yield {
                         "phase": "acting",
                         "agent_mode": "langgraph",
@@ -347,10 +426,25 @@ class QueryOrchestrationUseCase:
                         "tool_args": input_data,
                     }
 
-                # Tool call completed
+                # Tool call completed — create langfuse tool span
                 elif event_type == "on_tool_end":
                     tool_name = event["name"]
                     output_data = event.get("data", {}).get("output", "")
+                    if _lang_trace is not None and _tracer is not None:
+                        run_id = event.get("run_id", "")
+                        if run_id and run_id in _tool_runs:
+                            tool_info = _tool_runs.pop(run_id)
+                            try:
+                                _tracer.on_tool(
+                                    _lang_trace,
+                                    name=tool_info["name"],
+                                    input_args=tool_info["input_args"],
+                                    output=output_data,
+                                    start_dt=tool_info["start_dt"],
+                                    end_dt=datetime.now(timezone.utc),
+                                )
+                            except Exception:  # noqa: BLE001
+                                pass
                     yield {
                         "phase": "observing",
                         "agent_mode": "langgraph",
@@ -393,6 +487,22 @@ class QueryOrchestrationUseCase:
 
                     final_state = event.get("data", {}).get("output", {})
                     if isinstance(final_state, dict):
+                        # Buid Langfuse span(s) for rag_search calls recorded by act_node.
+                        # Must run before saving/yielding so spans arrive before trace finishes.
+                        if _lang_trace is not None and _tracer is not None:
+                            for _rev in final_state.get("rag_search_events") or []:
+                                try:
+                                    _tracer.on_tool(
+                                        _lang_trace,
+                                        name="rag_search",
+                                        input_args={k: _rev[k] for k in ("query", "top_k", "allowed_count", "threshold") if k in _rev},
+                                        output={k: _rev[k] for k in ("total", "qualified", "scores", "doc_names") if k in _rev},
+                                        start_dt=datetime.fromisoformat(_rev["start"]),
+                                        end_dt=datetime.fromisoformat(_rev["end"]),
+                                    )
+                                except Exception:  # noqa: BLE001 — tracing never breaks stream
+                                    pass
+
                         shortcut_response = final_state.get("shortcut_response")
                         shortcut_outcome = final_state.get("shortcut_outcome") or "SUCCESS"
 
