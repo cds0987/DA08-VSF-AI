@@ -627,6 +627,10 @@ class QueryOrchestrationUseCase:
                         # Override outcome to NO_INFO if the answer is a generic fallback
                         if answer and _is_fallback_answer(answer) and shortcut_outcome == "SUCCESS":
                             shortcut_outcome = "NO_INFO"
+                        # Only surface sources for successful answers — if the LLM said "not found"
+                        # or is asking a clarifying question, sending sources alongside is misleading.
+                        if shortcut_outcome != "SUCCESS" or _is_clarifying_answer(answer):
+                            sources = []
                         outcome_value = _outcome_to_enum_value(shortcut_outcome)
 
                         # Output guardrail — redact PII from final answer before persisting/sending.
@@ -1140,6 +1144,23 @@ def _is_fallback_answer(answer: str) -> bool:
     """
     normalized = _normalize_text(answer)
     return "khong tim thay thong tin" in normalized
+
+
+def _is_clarifying_answer(answer: str) -> bool:
+    """Return True when the LLM's response is a clarifying question rather than a real answer.
+
+    Detects the pattern: LLM found RAG sources but couldn't determine intent, so it asks
+    the user to rephrase instead of using the sources. Showing sources alongside a
+    clarifying question is misleading — the LLM didn't actually reference them.
+
+    Heuristic: the answer is short, ends with "?", and contains a clarification marker.
+    """
+    stripped = answer.strip()
+    if not stripped.endswith("?"):
+        return False
+    normalized = _normalize_text(stripped)
+    _CLARIFY_MARKERS = ("chua ro", "ban muon hoi gi", "ban co the noi ro", "y ban la", "cu the hon")
+    return any(marker in normalized for marker in _CLARIFY_MARKERS)
 
 
 def _extract_tool_call(event: Any) -> dict | None:
