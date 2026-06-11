@@ -59,6 +59,7 @@ jobs:
       run_frontend: ${{ steps.matrix.outputs.run_frontend }}
       run_langfuse: ${{ steps.matrix.outputs.run_langfuse }}
       run_langsmith: ${{ steps.matrix.outputs.run_langsmith }}
+      run_rag_langfuse: ${{ steps.matrix.outputs.run_rag_langfuse }}
       run_deploy: ${{ steps.matrix.outputs.run_deploy }}
     steps:
       - uses: actions/checkout@v4
@@ -107,7 +108,7 @@ jobs:
           fi
           has() { echo "$CH" | jq -e "any(.[]; $1)" >/dev/null && echo true || echo false; }
           if $FORCE; then
-            rrag=true; rhr=true; rec=true; rfe=true; rlf=true; rls=true; rd=true
+            rrag=true; rhr=true; rec=true; rfe=true; rlf=true; rls=true; rrwlf=true; rd=true
           else
             rrag=$(has '.=="rag-worker" or .=="mcp-service"')
             rhr=$(has '.=="hr-service" or .=="mcp-hr"')
@@ -115,11 +116,13 @@ jobs:
             rfe=$(has '.=="frontend"')
             rlf=$(has '.=="langfuse"')
             rls=$(has '.=="langsmith"')
+            # rag-langfuse: integration THUẦN rag-worker với Langfuse thật -> rag-worker đổi.
+            rrwlf=$(has '.=="rag-worker"')
             rd=$(has '.=="rag-worker" or .=="mcp-service" or .=="hr-service" or .=="user-service" or .=="document-service" or .=="query-service" or .=="frontend" or .=="nginx" or .=="base"')
           fi
           # Bỏ qua validate nhưng GIỮ build + deploy.
           if [ "$SKIP" = "true" ]; then
-            rrag=false; rhr=false; rec=false; rlf=false; rls=false
+            rrag=false; rhr=false; rec=false; rlf=false; rls=false; rrwlf=false
             echo "::notice::skip-tests bật -> BỎ QUA Phase 1 validate, chỉ build + deploy"
           fi
           {
@@ -130,9 +133,10 @@ jobs:
             echo "run_frontend=$rfe"
             echo "run_langfuse=$rlf"
             echo "run_langsmith=$rls"
+            echo "run_rag_langfuse=$rrwlf"
             echo "run_deploy=$rd"
           } >> "$GITHUB_OUTPUT"
-          echo "→ services=$SVC run_rag=$rrag run_hr=$rhr run_e2e_cloud=$rec run_frontend=$rfe run_langfuse=$rlf run_langsmith=$rls run_deploy=$rd"
+          echo "→ services=$SVC run_rag=$rrag run_hr=$rhr run_e2e_cloud=$rec run_frontend=$rfe run_langfuse=$rlf run_langsmith=$rls run_rag_langfuse=$rrwlf run_deploy=$rd"
 
   # ───────────────────── Phase 1a: CONTRACT ────────────────────────
   # Guard lớp A: chặn lệch vectorstore contract giữa rag-worker (producer) và
@@ -687,11 +691,97 @@ jobs:
           LANGSMITH_ENDPOINT: ${{ steps.lskey.outputs.endpoint }}
         run: python infra/localtest/ci_langsmith.py confirm-deleted
 
+  # ──────────────── Phase 1h: RAG-LANGFUSE (thuần rag-worker) ───────
+  # Integration THUẦN rag-worker: chạy đúng luồng ingest của rag-worker với
+  # IngestTracer + Langfuse THẬT (self-host docker). Các "service" ngoài
+  # (embedder/captioner/vectors) = stub mô phỏng đúng luồng data. Verify:
+  #   1 doc tốt -> trace đủ span stage + SUCCESS;
+  #   2 doc lỗi (embed, qdrant-write) -> trace FAILED + span level=ERROR đúng stage.
+  # Đây là guard "lỗi stage KHÔNG lọt khi vào production". Chỉ chạy khi rag-worker đổi.
+  rag-langfuse:
+    needs: detect
+    if: needs.detect.outputs.run_rag_langfuse == 'true'
+    runs-on: ubuntu-latest
+    env:
+      LF_PUBLIC_KEY: pk-lf-ragci
+      LF_SECRET_KEY: sk-lf-ragci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: src/rag-worker/requirements.txt
+      - name: Install rag-worker deps (gồm langfuse v2) + requests
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r src/rag-worker/requirements.txt requests
+      - name: Create Docker network lf-net
+        run: docker network create lf-net
+      - name: Start PostgreSQL (langfuse db)
+        run: |
+          docker run -d --name lf-db --network lf-net \
+            -e POSTGRES_USER=langfuse -e POSTGRES_PASSWORD=langfuse -e POSTGRES_DB=langfuse \
+            postgres:16-alpine
+      - name: Wait for PostgreSQL ready
+        run: |
+          for i in $(seq 1 30); do
+            docker exec lf-db pg_isready -U langfuse -q && { echo "pg ready ${i}s"; break; }
+            sleep 2
+          done
+          docker exec lf-db pg_isready -U langfuse || { echo "pg not ready" >&2; exit 1; }
+      - name: Start Langfuse (headless init project + keys)
+        run: |
+          docker run -d --name langfuse --network lf-net -p 3000:3000 \
+            -e DATABASE_URL=postgresql://langfuse:langfuse@lf-db:5432/langfuse \
+            -e NEXTAUTH_SECRET=ci-nextauth-secret \
+            -e SALT=ci-salt \
+            -e ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000 \
+            -e NEXTAUTH_URL=http://localhost:3000 \
+            -e TELEMETRY_ENABLED=false \
+            -e LANGFUSE_INIT_ORG_ID=ragci \
+            -e LANGFUSE_INIT_PROJECT_ID=ragci \
+            -e LANGFUSE_INIT_PROJECT_PUBLIC_KEY=${{ env.LF_PUBLIC_KEY }} \
+            -e LANGFUSE_INIT_PROJECT_SECRET_KEY=${{ env.LF_SECRET_KEY }} \
+            -e LANGFUSE_INIT_USER_EMAIL=ragci@company.com \
+            -e LANGFUSE_INIT_USER_PASSWORD=ragci-password-123 \
+            langfuse/langfuse:2
+      - name: Wait for Langfuse /api/public/health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/api/public/health >/dev/null 2>&1; then
+              echo "langfuse ready after ${i}s"; exit 0
+            fi
+            sleep 3
+          done
+          echo "langfuse not ready" >&2; docker logs langfuse || true; exit 1
+      - name: Run rag-worker ingest + verify trace (success + 2 stage failures)
+        working-directory: src/rag-worker
+        env:
+          APP_ENV: development
+          AI_PROVIDER: offline
+          LANGFUSE_HOST: http://localhost:3000
+          LANGFUSE_PUBLIC_KEY: ${{ env.LF_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ env.LF_SECRET_KEY }}
+        run: python scripts/e2e_langfuse_tracing.py
+      - name: XÓA trace test (DB — v2 không có API xóa trace) theo session prefix
+        if: always()
+        run: |
+          docker exec lf-db psql -U langfuse -d langfuse -v ON_ERROR_STOP=1 \
+            -c "DELETE FROM observations WHERE trace_id IN (SELECT id FROM traces WHERE session_id LIKE 'raglf-ci-%');" \
+            -c "DELETE FROM scores WHERE trace_id IN (SELECT id FROM traces WHERE session_id LIKE 'raglf-ci-%');" \
+            -c "DELETE FROM traces WHERE session_id LIKE 'raglf-ci-%';" || true
+      - name: Container logs on failure
+        if: failure()
+        run: |
+          echo "=== langfuse ===" && docker logs langfuse 2>&1 | tail -120 || true
+          echo "=== lf-db ===" && docker logs lf-db 2>&1 | tail -40 || true
+
   # ───────────────────────── Phase 2: GATE ─────────────────────────
   # Chốt chặn: fail nếu BẤT KỲ validate nào failure/cancelled. Job skipped (do path
   # không khớp) coi như pass. build-push + deploy đều needs gate -> không qua gate = dừng.
   gate:
-    needs: [contract, rag-test, search-semantic, hr-integration, e2e-cloud, langfuse-test, langsmith-test]
+    needs: [contract, rag-test, search-semantic, hr-integration, e2e-cloud, langfuse-test, langsmith-test, rag-langfuse]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -704,7 +794,8 @@ jobs:
             "hr-integration=${{ needs.hr-integration.result }}" \
             "e2e-cloud=${{ needs.e2e-cloud.result }}" \
             "langfuse-test=${{ needs.langfuse-test.result }}" \
-            "langsmith-test=${{ needs.langsmith-test.result }}"; do
+            "langsmith-test=${{ needs.langsmith-test.result }}" \
+            "rag-langfuse=${{ needs.rag-langfuse.result }}"; do
             name="${nr%%=*}"; res="${nr#*=}"
             echo "  $name = $res"
             if [ "$res" = "failure" ] || [ "$res" = "cancelled" ]; then

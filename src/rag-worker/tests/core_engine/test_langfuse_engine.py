@@ -153,3 +153,74 @@ async def test_engine_survives_model_metadata_lookup_failure() -> None:
     assert chunk_count > 0
     assert "gen:caption" in tracer.events
     assert "gen:embed" in tracer.events
+
+
+# ── Failure-matrix: mỗi stage lỗi PHẢI sinh span_error đúng stage + raise lên trên ──
+# Mục tiêu: lỗi 1 stage KHÔNG được "lọt" (CI vẫn xanh) khi vào production. Mock các
+# "service" ngoài (chunker/captioner/embedder/vectors) nhưng giữ ĐÚNG luồng data.
+
+class _BoomChunker:
+    def split(self, markdown):
+        raise RuntimeError("chunk boom")
+
+
+class _BoomCaptioner(_StubCaptioner):
+    async def caption_with_metadata(self, text: str):
+        raise RuntimeError("caption boom")
+
+
+class _BoomEmbedder(_StubEmbedder):
+    async def embed_batch(self, texts: list[str]):
+        raise RuntimeError("embed boom")
+
+
+class _BoomVectors(_StubVectors):
+    async def upsert_many(self, records):
+        raise RuntimeError("qdrant boom")
+
+
+def _engine_with(*, embedder=None, vectors=None, captioner=None, chunker=None, tracer=None):
+    return HaystackRagEngine(
+        settings=HaystackSettings(
+            embed_dimension=3,
+            parent_max_words=100,
+            child_max_words=4,
+            child_overlap_words=1,
+        ),
+        embedder=embedder or _StubEmbedder(),
+        vectors=vectors or _StubVectors(),
+        captioner=captioner if captioner is not None else _StubCaptioner(),
+        chunker=chunker,
+        tracer=tracer,
+    )
+
+
+@pytest.mark.parametrize(
+    ("stage", "kwargs"),
+    [
+        ("chunk", {"chunker": _BoomChunker()}),
+        ("caption", {"captioner": _BoomCaptioner()}),
+        ("embed", {"embedder": _BoomEmbedder()}),
+        ("qdrant-write", {"vectors": _BoomVectors()}),
+    ],
+)
+@pytest.mark.asyncio
+async def test_engine_stage_failure_marks_span_error_and_reraises(stage, kwargs) -> None:
+    tracer = _RecordingTracer()
+    engine = _engine_with(tracer=tracer, **kwargs)
+
+    with pytest.raises(Exception):
+        await engine.ingest(
+            IngestInput(
+                document_id=f"doc-fail-{stage}",
+                document_name="Doc",
+                file_type="md",
+                markdown="# Title\none two three four five six seven eight",
+                trace_handle=object(),
+            )
+        )
+
+    # span_error PHẢI bắn đúng stage lỗi (đây là cái cho biết "crash ở đâu")
+    assert f"error:{stage}" in tracer.events
+    # không stage NÀO sau stage lỗi được đóng OK (luồng dừng đúng chỗ)
+    assert f"ok:{stage}" not in tracer.events
