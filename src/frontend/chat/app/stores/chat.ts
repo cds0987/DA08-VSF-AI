@@ -361,10 +361,12 @@ export const useChatStore = defineStore('chat', () => {
     let fullContent = ''
     let completed = false
     let donePayload: QueryDoneEvent | null = null
+    const conversationTitle = conversations.value.find(c => c.id === currentConversationId.value)?.title
     const request: QueryRequest = {
       question,
       user_id: String(userId),
       trace_session: currentConversationId.value ?? undefined,
+      conversation_title: conversationTitle,
     }
 
     const PHASE_MAP: Record<string, number> = {
