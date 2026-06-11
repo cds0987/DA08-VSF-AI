@@ -1,5 +1,9 @@
 # E2E test: document-service → NATS → rag-worker → Qdrant → mcp-service (GCP thật)
 
+> ⚠️ **ĐÃ THAY THẾ (2026-06-12):** `docker-compose.localtest.yml` đã bị xóa. Bài e2e
+> chính thức giờ là **`docker-compose.e2e.yml` + `infra/e2e/run_e2e.py`** — xem
+> [`infra/e2e/README.md`](../infra/e2e/README.md). Tài liệu dưới giữ lại để tham khảo lịch sử.
+
 Ghi lại lần chạy thử **end-to-end** luồng ingest + search với hạ tầng cloud THẬT
 (GCS + Qdrant Cloud + OpenAI), phần stateful (Postgres, NATS) chạy local docker.
 Mục tiêu: chứng minh 5 mắt xích `file → S3(GCS) → rag-worker → Qdrant → mcp-search`
