@@ -1,17 +1,18 @@
 name: CI/CD develop (validate + build + deploy)
 
 # PIPELINE HỢP NHẤT — TẤT CẢ chạy khi merge vào develop (push:develop) hoặc chạy tay.
-#   Phase 0 DETECT     : dò service/path THAY ĐỔI -> quyết định validate/build/deploy cái gì.
-#   Phase 1 VALIDATE   : (chọn lọc theo path)
-#       - contract       : vectorstore contract parity (rag-worker producer vs mcp consumer)
-#       - rag-test       : rag-worker unit + e2e local (NATS+MinIO+Qdrant docker)
-#       - search-semantic: rag-worker seed full corpus -> mcp semantic search (local infra)
-#       - hr-integration : hr-service + mcp-service real Docker (Postgres)
-#       - e2e-cloud      : ingest+search trên GCS + Qdrant Cloud thật
-#   Phase 2 GATE       : fail nếu BẤT KỲ validate nào failure/cancelled -> chặn build+deploy.
+#   Phase 0 DETECT     : dò service/path THAY ĐỔI -> quyết định test/build/deploy cái gì.
+#   Phase 1 PER-SERVICE: test CỤC BỘ từng service (behavior + contract), infra off:
+#       - unit       : matrix pytest mỗi service THAY ĐỔI (rag-worker bỏ tests/e2e)
+#       - contract   : vectorstore contract parity (rag-worker producer vs mcp consumer)
+#   Phase 2 E2E        : 1 STACK mô phỏng prod (docker-compose.e2e.yml) + 1 flow
+#                        (infra/e2e/run_e2e.py). Giữ nguyên orchestration prod
+#                        (nats-bootstrap -> migrate -> service) -> bắt lỗi TÍCH HỢP.
+#                        GCS + Qdrant CLOUD thật; Postgres/NATS container; Langfuse v2.
+#   Phase GATE         : fail nếu BẤT KỲ test nào failure/cancelled -> chặn build+deploy.
 #   Phase 3 BUILD+PUSH : build CHỈ service thay đổi -> Docker Hub (:develop + :<git-sha>).
 #   Phase 4 DEPLOY     : SSH VM -> docker compose PULL + up --no-build -> HEALTH GATE.
-# Sửa docs/**, **.md -> KHÔNG chạy gì. workflow_dispatch -> chạy FULL (validate+build+deploy).
+# Sửa docs/**, **.md -> KHÔNG chạy gì. workflow_dispatch -> chạy FULL (test+build+deploy).
 
 on:
   push:
@@ -83,16 +84,9 @@ jobs:
             nginx: 'nginx/**'
             base:
               - 'docker-compose.yml'
+              - 'docker-compose.e2e.yml'
               - 'infra/nats/**'
-            langfuse:
-              - 'docker-compose.yml'
-              - 'infra/localtest/ci_langfuse.py'
-            langsmith:
-              - 'infra/localtest/ci_langsmith.py'
-              - 'src/query-service/app/infrastructure/observability/**'
-            e2e-extra:
-              - 'docker-compose.localtest.yml'
-              - 'infra/localtest/ci_e2e.py'
+              - 'infra/e2e/**'
             wf: '.github/workflows/deploy-develop.yml'
       - id: matrix
         run: |
@@ -140,9 +134,47 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "→ services=$SVC run_rag=$rrag run_hr=$rhr run_e2e_cloud=$rec run_frontend=$rfe run_langfuse=$rlf run_langsmith=$rls run_rag_langfuse=$rrwlf run_deploy=$rd"
 
-  # ───────────────────── Phase 1a: CONTRACT ────────────────────────
-  # Guard lớp A: chặn lệch vectorstore contract giữa rag-worker (producer) và
-  # mcp-service (consumer), không cần hạ tầng.
+  # ═══════════════════ Phase 1: PER-SERVICE (cục bộ) ═══════════════════
+  # Test BEHAVIOR + CONTRACT của TỪNG service, infra off, nhanh. Matrix chỉ
+  # service THAY ĐỔI (detect.services). KHÔNG dựng hạ tầng chéo — lỗi tích hợp
+  # để Phase 2 e2e lo.
+  unit:
+    needs: detect
+    if: needs.detect.outputs.services != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.detect.outputs.services) }}
+    defaults:
+      run:
+        working-directory: src/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # rag-worker chạy 3.13 (Dockerfile), các service còn lại 3.11.
+          python-version: ${{ matrix.service == 'rag-worker' && '3.13' || '3.11' }}
+          cache: pip
+          cache-dependency-path: src/${{ matrix.service }}/requirements.txt
+      - name: Install deps
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      - name: Run unit + behavior tests (infra off)
+        env:
+          APP_ENV: development
+          AI_PROVIDER: offline
+        run: |
+          # rag-worker: tests/e2e cần NATS+MinIO+Qdrant THẬT -> để Phase 2 lo, bỏ ở đây.
+          if [ "${{ matrix.service }}" = "rag-worker" ]; then
+            pytest tests -q -ra --ignore=tests/e2e
+          else
+            pytest tests -q -ra
+          fi
+
+  # ─────────────────── Phase 1b: CONTRACT PARITY ──────────────────────
+  # Guard CONTRACT giữa rag-worker (producer) và mcp-service (consumer): cùng
+  # embedding model/dimension/collection. Lệch -> mcp search fail-closed. Không
+  # cần hạ tầng. Chạy khi rag-worker hoặc mcp-service đổi.
   contract:
     needs: detect
     if: needs.detect.outputs.run_rag == 'true'
@@ -158,655 +190,89 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r src/rag-worker/requirements.txt
           pip install -r src/mcp-service/requirements.txt
-      - name: Check vectorstore contract parity (mcp consumer vs rag-worker producer)
+      - name: Check vectorstore contract parity
         run: python src/mcp-service/scripts/check_vectorstore_contract.py
 
-  # ───────────────────── Phase 1b: RAG-TEST ────────────────────────
-  # rag-worker unit (infra off) + e2e protocol THẬT (NATS + MinIO + Qdrant docker).
-  rag-test:
+  # ═══════════════════════ Phase 2: E2E (tích hợp) ═════════════════════
+  # 1 STACK mô phỏng prod (docker-compose.e2e.yml) + 1 flow xuyên suốt
+  # (infra/e2e/run_e2e.py). GIỮ NGUYÊN chuỗi orchestration prod (nats-bootstrap
+  # one-shot -> migrate -> service) nên bắt được lỗi tích hợp như nats-bootstrap
+  # exit 1. GCS + Qdrant = CLOUD THẬT; Postgres/NATS = container.
+  e2e:
     needs: detect
-    if: needs.detect.outputs.run_rag == 'true'
+    if: needs.detect.outputs.run_deploy == 'true'
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: src/rag-worker
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-          cache-dependency-path: src/rag-worker/requirements.txt
-      - name: Install dependencies
-        run: python -m pip install --upgrade pip && pip install -r requirements.txt
-
-      # NATS JetStream cần arg `-js` -> docker run. MinIO = S3; Qdrant = vector DB.
-      - name: Start NATS (JetStream)
-        run: docker run -d --name nats -p 4222:4222 nats:2.10 -js
-      - name: Start MinIO (S3)
-        run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio server /data
-      - name: Start Qdrant (vector DB)
-        run: docker run -d --name qdrant -p 6333:6333 qdrant/qdrant
-      - name: Wait for infra (NATS 4222 / MinIO 9000 / Qdrant 6333)
-        run: |
-          ready() { (echo > /dev/tcp/127.0.0.1/$1) 2>/dev/null; }
-          for port in 4222 9000 6333; do
-            ok=""
-            for i in $(seq 1 60); do
-              if ready "$port"; then echo "port $port up"; ok=1; break; fi
-              sleep 1
-            done
-            if [ -z "$ok" ]; then
-              echo "infra port $port did not become ready" >&2
-              docker ps -a
-              docker logs nats || true; docker logs minio || true; docker logs qdrant || true
-              exit 1
-            fi
-          done
-
-      - name: Run rag-worker tests (infra off)
-        env:
-          APP_ENV: development
-          AI_PROVIDER: offline
-        run: pytest tests -q -ra --ignore=tests/e2e
-
-      - name: Run e2e protocol tests (real infra on)
-        env:
-          APP_ENV: development
-          AI_PROVIDER: offline
-          NATS_URL: nats://127.0.0.1:4222
-          PARSER_IMPL: s3
-          S3_ENDPOINT_URL: http://127.0.0.1:9000
-          S3_ACCESS_KEY_ID: minioadmin
-          S3_SECRET_ACCESS_KEY: minioadmin
-          S3_REGION: us-east-1
-          E2E_S3_BUCKET: rag-e2e
-          VECTOR_DB_URL: http://127.0.0.1:6333
-        run: pytest tests/e2e -q -ra
-
-      - name: Infra logs on failure
-        if: failure()
-        run: |
-          docker logs nats || true
-          docker logs minio || true
-          docker logs qdrant || true
-
-  # ──────────────────── Phase 1c: SEARCH-SEMANTIC ──────────────────
-  # rag-worker ingest TOÀN BỘ validation corpus qua NATS+MinIO vào Qdrant; mcp-service
-  # semantic search lại trên CÙNG Qdrant. Drift (model khác) phải fail-closed.
-  search-semantic:
-    needs: detect
-    if: needs.detect.outputs.run_rag == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Start NATS (JetStream)
-        run: docker run -d --name nats -p 4222:4222 nats:2.10 -js
-      - name: Start MinIO (S3 object storage)
-        run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio server /data
-      - name: Start Qdrant (vector DB)
-        run: docker run -d --name qdrant -p 6333:6333 qdrant/qdrant
-      - name: Wait for infra (NATS 4222 / MinIO 9000 / Qdrant 6333)
-        run: |
-          ready() { (echo > /dev/tcp/127.0.0.1/$1) 2>/dev/null; }
-          for port in 4222 9000 6333; do
-            ok=""
-            for i in $(seq 1 60); do
-              if ready "$port"; then echo "port $port up"; ok=1; break; fi
-              sleep 1
-            done
-            if [ -z "$ok" ]; then
-              echo "infra port $port did not become ready" >&2
-              docker ps -a
-              docker logs nats || true; docker logs minio || true; docker logs qdrant || true
-              exit 1
-            fi
-          done
-
-      - name: Install deps (rag-worker producer + mcp-service consumer)
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r src/rag-worker/requirements.txt
-          pip install -r src/mcp-service/requirements.txt
-
-      - name: Seed Qdrant via rag-worker (full corpus, NATS + MinIO)
-        working-directory: src/rag-worker
-        env:
-          APP_ENV: development
-          AI_PROVIDER: offline
-          PARSER_IMPL: s3
-          NATS_URL: nats://127.0.0.1:4222
-          S3_ENDPOINT_URL: http://127.0.0.1:9000
-          S3_ACCESS_KEY_ID: minioadmin
-          S3_SECRET_ACCESS_KEY: minioadmin
-          S3_REGION: us-east-1
-          E2E_S3_BUCKET: rag-e2e
-          VECTOR_DB_URL: http://127.0.0.1:6333
-        run: python scripts/seed_validation_corpus_e2e.py
-
-      - name: mcp-service verify + search full corpus (expect success)
-        working-directory: src/mcp-service
-        env:
-          AI_PROVIDER: offline
-          RERANK_PROVIDER: lexical
-          RERANK_THRESHOLD: "0"
-          SEARCH_TOP_K: "50"
-          VECTOR_DB_URL: http://127.0.0.1:6333
-        run: python scripts/e2e_search_validation.py
-
-      - name: mcp-service drift must fail-closed (expect non-zero)
-        working-directory: src/mcp-service
-        env:
-          AI_PROVIDER: openai
-          EMBED_MODEL: bge-m3
-          RERANK_PROVIDER: none
-          VECTOR_DB_URL: http://127.0.0.1:6333
-        run: |
-          if python scripts/e2e_search_validation.py; then
-            echo "DRIFT NOT CAUGHT: mcp phục vụ search dù lệch contract" >&2
-            exit 1
-          fi
-          echo "OK: mcp fail-closed khi lệch contract"
-
-      - name: Infra logs on failure
-        if: failure()
-        run: |
-          docker logs nats || true
-          docker logs minio || true
-          docker logs qdrant || true
-
-  # ──────────────────── Phase 1d: HR-INTEGRATION ───────────────────
-  # hr-service (FastAPI :8004) -> Postgres thật; mcp-service (:8003) -> hr-service HTTP.
-  # Cả hai build từ Dockerfile thật, cùng Docker network, nói chuyện HTTP thật.
-  hr-integration:
-    needs: detect
-    if: needs.detect.outputs.run_hr == 'true'
-    runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
-      HR_TOKEN: ci-secret
-      MCP_TOKEN: ci-mcp-token
-      POSTGRES_USER: ci
-      POSTGRES_PASSWORD: ci
-      POSTGRES_DB: hr_db
-      DB_URL: postgresql+psycopg://ci:ci@postgres:5432/hr_db
-      ALEMBIC_URL: postgresql+psycopg://ci:ci@postgres:5432/hr_db
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install Python test deps
-        run: pip install httpx
-      - name: Create Docker network hr-net
-        run: docker network create hr-net
-      - name: Start PostgreSQL
-        run: |
-          docker run -d --name postgres --network hr-net \
-            -e POSTGRES_USER=${{ env.POSTGRES_USER }} \
-            -e POSTGRES_PASSWORD=${{ env.POSTGRES_PASSWORD }} \
-            -e POSTGRES_DB=${{ env.POSTGRES_DB }} \
-            postgres:16-alpine
-      - name: Wait for PostgreSQL ready
-        run: |
-          # postgres image init CHẠY 2 LẦN: server tạm (init script) -> shutdown -> server thật.
-          # pg_isready dễ pass ở server tạm rồi "rejecting" lúc restart -> flaky. Vì vậy poll
-          # TRUY VẤN THẬT vào DB đích + yêu cầu ỔN ĐỊNH 3 lần liên tiếp (vượt cú restart).
-          ok=0; streak=0
-          for i in $(seq 1 60); do
-            if docker exec postgres psql -U ${{ env.POSTGRES_USER }} -d ${{ env.POSTGRES_DB }} -tAc 'SELECT 1' 2>/dev/null | grep -q '^1$'; then
-              streak=$((streak+1))
-            else
-              streak=0
-            fi
-            if [ "$streak" -ge 3 ]; then ok=1; echo "postgres ready & stable sau ~$((i*2))s"; break; fi
-            sleep 2
-          done
-          [ "$ok" = 1 ] || { echo "postgres did not become ready" >&2; docker logs postgres 2>&1 | tail -30; exit 1; }
-      - name: Build hr-service image
-        run: docker build -t hr-service:ci src/hr-service
-      - name: Run Alembic migration (hr_svc schema + seed data)
-        run: |
-          docker run --rm --network hr-net \
-            -e DATABASE_URL=${{ env.ALEMBIC_URL }} \
-            -e HR_INTERNAL_TOKEN=${{ env.HR_TOKEN }} \
-            --workdir /app \
-            hr-service:ci \
-            alembic upgrade head
-      - name: Start hr-service
-        run: |
-          docker run -d --name hr-service --network hr-net \
-            -p 8004:8004 \
-            -e HR_DATABASE_URL=${{ env.DB_URL }} \
-            -e HR_INTERNAL_TOKEN=${{ env.HR_TOKEN }} \
-            -e HR_HOST=0.0.0.0 \
-            -e HR_PORT=8004 \
-            -e LOG_LEVEL=INFO \
-            hr-service:ci
-      - name: Wait for hr-service health
-        run: |
-          for i in $(seq 1 60); do
-            status=$(curl -sf -o /dev/null -w "%{http_code}" \
-              -H "X-Internal-Token: ${{ env.HR_TOKEN }}" \
-              http://localhost:8004/health 2>/dev/null || echo "000")
-            if [ "$status" = "200" ]; then
-              echo "hr-service ready after ${i}s"; break
-            fi
-            sleep 1
-          done
-          [ "$status" = "200" ] || \
-            { echo "hr-service did not become ready" >&2; docker logs hr-service; exit 1; }
-      - name: Build mcp-service image
-        run: docker build -t mcp-service:ci src/mcp-service
-      - name: Start mcp-service (hr_query enabled, rag_search disabled)
-        run: |
-          docker run -d --name mcp-service --network hr-net \
-            -p 8003:8003 \
-            -e PIPELINE_PROFILE=baseline \
-            -e AI_PROVIDER=offline \
-            -e MCP_HOST=0.0.0.0 \
-            -e MCP_PORT=8003 \
-            -e MCP_INTERNAL_TOKEN=${{ env.MCP_TOKEN }} \
-            -e TOOL_RAG_SEARCH_ENABLED=0 \
-            -e TOOL_HR_QUERY_ENABLED=1 \
-            -e HR_SERVICE_URL=http://hr-service:8004 \
-            -e HR_SERVICE_INTERNAL_TOKEN=${{ env.HR_TOKEN }} \
-            mcp-service:ci
-      - name: Wait for mcp-service ready
-        run: |
-          for i in $(seq 1 90); do
-            if (echo > /dev/tcp/127.0.0.1/8003) 2>/dev/null; then
-              echo "mcp-service port 8003 open after ${i}s"; break
-            fi
-            sleep 1
-          done
-          (echo > /dev/tcp/127.0.0.1/8003) 2>/dev/null || \
-            { echo "mcp-service port 8003 did not open" >&2; docker logs mcp-service; exit 1; }
-          sleep 2
-      - name: Run e2e integration test (hr-service + mcp-service, real Docker)
-        env:
-          HR_URL: http://localhost:8004
-          MCP_URL: http://localhost:8003/mcp
-          HR_INTERNAL_TOKEN: ${{ env.HR_TOKEN }}
-          MCP_INTERNAL_TOKEN: ${{ env.MCP_TOKEN }}
-        run: python src/hr-service/scripts/e2e_hr_integration.py
-      - name: Container logs on failure
-        if: failure()
-        run: |
-          echo "=== hr-service logs ===" && docker logs hr-service 2>&1 || true
-          echo "=== mcp-service logs ===" && docker logs mcp-service 2>&1 || true
-          echo "=== postgres logs ===" && docker logs postgres 2>&1 || true
-
-  # ──────────────────── Phase 1e: E2E-CLOUD ────────────────────────
-  # document-service -> NATS -> rag-worker -> Qdrant -> mcp search, trên GCS + Qdrant
-  # Cloud THẬT. Postgres + NATS = container runner. Dọn sạch GCS + Qdrant sau mỗi run.
-  e2e-cloud:
-    needs: detect
-    if: needs.detect.outputs.run_e2e_cloud == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      GCS_BUCKET: vsf-rag-chatbot-docs-dev
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       QDRANT_URL: ${{ secrets.QDRANT_URL }}
       QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
       VECTOR_DB_BASIC_AUTH: ${{ secrets.VECTOR_DB_BASIC_AUTH }}
       GCS_HMAC_KEY: ${{ secrets.GCS_HMAC_KEY }}
       GCS_HMAC_SECRET: ${{ secrets.GCS_HMAC_SECRET }}
-      JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
-      RAG_DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/rag_db
-      DOC_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/doc_db
+      GCS_BUCKET: vsf-rag-chatbot-docs-dev
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Install test client deps
+      - name: Install e2e client deps
+        run: python -m pip install --upgrade pip && pip install requests boto3
+      - name: Ghi .env cho docker compose (biến ${VAR} substitution)
         run: |
-          python -m pip install --upgrade pip
-          pip install boto3 requests mcp
-      - name: Generate infra/localtest/init-db.sql
-        run: |
-          mkdir -p infra/localtest
-          cat > infra/localtest/init-db.sql <<'SQL'
-          CREATE DATABASE doc_db;
-          CREATE DATABASE rag_db;
-          \connect doc_db
-          CREATE SCHEMA IF NOT EXISTS doc_svc;
-          CREATE TABLE IF NOT EXISTS doc_svc.documents (
-              id UUID PRIMARY KEY,
-              name VARCHAR(500) NOT NULL,
-              file_type VARCHAR(20) NOT NULL,
-              gcs_key VARCHAR(1000) NOT NULL,
-              status VARCHAR(20) NOT NULL DEFAULT 'queued',
-              uploaded_by UUID NOT NULL,
-              classification VARCHAR(20) NOT NULL DEFAULT 'internal',
-              allowed_departments TEXT[] NOT NULL DEFAULT '{}',
-              allowed_user_ids TEXT[] NOT NULL DEFAULT '{}',
-              chunk_count INTEGER NOT NULL DEFAULT 0,
-              error_message TEXT,
-              created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-              updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-              deleted_at TIMESTAMPTZ
-          );
-          CREATE INDEX IF NOT EXISTS ix_doc_status ON doc_svc.documents (status);
-          CREATE INDEX IF NOT EXISTS ix_doc_uploaded_by ON doc_svc.documents (uploaded_by);
-          CREATE TABLE IF NOT EXISTS doc_svc.audit_logs (
-              id UUID PRIMARY KEY,
-              actor_id UUID NOT NULL,
-              actor_role VARCHAR(50) NOT NULL,
-              action VARCHAR(100) NOT NULL,
-              resource_type VARCHAR(100),
-              resource_id UUID,
-              detail JSONB,
-              ip_address VARCHAR(45),
-              created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-          );
-          CREATE INDEX IF NOT EXISTS ix_audit_actor ON doc_svc.audit_logs (actor_id);
-          SQL
-      - name: Build + start stack (postgres+nats local; GCS+Qdrant cloud)
-        run: docker compose -f docker-compose.localtest.yml up -d --build
-      - name: Wait for rag-worker /readyz
-        run: |
-          for i in $(seq 1 60); do
-            if curl -fsS http://localhost:8000/readyz >/dev/null 2>&1; then
-              echo "rag-worker ready"; exit 0
-            fi
-            sleep 3
-          done
-          echo "rag-worker not ready" >&2
-          docker compose -f docker-compose.localtest.yml logs rag-worker || true
-          exit 1
-      - name: Upload validation corpus via document-service
+          cat > .env <<EOF
+          OPENAI_API_KEY=${OPENAI_API_KEY}
+          QDRANT_URL=${QDRANT_URL}
+          QDRANT_API_KEY=${QDRANT_API_KEY}
+          VECTOR_DB_BASIC_AUTH=${VECTOR_DB_BASIC_AUTH}
+          GCS_HMAC_KEY=${GCS_HMAC_KEY}
+          GCS_HMAC_SECRET=${GCS_HMAC_SECRET}
+          GCS_BUCKET=${GCS_BUCKET}
+          EOF
+      - name: Build + up stack (nats-bootstrap + migrate + service như prod)
+        run: docker compose -f docker-compose.e2e.yml up -d --build
+      - name: Run e2e flow (login -> upload -> ingest -> trace -> query RAG/HR -> trace)
         env:
+          GATEWAY_URL: http://localhost
+          DOC_URL: http://localhost:8002
+          LANGFUSE_HOST_PUBLIC: http://localhost:3100
+          LANGFUSE_PUBLIC_KEY: pk-lf-e2e
+          LANGFUSE_SECRET_KEY: sk-lf-e2e
           S3_ENDPOINT_URL: https://storage.googleapis.com
           S3_BUCKET: ${{ env.GCS_BUCKET }}
           S3_ACCESS_KEY_ID: ${{ secrets.GCS_HMAC_KEY }}
           S3_SECRET_ACCESS_KEY: ${{ secrets.GCS_HMAC_SECRET }}
           S3_REGION: auto
-        run: python infra/localtest/ci_e2e.py upload
-      - name: Verify ingest (poll Qdrant points)
-        run: python infra/localtest/ci_e2e.py verify
-      - name: (Re)start mcp-service after collection exists
-        run: |
-          docker compose -f docker-compose.localtest.yml up -d mcp-service
-          for i in $(seq 1 30); do
-            if docker compose -f docker-compose.localtest.yml logs mcp-service 2>&1 | grep -q "Uvicorn running"; then
-              echo "mcp up"; exit 0
-            fi
-            sleep 2
-          done
-          echo "mcp not up" >&2
-          docker compose -f docker-compose.localtest.yml logs mcp-service || true
-          exit 1
-      - name: Search golden queries via MCP HTTP
-        run: python infra/localtest/ci_e2e.py search
+        run: python infra/e2e/run_e2e.py
       - name: Stack logs on failure
         if: failure()
-        run: docker compose -f docker-compose.localtest.yml logs --no-color | tail -300 || true
-      - name: Cleanup GCS + Qdrant
-        if: always()
-        env:
-          S3_ENDPOINT_URL: https://storage.googleapis.com
-          S3_BUCKET: ${{ env.GCS_BUCKET }}
-          S3_ACCESS_KEY_ID: ${{ secrets.GCS_HMAC_KEY }}
-          S3_SECRET_ACCESS_KEY: ${{ secrets.GCS_HMAC_SECRET }}
-          S3_REGION: auto
-        run: python infra/localtest/ci_e2e.py cleanup
+        run: docker compose -f docker-compose.e2e.yml logs --no-color | tail -400 || true
       - name: Tear down stack
         if: always()
-        run: docker compose -f docker-compose.localtest.yml down -v || true
+        run: docker compose -f docker-compose.e2e.yml down -v || true
 
-  # ──────────────────── Phase 1f: LANGFUSE-TEST ────────────────────
-  # Langfuse self-host SẴN SÀNG nhận data chưa: dựng langfuse + postgres docker, gửi 1
-  # trace THẬT qua public API -> verify hiện ra -> XÓA NGAY -> verify đã xóa. Container
-  # ephemeral, teardown sau job. Chỉ chạy khi compose/script langfuse đổi.
-  langfuse-test:
-    needs: detect
-    if: needs.detect.outputs.run_langfuse == 'true'
-    runs-on: ubuntu-latest
-    env:
-      LF_PUBLIC_KEY: pk-lf-ci-smoke
-      LF_SECRET_KEY: sk-lf-ci-smoke
-      SMOKE_TRACE_ID: ci-smoke-fixed-trace
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Install test client deps
-        run: python -m pip install --upgrade pip && pip install requests
-      - name: Create Docker network lf-net
-        run: docker network create lf-net
-      - name: Start PostgreSQL (langfuse db)
-        run: |
-          docker run -d --name lf-db --network lf-net \
-            -e POSTGRES_USER=langfuse -e POSTGRES_PASSWORD=langfuse -e POSTGRES_DB=langfuse \
-            postgres:16-alpine
-      - name: Wait for PostgreSQL ready
-        run: |
-          for i in $(seq 1 30); do
-            docker exec lf-db pg_isready -U langfuse -q && { echo "pg ready ${i}s"; break; }
-            sleep 2
-          done
-          docker exec lf-db pg_isready -U langfuse || { echo "pg not ready" >&2; exit 1; }
-      - name: Start Langfuse (headless init project + keys)
-        run: |
-          docker run -d --name langfuse --network lf-net -p 3000:3000 \
-            -e DATABASE_URL=postgresql://langfuse:langfuse@lf-db:5432/langfuse \
-            -e NEXTAUTH_SECRET=ci-nextauth-secret \
-            -e SALT=ci-salt \
-            -e ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000 \
-            -e NEXTAUTH_URL=http://localhost:3000 \
-            -e TELEMETRY_ENABLED=false \
-            -e LANGFUSE_INIT_ORG_ID=ci \
-            -e LANGFUSE_INIT_PROJECT_ID=ci \
-            -e LANGFUSE_INIT_PROJECT_PUBLIC_KEY=${{ env.LF_PUBLIC_KEY }} \
-            -e LANGFUSE_INIT_PROJECT_SECRET_KEY=${{ env.LF_SECRET_KEY }} \
-            -e LANGFUSE_INIT_USER_EMAIL=ci@company.com \
-            -e LANGFUSE_INIT_USER_PASSWORD=ci-password-123 \
-            langfuse/langfuse:2
-      - name: Wait for Langfuse /api/public/health
-        run: |
-          for i in $(seq 1 60); do
-            if curl -fsS http://localhost:3000/api/public/health >/dev/null 2>&1; then
-              echo "langfuse ready after ${i}s"; exit 0
-            fi
-            sleep 3
-          done
-          echo "langfuse not ready" >&2; docker logs langfuse || true; exit 1
-      - name: Ingest + verify NHẬN data
-        env:
-          LANGFUSE_HOST: http://localhost:3000
-          LANGFUSE_PUBLIC_KEY: ${{ env.LF_PUBLIC_KEY }}
-          LANGFUSE_SECRET_KEY: ${{ env.LF_SECRET_KEY }}
-        run: python infra/localtest/ci_langfuse.py ingest
-      - name: XÓA NGAY trace test (DB — v2 không có API xóa trace)
-        run: |
-          docker exec lf-db psql -U langfuse -d langfuse -v ON_ERROR_STOP=1 \
-            -c "DELETE FROM observations WHERE trace_id='${{ env.SMOKE_TRACE_ID }}';" \
-            -c "DELETE FROM scores WHERE trace_id='${{ env.SMOKE_TRACE_ID }}';" \
-            -c "DELETE FROM traces WHERE id='${{ env.SMOKE_TRACE_ID }}';"
-      - name: Confirm đã xóa sạch (GET -> 404)
-        env:
-          LANGFUSE_HOST: http://localhost:3000
-          LANGFUSE_PUBLIC_KEY: ${{ env.LF_PUBLIC_KEY }}
-          LANGFUSE_SECRET_KEY: ${{ env.LF_SECRET_KEY }}
-        run: python infra/localtest/ci_langfuse.py confirm-deleted
-      - name: Container logs on failure
-        if: failure()
-        run: |
-          echo "=== langfuse ===" && docker logs langfuse 2>&1 | tail -120 || true
-          echo "=== lf-db ===" && docker logs lf-db 2>&1 | tail -40 || true
-
-  # ──────────────────── Phase 1g: LANGSMITH-TEST ───────────────────
-  # LangSmith là SaaS cloud (KHÔNG self-host) -> không dựng docker. Gửi 1 run THẬT bằng
-  # KEY THẬT (đọc từ deploy/env/query-service.env, giống langfuse đọc common.env) vào 1
-  # PROJECT EPHEMERAL duy nhất mỗi run -> verify NHẬN -> XÓA NGUYÊN PROJECT -> verify đã
-  # xóa. Dùng RunTree low-level y như runtime. Chỉ chạy khi script/observability đổi.
-  langsmith-test:
-    needs: detect
-    if: needs.detect.outputs.run_langsmith == 'true'
-    runs-on: ubuntu-latest
-    env:
-      SMOKE_PROJECT: ci-langsmith-${{ github.run_id }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Install langsmith client
-        run: python -m pip install --upgrade pip && pip install langsmith
-      - name: Đọc KEY THẬT từ deploy/env/query-service.env
-        id: lskey
-        run: |
-          K=$(grep -E '^LANGSMITH_API_KEY=' deploy/env/query-service.env | cut -d= -f2-)
-          E=$(grep -E '^LANGSMITH_ENDPOINT=' deploy/env/query-service.env | cut -d= -f2-)
-          [ -n "$K" ] || { echo "::error::thiếu LANGSMITH_API_KEY trong query-service.env"; exit 1; }
-          echo "::add-mask::$K"
-          echo "key=$K" >> "$GITHUB_OUTPUT"
-          echo "endpoint=${E:-https://api.smith.langchain.com}" >> "$GITHUB_OUTPUT"
-      - name: Ingest + verify NHẬN data
-        env:
-          LANGSMITH_API_KEY: ${{ steps.lskey.outputs.key }}
-          LANGSMITH_ENDPOINT: ${{ steps.lskey.outputs.endpoint }}
-        run: python infra/localtest/ci_langsmith.py ingest
-      - name: XÓA NGAY project test
-        if: always()
-        env:
-          LANGSMITH_API_KEY: ${{ steps.lskey.outputs.key }}
-          LANGSMITH_ENDPOINT: ${{ steps.lskey.outputs.endpoint }}
-        run: python infra/localtest/ci_langsmith.py purge
-      - name: Verify đã XÓA (không để lại rác)
-        env:
-          LANGSMITH_API_KEY: ${{ steps.lskey.outputs.key }}
-          LANGSMITH_ENDPOINT: ${{ steps.lskey.outputs.endpoint }}
-        run: python infra/localtest/ci_langsmith.py confirm-deleted
-
-  # ──────────────── Phase 1h: RAG-LANGFUSE (thuần rag-worker) ───────
-  # Integration THUẦN rag-worker: chạy đúng luồng ingest của rag-worker với
-  # IngestTracer + Langfuse THẬT (self-host docker). Các "service" ngoài
-  # (embedder/captioner/vectors) = stub mô phỏng đúng luồng data. Verify:
-  #   1 doc tốt -> trace đủ span stage + SUCCESS;
-  #   2 doc lỗi (embed, qdrant-write) -> trace FAILED + span level=ERROR đúng stage.
-  # Đây là guard "lỗi stage KHÔNG lọt khi vào production". Chỉ chạy khi rag-worker đổi.
-  rag-langfuse:
-    needs: detect
-    if: needs.detect.outputs.run_rag_langfuse == 'true'
-    runs-on: ubuntu-latest
-    env:
-      LF_PUBLIC_KEY: pk-lf-ragci
-      LF_SECRET_KEY: sk-lf-ragci
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-          cache-dependency-path: src/rag-worker/requirements.txt
-      - name: Install rag-worker deps (gồm langfuse v2) + requests
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r src/rag-worker/requirements.txt requests
-      - name: Create Docker network lf-net
-        run: docker network create lf-net
-      - name: Start PostgreSQL (langfuse db)
-        run: |
-          docker run -d --name lf-db --network lf-net \
-            -e POSTGRES_USER=langfuse -e POSTGRES_PASSWORD=langfuse -e POSTGRES_DB=langfuse \
-            postgres:16-alpine
-      - name: Wait for PostgreSQL ready
-        run: |
-          for i in $(seq 1 30); do
-            docker exec lf-db pg_isready -U langfuse -q && { echo "pg ready ${i}s"; break; }
-            sleep 2
-          done
-          docker exec lf-db pg_isready -U langfuse || { echo "pg not ready" >&2; exit 1; }
-      - name: Start Langfuse (headless init project + keys)
-        run: |
-          docker run -d --name langfuse --network lf-net -p 3000:3000 \
-            -e DATABASE_URL=postgresql://langfuse:langfuse@lf-db:5432/langfuse \
-            -e NEXTAUTH_SECRET=ci-nextauth-secret \
-            -e SALT=ci-salt \
-            -e ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000 \
-            -e NEXTAUTH_URL=http://localhost:3000 \
-            -e TELEMETRY_ENABLED=false \
-            -e LANGFUSE_INIT_ORG_ID=ragci \
-            -e LANGFUSE_INIT_PROJECT_ID=ragci \
-            -e LANGFUSE_INIT_PROJECT_PUBLIC_KEY=${{ env.LF_PUBLIC_KEY }} \
-            -e LANGFUSE_INIT_PROJECT_SECRET_KEY=${{ env.LF_SECRET_KEY }} \
-            -e LANGFUSE_INIT_USER_EMAIL=ragci@company.com \
-            -e LANGFUSE_INIT_USER_PASSWORD=ragci-password-123 \
-            langfuse/langfuse:2
-      - name: Wait for Langfuse /api/public/health
-        run: |
-          for i in $(seq 1 60); do
-            if curl -fsS http://localhost:3000/api/public/health >/dev/null 2>&1; then
-              echo "langfuse ready after ${i}s"; exit 0
-            fi
-            sleep 3
-          done
-          echo "langfuse not ready" >&2; docker logs langfuse || true; exit 1
-      - name: Run rag-worker ingest + verify trace (success + 2 stage failures)
-        working-directory: src/rag-worker
-        env:
-          APP_ENV: development
-          AI_PROVIDER: offline
-          LANGFUSE_HOST: http://localhost:3000
-          LANGFUSE_PUBLIC_KEY: ${{ env.LF_PUBLIC_KEY }}
-          LANGFUSE_SECRET_KEY: ${{ env.LF_SECRET_KEY }}
-        run: python scripts/e2e_langfuse_tracing.py
-      - name: XÓA trace test (DB — v2 không có API xóa trace) theo session prefix
-        if: always()
-        run: |
-          docker exec lf-db psql -U langfuse -d langfuse -v ON_ERROR_STOP=1 \
-            -c "DELETE FROM observations WHERE trace_id IN (SELECT id FROM traces WHERE session_id LIKE 'raglf-ci-%');" \
-            -c "DELETE FROM scores WHERE trace_id IN (SELECT id FROM traces WHERE session_id LIKE 'raglf-ci-%');" \
-            -c "DELETE FROM traces WHERE session_id LIKE 'raglf-ci-%';" || true
-      - name: Container logs on failure
-        if: failure()
-        run: |
-          echo "=== langfuse ===" && docker logs langfuse 2>&1 | tail -120 || true
-          echo "=== lf-db ===" && docker logs lf-db 2>&1 | tail -40 || true
-
-  # ───────────────────────── Phase 2: GATE ─────────────────────────
-  # Chốt chặn: fail nếu BẤT KỲ validate nào failure/cancelled. Job skipped (do path
-  # không khớp) coi như pass. build-push + deploy đều needs gate -> không qua gate = dừng.
+  # ───────────────────────── Phase GATE ─────────────────────────
+  # Fail nếu BẤT KỲ test nào failure/cancelled. Job skipped (path không khớp) = pass.
   gate:
-    needs: [contract, rag-test, search-semantic, hr-integration, e2e-cloud, langfuse-test, langsmith-test, rag-langfuse]
+    needs: [unit, contract, e2e]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Assert no validate failed
+      - name: Assert no test failed
         run: |
           for nr in \
+            "unit=${{ needs.unit.result }}" \
             "contract=${{ needs.contract.result }}" \
-            "rag-test=${{ needs.rag-test.result }}" \
-            "search-semantic=${{ needs.search-semantic.result }}" \
-            "hr-integration=${{ needs.hr-integration.result }}" \
-            "e2e-cloud=${{ needs.e2e-cloud.result }}" \
-            "langfuse-test=${{ needs.langfuse-test.result }}" \
-            "langsmith-test=${{ needs.langsmith-test.result }}" \
-            "rag-langfuse=${{ needs.rag-langfuse.result }}"; do
+            "e2e=${{ needs.e2e.result }}"; do
             name="${nr%%=*}"; res="${nr#*=}"
             echo "  $name = $res"
             if [ "$res" = "failure" ] || [ "$res" = "cancelled" ]; then
-              echo "::error::validate '$name' = $res -> chặn build + deploy"
+              echo "::error::test '$name' = $res -> chặn build + deploy"
               FAILED=1
             fi
           done
           [ -z "${FAILED:-}" ] || exit 1
-          echo "GATE OK: không validate nào fail."
+          echo "GATE OK: không test nào fail."
 
   # ──────────────────── Phase 3: BUILD + PUSH ──────────────────────
   # Matrix = CHỈ service thay đổi (detect.services). Mỗi image 2 tag: :develop + :<git-sha>.
