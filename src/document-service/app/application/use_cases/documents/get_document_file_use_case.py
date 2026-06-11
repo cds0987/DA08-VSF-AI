@@ -1,9 +1,11 @@
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.parse import urlparse
 
 from app.application.auth import CurrentUser
-from app.application.exceptions import NotFoundError, PermissionDeniedError
+from app.application.exceptions import NotFoundError, PermissionDeniedError, StorageError
 from app.application.use_cases.documents.common import can_access_document
+from app.application.use_cases.documents.common import ALLOWED_EXTENSIONS
 from app.domain.repositories.document_repository import DocumentRepository
 
 
@@ -40,9 +42,29 @@ class GetDocumentFileUseCase:
         ):
             raise PermissionDeniedError("Khong co quyen xem tai lieu nay")
 
+        file_type = _normalize_file_type(document.file_type)
+        try:
+            url = await self.storage.generate_presigned_url(document.gcs_key, expires_in=300)
+        except Exception as exc:
+            raise StorageError() from exc
+        _validate_browser_url(url)
+
         return DocumentFileResult(
-            url=await self.storage.generate_presigned_url(document.gcs_key, expires_in=300),
-            file_type=document.file_type,
+            url=url,
+            file_type=file_type,
             expires_in=300,
         )
+
+
+def _normalize_file_type(file_type: str) -> str:
+    normalized = file_type.strip().lower().lstrip(".")
+    if normalized not in ALLOWED_EXTENSIONS:
+        raise StorageError("Unsupported document file type")
+    return normalized
+
+
+def _validate_browser_url(url: str) -> None:
+    parsed = urlparse(url)
+    if not url.strip() or parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise StorageError("Storage returned an invalid signed URL")
 

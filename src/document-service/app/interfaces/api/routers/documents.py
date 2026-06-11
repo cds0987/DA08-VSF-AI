@@ -130,6 +130,11 @@ async def get_document_file(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(exc) or "Khong co quyen xem tai lieu nay",
         ) from exc
+    except StorageError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=exc.detail,
+        ) from exc
     return DocumentFileResponse(
         url=result.url,
         file_type=result.file_type,

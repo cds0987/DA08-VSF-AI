@@ -84,6 +84,11 @@ class FailingDeleteStorage(FakeStorage):
         raise RuntimeError("storage unavailable")
 
 
+class InvalidUrlStorage(FakeStorage):
+    async def generate_presigned_url(self, key: str, expires_in: int = 300) -> str:
+        return "not-a-browser-url"
+
+
 class FakePublisher:
     def __init__(self) -> None:
         self.ingest_payloads: list[dict] = []
@@ -122,11 +127,12 @@ def document(
     classification: str = "internal",
     allowed_departments: list[str] | None = None,
     allowed_user_ids: list[str] | None = None,
+    file_type: str = "pdf",
 ) -> Document:
     return Document(
         id=str(uuid4()),
         name="policy.pdf",
-        file_type="pdf",
+        file_type=file_type,
         gcs_key="raw/policy.pdf",
         status=DocumentStatus.INDEXED,
         uploaded_by=str(uuid4()),
@@ -367,6 +373,45 @@ async def test_file_acl_allows_matching_secret_department() -> None:
 
     assert result.file_type == "pdf"
     assert result.expires_in == 300
+
+
+@pytest.mark.asyncio
+async def test_file_response_normalizes_legacy_file_type() -> None:
+    doc = document(file_type=".PDF")
+    use_case = GetDocumentFileUseCase(InMemoryDocuments([doc]), FakeStorage())
+
+    result = await use_case.execute(
+        CurrentUser(id=str(uuid4()), role="user", account_type="internal", department="HR"),
+        doc.id,
+    )
+
+    assert result.file_type == "pdf"
+    assert result.url.startswith("https://")
+    assert result.expires_in == 300
+
+
+@pytest.mark.asyncio
+async def test_file_response_rejects_invalid_file_type() -> None:
+    doc = document(file_type="exe")
+    use_case = GetDocumentFileUseCase(InMemoryDocuments([doc]), FakeStorage())
+
+    with pytest.raises(StorageError):
+        await use_case.execute(
+            CurrentUser(id=str(uuid4()), role="user", account_type="internal", department="HR"),
+            doc.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_file_response_rejects_invalid_signed_url() -> None:
+    doc = document()
+    use_case = GetDocumentFileUseCase(InMemoryDocuments([doc]), InvalidUrlStorage())
+
+    with pytest.raises(StorageError):
+        await use_case.execute(
+            CurrentUser(id=str(uuid4()), role="user", account_type="internal", department="HR"),
+            doc.id,
+        )
 
 
 @pytest.mark.asyncio

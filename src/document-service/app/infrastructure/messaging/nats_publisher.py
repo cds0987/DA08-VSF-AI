@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -7,6 +8,11 @@ from app.core.config import Settings
 
 
 JETSTREAM_EVENT_SUBJECTS = {"doc.ingest", "doc.access", "doc.status", "notify.doc_new"}
+JETSTREAM_STREAMS = {
+    "DOC_EVENTS": ["doc.ingest", "doc.status", "doc.access"],
+    "NOTIFY_EVENTS": ["notify.doc_new"],
+}
+logger = logging.getLogger(__name__)
 
 
 class NatsPublisher:
@@ -36,6 +42,7 @@ class NatsPublisher:
         data = json.dumps(_with_event_metadata(subject, payload)).encode("utf-8")
         if self.settings.nats_jetstream_enabled:
             js = nc.jetstream()
+            await ensure_jetstream_streams(js)
             await js.publish(subject, data)
         else:
             await nc.publish(subject, data)
@@ -63,6 +70,18 @@ def _import_nats():
     except ImportError as exc:
         raise RuntimeError("nats-py is required for NATS messaging") from exc
     return nats
+
+
+async def ensure_jetstream_streams(js) -> None:
+    for name, subjects in JETSTREAM_STREAMS.items():
+        try:
+            await js.stream_info(name)
+        except Exception:
+            try:
+                await js.add_stream(name=name, subjects=subjects)
+            except Exception as exc:
+                logger.warning("failed to ensure NATS stream %s: %s", name, exc)
+                raise
 
 
 def _with_event_metadata(subject: str, payload: dict) -> dict:

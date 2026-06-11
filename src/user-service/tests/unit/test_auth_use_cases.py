@@ -298,7 +298,35 @@ def test_jwt_payload_includes_account_type() -> None:
     assert payload["user_id"] == user.id
     assert payload["role"] == "user"
     assert payload["account_type"] == "internal"
+    assert payload["department"] == "HR"
     assert payload["jti"] == access_token.jti
+
+
+def test_jwt_payload_includes_empty_department_claim() -> None:
+    from jose import jwt
+
+    from app.infrastructure.security.jwt_token_service import JwtTokenService
+
+    secret = "strong-test-secret"
+    user = User(
+        id=str(uuid4()),
+        email="user@company.com",
+        role=UserRole.USER,
+        is_active=True,
+        account_type="external",
+        department="",
+        hashed_password="hashed:secret",
+    )
+    token_service = JwtTokenService(secret_key=secret)
+
+    access_token = token_service.create_access_token(user)
+    payload = jwt.decode(access_token.token, secret, algorithms=["HS256"])
+
+    assert payload["sub"] == user.id
+    assert payload["role"] == "user"
+    assert payload["account_type"] == "external"
+    assert "department" in payload
+    assert payload["department"] == ""
 
 
 @pytest.mark.asyncio
@@ -324,6 +352,45 @@ async def test_refresh_rotates_token_and_rejects_old_one() -> None:
     assert result.refresh_token != old_refresh
     with pytest.raises(InvalidTokenError):
         await use_case.execute(old_refresh)
+
+
+@pytest.mark.asyncio
+async def test_refresh_access_token_preserves_document_acl_claims() -> None:
+    from jose import jwt
+
+    from app.infrastructure.security.jwt_token_service import JwtTokenService
+
+    secret = "strong-test-secret"
+    user = User(
+        id=str(uuid4()),
+        email="external@company.com",
+        role=UserRole.USER,
+        is_active=True,
+        account_type="external",
+        department="Partner",
+        hashed_password="hashed:secret",
+    )
+    users = InMemoryUsers([user])
+    hasher = FakePasswordHasher()
+    refresh_store = InMemoryRefreshTokens()
+    issuer = RefreshTokenIssuer(refresh_store, hasher)
+    refresh_token = await issuer.issue(user.id)
+    token_service = JwtTokenService(secret_key=secret)
+    use_case = RefreshTokenUseCase(
+        user_repository=users,
+        refresh_token_repository=refresh_store,
+        refresh_token_issuer=issuer,
+        password_hasher=hasher,
+        token_service=token_service,
+    )
+
+    result = await use_case.execute(refresh_token)
+    payload = jwt.decode(result.access_token, secret, algorithms=["HS256"])
+
+    assert payload["sub"] == user.id
+    assert payload["role"] == "user"
+    assert payload["account_type"] == "external"
+    assert payload["department"] == "Partner"
 
 
 @pytest.mark.asyncio
