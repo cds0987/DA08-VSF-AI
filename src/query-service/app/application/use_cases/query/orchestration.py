@@ -553,8 +553,11 @@ class QueryOrchestrationUseCase:
                 ) if trace_handle else None
                 tracer.span_end(err_span, output_data={"error": str(_stream_exc)}, level="ERROR")
             logger.error(
-                "langgraph_stream_fatal",
-                extra={"session_id": session_id, "error_type": _err_name, "error": str(_stream_exc)[:300]},
+                "langgraph_stream_fatal %s: %s",
+                _err_name,
+                str(_stream_exc)[:400],
+                extra={"session_id": session_id, "error_type": _err_name},
+                exc_info=True,
             )
             await self._save_assistant(user.id, session_id, _GRACEFUL_CRASH_MSG, [], started)
             yield {
