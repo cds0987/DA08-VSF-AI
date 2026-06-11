@@ -1,0 +1,447 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# docker-compose.e2e.yml — 1 STACK DUY NHẤT mô phỏng PRODUCTION ở local/CI.
+#
+#   docker compose -f docker-compose.e2e.yml up -d --build
+#   python infra/e2e/run_e2e.py           # chạy đúng 1 flow tích hợp xuyên suốt
+#   docker compose -f docker-compose.e2e.yml down -v
+#
+# MỤC TIÊU: bắt lỗi ORCHESTRATION mà unit/per-service test KHÔNG thấy (vd
+#   nats-bootstrap exit 1). Vì vậy GIỮ NGUYÊN chuỗi depends_on của prod
+#   (docker-compose.yml): nats-bootstrap one-shot (provision DOC_EVENTS,
+#   verify-only) -> migrate one-shot -> service. Bootstrap/migrate fail =
+#   compose up fail = test fail.
+#
+# KHÁC prod (docker-compose.yml):
+#   - build từ source (không pull Docker Hub).
+#   - Postgres + NATS + Redis = container (prod: Cloud SQL + NATS VM).
+#   - GCS + Qdrant = CLOUD THẬT (key đọc từ .env / secrets CI) -> nghiệm thu
+#     đúng đường tích hợp cloud.
+#   - thêm seed one-shot (seed-user, seed-doc): prod seed Cloud SQL tay 1 lần;
+#     e2e self-contained nên tự dựng schema + admin.
+#   - Langfuse v2 self-host (KHỚP prod) + BẬT trace cả query-service lẫn
+#     rag-worker (mặc định prod off) -> test thật đường observability.
+#
+# Secrets từ .env (gitignored) hoặc env CI: OPENAI_API_KEY, QDRANT_URL,
+#   QDRANT_API_KEY, GCS_HMAC_KEY, GCS_HMAC_SECRET. Xem infra/e2e/README.md.
+# ═══════════════════════════════════════════════════════════════════════════
+
+x-jwt: &jwt
+  JWT_SECRET_KEY: "e2e-jwt-secret-shared-across-services-32ch"
+  JWT_ALGORITHM: HS256
+
+x-newrelic-off: &newrelic-off
+  NEW_RELIC_AGENT_ENABLED: "false"
+  NEW_RELIC_ENABLED: "false"
+
+x-gcs: &gcs-s3
+  S3_ENDPOINT_URL: https://storage.googleapis.com
+  S3_ACCESS_KEY_ID: ${GCS_HMAC_KEY:?set GCS_HMAC_KEY in .env}
+  S3_SECRET_ACCESS_KEY: ${GCS_HMAC_SECRET:?set GCS_HMAC_SECRET in .env}
+  S3_REGION: auto
+
+x-qdrant: &qdrant-cloud
+  VECTOR_DB_PROVIDER: qdrant
+  VECTOR_DB_URL: ${QDRANT_URL:?set QDRANT_URL in .env}
+  VECTOR_DB_API_KEY: ${QDRANT_API_KEY:-}
+  VECTOR_DB_BASIC_AUTH: ${VECTOR_DB_BASIC_AUTH:-}
+  VECTOR_COLLECTION: rag_chatbot
+
+x-openai: &openai
+  OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY in .env}
+
+# Langfuse v2 self-host: cặp key cố định (headless init) — query-service +
+# rag-worker dùng để gửi trace; run_e2e dùng để verify NHẬN trace.
+x-langfuse: &langfuse
+  LANGFUSE_HOST: http://langfuse:3000
+  LANGFUSE_PUBLIC_KEY: pk-lf-e2e
+  LANGFUSE_SECRET_KEY: sk-lf-e2e
+
+services:
+  # ─────────────────────────────── Infra ──────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - ./infra/e2e/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  nats:
+    image: nats:2.10
+    command: ["-js", "-c", "/etc/nats/jetstream.conf"]
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+    volumes:
+      - ./infra/nats/jetstream.conf:/etc/nats/jetstream.conf:ro
+    restart: unless-stopped
+
+  # NGUỒN DUY NHẤT provision JetStream (giống prod): chạy CHÍNH bootstrap_streams.py
+  # bằng image rag-worker. One-shot TRƯỚC service. exit 1 -> compose up fail.
+  nats-bootstrap:
+    build:
+      context: ./src/rag-worker
+    image: rag-worker:e2e
+    depends_on:
+      nats:
+        condition: service_started
+    command: ["python", "/etc/nats/bootstrap_streams.py"]
+    environment:
+      NATS_URL: nats://nats:4222
+    volumes:
+      - ./infra/nats/bootstrap_streams.py:/etc/nats/bootstrap_streams.py:ro
+    restart: "no"
+
+  # ── Langfuse v2 self-host (KHỚP prod) ──────────────────────────────────────
+  langfuse-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  langfuse:
+    image: langfuse/langfuse:2
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3100:3000"
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      NEXTAUTH_SECRET: e2e-nextauth-secret
+      SALT: e2e-salt
+      ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      NEXTAUTH_URL: http://localhost:3100
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_INIT_ORG_ID: e2e
+      LANGFUSE_INIT_PROJECT_ID: e2e
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-e2e
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-e2e
+      LANGFUSE_INIT_USER_EMAIL: e2e@company.com
+      LANGFUSE_INIT_USER_PASSWORD: e2e-password-123
+    restart: unless-stopped
+
+  # ──────────────────────── Seed one-shot (schema + admin) ──────────────────
+  # user-service KHÔNG tự create_all + repo không có seed admin (prod seed Cloud
+  # SQL tay). Dùng image user-service chạy infra/e2e/seed_user.py.
+  seed-user:
+    image: user-service:e2e
+    build:
+      context: ./src/user-service
+    command: ["python", "/seed/seed_user.py"]
+    environment:
+      USER_SERVICE_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/user_db
+      SEED_ADMIN_EMAIL: admin@company.com
+      SEED_ADMIN_PASSWORD: "***REDACTED-SEED-ADMIN-PW***"
+    volumes:
+      - ./infra/e2e/seed_user.py:/seed/seed_user.py:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # document-service KHÔNG tự tạo schema doc_svc -> psql apply seed_doc.sql.
+  seed-doc:
+    image: postgres:16-alpine
+    entrypoint:
+      ["sh", "-c", "psql postgresql://postgres:postgres@postgres:5432/doc_db -v ON_ERROR_STOP=1 -f /seed/seed_doc.sql"]
+    volumes:
+      - ./infra/e2e/seed_doc.sql:/seed/seed_doc.sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # ──────────────────────────── DB Migrations ────────────────────────────
+  rag-migrate:
+    image: rag-worker:e2e
+    command: ["alembic", "upgrade", "head"]
+    working_dir: /app
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/rag_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  hr-migrate:
+    image: hr-service:e2e
+    build:
+      context: ./src/hr-service
+    command: ["alembic", "upgrade", "head"]
+    working_dir: /app
+    environment:
+      # alembic env.py đọc HR_DATABASE_URL (fallback DATABASE_URL) — cùng biến runtime.
+      HR_DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/hr_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # ──────────────────────────── Backend services ─────────────────────────
+  user-service:
+    image: user-service:e2e
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      <<: [*jwt, *newrelic-off]
+      USER_SERVICE_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/user_db
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/user_db
+      REDIS_URL: redis://redis:6379/0
+      ALLOWED_ORIGINS: "http://localhost,http://localhost:3000,http://localhost:3001"
+      ACCESS_TOKEN_TTL_MINUTES: "480"
+      MICROSOFT_CLIENT_ID: ""
+      MICROSOFT_CLIENT_SECRET: ""
+      MICROSOFT_TENANT_ID: "common"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      seed-user:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  document-service:
+    image: document-service:e2e
+    build:
+      context: ./src/document-service
+    ports:
+      - "127.0.0.1:8002:8002"
+    environment:
+      <<: [*jwt, *gcs-s3, *newrelic-off]
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/doc_db
+      NATS_URL: nats://nats:4222
+      NATS_JETSTREAM_ENABLED: "true"
+      STORAGE_BACKEND: s3
+      S3_BUCKET: ${GCS_BUCKET:-vsf-rag-chatbot-docs-dev}
+      CORS_ORIGINS: "http://localhost,http://localhost:3000,http://localhost:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      nats-bootstrap:
+        condition: service_completed_successfully
+      seed-doc:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  rag-worker:
+    image: rag-worker:e2e
+    environment:
+      <<: [*openai, *gcs-s3, *qdrant-cloud, *newrelic-off, *langfuse]
+      APP_ENV: production
+      LOG_LEVEL: INFO
+      AI_PROVIDER: openai
+      EMBED_MODEL: text-embedding-3-small
+      EMBED_DIMENSION: "1536"
+      CAPTION_MODEL: gpt-4o-mini
+      CAPTION_ENABLED: "true"
+      RERANK_PROVIDER: none
+      PARSER_IMPL: s3
+      S3_SOURCE_BUCKET: ${GCS_BUCKET:-vsf-rag-chatbot-docs-dev}
+      SOURCE_ROOT: /tmp
+      ARTIFACT_ROOT: /tmp/artifacts
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/rag_db
+      NATS_URL: nats://nats:4222
+      NATS_JETSTREAM_ENABLED: "true"
+      # VERIFY-ONLY (như prod): stream do nats-bootstrap provision. AUTO_CREATE=0 ->
+      # nếu bootstrap chưa tạo DOC_EVENTS, rag-worker từ chối start -> lộ lỗi ngay.
+      NATS_STREAM: DOC_EVENTS
+      NATS_STREAM_AUTO_CREATE: "0"
+      INGEST_WORKER_COUNT: "1"
+      # BẬT IngestTracer (mặc định off) -> test thật đường trace rag-worker.
+      LANGFUSE_ENABLED: "1"
+      LANGFUSE_SAMPLE_RATE: "1.0"
+    depends_on:
+      nats:
+        condition: service_started
+      nats-bootstrap:
+        condition: service_completed_successfully
+      rag-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  hr-service:
+    image: hr-service:e2e
+    ports:
+      - "127.0.0.1:8004:8004"
+    environment:
+      <<: *newrelic-off
+      HR_DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/hr_db
+      HR_HOST: "0.0.0.0"
+      HR_PORT: "8004"
+      HR_INTERNAL_TOKEN: e2e-hr-token
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      hr-migrate:
+        condition: service_completed_successfully
+      nats:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c",
+        "import os,urllib.request; urllib.request.urlopen(urllib.request.Request('http://localhost:8004/health', headers={'X-Internal-Token': os.environ.get('HR_INTERNAL_TOKEN','')}))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  mcp-service:
+    image: mcp-service:e2e
+    build:
+      context: ./src/mcp-service
+    ports:
+      - "127.0.0.1:8003:8003"
+    environment:
+      <<: [*openai, *qdrant-cloud, *newrelic-off]
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8003"
+      LOG_LEVEL: INFO
+      AI_PROVIDER: openai
+      EMBED_MODEL: text-embedding-3-small
+      EMBED_DIMENSION: "1536"
+      RERANK_PROVIDER: llm
+      RERANK_MODEL: gpt-4o-mini
+      RERANK_THRESHOLD: "0.0"
+      TOOL_RAG_SEARCH_ENABLED: "1"
+      TOOL_HR_QUERY_ENABLED: "1"
+      HR_SERVICE_URL: http://hr-service:8004
+      HR_SERVICE_INTERNAL_TOKEN: e2e-hr-token
+      MCP_INTERNAL_TOKEN: ""
+    depends_on:
+      rag-worker:
+        condition: service_healthy
+      hr-service:
+        condition: service_healthy
+    restart: unless-stopped
+
+  query-service:
+    image: query-service:e2e
+    build:
+      context: ./src/query-service
+    ports:
+      - "127.0.0.1:8001:8001"
+    environment:
+      <<: [*jwt, *openai, *newrelic-off, *langfuse]
+      SERVICE_NAME: query-service
+      APP_ENV: production
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/query_db
+      REDIS_URL: redis://redis:6379/0
+      RATE_LIMITER_MODE: redis
+      AUTH_MODE: jwt
+      USER_SERVICE_URL: http://user-service:8000
+      LLM_MODE: openai
+      OPENAI_LLM_MODEL: gpt-4o-mini
+      OPENAI_EMBEDDING_MODEL: text-embedding-3-small
+      USE_LANGGRAPH: "true"
+      AGENT_MAX_ITERATIONS: "3"
+      MCP_MODE: real
+      MCP_SERVICE_URL: http://mcp-service:8003
+      MCP_TIMEOUT_SECONDS: "20"
+      MCP_INTERNAL_TOKEN: ""
+      TOOL_ROUTING_MODE: native
+      NATS_URL: nats://nats:4222
+      NATS_JETSTREAM_ENABLED: "true"
+      QDRANT_URL: ${QDRANT_URL}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT_COLLECTION: rag_chatbot
+      # BẬT trace query-service -> test thật đường observability (mặc định prod off).
+      OBSERVABILITY_MODE: langfuse
+      GUARDRAILS_MODE: "off"
+      ALLOWED_ORIGINS: "http://localhost,http://localhost:3000,http://localhost:3001"
+      RAG_SCORE_THRESHOLD: "0.70"
+      RAG_RESULT_LIMIT: "3"
+      QUERY_RATE_LIMIT_PER_MINUTE: "60"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      nats:
+        condition: service_started
+      nats-bootstrap:
+        condition: service_completed_successfully
+      mcp-service:
+        condition: service_started
+      langfuse:
+        condition: service_started
+    restart: unless-stopped
+
+  # ──────────────────────────── Frontend + nginx ─────────────────────────
+  frontend-chat:
+    image: frontend-chat:e2e
+    build:
+      context: ./src/frontend/chat
+    environment:
+      <<: *newrelic-off
+      NITRO_HOST: 0.0.0.0
+      NITRO_PORT: "3000"
+      NUXT_PUBLIC_API_GATEWAY_URL: ""
+      NUXT_PUBLIC_USER_SERVICE_PATH: /api/user
+      NUXT_PUBLIC_DOCUMENT_SERVICE_PATH: /api/documents
+      NUXT_PUBLIC_QUERY_SERVICE_PATH: /api/query
+      NUXT_PUBLIC_HR_SERVICE_PATH: /api/hr
+      NUXT_PUBLIC_MCP_SERVICE_PATH: /api/mcp
+      NUXT_PUBLIC_CHAT_APP_URL: /
+      NUXT_PUBLIC_ADMIN_APP_URL: /admin/
+    depends_on:
+      - user-service
+      - query-service
+    restart: unless-stopped
+
+  frontend-admin:
+    image: frontend-admin:e2e
+    build:
+      context: ./src/frontend/admin
+    environment:
+      <<: *newrelic-off
+      NITRO_HOST: 0.0.0.0
+      NITRO_PORT: "3001"
+      NUXT_APP_BASE_URL: /admin/
+      NUXT_PUBLIC_API_GATEWAY_URL: ""
+      NUXT_PUBLIC_USER_SERVICE_PATH: /api/user
+      NUXT_PUBLIC_DOCUMENT_SERVICE_PATH: /api/documents
+      NUXT_PUBLIC_QUERY_SERVICE_PATH: /api/query
+      NUXT_PUBLIC_HR_SERVICE_PATH: /api/hr
+      NUXT_PUBLIC_MCP_SERVICE_PATH: /api/mcp
+      NUXT_PUBLIC_CHAT_APP_URL: /
+      NUXT_PUBLIC_ADMIN_APP_URL: /admin/
+    depends_on:
+      - user-service
+      - document-service
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:e2e
+    build:
+      context: ./nginx
+    ports:
+      - "127.0.0.1:80:80"
+    depends_on:
+      - user-service
+      - document-service
+      - query-service
+      - mcp-service
+      - hr-service
+      - rag-worker
+      - frontend-chat
+      - frontend-admin
+    restart: unless-stopped
