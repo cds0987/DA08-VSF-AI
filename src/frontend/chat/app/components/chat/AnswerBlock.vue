@@ -45,7 +45,7 @@ function selectSource(citation: Citation) {
 </script>
 
 <template>
-  <div class="overflow-hidden rounded-2xl border border-slate-200 dark:border-transparent bg-white dark:bg-chat-response shadow-sm dark:shadow-none">
+  <div class="overflow-hidden rounded-2xl bg-transparent">
     <div
       v-if="data.error"
       class="flex items-start gap-2 border-b border-rose-100 dark:border-rose-900/30 bg-rose-50/60 dark:bg-rose-900/10 px-5 py-3 text-[12.5px] text-rose-700 dark:text-rose-400"
@@ -63,7 +63,7 @@ function selectSource(citation: Citation) {
       <ActionableCard v-if="data.action" :action="data.action" />
     </div>
 
-    <div v-if="data.citations?.length" class="border-t border-slate-100 dark:border-white/5">
+    <div v-if="data.citations?.length" class="border-t border-slate-100 dark:border-white/5 bg-slate-50/20 dark:bg-background/10">
       <button
         class="flex w-full items-center justify-between px-5 py-3 text-[12.5px] font-medium text-slate-800 dark:text-foreground/80 hover:bg-slate-100/80 dark:hover:bg-white/5"
         @click="isSourcesOpen = !isSourcesOpen"
@@ -97,7 +97,7 @@ function selectSource(citation: Citation) {
       </div>
     </div>
 
-    <div class="flex items-center justify-between border-t border-slate-100 dark:border-white/5 bg-slate-50/30 dark:bg-background/20 px-5 py-2.5">
+    <div class="flex items-center justify-between px-5 py-2.5">
       <div class="flex items-center gap-2">
         <button
           :disabled="!data.sessionId"

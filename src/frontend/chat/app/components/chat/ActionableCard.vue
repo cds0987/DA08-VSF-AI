@@ -43,7 +43,7 @@ async function handleConfirm() {
       </div>
     </div>
 
-    <div v-if="action.action_type === 'create_leave_request'" class="space-y-2.5 rounded-lg border border-blue-100 dark:border-border bg-white dark:bg-card p-3 shadow-sm">
+    <div v-if="action.action_type === 'create_leave_request'" class="space-y-2.5 rounded-lg border border-blue-100 dark:border-border bg-white dark:bg-card p-3">
       <div class="grid grid-cols-2 gap-4">
         <div>
           <label class="text-[10px] font-bold uppercase text-slate-400 dark:text-muted-foreground">Type</label>

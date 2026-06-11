@@ -12,7 +12,7 @@ const props = defineProps<Props>()
 </script>
 
 <template>
-  <div class="rounded-xl border border-slate-200 dark:border-border bg-white dark:bg-chat-response p-4 shadow-sm dark:shadow-none">
+  <div class="rounded-xl bg-transparent p-4">
     <div class="mb-3 flex items-center gap-2 text-[12px] font-medium text-slate-800 dark:text-foreground">
       <Sparkles class="h-3.5 w-3.5 text-blue-500" />
       Retrieval pipeline

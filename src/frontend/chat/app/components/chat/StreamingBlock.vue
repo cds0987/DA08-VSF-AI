@@ -5,7 +5,7 @@ defineProps<{
 </script>
 
 <template>
-  <div class="rounded-xl border border-slate-200 dark:border-white/5 bg-white dark:bg-chat-response px-5 pb-5 pt-4 shadow-sm dark:shadow-none">
+  <div class="rounded-xl bg-transparent px-5 pb-5 pt-4">
     <p class="whitespace-pre-wrap text-[16px] font-medium leading-relaxed text-slate-900 dark:text-foreground [overflow-wrap:anywhere] [word-break:break-word]">
       {{ text }}
       <span class="ml-0.5 inline-flex h-5 items-end align-middle">

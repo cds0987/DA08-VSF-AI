@@ -3,7 +3,7 @@ import { AlertTriangle, Mail } from '@lucide/vue'
 </script>
 
 <template>
-  <div class="rounded-xl border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/5 p-5 shadow-sm">
+  <div class="rounded-xl border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/5 p-5">
     <div class="flex items-start gap-3">
       <div class="flex h-8 w-8 items-center justify-center rounded-md bg-amber-100 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400">
         <AlertTriangle class="h-4 w-4" />
