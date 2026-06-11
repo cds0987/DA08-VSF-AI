@@ -39,7 +39,6 @@ const smoothScrollToBottom = useDebounceFn(() => {
 
 function markForInstantScroll() {
   requiresInstantScroll = true
-  smoothScrollToBottom?.cancel?.()
 }
 
 function scheduleInstantScroll() {
