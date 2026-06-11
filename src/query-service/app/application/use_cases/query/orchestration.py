@@ -88,6 +88,7 @@ class QueryOrchestrationUseCase:
         question: str,
         user: AuthenticatedUser,
         trace_session: str | None = None,
+        conversation_title: str | None = None,
     ) -> AsyncIterator[dict]:
         """Wrapper mỏng: bọc luồng thật bằng 1 langfuse trace (best-effort, low-level
         client — KHÔNG callback). Tạo trace TRƯỚC _stream_inner để _stream_langgraph có
@@ -109,10 +110,16 @@ class QueryOrchestrationUseCase:
                 _lang_trace=trace,
             ):
                 if event.get("done"):
-                    # _usage là kênh nội bộ (token/model cho langfuse) — pop ra để KHÔNG
-                    # rò xuống SSE/frontend; chỉ tracer dùng.
+                    # _usage/_answer là kênh nội bộ (token/model/answer cho langfuse) —
+                    # pop ra để KHÔNG rò xuống SSE/frontend; chỉ tracer dùng.
                     usage_meta = event.pop("_usage", None)
-                    last_done = event
+                    last_done = {**event}  # copy trước khi pop _answer (tracer cần)
+                    event.pop("_answer", None)
+                    # Đưa trace_id vào done event để frontend dùng khi submit feedback.
+                    if tracer is not None and trace is not None:
+                        tid = tracer.get_trace_id(trace)
+                        if tid:
+                            event["trace_id"] = tid
                 yield event
         finally:
             if tracer is not None and trace is not None:
@@ -129,6 +136,7 @@ class QueryOrchestrationUseCase:
         # Dùng session_id được truyền từ stream() (đã tạo trước trace) để trace con
         # khớp với trace cha. Legacy path tự sinh mới nếu không có.
         session_id = _session_id or str(uuid4())
+
 
         # Input guardrail — block prompt injection before touching the LLM or MCP.
         blocked, reason = await self._input_guardrail.scan(question)
@@ -301,6 +309,16 @@ class QueryOrchestrationUseCase:
         last_iteration = 0
         # Track if we already emitted the shortcut acting event
         shortcut_acting_emitted = False
+        # Langfuse node spans: name -> [span, ...] (LIFO stack per name).
+        # Dùng name thay vì run_id vì LangGraph có thể emit on_chain_end với run_id
+        # khác on_chain_start (dispatcher wrapper). LangGraph chạy node tuần tự nên
+        # LIFO stack là đủ chính xác.
+        _active_spans: dict[str, list] = {}
+        _SPAN_NODES = {"shortcut", "triage", "think", "act", "observe", "answer"}
+        # Gom usage từ MỌI model call (on_chat_model_end) — gồm cả triage. _collect_usage
+        # cũ chỉ đọc final_state["messages"] nên off-topic (triage không vào messages) ra
+        # 0 token -> trace $0.00 dù triage vẫn tốn tiền. Accumulator này phủ mọi path.
+        _usage_acc: dict[str, Any] = {"input": 0, "output": 0, "cached": 0, "model": None}
 
         # Langfuse enriched tracing: per run_id accumulate start time + input for LLM
         # calls and tool calls → create child generation/span after each call completes.
@@ -336,6 +354,55 @@ class QueryOrchestrationUseCase:
                     if node_name in ("act", "observe"):
                         last_iteration = max(last_iteration, 1)
                     # NOTE: do NOT increment for "think" or "answer" — shortcut path has 0 iterations
+                    if node_name in _SPAN_NODES and tracer and trace_handle:
+                        _span = tracer.span_start(
+                            trace_handle, name=node_name,
+                            input_data={"iteration": last_iteration},
+                        )
+                        if _span:
+                            _active_spans.setdefault(node_name, []).append(_span)
+                        # Tool span: agent gọi tool THẲNG trong act_node (KHÔNG qua LangChain
+                        # ToolNode) nên on_tool_start/on_tool_end KHÔNG bao giờ bắn. Lấy
+                        # tool call từ chính input state của act_node để vẫn có span
+                        # `tool.<name>` (args lúc mở, result lúc act_node xong).
+                        if node_name == "act":
+                            _tc = _extract_tool_call(event)
+                            if _tc:
+                                # Lồng tool span VÀO TRONG act span vừa mở.
+                                _act_parent = (_active_spans.get("act") or [None])[-1]
+                                _tspan = tracer.span_start(
+                                    trace_handle, name=f"tool.{_tc['name']}",
+                                    input_data={"tool": _tc["name"], "args": _tc.get("args", {})},
+                                    parent=_act_parent,
+                                )
+                                if _tspan:
+                                    _active_spans.setdefault(f"tool.{_tc['name']}", []).append(_tspan)
+
+                # Model call bắt đầu — bắt ĐÚNG prompt model NHẬN (system + context +
+                # tool results + history). Mở span llm.<node> để thấy "model nhận gì".
+                elif event_type == "on_chat_model_start":
+                    if tracer and trace_handle:
+                        _node = (event.get("metadata") or {}).get("langgraph_node") or "call"
+                        # Lồng span llm.<node> VÀO TRONG node span tương ứng (think/triage/
+                        # answer) để cây trace gọn: click node -> thấy ngay model I/O.
+                        _parent = (_active_spans.get(_node) or [None])[-1]
+                        _mspan = tracer.span_start(
+                            trace_handle, name=f"llm.{_node}",
+                            input_data=_render_chat_input(event),
+                            parent=_parent,
+                        )
+                        if _mspan:
+                            _active_spans.setdefault("llm.call", []).append(_mspan)
+
+                # Model call xong — bắt output THẬT (reasoning/answer + tool_calls quyết
+                # định gọi tool nào). Đóng span để thấy "model nghĩ gì".
+                elif event_type == "on_chat_model_end":
+                    if tracer:
+                        _mstack = _active_spans.get("llm.call")
+                        if _mstack:
+                            tracer.span_end(_mstack.pop(), output_data=_render_chat_output(event))
+                    # Cộng dồn token của LẦN GỌI NÀY (triage/think/answer) vào rollup.
+                    _accumulate_usage(_usage_acc, event)
 
                 # LLM call started — record start time + input for langfuse enriched trace
                 elif event_type == "on_chat_model_start":
@@ -458,6 +525,17 @@ class QueryOrchestrationUseCase:
                 elif event_type == "on_chain_error":
                     error_val = event.get("data", {}).get("error")
                     error_msg = str(getattr(error_val, "args", [str(error_val)])[0])
+                    if tracer:
+                        for key, stack in list(_active_spans.items()):
+                            while stack:
+                                _span = stack.pop()
+                                tracer.span_end(_span, output_data={"error": error_msg, "span": key}, level="ERROR")
+                        err_span = tracer.span_start(
+                            trace_handle,
+                            name="graph.error",
+                            input_data={"node": event.get("name")},
+                        ) if trace_handle else None
+                        tracer.span_end(err_span, output_data={"error": error_msg}, level="ERROR")
                     logger.error(
                         "langgraph_stream_error",
                         extra={"session_id": session_id, "error": error_msg},
@@ -480,9 +558,25 @@ class QueryOrchestrationUseCase:
 
                 # Graph complete — only the top-level graph on_chain_end is final
                 elif event_type == "on_chain_end":
-                    # Skip sub-node on_chain_end (shortcut, answer, etc.) — only handle graph root
                     run_name = event.get("name", "")
                     if run_name not in ("VinSmartFutureReActAgent", "VinSmartFutureAgent"):
+                        # Sub-node completed — close its Langfuse span (LIFO pop by name)
+                        if tracer:
+                            _out = event.get("data", {}).get("output") or {}
+                            _node_stack = _active_spans.get(run_name)
+                            if _node_stack:
+                                _span = _node_stack.pop()
+                                tracer.span_end(_span, output_data=_node_output_summary(_out))
+                            # Đóng span tool mở ở act_node (result = output của act_node:
+                            # sources/phase...). on_tool_end không bắn nên đóng tại đây.
+                            if run_name == "act":
+                                for _k in [k for k in _active_spans if k.startswith("tool.")]:
+                                    _tstack = _active_spans.get(_k)
+                                    while _tstack:
+                                        tracer.span_end(
+                                            _tstack.pop(),
+                                            output_data=_node_output_summary(_out),
+                                        )
                         continue
 
                     final_state = event.get("data", {}).get("output", {})
@@ -583,10 +677,14 @@ class QueryOrchestrationUseCase:
                             "outcome": outcome_value,
                             "agent_mode": "langgraph",
                             "iterations": final_iteration,
+                            "_answer": answer,  # kênh nội bộ cho langfuse tracer
                         }
                         # Token/model usage cho langfuse (cost+latency). Kênh nội bộ _usage:
                         # wrapper stream() pop ra trước khi yield SSE -> KHÔNG rò xuống FE.
-                        usage_meta = _collect_usage(final_state, self._settings.openai_llm_model)
+                        # Ưu tiên accumulator (gom MỌI model call gồm triage); fallback
+                        # _collect_usage cho path không qua on_chat_model_end (mock/non-stream).
+                        usage_meta = _usage_from_acc(_usage_acc, self._settings.openai_llm_model) \
+                            or _collect_usage(final_state, self._settings.openai_llm_model)
                         if usage_meta is not None:
                             done_event["_usage"] = usage_meta
                         yield done_event
@@ -597,9 +695,27 @@ class QueryOrchestrationUseCase:
             # Saving an assistant turn completes the exchange so the frontend does NOT
             # resend the user message (which would cause duplicates).
             _err_name = type(_stream_exc).__name__
+            if tracer:
+                for key, stack in list(_active_spans.items()):
+                    while stack:
+                        _span = stack.pop()
+                        tracer.span_end(
+                            _span,
+                            output_data={"error": str(_stream_exc), "span": key},
+                            level="ERROR",
+                        )
+                err_span = tracer.span_start(
+                    trace_handle,
+                    name="graph.error",
+                    input_data={"node": "langgraph_stream"},
+                ) if trace_handle else None
+                tracer.span_end(err_span, output_data={"error": str(_stream_exc)}, level="ERROR")
             logger.error(
-                "langgraph_stream_fatal",
-                extra={"session_id": session_id, "error_type": _err_name, "error": str(_stream_exc)[:300]},
+                "langgraph_stream_fatal %s: %s",
+                _err_name,
+                str(_stream_exc)[:400],
+                extra={"session_id": session_id, "error_type": _err_name},
+                exc_info=True,
             )
             await self._save_assistant(user.id, session_id, _GRACEFUL_CRASH_MSG, [], started)
             yield {
@@ -923,6 +1039,39 @@ class QueryOrchestrationUseCase:
         }
 
 
+def _accumulate_usage(acc: dict, event: Any) -> None:
+    """Cộng usage của 1 model call (on_chat_model_end.data.output = AIMessage) vào acc.
+    Phủ MỌI lần gọi model (triage/think/answer) -> off-topic vẫn có token triage.
+    Best-effort: lỗi/không có usage thì bỏ qua."""
+    try:
+        out = (event.get("data") or {}).get("output")
+        if hasattr(out, "generations"):
+            gens = out.generations
+            out = gens[0][0].message if gens and gens[0] else out
+        um = getattr(out, "usage_metadata", None)
+        if not um:
+            return
+        acc["input"] += int(um.get("input_tokens", 0) or 0)
+        acc["output"] += int(um.get("output_tokens", 0) or 0)
+        acc["cached"] += int((um.get("input_token_details") or {}).get("cache_read", 0) or 0)
+        rm = getattr(out, "response_metadata", None) or {}
+        acc["model"] = rm.get("model_name") or acc["model"]
+    except Exception:  # noqa: BLE001 — gom usage best-effort
+        return
+
+
+def _usage_from_acc(acc: dict, default_model: str) -> dict | None:
+    """Đổi accumulator -> usage_meta cho tracer. None nếu chưa gom được token nào."""
+    if acc["input"] == 0 and acc["output"] == 0:
+        return None
+    return {
+        "model": acc["model"] or default_model,
+        "input_tokens": acc["input"],
+        "output_tokens": acc["output"],
+        "cached_tokens": acc["cached"],
+    }
+
+
 def _collect_usage(final_state: Any, default_model: str) -> dict | None:
     """
     Gom token usage từ mọi AIMessage trong final_state (triage + think + answer đều qua
@@ -1043,3 +1192,79 @@ def _is_fallback_answer(answer: str) -> bool:
     """
     normalized = _normalize_text(answer)
     return "khong tim thay thong tin" in normalized
+
+
+def _extract_tool_call(event: Any) -> dict | None:
+    """Rút (name, args) của tool call từ input state của act_node.
+
+    act_node nhận state có messages; AIMessage cuối mang tool_calls. Trả None nếu không
+    có tool call (best-effort — mọi lỗi nuốt, KHÔNG làm vỡ stream)."""
+    try:
+        state = (event.get("data") or {}).get("input")
+        messages = state.get("messages") if isinstance(state, dict) else None
+        if not messages:
+            return None
+        last = messages[-1]
+        tool_calls = getattr(last, "tool_calls", None)
+        if not tool_calls:
+            return None
+        tc = tool_calls[0]
+        if isinstance(tc, dict):
+            name, args = tc.get("name"), tc.get("args", {})
+        else:
+            name, args = getattr(tc, "name", None), getattr(tc, "args", {})
+        return {"name": name, "args": args} if name else None
+    except Exception:  # noqa: BLE001 — tracing best-effort
+        return None
+
+
+def _msg_brief(msg: Any) -> dict:
+    """1 message -> {role, content, [tool_calls]} đọc được trên Langfuse. Cap content để
+    tránh payload khổng lồ (system prompt dài)."""
+    role = getattr(msg, "type", None) or type(msg).__name__
+    content = getattr(msg, "content", msg)
+    out: dict[str, Any] = {"role": role, "content": str(content)[:4000]}
+    tcs = getattr(msg, "tool_calls", None)
+    if tcs:
+        out["tool_calls"] = [
+            {
+                "name": t.get("name") if isinstance(t, dict) else getattr(t, "name", None),
+                "args": t.get("args") if isinstance(t, dict) else getattr(t, "args", None),
+            }
+            for t in tcs
+        ]
+    return out
+
+
+def _render_chat_input(event: Any) -> dict:
+    """on_chat_model_start.data.input.messages = [[msg, msg, ...]] -> list message phẳng
+    = ĐÚNG prompt model nhận. Best-effort."""
+    try:
+        msgs = ((event.get("data") or {}).get("input") or {}).get("messages") or []
+        flat = msgs[0] if msgs and isinstance(msgs[0], (list, tuple)) else msgs
+        return {"messages": [_msg_brief(m) for m in flat]}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _render_chat_output(event: Any) -> dict:
+    """on_chat_model_end.data.output = AIMessage (hoặc LLMResult) -> content + tool_calls
+    = model nghĩ/quyết định gì. Best-effort."""
+    try:
+        out = (event.get("data") or {}).get("output")
+        if hasattr(out, "generations"):
+            gens = out.generations
+            out = gens[0][0].message if gens and gens[0] else out
+        return _msg_brief(out)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _node_output_summary(output: Any) -> dict:
+    """Tóm tắt output của LangGraph node để log vào Langfuse span.
+    Bỏ 'messages' (list dài) — chỉ giữ các scalar fields như phase, iteration, outcome.
+    """
+    if not isinstance(output, dict):
+        return {}
+    skip = {"messages"}
+    return {k: v for k, v in output.items() if k not in skip}

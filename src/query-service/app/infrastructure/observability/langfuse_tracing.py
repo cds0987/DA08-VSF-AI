@@ -40,15 +40,27 @@ class LangfuseTracer:
         self._client = client
         self._prices = price_catalog
 
-    def start(self, question: str, user: Any, session_id: str | None) -> _TraceHandle | None:
+    def start(
+        self,
+        question: str,
+        user: Any,
+        session_id: str | None,
+        conversation_title: str | None = None,
+    ) -> _TraceHandle | None:
         """Tạo 1 trace cho 1 lượt query. Trả None nếu lỗi (query vẫn chạy bình thường)."""
         try:
+            metadata: dict[str, Any] = {
+                "role": getattr(user, "role", None),
+                "department": getattr(user, "department", None),
+            }
+            if conversation_title:
+                metadata["conversation_title"] = conversation_title
             trace = self._client.trace(
                 name="rag-query",
                 user_id=getattr(user, "id", None),
                 session_id=session_id,
                 input=question,
-                metadata={"role": getattr(user, "role", None)},
+                metadata=metadata,
             )
             return _TraceHandle(trace, datetime.now(timezone.utc), question)
         except Exception as exc:  # noqa: BLE001 — tracing không được phép làm vỡ query
@@ -74,6 +86,76 @@ class LangfuseTracer:
                 usage.update(cost)  # input_cost / output_cost / total_cost
         return usage
 
+    def span_start(
+        self,
+        handle: "_TraceHandle | None",
+        name: str,
+        input_data: Any = None,
+        metadata: dict | None = None,
+        parent: Any = None,
+    ) -> Any:
+        """Tạo child span. Mặc định gắn lên trace (con của root); nếu truyền `parent`
+        (1 span object), tạo span LỒNG dưới parent đó (langfuse span cũng có .span()).
+        Trả span object hoặc None nếu lỗi. Best-effort."""
+        # parent (span object) ưu tiên; nếu không có thì gắn lên trace của handle.
+        target = parent if parent is not None else (handle.trace if handle is not None else None)
+        if target is None:
+            return None
+        try:
+            return target.span(
+                name=name,
+                start_time=datetime.now(timezone.utc),
+                input=input_data,
+                metadata=metadata or {},
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("langfuse_span_start_failed", extra={"name": name, "error": str(exc)[:200]})
+            return None
+
+    def span_end(self, span: Any, output_data: Any = None, level: str | None = None) -> None:
+        """Đóng span với output. Best-effort."""
+        if span is None:
+            return
+        try:
+            kwargs: dict[str, Any] = {"output": output_data, "end_time": datetime.now(timezone.utc)}
+            if level:
+                kwargs["level"] = level
+            span.end(**kwargs)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("langfuse_span_end_failed", extra={"error": str(exc)[:200]})
+
+    def span(
+        self,
+        handle: _TraceHandle | None,
+        name: str,
+        *,
+        input: Any = None,
+        metadata: dict | None = None,
+    ) -> Any | None:
+        """Alias tương thích cho callsite cũ dùng span(...)."""
+        return self.span_start(handle, name=name, input_data=input, metadata=metadata)
+
+    def end_span(self, span: Any | None, *, output: Any = None, level: str | None = None) -> None:
+        """Alias tương thích cho callsite cũ dùng end_span(...)."""
+        self.span_end(span, output_data=output, level=level)
+
+    def get_trace_id(self, handle: "_TraceHandle | None") -> str | None:
+        """Trả Langfuse trace ID để dùng cho score API. None nếu không có."""
+        if handle is None:
+            return None
+        try:
+            return handle.trace.id
+        except Exception:
+            return None
+
+    def score(self, trace_id: str, value: int, name: str = "user_feedback") -> None:
+        """Ghi user score (1 = helpful, -1 = not helpful) lên Langfuse trace. Best-effort."""
+        try:
+            self._client.score(trace_id=trace_id, name=name, value=float(value))
+            self._client.flush()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("langfuse_score_failed", extra={"error": str(exc)[:200]})
+
     def finish(
         self,
         handle: _TraceHandle | None,
@@ -81,8 +163,8 @@ class LangfuseTracer:
         usage_meta: dict | None,
     ) -> None:
         """
-        Ghi outcome/sources vào trace + 1 generation (model, usage, cost, latency) rồi
-        flush. usage_meta = {model, input_tokens, output_tokens, cached_tokens} từ
+        Ghi answer/sources/outcome vào trace + 1 generation (model, usage, cost, latency)
+        rồi flush. usage_meta = {model, input_tokens, output_tokens, cached_tokens} từ
         orchestration (gom từ các AIMessage). Best-effort.
         """
         if handle is None:
@@ -90,13 +172,26 @@ class LangfuseTracer:
         try:
             ev = done_event or {}
             end_dt = datetime.now(timezone.utc)
-            output = {
+            answer = ev.get("_answer") or ""
+            sources = ev.get("sources") or []
+
+            trace_output: dict = {
+                "answer": answer,
                 "outcome": ev.get("outcome"),
-                "num_sources": len(ev.get("sources") or []),
+                "num_sources": len(sources),
                 "iterations": ev.get("iterations"),
-                "error": ev.get("error"),
             }
-            handle.trace.update(output=output)
+            if ev.get("error"):
+                trace_output["error"] = ev.get("error")
+            if sources:
+                trace_output["sources"] = [
+                    {
+                        "title": s.get("document_name", ""),
+                        "score": round(float(s.get("score") or 0), 3),
+                    }
+                    for s in sources[:5]
+                ]
+            handle.trace.update(output=trace_output)
 
             if usage_meta and usage_meta.get("model"):
                 handle.trace.generation(
@@ -105,7 +200,7 @@ class LangfuseTracer:
                     start_time=handle.start_dt,
                     end_time=end_dt,
                     input=handle.question,
-                    output=output,
+                    output=answer or trace_output,
                     usage=self._build_usage(usage_meta),
                 )
 

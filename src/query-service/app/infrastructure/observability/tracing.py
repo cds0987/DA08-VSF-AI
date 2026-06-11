@@ -28,11 +28,17 @@ class CompositeTracer:
     def __init__(self, tracers: list[Any]) -> None:
         self._tracers = tracers
 
-    def start(self, question: str, user: Any, session_id: str | None) -> list | None:
+    def start(
+        self,
+        question: str,
+        user: Any,
+        session_id: str | None,
+        conversation_title: str | None = None,
+    ) -> list | None:
         handles = []
         for tracer in self._tracers:
             try:
-                handles.append((tracer, tracer.start(question, user, session_id)))
+                handles.append((tracer, tracer.start(question, user, session_id, conversation_title=conversation_title)))
             except Exception as exc:  # noqa: BLE001 — 1 backend lỗi không kéo theo cái khác
                 logger.warning("composite_trace_start_failed", extra={"error": str(exc)[:200]})
         return handles or None
@@ -45,6 +51,69 @@ class CompositeTracer:
                 tracer.finish(child_handle, done_event, usage_meta)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("composite_trace_finish_failed", extra={"error": str(exc)[:200]})
+
+    def span_start(self, handle: list | None, name: str, parent: list | None = None,
+                   **kwargs: Any) -> list | None:
+        if not handle:
+            return None
+        # parent là composite span-handle (list[(tracer, span)]) -> map về span của
+        # đúng tracer để span con LỒNG đúng backend.
+        parent_map = {id(tr): sp for tr, sp in parent} if parent else {}
+        children = []
+        for tracer, child_handle in handle:
+            fn = getattr(tracer, "span_start", None) or getattr(tracer, "span", None)
+            if fn is None:
+                continue
+            p = parent_map.get(id(tracer))
+            try:
+                try:
+                    children.append((tracer, fn(child_handle, name, parent=p, **kwargs)))
+                except TypeError:
+                    # tracer cũ không nhận `parent` -> gọi không kèm (span phẳng).
+                    children.append((tracer, fn(child_handle, name, **kwargs)))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("composite_span_failed", extra={"error": str(exc)[:200]})
+        return children or None
+
+    def span_end(self, span_handle: list | None, **kwargs: Any) -> None:
+        if not span_handle:
+            return
+        for tracer, child_span in span_handle:
+            fn = getattr(tracer, "span_end", None) or getattr(tracer, "end_span", None)
+            if fn is None:
+                continue
+            try:
+                fn(child_span, **kwargs)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("composite_end_span_failed", extra={"error": str(exc)[:200]})
+
+    def get_trace_id(self, handle: list | None) -> str | None:
+        """Lấy Langfuse trace ID từ composite handle (ưu tiên backend đầu tiên có ID)."""
+        if not handle:
+            return None
+        for tracer, child_handle in handle:
+            fn = getattr(tracer, "get_trace_id", None)
+            if fn:
+                tid = fn(child_handle)
+                if tid:
+                    return tid
+        return None
+
+    def score(self, trace_id: str, value: int, name: str = "user_feedback") -> None:
+        """Fan-out score tới tất cả backend hỗ trợ."""
+        for tracer in self._tracers:
+            fn = getattr(tracer, "score", None)
+            if fn:
+                try:
+                    fn(trace_id, value, name)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("composite_score_failed", extra={"error": str(exc)[:200]})
+
+    def span(self, handle: list | None, name: str, **kwargs: Any) -> list | None:
+        return self.span_start(handle, name, **kwargs)
+
+    def end_span(self, span_handle: list | None, **kwargs: Any) -> None:
+        self.span_end(span_handle, **kwargs)
 
 
 def build_tracer(settings: Any) -> Any | None:

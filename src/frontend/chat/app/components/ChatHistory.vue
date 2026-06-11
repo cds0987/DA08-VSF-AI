@@ -128,7 +128,7 @@ async function clearHistory() {
     <div class="w-full flex flex-col gap-0.5 pb-20">
       <!-- Header -->
       <div class="flex items-center w-full h-9 transition-all pl-6 pr-3">
-        <h3 class="text-sm font-semibold text-slate-900 whitespace-nowrap">
+        <h3 class="text-sm font-semibold text-slate-900 dark:text-sidebar-foreground whitespace-nowrap">
           Gần đây
         </h3>
         <span
@@ -150,10 +150,10 @@ async function clearHistory() {
         <button
           @click="chat.loadConversation(item.id)"
           :class="cn(
-            'flex items-center rounded-lg overflow-hidden cursor-pointer shrink-0 h-9 transition-all w-full text-sm hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-0 outline-none pl-4 pr-10',
+            'flex items-center rounded-lg overflow-hidden cursor-pointer shrink-0 h-9 transition-all w-full text-sm hover:bg-slate-100 dark:hover:bg-sidebar-accent hover:text-slate-900 dark:hover:text-sidebar-accent-foreground focus-visible:ring-0 outline-none pl-4 pr-10',
             chat.currentConversationId === item.id || activeMenuId === item.id
-              ? 'bg-slate-100 text-slate-900'
-              : 'bg-transparent text-slate-600',
+              ? 'bg-slate-100 dark:bg-sidebar-accent text-slate-900 dark:text-sidebar-accent-foreground'
+              : 'bg-transparent text-slate-600 dark:text-muted-foreground',
           )"
         >
           <span class="truncate font-medium">{{ item.title }}</span>
@@ -164,8 +164,8 @@ async function clearHistory() {
           <button
             :ref="(el) => setMoreButtonRef(el, item.id)"
             type="button"
-            class="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-md cursor-pointer transition-colors"
-            :class="{ 'bg-slate-200 text-slate-600': activeMenuId === item.id }"
+            class="p-1 text-slate-400 dark:text-muted-foreground hover:text-slate-600 dark:hover:text-sidebar-accent-foreground hover:bg-slate-200 dark:hover:bg-sidebar-accent rounded-md cursor-pointer transition-colors"
+            :class="{ 'bg-slate-200 dark:bg-sidebar-accent text-slate-600 dark:text-sidebar-accent-foreground': activeMenuId === item.id }"
             @click.stop="toggleMenu(item.id)"
           >
             <MoreHorizontal class="h-4 w-4" />
@@ -176,17 +176,17 @@ async function clearHistory() {
         <div
           v-if="activeMenuId === item.id"
           :ref="(el) => activeDropdownRef = el as HTMLElement"
-          class="absolute right-2 top-9 w-36 bg-white rounded-lg shadow-xl border border-slate-200 py-1.5 z-[100] animate-in fade-in zoom-in-95 duration-100"
+          class="absolute right-2 top-9 w-36 bg-white dark:bg-popover rounded-lg shadow-xl border border-slate-200 dark:border-border py-1.5 z-[100] animate-in fade-in zoom-in-95 duration-100"
         >
           <button
-            class="flex items-center w-full px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 transition-colors gap-2"
+            class="flex items-center w-full px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-popover-foreground hover:bg-slate-100 dark:hover:bg-accent transition-colors gap-2"
             @click.stop="openRenameModal(item.id, item.title)"
           >
-            <Edit2 class="h-3.5 w-3.5 text-slate-400" />
+            <Edit2 class="h-3.5 w-3.5 text-slate-400 dark:text-muted-foreground" />
             Đổi tên
           </button>
           <button
-            class="flex items-center w-full px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 transition-colors gap-2"
+            class="flex items-center w-full px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors gap-2"
             @click.stop="confirmDelete(item.id)"
           >
             <Trash2 class="h-3.5 w-3.5 text-red-400" />
@@ -207,19 +207,19 @@ async function clearHistory() {
       />
       
       <!-- Modal Content -->
-      <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div class="relative bg-white dark:bg-card rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         <div class="p-6">
-          <h3 class="text-lg font-bold text-slate-900 mb-1">
+          <h3 class="text-lg font-bold text-slate-900 dark:text-foreground mb-1">
             Đổi tên cuộc trò chuyện
           </h3>
-          <p class="text-sm text-slate-500 mb-5">
+          <p class="text-sm text-slate-500 dark:text-muted-foreground mb-5">
             Nhập tên mới cho cuộc trò chuyện này.
           </p>
 
           <input
             ref="renameInputRef"
             v-model="renameTargetTitle"
-            class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white transition-all text-sm"
+            class="w-full px-4 py-2.5 bg-slate-50 dark:bg-chat-input border border-slate-200 dark:border-border rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white dark:focus:bg-chat-input transition-all text-sm dark:text-foreground dark:placeholder:text-chat-placeholder"
             placeholder="Tên cuộc trò chuyện..."
             @keyup.enter="handleRename"
             @keyup.escape="closeRenameModal"
@@ -227,7 +227,7 @@ async function clearHistory() {
 
           <div class="mt-8 flex justify-end gap-2.5">
             <button
-              class="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+              class="px-4 py-2 text-sm font-semibold text-slate-600 dark:text-muted-foreground hover:bg-slate-100 dark:hover:bg-accent rounded-xl transition-colors cursor-pointer"
               @click="closeRenameModal"
             >
               Huỷ
@@ -254,18 +254,18 @@ async function clearHistory() {
       />
       
       <!-- Modal Content -->
-      <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div class="relative bg-white dark:bg-card rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         <div class="p-6">
-          <h3 class="text-lg font-bold text-slate-900 mb-2">
+          <h3 class="text-lg font-bold text-slate-900 dark:text-foreground mb-2">
             Bạn muốn xoá cuộc trò chuyện?
           </h3>
-          <p class="text-sm text-slate-500 leading-relaxed mb-6">
+          <p class="text-sm text-slate-500 dark:text-muted-foreground leading-relaxed mb-6">
             Thao tác này sẽ xoá các câu lệnh, câu trả lời và ý kiến phản hồi, cũng như mọi nội dung bạn đã tạo.
           </p>
 
           <div class="flex justify-end gap-2.5">
             <button
-              class="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+              class="px-4 py-2 text-sm font-semibold text-slate-600 dark:text-muted-foreground hover:bg-slate-100 dark:hover:bg-accent rounded-xl transition-colors cursor-pointer"
               @click="closeDeleteModal"
             >
               Huỷ

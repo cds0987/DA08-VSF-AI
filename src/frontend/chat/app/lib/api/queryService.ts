@@ -68,11 +68,11 @@ export function useQueryService() {
     )
   }
 
-  async function submitFeedback(sessionId: string, score: 1 | -1) {
+  async function submitFeedback(sessionId: string, score: 1 | -1, traceId?: string) {
     return await $fetch<{ message: string }>(`${baseUrl}/feedback`, {
       method: 'POST',
       headers: getQueryServiceAuthHeaders(),
-      body: { session_id: sessionId, score },
+      body: { session_id: sessionId, score, trace_id: traceId },
     })
   }
 

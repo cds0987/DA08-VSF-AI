@@ -361,9 +361,12 @@ export const useChatStore = defineStore('chat', () => {
     let fullContent = ''
     let completed = false
     let donePayload: QueryDoneEvent | null = null
+    const conversationTitle = conversations.value.find(c => c.id === currentConversationId.value)?.title
     const request: QueryRequest = {
       question,
       user_id: String(userId),
+      trace_session: currentConversationId.value ?? undefined,
+      conversation_title: conversationTitle,
     }
 
     const PHASE_MAP: Record<string, number> = {
@@ -448,6 +451,7 @@ export const useChatStore = defineStore('chat', () => {
             result.session_id + '-source-' + index,
           )),
           sessionId: result.session_id,
+          traceId: result.trace_id,
           timestamp: new Date().toLocaleString(),
         }
         assistant.fallback = result.fallback === true
@@ -486,7 +490,7 @@ export const useChatStore = defineStore('chat', () => {
     message.feedback = score
     cacheCurrentConversation()
     try {
-      await queryService.submitFeedback(message.sessionId, score)
+      await queryService.submitFeedback(message.sessionId, score, message.traceId)
     } catch (error) {
       message.feedback = previous
       cacheCurrentConversation()
