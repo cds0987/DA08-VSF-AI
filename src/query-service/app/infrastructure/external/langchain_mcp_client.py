@@ -38,7 +38,7 @@ _DEFAULT_HR_DESC = (
 
 class _RagSearchInput(BaseModel):
     query: str = Field(description="Search query in Vietnamese or English")
-    top_k: int = Field(default=5, ge=1, le=5, description="Number of results (max 5)")
+    top_k: int = Field(default=5, ge=1, le=10, description="Number of results (max 10)")
 
 
 class _HrQueryInput(BaseModel):
@@ -184,7 +184,7 @@ class LangChainMCPToolsLoader:
             results = await client.rag_search(
                 query=query,
                 document_ids=list(_doc_ids),
-                top_k=min(top_k, 5),
+                top_k=min(top_k, 10),
             )
             return json.dumps({
                 "results": [

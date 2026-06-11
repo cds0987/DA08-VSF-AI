@@ -24,6 +24,8 @@ class SourceDoc(TypedDict):
     heading_path: list[str]
     score: float
     source_gcs_uri: str
+    document_id: str
+    page_number: int | None
 
 
 class AgentState(TypedDict):
@@ -62,6 +64,8 @@ class AgentState(TypedDict):
     allowed_doc_ids: list[str]
     # Ngưỡng điểm RAG (config-driven) để act_node lọc kết quả — trước hardcode 0.70.
     rag_score_threshold: float
+    # Số chunk tối đa lấy từ rag-service mỗi lần gọi (config-driven).
+    rag_top_k: int
 
     # --- Loop termination guards ---
     # force_answer: set True by observe_node (iteration cap) or act_node (duplicate tool call)
@@ -92,6 +96,7 @@ def create_initial_state(
     max_iterations: int = 3,
     recent_messages: list | None = None,
     rag_score_threshold: float = 0.70,
+    rag_top_k: int = 5,
 ) -> AgentState:
     """
     recent_messages: optional list of LangChain BaseMessage objects representing
@@ -116,6 +121,7 @@ def create_initial_state(
         user_department=user_department,
         allowed_doc_ids=allowed_doc_ids,
         rag_score_threshold=rag_score_threshold,
+        rag_top_k=rag_top_k,
         session_id=session_id,
         question=question,
     )
