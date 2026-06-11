@@ -11,6 +11,7 @@ import type {
   PipelineStage,
   QueryDoneEvent,
   QueryRequest,
+  QuerySource,
   QueryTokenEvent,
 } from '~/types'
 import {
@@ -46,20 +47,38 @@ function createTitle(text: string) {
   return normalized.length > 48 ? `${normalized.slice(0, 48)}...` : normalized
 }
 
+function sourceDocumentId(source: QuerySource): string {
+  const explicitId = source.document_id?.trim()
+  if (explicitId) return explicitId
+
+  const uri = source.source_gcs_uri || ''
+  const marker = '/raw/'
+  const markerIndex = uri.indexOf(marker)
+  if (markerIndex < 0) return ''
+  return uri.slice(markerIndex + marker.length).split('/')[0] || ''
+}
+
+function toCitation(source: QuerySource, id: string): Citation {
+  return {
+    id,
+    document_id: sourceDocumentId(source),
+    document: source.document_name,
+    caption: source.caption,
+    heading_path: source.heading_path,
+    page_number: source.page_number,
+  }
+}
+
 function toChatMessage(message: ConversationHistoryMessage, index: number): ChatMessage {
   const createdAt = new Date(message.created_at)
   return {
     id: 'history-' + createdAt.getTime() + '-' + index,
     role: message.role,
     content: message.content,
-    citations: message.sources?.map((source, sIndex) => ({
-      id: `history-${createdAt.getTime()}-${index}-source-${sIndex}`,
-      document_id: source.document_id,
-      document: source.document_name,
-      caption: source.caption,
-      heading_path: source.heading_path,
-      page_number: source.page_number,
-    })),
+    citations: message.sources?.map((source, sIndex) => toCitation(
+      source,
+      'history-' + createdAt.getTime() + '-' + index + '-source-' + sIndex,
+    )),
     timestamp: Number.isNaN(createdAt.getTime())
       ? message.created_at
       : createdAt.toLocaleString(),
@@ -424,14 +443,10 @@ export const useChatStore = defineStore('chat', () => {
           role: 'assistant',
           content: actionPayload ? '' : fullContent, // Hide raw JSON if it's an action
           action: actionPayload,
-          citations: result.sources.map((source, index) => ({
-            id: result.session_id + '-source-' + index,
-            document_id: source.document_id,
-            document: source.document_name,
-            caption: source.caption,
-            heading_path: source.heading_path,
-            page_number: source.page_number,
-          })),
+          citations: result.sources.map((source, index) => toCitation(
+            source,
+            result.session_id + '-source-' + index,
+          )),
           sessionId: result.session_id,
           timestamp: new Date().toLocaleString(),
         }

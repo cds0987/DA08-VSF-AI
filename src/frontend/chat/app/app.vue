@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { useSessionStore } from './stores/session'
 import { useNotificationStore } from './stores/notifications'
+import { useTheme } from './composables/useTheme'
 
 const session = useSessionStore()
 const notifications = useNotificationStore()
+const { initTheme } = useTheme()
 let stopSessionWatch: (() => void) | null = null
 
 onMounted(() => {
+  initTheme()
   stopSessionWatch = watch(
     () => session.user,
     (user) => {

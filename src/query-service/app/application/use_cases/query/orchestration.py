@@ -88,24 +88,26 @@ class QueryOrchestrationUseCase:
         user: AuthenticatedUser,
         trace_session: str | None = None,
     ) -> AsyncIterator[dict]:
-        """Wrapper mỏng: bọc luồng thật bằng 1 langfuse trace (best-effort, low-level
-        client — KHÔNG callback). Tạo trace sớm với session_id của request, bắt event
-        `done` để ghi outcome/sources, finalize ở finally (phủ cả khi client ngắt).
+        """Wrapper mỏng: bọc luồng thật bằng 1 langfuse trace + node spans (best-effort,
+        low-level client — KHÔNG callback).
 
         trace_session: nếu set (vd "ci-smoke" do smoke CI), dùng làm session_id của TRACE
         thay cho session_id ngẫu nhiên -> gom trace smoke 1 chỗ để deploy kế tự xóa."""
         tracer = self._tracer
         session_id = str(uuid4())
-        trace = tracer.start(question, user, trace_session or session_id) if tracer is not None else None
+        # Tạo trace eagerly (trước event loop) để span_start() trong _stream_langgraph
+        # có trace object ngay từ event đầu tiên.
+        trace = tracer.start(question, user, trace_session or session_id) if tracer else None
         last_done: dict | None = None
         usage_meta: dict | None = None
         try:
             async for event in self._stream_inner(question, user, session_id, trace):
                 if event.get("done"):
-                    # _usage là kênh nội bộ (token/model cho langfuse) — pop ra để KHÔNG
-                    # rò xuống SSE/frontend; chỉ tracer dùng.
+                    # _usage/_answer là kênh nội bộ (token/model/answer cho langfuse) —
+                    # pop ra để KHÔNG rò xuống SSE/frontend; chỉ tracer dùng.
                     usage_meta = event.pop("_usage", None)
-                    last_done = event
+                    last_done = {**event}  # copy trước khi pop _answer (tracer cần)
+                    event.pop("_answer", None)
                 yield event
         finally:
             if tracer is not None and trace is not None:
@@ -116,7 +118,7 @@ class QueryOrchestrationUseCase:
         question: str,
         user: AuthenticatedUser,
         session_id: str,
-        trace: Any = None,
+        trace_handle: Any = None,
     ) -> AsyncIterator[dict]:
         started = perf_counter()
 
@@ -144,7 +146,10 @@ class QueryOrchestrationUseCase:
         # Falls through to the legacy direct-orchestration path when no agent is available
         # (e.g. mock mode / no OpenAI key).
         if self._langgraph_agent is not None:
-            async for event in self._stream_langgraph(question, user, session_id, started, trace):
+            async for event in self._stream_langgraph(
+                question, user, session_id, started,
+                tracer=self._tracer, trace_handle=trace_handle,
+            ):
                 yield event
             return
 
@@ -227,32 +232,14 @@ class QueryOrchestrationUseCase:
         ):
             yield event
 
-    def _span(self, handle: Any, name: str, **kwargs: Any) -> Any | None:
-        fn = getattr(self._tracer, "span", None)
-        if fn is None:
-            return None
-        try:
-            return fn(handle, name, **kwargs)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("trace_span_failed", extra={"error": str(exc)[:200], "name": name})
-            return None
-
-    def _end_span(self, span: Any, **kwargs: Any) -> None:
-        fn = getattr(self._tracer, "end_span", None)
-        if fn is None:
-            return
-        try:
-            fn(span, **kwargs)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("trace_end_span_failed", extra={"error": str(exc)[:200]})
-
     async def _stream_langgraph(
         self,
         question: str,
         user: AuthenticatedUser,
         session_id: str,
         started: float,
-        trace: Any = None,
+        tracer: Any = None,
+        trace_handle: Any = None,
     ) -> AsyncIterator[dict]:
         """
         Stream responses using the LangGraph agent.
@@ -305,7 +292,12 @@ class QueryOrchestrationUseCase:
         last_iteration = 0
         # Track if we already emitted the shortcut acting event
         shortcut_acting_emitted = False
-        open_tool_spans: dict[str, Any] = {}
+        # Langfuse node spans: name -> [span, ...] (LIFO stack per name).
+        # Dùng name thay vì run_id vì LangGraph có thể emit on_chain_end với run_id
+        # khác on_chain_start (dispatcher wrapper). LangGraph chạy node tuần tự nên
+        # LIFO stack là đủ chính xác.
+        _active_spans: dict[str, list] = {}
+        _SPAN_NODES = {"shortcut", "triage", "think", "act", "observe", "answer"}
 
         # recursion_limit is a defence-in-depth net; Part 1 (force_answer + act→observe→think
         # wiring) provides the logical hard cap.  Set to 3 * max_iterations + overhead.
@@ -334,6 +326,13 @@ class QueryOrchestrationUseCase:
                     if node_name in ("act", "observe"):
                         last_iteration = max(last_iteration, 1)
                     # NOTE: do NOT increment for "think" or "answer" — shortcut path has 0 iterations
+                    if node_name in _SPAN_NODES and tracer and trace_handle:
+                        _span = tracer.span_start(
+                            trace_handle, name=node_name,
+                            input_data={"iteration": last_iteration},
+                        )
+                        if _span:
+                            _active_spans.setdefault(node_name, []).append(_span)
 
                 # Token stream from LLM
                 elif event_type == "on_chat_model_stream":
@@ -359,12 +358,13 @@ class QueryOrchestrationUseCase:
                 elif event_type == "on_tool_start":
                     tool_name = event["name"]
                     input_data = event.get("data", {}).get("input", {})
-                    run_id = str(event.get("run_id") or tool_name)
-                    open_tool_spans[run_id] = self._span(
-                        trace,
-                        f"tool.{tool_name}",
-                        input=input_data,
-                    )
+                    if tracer and trace_handle:
+                        _span = tracer.span_start(
+                            trace_handle, name=f"tool.{tool_name}",
+                            input_data={"tool": tool_name, "args": input_data},
+                        )
+                        if _span:
+                            _active_spans.setdefault(f"tool.{tool_name}", []).append(_span)
                     yield {
                         "phase": "acting",
                         "agent_mode": "langgraph",
@@ -378,11 +378,11 @@ class QueryOrchestrationUseCase:
                 elif event_type == "on_tool_end":
                     tool_name = event["name"]
                     output_data = event.get("data", {}).get("output", "")
-                    run_id = str(event.get("run_id") or tool_name)
-                    self._end_span(
-                        open_tool_spans.pop(run_id, None),
-                        output=str(output_data)[:500] if output_data else "",
-                    )
+                    if tracer:
+                        _tool_stack = _active_spans.get(f"tool.{tool_name}")
+                        if _tool_stack:
+                            _span = _tool_stack.pop()
+                            tracer.span_end(_span, output_data={"result_preview": str(output_data)[:300]})
                     yield {
                         "phase": "observing",
                         "agent_mode": "langgraph",
@@ -396,18 +396,17 @@ class QueryOrchestrationUseCase:
                 elif event_type == "on_chain_error":
                     error_val = event.get("data", {}).get("error")
                     error_msg = str(getattr(error_val, "args", [str(error_val)])[0])
-                    for run_id in list(open_tool_spans):
-                        self._end_span(
-                            open_tool_spans.pop(run_id, None),
-                            output={"error": error_msg},
-                            level="ERROR",
-                        )
-                    err_span = self._span(
-                        trace,
-                        "graph.error",
-                        input={"node": event.get("name")},
-                    )
-                    self._end_span(err_span, output={"error": error_msg}, level="ERROR")
+                    if tracer:
+                        for key, stack in list(_active_spans.items()):
+                            while stack:
+                                _span = stack.pop()
+                                tracer.span_end(_span, output_data={"error": error_msg, "span": key}, level="ERROR")
+                        err_span = tracer.span_start(
+                            trace_handle,
+                            name="graph.error",
+                            input_data={"node": event.get("name")},
+                        ) if trace_handle else None
+                        tracer.span_end(err_span, output_data={"error": error_msg}, level="ERROR")
                     logger.error(
                         "langgraph_stream_error",
                         extra={"session_id": session_id, "error": error_msg},
@@ -430,9 +429,15 @@ class QueryOrchestrationUseCase:
 
                 # Graph complete — only the top-level graph on_chain_end is final
                 elif event_type == "on_chain_end":
-                    # Skip sub-node on_chain_end (shortcut, answer, etc.) — only handle graph root
                     run_name = event.get("name", "")
                     if run_name not in ("VinSmartFutureReActAgent", "VinSmartFutureAgent"):
+                        # Sub-node completed — close its Langfuse span (LIFO pop by name)
+                        if tracer:
+                            _node_stack = _active_spans.get(run_name)
+                            if _node_stack:
+                                _span = _node_stack.pop()
+                                _out = event.get("data", {}).get("output") or {}
+                                tracer.span_end(_span, output_data=_node_output_summary(_out))
                         continue
 
                     final_state = event.get("data", {}).get("output", {})
@@ -517,6 +522,7 @@ class QueryOrchestrationUseCase:
                             "outcome": outcome_value,
                             "agent_mode": "langgraph",
                             "iterations": final_iteration,
+                            "_answer": answer,  # kênh nội bộ cho langfuse tracer
                         }
                         # Token/model usage cho langfuse (cost+latency). Kênh nội bộ _usage:
                         # wrapper stream() pop ra trước khi yield SSE -> KHÔNG rò xuống FE.
@@ -531,18 +537,21 @@ class QueryOrchestrationUseCase:
             # Saving an assistant turn completes the exchange so the frontend does NOT
             # resend the user message (which would cause duplicates).
             _err_name = type(_stream_exc).__name__
-            for run_id in list(open_tool_spans):
-                self._end_span(
-                    open_tool_spans.pop(run_id, None),
-                    output={"error": str(_stream_exc)},
-                    level="ERROR",
-                )
-            err_span = self._span(
-                trace,
-                "graph.error",
-                input={"node": "langgraph_stream"},
-            )
-            self._end_span(err_span, output={"error": str(_stream_exc)}, level="ERROR")
+            if tracer:
+                for key, stack in list(_active_spans.items()):
+                    while stack:
+                        _span = stack.pop()
+                        tracer.span_end(
+                            _span,
+                            output_data={"error": str(_stream_exc), "span": key},
+                            level="ERROR",
+                        )
+                err_span = tracer.span_start(
+                    trace_handle,
+                    name="graph.error",
+                    input_data={"node": "langgraph_stream"},
+                ) if trace_handle else None
+                tracer.span_end(err_span, output_data={"error": str(_stream_exc)}, level="ERROR")
             logger.error(
                 "langgraph_stream_fatal",
                 extra={"session_id": session_id, "error_type": _err_name, "error": str(_stream_exc)[:300]},
@@ -989,3 +998,13 @@ def _is_fallback_answer(answer: str) -> bool:
     """
     normalized = _normalize_text(answer)
     return "khong tim thay thong tin" in normalized
+
+
+def _node_output_summary(output: Any) -> dict:
+    """Tóm tắt output của LangGraph node để log vào Langfuse span.
+    Bỏ 'messages' (list dài) — chỉ giữ các scalar fields như phase, iteration, outcome.
+    """
+    if not isinstance(output, dict):
+        return {}
+    skip = {"messages"}
+    return {k: v for k, v in output.items() if k not in skip}

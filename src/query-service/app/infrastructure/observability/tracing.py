@@ -46,12 +46,12 @@ class CompositeTracer:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("composite_trace_finish_failed", extra={"error": str(exc)[:200]})
 
-    def span(self, handle: list | None, name: str, **kwargs: Any) -> list | None:
+    def span_start(self, handle: list | None, name: str, **kwargs: Any) -> list | None:
         if not handle:
             return None
         children = []
         for tracer, child_handle in handle:
-            fn = getattr(tracer, "span", None)
+            fn = getattr(tracer, "span_start", None) or getattr(tracer, "span", None)
             if fn is None:
                 continue
             try:
@@ -60,17 +60,23 @@ class CompositeTracer:
                 logger.warning("composite_span_failed", extra={"error": str(exc)[:200]})
         return children or None
 
-    def end_span(self, span_handle: list | None, **kwargs: Any) -> None:
+    def span_end(self, span_handle: list | None, **kwargs: Any) -> None:
         if not span_handle:
             return
         for tracer, child_span in span_handle:
-            fn = getattr(tracer, "end_span", None)
+            fn = getattr(tracer, "span_end", None) or getattr(tracer, "end_span", None)
             if fn is None:
                 continue
             try:
                 fn(child_span, **kwargs)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("composite_end_span_failed", extra={"error": str(exc)[:200]})
+
+    def span(self, handle: list | None, name: str, **kwargs: Any) -> list | None:
+        return self.span_start(handle, name, **kwargs)
+
+    def end_span(self, span_handle: list | None, **kwargs: Any) -> None:
+        self.span_end(span_handle, **kwargs)
 
 
 def build_tracer(settings: Any) -> Any | None:
