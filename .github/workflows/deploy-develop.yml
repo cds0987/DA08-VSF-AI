@@ -81,7 +81,9 @@ jobs:
             query-service: 'src/query-service/**'
             frontend: 'src/frontend/**'
             nginx: 'nginx/**'
-            base: 'docker-compose.yml'
+            base:
+              - 'docker-compose.yml'
+              - 'infra/nats/**'
             langfuse:
               - 'docker-compose.yml'
               - 'infra/localtest/ci_langfuse.py'

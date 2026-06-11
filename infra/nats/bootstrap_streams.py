@@ -67,17 +67,30 @@ async def _main() -> int:
                 continue
             except Exception:
                 pass
-            await js.add_stream(
-                StreamConfig(
-                    name=name,
-                    subjects=subjects,
-                    retention=RetentionPolicy.LIMITS,
-                    storage=StorageType.FILE,
-                    discard=DiscardPolicy.OLD,
-                    num_replicas=1,
+            try:
+                await js.add_stream(
+                    StreamConfig(
+                        name=name,
+                        subjects=subjects,
+                        retention=RetentionPolicy.LIMITS,
+                        storage=StorageType.FILE,
+                        discard=DiscardPolicy.OLD,
+                        num_replicas=1,
+                    )
                 )
-            )
-            print(f"[bootstrap] đã tạo stream {name} {subjects}", flush=True)
+                print(f"[bootstrap] đã tạo stream {name} {subjects}", flush=True)
+            except Exception as exc:  # noqa: BLE001
+                # 10065 = subjects overlap: subject ĐÃ được stream khác (owner khác,
+                # vd hr-service) provision rồi -> coi như đã có, KHÔNG fail. Migration
+                # xóa DOCS ở trên đã đảm bảo doc.* không bị stream lạ chiếm.
+                msg = str(exc)
+                if "10065" in msg or "overlap" in msg.lower() or "in use" in msg.lower():
+                    print(
+                        f"[bootstrap] {name}: subject đã được stream khác sở hữu -> bỏ qua ({msg})",
+                        flush=True,
+                    )
+                    continue
+                raise
 
         print("[bootstrap] NATS bootstrap DONE", flush=True)
         return 0
