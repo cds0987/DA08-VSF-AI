@@ -30,10 +30,12 @@ def build_langfuse_callback(settings: Any) -> Any | None:
         return None
 
     try:
-        from langfuse.langchain import CallbackHandler  # type: ignore[import]
+        # Langfuse server self-host = v2 -> dùng SDK v2 path `langfuse.callback`
+        # (KHÔNG phải `langfuse.langchain` của v3/v4 — server v2 không nhận OTLP).
+        from langfuse.callback import CallbackHandler  # type: ignore[import]
     except ImportError as exc:
         raise RuntimeError(
-            "langfuse is required when OBSERVABILITY_MODE=langfuse — add it to requirements.txt"
+            "langfuse v2 + langchain required when OBSERVABILITY_MODE=langfuse — xem requirements.txt"
         ) from exc
 
     return CallbackHandler(
