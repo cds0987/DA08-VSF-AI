@@ -22,16 +22,18 @@ services:
   # NGUỒN DUY NHẤT provision JetStream stream (DOC_EVENTS/NOTIFY_EVENTS/HR_EVENTS)
   # theo infra/nats/subjects.md + migrate xóa stream legacy DOCS. One-shot chạy
   # TRƯỚC service -> mọi service verify-only, hết cảnh đua add_stream gây overlap.
+  # Dùng image rag-worker (đã có nats-py) + script Python -> không phụ thuộc cú
+  # pháp nats CLI theo version. Override CMD (image rag-worker chỉ có CMD, không ENTRYPOINT).
   nats-bootstrap:
-    image: natsio/nats-box:0.14.5
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/rag-worker:${IMAGE_TAG:-develop}
     depends_on:
       nats:
         condition: service_started
-    entrypoint: ["/bin/sh", "/etc/nats/bootstrap-streams.sh"]
+    command: ["python", "/etc/nats/bootstrap_streams.py"]
     environment:
       NATS_URL: nats://nats:4222
     volumes:
-      - ./infra/nats/bootstrap-streams.sh:/etc/nats/bootstrap-streams.sh:ro
+      - ./infra/nats/bootstrap_streams.py:/etc/nats/bootstrap_streams.py:ro
     restart: "no"
 
   redis:
