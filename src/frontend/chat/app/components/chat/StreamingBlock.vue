@@ -6,7 +6,7 @@ defineProps<{
 
 <template>
   <div class="rounded-xl border border-slate-200 bg-white px-5 pb-5 pt-4 shadow-sm">
-    <p class="whitespace-pre-wrap text-[14px] font-medium leading-relaxed text-slate-900 [overflow-wrap:anywhere] [word-break:break-word]">
+    <p class="whitespace-pre-wrap text-[16px] font-medium leading-relaxed text-slate-900 [overflow-wrap:anywhere] [word-break:break-word]">
       {{ text }}
       <span class="ml-0.5 inline-flex h-5 items-end align-middle">
         <span class="streaming-cursor h-4 w-[2px] rounded-full bg-blue-500" />

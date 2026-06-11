@@ -57,7 +57,7 @@ function selectSource(citation: Citation) {
     <div class="px-5 pb-5 pt-4 text-slate-900">
       <div 
         v-if="data.content"
-        class="ai-response-markdown prose prose-sm prose-slate max-w-none font-medium text-slate-900 prose-p:leading-relaxed prose-pre:bg-slate-50 prose-pre:border prose-pre:border-slate-200 [overflow-wrap:anywhere]"
+        class="ai-response-markdown prose prose-base prose-slate max-w-none font-medium text-slate-900 prose-p:font-medium prose-p:leading-relaxed prose-pre:bg-slate-50 prose-pre:border prose-pre:border-slate-200 [overflow-wrap:anywhere]"
         v-html="renderedContent"
       />
       <ActionableCard v-if="data.action" :action="data.action" />

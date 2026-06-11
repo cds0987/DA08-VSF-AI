@@ -62,7 +62,7 @@ watch(() => props.input, (value) => {
         maxlength="500"
         placeholder="Ask a question about FeatureMind policies, procedures, or knowledge..."
         :class="cn(
-          'max-h-[200px] w-full resize-none bg-transparent text-[14px] text-slate-800 outline-none placeholder:text-slate-400',
+          'max-h-[200px] w-full resize-none bg-transparent text-[16px] text-slate-800 outline-none placeholder:text-slate-400',
           isMultiline ? 'min-h-[60px] px-4 pb-2 pt-4' : 'min-h-[36px] flex-1 px-3 py-2',
         )"
       />

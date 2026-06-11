@@ -18,7 +18,7 @@ const formatSize = (bytes: number) => {
 
 <template>
   <div class="flex flex-col items-end gap-2">
-    <div class="max-w-[80%] rounded-2xl rounded-br-sm border border-blue-200/50 bg-blue-500/10 px-4 py-3 text-[14px] text-slate-800 shadow-sm flex flex-col gap-3">
+    <div class="max-w-[80%] rounded-2xl rounded-br-sm border border-blue-200/50 bg-blue-500/10 px-4 py-3 text-[16px] font-medium leading-relaxed text-slate-900 shadow-sm flex flex-col gap-3">
       <!-- Attachments -->
       <div v-if="attachments && attachments.length > 0" class="flex flex-col gap-2">
         <div 
