@@ -54,10 +54,10 @@ function selectSource(citation: Citation) {
       {{ data.error }}
     </div>
 
-    <div class="px-5 pb-5 pt-4 text-slate-800">
+    <div class="px-5 pb-5 pt-4 text-slate-900">
       <div 
         v-if="data.content"
-        class="ai-response-markdown prose prose-sm prose-slate max-w-none text-slate-900 prose-p:leading-relaxed prose-pre:bg-slate-50 prose-pre:border prose-pre:border-slate-200 [overflow-wrap:anywhere]"
+        class="ai-response-markdown prose prose-sm prose-slate max-w-none font-medium text-slate-900 prose-p:leading-relaxed prose-pre:bg-slate-50 prose-pre:border prose-pre:border-slate-200 [overflow-wrap:anywhere]"
         v-html="renderedContent"
       />
       <ActionableCard v-if="data.action" :action="data.action" />
@@ -65,7 +65,7 @@ function selectSource(citation: Citation) {
 
     <div v-if="data.citations?.length" class="border-t border-slate-100">
       <button
-        class="flex w-full items-center justify-between px-5 py-3 text-[12.5px] font-medium text-slate-600 hover:bg-slate-100/80"
+        class="flex w-full items-center justify-between px-5 py-3 text-[12.5px] font-medium text-slate-800 hover:bg-slate-100/80"
         @click="isSourcesOpen = !isSourcesOpen"
       >
         <span class="inline-flex items-center gap-2">
@@ -87,10 +87,10 @@ function selectSource(citation: Citation) {
           <div class="truncate text-[13px] font-semibold text-slate-900">
             {{ index + 1 }}. {{ citation.caption || citation.document }}
           </div>
-          <div class="mt-1 truncate text-[11px] font-medium text-slate-500">
+          <div class="mt-1 truncate text-[11px] font-medium text-slate-700">
             {{ citation.document }}
           </div>
-          <div v-if="citation.heading_path.length" class="mt-1 truncate text-[11px] text-slate-400">
+          <div v-if="citation.heading_path.length" class="mt-1 truncate text-[11px] font-medium text-slate-600">
             {{ citation.heading_path.join(' › ') }}
           </div>
         </button>
