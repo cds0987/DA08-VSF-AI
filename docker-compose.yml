@@ -19,6 +19,21 @@ services:
       - nats_data:/data
     restart: unless-stopped
 
+  # NGUỒN DUY NHẤT provision JetStream stream (DOC_EVENTS/NOTIFY_EVENTS/HR_EVENTS)
+  # theo infra/nats/subjects.md + migrate xóa stream legacy DOCS. One-shot chạy
+  # TRƯỚC service -> mọi service verify-only, hết cảnh đua add_stream gây overlap.
+  nats-bootstrap:
+    image: natsio/nats-box:0.14.5
+    depends_on:
+      nats:
+        condition: service_started
+    entrypoint: ["/bin/sh", "/etc/nats/bootstrap-streams.sh"]
+    environment:
+      NATS_URL: nats://nats:4222
+    volumes:
+      - ./infra/nats/bootstrap-streams.sh:/etc/nats/bootstrap-streams.sh:ro
+    restart: "no"
+
   redis:
     image: redis:7-alpine
     ports:
@@ -112,7 +127,10 @@ services:
       <<: *newrelic
       NEW_RELIC_APP_NAME: vsf-document-service
     depends_on:
-      - nats
+      nats:
+        condition: service_started
+      nats-bootstrap:
+        condition: service_completed_successfully
     restart: unless-stopped
     volumes:
         - ./deploy/secrets/gcp-sa.json:/secrets/gcp-sa.json:ro
@@ -128,8 +146,12 @@ services:
       <<: *newrelic
       NEW_RELIC_APP_NAME: vsf-query-service
     depends_on:
-      - nats
-      - redis
+      nats:
+        condition: service_started
+      redis:
+        condition: service_started
+      nats-bootstrap:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   # Migration one-shot: alembic upgrade head lên Cloud SQL TRƯỚC khi rag-worker chạy.
@@ -160,6 +182,8 @@ services:
     depends_on:
       nats:
         condition: service_started
+      nats-bootstrap:
+        condition: service_completed_successfully
       qdrant:
         condition: service_started
       rag-migrate:

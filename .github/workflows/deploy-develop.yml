@@ -969,13 +969,16 @@ jobs:
 
             echo "==> 3) Login Docker Hub + PULL image (KHÔNG build trên VM)"
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-            docker compose pull qdrant langfuse-db langfuse rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin nginx
+            docker compose pull qdrant langfuse-db langfuse nats-bootstrap rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin nginx
 
-            echo "==> 4) Up image đã pull (deps: nats, rag-migrate, hr-migrate one-shot alembic)"
+            echo "==> 4) Up image đã pull (deps: nats, nats-bootstrap provision stream, rag-migrate/hr-migrate one-shot alembic)"
+            #     nats-bootstrap = one-shot provision JetStream stream (DOC_EVENTS...) + migrate
+            #       xóa DOCS legacy. rag-worker/document-service/query-service depends_on nó
+            #       (service_completed_successfully) nên compose tự chạy đúng thứ tự.
             #     nginx = image config-nướng-sẵn (không bind-mount) -> recreate để lấy image mới.
             # langfuse + langfuse-db: hạ tầng observability, KHÔNG nằm trong health-gate/rollback
             # (giống qdrant) -> langfuse chết cũng không kéo sập / rollback app.
-            docker compose up -d --no-build qdrant langfuse-db langfuse rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin
+            docker compose up -d --no-build qdrant langfuse-db langfuse nats-bootstrap rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin
             docker compose up -d --no-build --force-recreate nginx
 
             echo "==> 4b) LANGFUSE readiness PROD bằng KEY THẬT (NON-FATAL — chỉ cảnh báo)"
