@@ -30,40 +30,40 @@ async function handleConfirm() {
 </script>
 
 <template>
-  <div class="mt-4 rounded-xl border border-blue-100 bg-blue-50/30 p-4">
+  <div class="mt-4 rounded-xl border border-blue-100 dark:border-blue-500/20 bg-blue-50/30 dark:bg-blue-500/5 p-4">
     <div class="mb-3 flex items-center gap-2">
       <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/10 text-blue-600">
         <Calendar class="h-4 w-4" />
       </div>
       <div>
-        <h4 class="text-[13px] font-semibold text-slate-900">
+        <h4 class="text-[13px] font-semibold text-slate-900 dark:text-foreground">
           {{ action.action_type === 'create_leave_request' ? 'Leave Request Draft' : 'Action Required' }}
         </h4>
-        <p class="text-[11px] text-slate-500 uppercase font-bold tracking-wider">HR Service Tool</p>
+        <p class="text-[11px] text-slate-500 dark:text-muted-foreground uppercase font-bold tracking-wider">HR Service Tool</p>
       </div>
     </div>
 
-    <div v-if="action.action_type === 'create_leave_request'" class="space-y-2.5 rounded-lg border border-blue-100 bg-white p-3 shadow-sm">
+    <div v-if="action.action_type === 'create_leave_request'" class="space-y-2.5 rounded-lg border border-blue-100 dark:border-border bg-white dark:bg-card p-3 shadow-sm">
       <div class="grid grid-cols-2 gap-4">
         <div>
-          <label class="text-[10px] font-bold uppercase text-slate-400">Type</label>
-          <div class="text-[13px] font-medium text-slate-700 capitalize">{{ action.parameters.leave_type }}</div>
+          <label class="text-[10px] font-bold uppercase text-slate-400 dark:text-muted-foreground">Type</label>
+          <div class="text-[13px] font-medium text-slate-700 dark:text-foreground/90 capitalize">{{ action.parameters.leave_type }}</div>
         </div>
         <div>
-          <label class="text-[10px] font-bold uppercase text-slate-400">Reason</label>
-          <div class="text-[13px] font-medium text-slate-700 truncate" :title="action.parameters.reason">
+          <label class="text-[10px] font-bold uppercase text-slate-400 dark:text-muted-foreground">Reason</label>
+          <div class="text-[13px] font-medium text-slate-700 dark:text-foreground/90 truncate" :title="action.parameters.reason">
             {{ action.parameters.reason || '—' }}
           </div>
         </div>
       </div>
       <div class="grid grid-cols-2 gap-4 pt-1">
         <div>
-          <label class="text-[10px] font-bold uppercase text-slate-400">Start Date</label>
-          <div class="text-[13px] font-medium text-slate-700">{{ action.parameters.start_date }}</div>
+          <label class="text-[10px] font-bold uppercase text-slate-400 dark:text-muted-foreground">Start Date</label>
+          <div class="text-[13px] font-medium text-slate-700 dark:text-foreground/90">{{ action.parameters.start_date }}</div>
         </div>
         <div>
-          <label class="text-[10px] font-bold uppercase text-slate-400">End Date</label>
-          <div class="text-[13px] font-medium text-slate-700">{{ action.parameters.end_date }}</div>
+          <label class="text-[10px] font-bold uppercase text-slate-400 dark:text-muted-foreground">End Date</label>
+          <div class="text-[13px] font-medium text-slate-700 dark:text-foreground/90">{{ action.parameters.end_date }}</div>
         </div>
       </div>
     </div>

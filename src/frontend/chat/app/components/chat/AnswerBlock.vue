@@ -45,7 +45,7 @@ function selectSource(citation: Citation) {
 </script>
 
 <template>
-  <div class="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+  <div class="overflow-hidden rounded-2xl border border-slate-200 dark:border-transparent bg-white dark:bg-chat-response shadow-sm dark:shadow-none">
     <div
       v-if="data.error"
       class="flex items-start gap-2 border-b border-rose-100 dark:border-rose-900/30 bg-rose-50/60 dark:bg-rose-900/10 px-5 py-3 text-[12.5px] text-rose-700 dark:text-rose-400"
@@ -54,54 +54,54 @@ function selectSource(citation: Citation) {
       {{ data.error }}
     </div>
 
-    <div class="px-5 pb-5 pt-4 text-slate-900 dark:text-slate-100">
+    <div class="px-5 pb-5 pt-4 text-slate-900 dark:text-foreground">
       <div 
         v-if="data.content"
-        class="ai-response-markdown prose prose-base prose-slate dark:prose-invert max-w-none font-medium text-slate-900 dark:text-slate-100 prose-p:font-medium prose-p:leading-relaxed prose-pre:bg-slate-50 dark:prose-pre:bg-slate-800 prose-pre:border prose-pre:border-slate-200 dark:prose-pre:border-slate-700 [overflow-wrap:anywhere]"
+        class="ai-response-markdown prose prose-base prose-slate dark:prose-invert max-w-none font-medium text-slate-900 dark:text-foreground prose-p:font-medium prose-p:leading-relaxed prose-pre:bg-slate-50 dark:prose-pre:bg-background/50 prose-pre:border prose-pre:border-slate-200 dark:prose-pre:border-white/5 [overflow-wrap:anywhere]"
         v-html="renderedContent"
       />
       <ActionableCard v-if="data.action" :action="data.action" />
     </div>
 
-    <div v-if="data.citations?.length" class="border-t border-slate-100 dark:border-slate-800">
+    <div v-if="data.citations?.length" class="border-t border-slate-100 dark:border-white/5">
       <button
-        class="flex w-full items-center justify-between px-5 py-3 text-[12.5px] font-medium text-slate-800 dark:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-slate-800/80"
+        class="flex w-full items-center justify-between px-5 py-3 text-[12.5px] font-medium text-slate-800 dark:text-foreground/80 hover:bg-slate-100/80 dark:hover:bg-white/5"
         @click="isSourcesOpen = !isSourcesOpen"
       >
         <span class="inline-flex items-center gap-2">
-          <ChevronRight :class="cn('h-3.5 w-3.5 text-slate-400 transition-transform', isSourcesOpen && 'rotate-90')" />
+          <ChevronRight :class="cn('h-3.5 w-3.5 text-slate-400 dark:text-muted-foreground transition-transform', isSourcesOpen && 'rotate-90')" />
           {{ data.citations.length }} Sources
         </span>
-        <span class="text-[10px] font-bold uppercase tracking-widest text-slate-400">Transparency</span>
+        <span class="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-muted-foreground">Transparency</span>
       </button>
-      <div v-if="isSourcesOpen" class="grid gap-2 border-t border-slate-100 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/40 p-3 sm:grid-cols-2">
+      <div v-if="isSourcesOpen" class="grid gap-2 border-t border-slate-100 dark:border-white/5 bg-slate-50/40 dark:bg-background/40 p-3 sm:grid-cols-2">
         <button
           v-for="(citation, index) in data.citations"
           :key="citation.id"
           :class="cn(
             'rounded-xl border p-3 text-left transition-colors',
-            selectedSourceId === citation.id ? 'border-blue-200 dark:border-blue-900 bg-blue-50/80 dark:bg-blue-900/20' : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-700',
+            selectedSourceId === citation.id ? 'border-blue-200 dark:border-blue-900 bg-blue-50/80 dark:bg-blue-900/20' : 'border-slate-200 dark:border-white/10 bg-white dark:bg-card hover:border-slate-300 dark:hover:border-white/20',
           )"
           @click="selectSource(citation)"
         >
-          <div class="truncate text-[13px] font-semibold text-slate-900 dark:text-slate-100">
+          <div class="truncate text-[13px] font-semibold text-slate-900 dark:text-foreground">
             {{ index + 1 }}. {{ citation.caption || citation.document }}
           </div>
-          <div class="mt-1 truncate text-[11px] font-medium text-slate-700 dark:text-slate-400">
+          <div class="mt-1 truncate text-[11px] font-medium text-slate-700 dark:text-muted-foreground">
             {{ citation.document }}
           </div>
-          <div v-if="citation.heading_path.length" class="mt-1 truncate text-[11px] font-medium text-slate-600 dark:text-slate-500">
+          <div v-if="citation.heading_path.length" class="mt-1 truncate text-[11px] font-medium text-slate-600 dark:text-muted-foreground/70">
             {{ citation.heading_path.join(' › ') }}
           </div>
         </button>
       </div>
     </div>
 
-    <div class="flex items-center justify-between border-t border-slate-100 dark:border-slate-800 bg-slate-50/30 dark:bg-slate-900/30 px-5 py-2.5">
+    <div class="flex items-center justify-between border-t border-slate-100 dark:border-white/5 bg-slate-50/30 dark:bg-background/20 px-5 py-2.5">
       <div class="flex items-center gap-2">
         <button
           :disabled="!data.sessionId"
-          :class="cn('rounded-md p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40', data.feedback === 1 && 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400')"
+          :class="cn('rounded-md p-2 text-slate-500 dark:text-muted-foreground hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-40', data.feedback === 1 && 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400')"
           title="Helpful"
           @click="emit('feedback', data.id, 1)"
         >
@@ -109,14 +109,14 @@ function selectSource(citation: Citation) {
         </button>
         <button
           :disabled="!data.sessionId"
-          :class="cn('rounded-md p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40', data.feedback === -1 && 'bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400')"
+          :class="cn('rounded-md p-2 text-slate-500 dark:text-muted-foreground hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-40', data.feedback === -1 && 'bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400')"
           title="Not helpful"
           @click="emit('feedback', data.id, -1)"
         >
           <ThumbsDown class="h-4 w-4" />
         </button>
       </div>
-      <button class="rounded-md p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" @click="copyToClipboard">
+      <button class="rounded-md p-2 text-slate-500 dark:text-muted-foreground hover:bg-slate-100 dark:hover:bg-white/5" @click="copyToClipboard">
         <Check v-if="copied" class="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
         <Copy v-else class="h-4 w-4" />
       </button>
