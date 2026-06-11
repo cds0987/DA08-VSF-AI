@@ -91,6 +91,10 @@ services:
   nats-bootstrap:
     build:
       context: ./src/rag-worker
+      cache_from:
+        - type=gha,scope=e2e-rag-worker
+      cache_to:
+        - type=gha,scope=e2e-rag-worker,mode=max
     image: rag-worker:e2e
     depends_on:
       nats:
@@ -144,6 +148,10 @@ services:
     image: user-service:e2e
     build:
       context: ./src/user-service
+      cache_from:
+        - type=gha,scope=e2e-user-service
+      cache_to:
+        - type=gha,scope=e2e-user-service,mode=max
     command: ["python", "/seed/seed_user.py"]
     working_dir: /app
     environment:
@@ -188,6 +196,10 @@ services:
     image: hr-service:e2e
     build:
       context: ./src/hr-service
+      cache_from:
+        - type=gha,scope=e2e-hr-service
+      cache_to:
+        - type=gha,scope=e2e-hr-service,mode=max
     command: ["alembic", "upgrade", "head"]
     working_dir: /app
     environment:
@@ -224,6 +236,10 @@ services:
     image: document-service:e2e
     build:
       context: ./src/document-service
+      cache_from:
+        - type=gha,scope=e2e-document-service
+      cache_to:
+        - type=gha,scope=e2e-document-service,mode=max
     ports:
       - "127.0.0.1:8002:8002"
     environment:
@@ -312,6 +328,10 @@ services:
     image: mcp-service:e2e
     build:
       context: ./src/mcp-service
+      cache_from:
+        - type=gha,scope=e2e-mcp-service
+      cache_to:
+        - type=gha,scope=e2e-mcp-service,mode=max
     ports:
       - "127.0.0.1:8003:8003"
     environment:
@@ -341,6 +361,10 @@ services:
     image: query-service:e2e
     build:
       context: ./src/query-service
+      cache_from:
+        - type=gha,scope=e2e-query-service
+      cache_to:
+        - type=gha,scope=e2e-query-service,mode=max
     ports:
       - "127.0.0.1:8001:8001"
     environment:

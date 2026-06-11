@@ -1,5 +1,8 @@
 # API Keys & Secrets cần thiết
 
+> ⚠️ **LƯU Ý (2026-06-12):** `docker-compose.local.yml` đã bị xóa; stack cục bộ chuẩn giờ là
+> **`docker-compose.e2e.yml`** (đọc key từ `.env` repo root) — xem [`infra/e2e/README.md`](../../../infra/e2e/README.md).
+
 Tài liệu này liệt kê **mọi secret/API key** của hệ thống, trạng thái hiện tại khi chạy local, và hướng dẫn lấy nếu chưa có.
 
 ---

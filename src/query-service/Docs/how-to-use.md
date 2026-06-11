@@ -1,5 +1,11 @@
 # Hướng dẫn chạy và sử dụng hệ thống RAG Chatbot — Local
 
+> ⚠️ **ĐÃ THAY THẾ (2026-06-12):** `docker-compose.local.yml` đã bị xóa. Stack chạy cục bộ
+> chuẩn giờ là **`docker-compose.e2e.yml`** (GCS + Qdrant Cloud thật, cần `.env` với
+> `OPENAI_API_KEY`/`QDRANT_URL`/`QDRANT_API_KEY`/`GCS_HMAC_*`) — xem
+> [`infra/e2e/README.md`](../../../infra/e2e/README.md). Thay mọi `docker-compose.local.yml`
+> dưới đây bằng `docker-compose.e2e.yml`.
+
 ## Yêu cầu trước khi bắt đầu
 
 | Công cụ | Phiên bản | Lưu ý |
