@@ -68,8 +68,11 @@ export interface DocumentFileResponse {
 }
 
 export interface QueryTokenEvent {
-  token: string
+  token?: string
   phase?: 'thinking' | 'acting' | 'observing' | 'generating'
+  status?: string
+  node?: string
+  tool?: string
 }
 
 export interface QueryDoneEvent {

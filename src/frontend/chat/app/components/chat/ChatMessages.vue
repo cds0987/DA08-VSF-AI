@@ -11,6 +11,7 @@ defineProps<{
   pipeline: number
   pipelineStages: PipelineStage[]
   streamingText: string
+  thinkingStatus?: string
 }>()
 
 const emit = defineEmits<{
@@ -35,6 +36,7 @@ const emit = defineEmits<{
       v-if="pipeline >= 0 && pipeline < pipelineStages.length"
       :stage="pipeline"
       :stages="pipelineStages"
+      :thinking-status="thinkingStatus"
     />
     <StreamingBlock
       v-if="pipeline === pipelineStages.length && streamingText"

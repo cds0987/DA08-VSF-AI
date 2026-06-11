@@ -6,6 +6,7 @@ import type { PipelineStage } from '~/types'
 interface Props {
   stage: number
   stages: PipelineStage[]
+  thinkingStatus?: string
 }
 
 const props = defineProps<Props>()
@@ -53,7 +54,7 @@ const props = defineProps<Props>()
         </span>
         <span class="flex-1">{{ s.label }}</span>
         <span v-if="i === stage" class="text-[11px] text-blue-500 animate-pulse">
-          in progress…
+          {{ thinkingStatus || 'in progress…' }}
         </span>
         <span v-if="i < stage" class="text-[11px] text-emerald-600">done</span>
       </div>

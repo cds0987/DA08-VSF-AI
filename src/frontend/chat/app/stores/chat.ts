@@ -86,9 +86,13 @@ function toChatMessage(message: ConversationHistoryMessage, index: number): Chat
 }
 
 function isTokenEvent(value: unknown): value is QueryTokenEvent {
-  return typeof value === 'object'
-    && value !== null
-    && typeof (value as QueryTokenEvent).token === 'string'
+  const ev = value as Partial<QueryTokenEvent & QueryDoneEvent>
+  return (
+    typeof ev === 'object'
+    && ev !== null
+    && ev.done !== true
+    && (typeof ev.token === 'string' || typeof ev.phase === 'string')
+  )
 }
 
 function isDoneEvent(value: unknown): value is QueryDoneEvent {
@@ -127,6 +131,7 @@ export const useChatStore = defineStore('chat', () => {
   const isUsingHistoryFallback = ref(false)
   const pipeline = ref<number>(-1)
   const streamingText = ref('')
+  const thinkingStatus = ref('')
   const panelCitation = ref<Citation | null>(null)
   const isPanelOpen = ref(false)
   let abortController: AbortController | null = null
@@ -357,6 +362,7 @@ export const useChatStore = defineStore('chat', () => {
     cacheCurrentConversation()
 
     streamingText.value = ''
+    thinkingStatus.value = ''
     pipeline.value = 0
     let fullContent = ''
     let completed = false
@@ -396,15 +402,19 @@ export const useChatStore = defineStore('chat', () => {
         onmessage(message) {
           const payload: unknown = JSON.parse(message.data)
           if (isTokenEvent(payload)) {
-            // Update pipeline stage based on phase if provided
+            // Update thinking status for "AI thinking" display
+            if (payload.status) {
+              thinkingStatus.value = payload.status
+            }
+            // Update pipeline stage based on phase
             if (payload.phase && PHASE_MAP[payload.phase] !== undefined) {
               pipeline.value = PHASE_MAP[payload.phase]
             }
-
             if (payload.token) {
               fullContent += payload.token
               streamingText.value += payload.token
               pipeline.value = pipelineStages.length
+              thinkingStatus.value = ''
             }
             return
           }
@@ -478,6 +488,7 @@ export const useChatStore = defineStore('chat', () => {
     } finally {
       if (abortController === controller) abortController = null
       streamingText.value = ''
+      thinkingStatus.value = ''
       pipeline.value = -1
     }
   }
@@ -509,6 +520,7 @@ export const useChatStore = defineStore('chat', () => {
     isUsingHistoryFallback,
     pipeline,
     streamingText,
+    thinkingStatus,
     panelCitation,
     isPanelOpen,
     setInput,

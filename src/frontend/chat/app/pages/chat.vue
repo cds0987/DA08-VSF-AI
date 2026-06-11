@@ -123,6 +123,7 @@ watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText
             :pipeline="chat.pipeline"
             :pipeline-stages="PIPELINE_STAGES"
             :streaming-text="chat.streamingText"
+            :thinking-status="chat.thinkingStatus"
             @open-citation="chat.handleOpenCitation"
             @feedback="submitFeedback"
           />

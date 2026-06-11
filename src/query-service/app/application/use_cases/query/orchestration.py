@@ -322,6 +322,12 @@ class QueryOrchestrationUseCase:
         _active_spans: dict[str, Any] = {}  # run_id → span for node lifecycle
         _SPAN_NODES = {"triage", "think", "act", "observe", "answer", "shortcut"}
         _tracer = self._tracer  # LangfuseTracer | None
+        # Status text per node — emitted as SSE so the UI can show "AI thinking" indicator
+        _NODE_STATUS: dict[str, str] = {
+            "triage": "Đang phân tích câu hỏi...",
+            "think": "Đang suy nghĩ...",
+            "answer": "Đang soạn câu trả lời...",
+        }
 
         # recursion_limit is a defence-in-depth net; Part 1 (force_answer + act→observe→think
         # wiring) provides the logical hard cap.  Set to 3 * max_iterations + overhead.
@@ -359,6 +365,17 @@ class QueryOrchestrationUseCase:
                             )
                             if span is not None:
                                 _active_spans[run_id] = span
+                    # Emit thinking-status event so the UI shows what the agent is doing
+                    node_status = _NODE_STATUS.get(node_name)
+                    if node_status:
+                        yield {
+                            "phase": "thinking",
+                            "node": node_name,
+                            "status": node_status,
+                            "session_id": session_id,
+                            "agent_mode": "langgraph",
+                            "iterations": last_iteration,
+                        }
 
                 # LLM call started — record start time + input for langfuse enriched trace
                 elif event_type == "on_chat_model_start":
@@ -441,8 +458,15 @@ class QueryOrchestrationUseCase:
                                 "input_args": input_data,
                                 "start_dt": datetime.now(timezone.utc),
                             }
+                    _tool_status = (
+                        "Đang tìm kiếm tài liệu..."
+                        if tool_name == "rag_search"
+                        else "Đang truy vấn dữ liệu HR..."
+                    )
                     yield {
                         "phase": "acting",
+                        "node": "act",
+                        "status": _tool_status,
                         "agent_mode": "langgraph",
                         "session_id": session_id,
                         "iterations": last_iteration,
