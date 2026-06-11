@@ -61,17 +61,78 @@ class IngestDocumentUseCase:
         artifact_store: ArtifactStore,
         *,
         claim_heartbeat_interval_seconds: float = 5.0,
+        tracer: object | None = None,
     ):
         self._engine = engine
         self._documents = document_repository
         self._jobs = job_repository
         self._parser = parser
         self._artifact_store = artifact_store
+        self._tracer = tracer
         self._logger = logging.getLogger(__name__)
         self._claim_heartbeat_interval_seconds = claim_heartbeat_interval_seconds
         self._ingest_timeout_seconds = max(
             0.001, float(os.getenv("INGEST_JOB_TIMEOUT_SECONDS", "600"))
         )
+
+    def _trace_start(self, document_id: str, job_meta: dict) -> object | None:
+        if self._tracer is None:
+            return None
+        try:
+            return self._tracer.start_job(document_id, job_meta)
+        except Exception as exc:  # noqa: BLE001
+            log_event(
+                self._logger,
+                logging.WARNING,
+                "ingest_trace_start_failed",
+                stage="trace",
+                document_id=document_id,
+                error=str(exc),
+            )
+            return None
+
+    def _span_start(self, trace: object | None, name: str, payload: dict) -> object | None:
+        if self._tracer is None:
+            return None
+        try:
+            return self._tracer.span_start(trace, name, payload)
+        except Exception as exc:  # noqa: BLE001
+            log_event(
+                self._logger,
+                logging.WARNING,
+                "ingest_trace_span_start_failed",
+                stage="trace",
+                span=name,
+                error=str(exc),
+            )
+            return None
+
+    def _span_ok(self, span: object | None, payload: dict) -> None:
+        if self._tracer is None:
+            return
+        with contextlib.suppress(Exception):
+            self._tracer.span_ok(span, payload)
+
+    def _span_error(self, span: object | None, exc: BaseException) -> None:
+        if self._tracer is None:
+            return
+        with contextlib.suppress(Exception):
+            self._tracer.span_error(span, exc)
+
+    async def _finish_trace(self, trace: object | None, status: str, payload: dict) -> None:
+        if self._tracer is None:
+            return
+        try:
+            await self._tracer.finish_job(trace, status, payload)
+        except Exception as exc:  # noqa: BLE001
+            log_event(
+                self._logger,
+                logging.WARNING,
+                "ingest_trace_finish_failed",
+                stage="trace",
+                status=status,
+                error=str(exc),
+            )
 
     async def enqueue(
         self,
@@ -213,8 +274,24 @@ class IngestDocumentUseCase:
         heartbeat_task = asyncio.create_task(
             self._maintain_claim_lease(job.id, claim_id, heartbeat_stop, lease_lost)
         )
+        trace = self._trace_start(
+            job.document_id,
+            {
+                "job_id": job.id,
+                "attempt": job.attempt,
+                "mime": job.file_type,
+                "uri": job.source_uri or f"inline://{job.document_id}",
+                "source_uri": job.source_uri or f"inline://{job.document_id}",
+                "correlation_id": job.correlation_id,
+                "collection": getattr(
+                    getattr(getattr(self._engine, "vectors", None), "config", None),
+                    "index_id",
+                    lambda: "",
+                )(),
+            },
+        )
         try:
-            markdown, source_uri, artifact_uri = await self._prepare_markdown(job)
+            markdown, source_uri, artifact_uri = await self._prepare_markdown(job, trace)
             ingest_task = asyncio.create_task(
                 asyncio.wait_for(
                     self._engine.ingest(
@@ -226,6 +303,7 @@ class IngestDocumentUseCase:
                             source_uri=source_uri,
                             artifact_uri=artifact_uri,
                             correlation_id=job.correlation_id,
+                            trace_handle=trace,
                         )
                     ),
                     timeout=self._ingest_timeout_seconds,
@@ -258,6 +336,11 @@ class IngestDocumentUseCase:
         except LeaseLostError:
             return await self._jobs.get_job(job.id)
         except Exception as exc:
+            await self._finish_trace(
+                trace,
+                "FAILED",
+                {"stage": "ingest", "error": str(exc)[:300]},
+            )
             error_class = classify_ingest_error(exc)
             failed = await self._jobs.fail_job(
                 job.id,
@@ -341,6 +424,11 @@ class IngestDocumentUseCase:
                 created_at=datetime.now(UTC),
             )
         )
+        await self._finish_trace(
+            trace,
+            "SUCCESS",
+            {"total_chunks": chunk_count, "source_uri": source_uri},
+        )
         return await self._jobs.get_job(job.id)
 
     async def delete(self, document_id: str) -> None:
@@ -360,25 +448,42 @@ class IngestDocumentUseCase:
     async def get_latest_job_for_document(self, document_id: str) -> IngestJob | None:
         return await self._jobs.get_latest_job_for_document(document_id)
 
-    async def _prepare_markdown(self, job: IngestJob) -> tuple[str, str, str]:
-        if job.markdown:
-            markdown = job.markdown
-            source_uri = job.source_uri or f"inline://{job.document_id}"
-        else:
-            if not job.source_uri:
-                raise ValueError("source_uri is required for file-based ingest jobs")
-            parsed = await self._parser.parse(
-                document_id=job.document_id,
-                file_type=job.file_type,
-                source_uri=job.source_uri,
-            )
-            markdown = parsed.markdown
-            source_uri = parsed.source_uri
-        artifact_uri = job.artifact_uri or await self._artifact_store.write_markdown(
-            job.document_id, markdown
+    async def _prepare_markdown(
+        self,
+        job: IngestJob,
+        trace: object | None = None,
+    ) -> tuple[str, str, str]:
+        parse_span = self._span_start(
+            trace,
+            "parse",
+            {"uri": job.source_uri or f"inline://{job.document_id}", "mime": job.file_type},
         )
-        canonical_markdown = await self._artifact_store.read_markdown(artifact_uri)
-        return canonical_markdown, source_uri, artifact_uri
+        try:
+            if job.markdown:
+                markdown = job.markdown
+                source_uri = job.source_uri or f"inline://{job.document_id}"
+            else:
+                if not job.source_uri:
+                    raise ValueError("source_uri is required for file-based ingest jobs")
+                parsed = await self._parser.parse(
+                    document_id=job.document_id,
+                    file_type=job.file_type,
+                    source_uri=job.source_uri,
+                )
+                markdown = parsed.markdown
+                source_uri = parsed.source_uri
+            artifact_uri = job.artifact_uri or await self._artifact_store.write_markdown(
+                job.document_id, markdown
+            )
+            canonical_markdown = await self._artifact_store.read_markdown(artifact_uri)
+            self._span_ok(
+                parse_span,
+                {"chars": len(canonical_markdown or ""), "artifact_uri": artifact_uri},
+            )
+            return canonical_markdown, source_uri, artifact_uri
+        except Exception as exc:
+            self._span_error(parse_span, exc)
+            raise
 
     async def _maintain_claim_lease(
         self,

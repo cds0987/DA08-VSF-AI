@@ -194,6 +194,26 @@ class EnqueueFailingDocuments(InMemoryDocumentRepository):
         raise RuntimeError("queue down")
 
 
+class ExplodingTracer:
+    def start_job(self, *args, **kwargs):
+        raise RuntimeError("trace start down")
+
+    def span_start(self, *args, **kwargs):
+        raise RuntimeError("span start down")
+
+    def span_ok(self, *args, **kwargs):
+        raise RuntimeError("span ok down")
+
+    def span_error(self, *args, **kwargs):
+        raise RuntimeError("span error down")
+
+    def generation(self, *args, **kwargs):
+        raise RuntimeError("generation down")
+
+    async def finish_job(self, *args, **kwargs):
+        raise RuntimeError("trace finish down")
+
+
 def test_ingest_use_case_enqueues_and_processes_markdown_job() -> None:
     async def scenario() -> None:
         engine = StubEngine()
@@ -660,6 +680,35 @@ def test_ingest_use_case_cleans_up_vectors_when_document_deleted_mid_ingest() ->
         tombstone = await use_case.get_document("doc-delete-race")
         assert tombstone is not None
         assert tombstone.status is DocumentStatus.DELETED
+
+    asyncio.run(scenario())
+
+
+def test_ingest_use_case_survives_tracer_failures() -> None:
+    async def scenario() -> None:
+        engine = StubEngine()
+        documents = InMemoryDocumentRepository()
+        parser = StubParser()
+        artifact_store = StubArtifactStore()
+        use_case = IngestDocumentUseCase(
+            engine,
+            documents,
+            documents,
+            parser,
+            artifact_store,
+            tracer=ExplodingTracer(),
+        )
+
+        await use_case.enqueue(
+            document_id="doc-trace-survive",
+            document_name="Guide",
+            file_type="md",
+            markdown="# Title\nBody",
+        )
+        processed = await use_case.process_next_job()
+
+        assert processed is not None
+        assert processed.status is IngestJobStatus.COMPLETED
 
     asyncio.run(scenario())
 

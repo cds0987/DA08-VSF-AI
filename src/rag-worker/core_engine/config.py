@@ -24,6 +24,12 @@ class HaystackSettings:
     parent_max_words: int = 220
     child_max_words: int = 90
     child_overlap_words: int = 15
+    langfuse_enabled: bool = False
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_host: str = "http://langfuse-web:3000"
+    langfuse_sample_rate: float = 0.0
+    langfuse_trace_on_error: bool = True
 
 
 def _int(name: str, default: int) -> int:
@@ -34,6 +40,13 @@ def _int(name: str, default: int) -> int:
 def _float(name: str, default: float) -> float:
     raw = os.getenv(name)
     return float(raw) if raw and raw.strip() else default
+
+
+def _bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if not raw or not raw.strip():
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def load_settings() -> HaystackSettings:
@@ -51,4 +64,10 @@ def load_settings() -> HaystackSettings:
         parent_max_words=_int("SECTION_MAX_WORDS", 220),
         child_max_words=_int("CHILD_MAX_WORDS", 90),
         child_overlap_words=_int("CHILD_OVERLAP_WORDS", 15),
+        langfuse_enabled=_bool("LANGFUSE_ENABLED", False),
+        langfuse_public_key=os.getenv("LANGFUSE_PUBLIC_KEY", ""),
+        langfuse_secret_key=os.getenv("LANGFUSE_SECRET_KEY", ""),
+        langfuse_host=os.getenv("LANGFUSE_HOST", "http://langfuse-web:3000"),
+        langfuse_sample_rate=_float("LANGFUSE_SAMPLE_RATE", 0.0),
+        langfuse_trace_on_error=_bool("LANGFUSE_TRACE_ON_ERROR", True),
     )
