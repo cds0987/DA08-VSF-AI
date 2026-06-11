@@ -74,6 +74,41 @@ class LangfuseTracer:
                 usage.update(cost)  # input_cost / output_cost / total_cost
         return usage
 
+    def span(
+        self,
+        handle: _TraceHandle | None,
+        name: str,
+        *,
+        input: Any = None,
+        metadata: dict | None = None,
+    ) -> Any | None:
+        """Mở 1 span con dưới root trace. None-safe và best-effort."""
+        if handle is None:
+            return None
+        try:
+            return handle.trace.span(
+                name=name,
+                start_time=datetime.now(timezone.utc),
+                input=input,
+                metadata=metadata or {},
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("langfuse_span_start_failed", extra={"error": str(exc)[:200]})
+            return None
+
+    @staticmethod
+    def end_span(span: Any | None, *, output: Any = None, level: str | None = None) -> None:
+        """Đóng span con. span None -> no-op."""
+        if span is None:
+            return
+        try:
+            kwargs: dict[str, Any] = {"end_time": datetime.now(timezone.utc), "output": output}
+            if level:
+                kwargs["level"] = level
+            span.end(**kwargs)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("langfuse_span_end_failed", extra={"error": str(exc)[:200]})
+
     def finish(
         self,
         handle: _TraceHandle | None,
