@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     semantic_cache_threshold: float = 0.95
     rag_score_threshold: float = 0.35  # hạ từ 0.70: quá cao cho text-embedding-3-small
     rag_result_limit: int = 3
+    rag_top_k: int = 8  # số chunk tối đa mỗi lần gọi rag_search (LangGraph path)
     llm_max_output_tokens: int = 1500
     rag_context_max_chars: int = 10000
     query_rate_limit_per_minute: int = 20

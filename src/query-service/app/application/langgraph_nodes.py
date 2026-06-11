@@ -496,11 +496,13 @@ async def act_node(
                 success = False
                 new_sources = []
             else:
+                # top_k ưu tiên từ LLM tool_args, fallback về giá trị config-driven trong state.
+                effective_top_k = tool_args.get("top_k", state.get("rag_top_k", 5))
                 _rag_start_dt = datetime.now(timezone.utc)
                 results = await mcp_client.rag_search(
                     query=state["question"],  # raw question — server-injected, like user_id
                     document_ids=list(allowed_doc_ids),
-                    top_k=tool_args.get("top_k", 5),
+                    top_k=effective_top_k,
                 )
                 _rag_end_dt = datetime.now(timezone.utc)
                 # Only pass results that meet the relevance threshold to the LLM.
@@ -509,15 +511,24 @@ async def act_node(
                 threshold = state.get("rag_score_threshold", 0.70)
                 qualified = [r for r in results if r.score >= threshold]
 
+                # Adaptive threshold fallback: nếu không có chunk nào đạt ngưỡng nhưng
+                # rag-service vẫn trả về kết quả, lấy top-3 điểm cao nhất để LLM có ngữ cảnh
+                # thay vì trả "không tìm thấy" do lọc quá chặt.
+                adaptive_fallback = False
+                if not qualified and results:
+                    qualified = sorted(results, key=lambda r: r.score, reverse=True)[:min(3, len(results))]
+                    adaptive_fallback = True
+
                 # Ghi debug event (JSON-safe) vào state để orchestration dựng Langfuse span.
                 # Tất cả giá trị là scalar/list[str/float] — an toàn với checkpointer.
                 _rag_event = {
                     "query": state["question"],
-                    "top_k": tool_args.get("top_k", 5),
+                    "top_k": effective_top_k,
                     "allowed_count": len(allowed_doc_ids),
                     "threshold": threshold,
                     "total": len(results),
                     "qualified": len(qualified),
+                    "adaptive_fallback": adaptive_fallback,
                     "scores": [round(r.score, 4) for r in results[:10]],
                     "doc_names": sorted({r.document_name for r in qualified}),
                     "start": _rag_start_dt.isoformat(),
@@ -536,6 +547,7 @@ async def act_node(
                                 "heading_path": r.heading_path,
                                 "score": r.score,
                                 "source_gcs_uri": r.source_gcs_uri,
+                                "page_number": r.page_number,
                             }
                             for r in qualified
                         ]
@@ -548,9 +560,10 @@ async def act_node(
                             heading_path=r.heading_path,
                             score=r.score,
                             source_gcs_uri=r.source_gcs_uri,
+                            document_id=r.document_id,
+                            page_number=r.page_number,
                         )
                         for r in qualified
-                        if r.score >= threshold
                     ]
                 else:
                     data = json.dumps({

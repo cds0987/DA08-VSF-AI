@@ -303,6 +303,7 @@ class QueryOrchestrationUseCase:
             max_iterations=self._settings.agent_max_iterations,
             recent_messages=recent_lc_messages,
             rag_score_threshold=self._settings.rag_score_threshold,
+            rag_top_k=self._settings.rag_top_k,
         )
 
         answer_accumulator: list[str] = []
@@ -988,6 +989,8 @@ class QueryOrchestrationUseCase:
             "heading_path": result.heading_path,
             "score": result.score,
             "source_gcs_uri": result.source_gcs_uri,
+            "document_id": result.document_id,
+            "page_number": result.page_number,
         }
 
 
