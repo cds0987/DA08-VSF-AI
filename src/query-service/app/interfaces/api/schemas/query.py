@@ -27,3 +27,4 @@ class QueryResponse(BaseModel):
 class FeedbackRequest(BaseModel):
     session_id: str
     score: Literal[1, -1]
+    trace_id: str | None = None

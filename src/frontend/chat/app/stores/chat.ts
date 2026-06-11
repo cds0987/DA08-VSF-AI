@@ -451,6 +451,7 @@ export const useChatStore = defineStore('chat', () => {
             result.session_id + '-source-' + index,
           )),
           sessionId: result.session_id,
+          traceId: result.trace_id,
           timestamp: new Date().toLocaleString(),
         }
         assistant.fallback = result.fallback === true
@@ -489,7 +490,7 @@ export const useChatStore = defineStore('chat', () => {
     message.feedback = score
     cacheCurrentConversation()
     try {
-      await queryService.submitFeedback(message.sessionId, score)
+      await queryService.submitFeedback(message.sessionId, score, message.traceId)
     } catch (error) {
       message.feedback = previous
       cacheCurrentConversation()

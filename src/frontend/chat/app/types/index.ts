@@ -76,6 +76,7 @@ export interface QueryDoneEvent {
   done: true
   sources: QuerySource[]
   session_id: string
+  trace_id?: string
   cached?: true
   fallback?: true
 }
@@ -129,6 +130,7 @@ export interface ChatMessage {
   citations?: Citation[]
   sessionId?: string
   feedback?: 1 | -1
+  traceId?: string
   timestamp: string
   attachments?: MessageAttachment[]
   error?: string

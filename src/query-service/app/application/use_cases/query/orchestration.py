@@ -109,6 +109,11 @@ class QueryOrchestrationUseCase:
                     usage_meta = event.pop("_usage", None)
                     last_done = {**event}  # copy trước khi pop _answer (tracer cần)
                     event.pop("_answer", None)
+                    # Đưa trace_id vào done event để frontend dùng khi submit feedback.
+                    if tracer is not None and trace is not None:
+                        tid = tracer.get_trace_id(trace)
+                        if tid:
+                            event["trace_id"] = tid
                 yield event
         finally:
             if tracer is not None and trace is not None:

@@ -139,6 +139,23 @@ class LangfuseTracer:
         """Alias tương thích cho callsite cũ dùng end_span(...)."""
         self.span_end(span, output_data=output, level=level)
 
+    def get_trace_id(self, handle: "_TraceHandle | None") -> str | None:
+        """Trả Langfuse trace ID để dùng cho score API. None nếu không có."""
+        if handle is None:
+            return None
+        try:
+            return handle.trace.id
+        except Exception:
+            return None
+
+    def score(self, trace_id: str, value: int, name: str = "user_feedback") -> None:
+        """Ghi user score (1 = helpful, -1 = not helpful) lên Langfuse trace. Best-effort."""
+        try:
+            self._client.score(trace_id=trace_id, name=name, value=float(value))
+            self._client.flush()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("langfuse_score_failed", extra={"error": str(exc)[:200]})
+
     def finish(
         self,
         handle: _TraceHandle | None,

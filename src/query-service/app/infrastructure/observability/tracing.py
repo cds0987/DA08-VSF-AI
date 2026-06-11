@@ -87,6 +87,28 @@ class CompositeTracer:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("composite_end_span_failed", extra={"error": str(exc)[:200]})
 
+    def get_trace_id(self, handle: list | None) -> str | None:
+        """Lấy Langfuse trace ID từ composite handle (ưu tiên backend đầu tiên có ID)."""
+        if not handle:
+            return None
+        for tracer, child_handle in handle:
+            fn = getattr(tracer, "get_trace_id", None)
+            if fn:
+                tid = fn(child_handle)
+                if tid:
+                    return tid
+        return None
+
+    def score(self, trace_id: str, value: int, name: str = "user_feedback") -> None:
+        """Fan-out score tới tất cả backend hỗ trợ."""
+        for tracer in self._tracers:
+            fn = getattr(tracer, "score", None)
+            if fn:
+                try:
+                    fn(trace_id, value, name)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("composite_score_failed", extra={"error": str(exc)[:200]})
+
     def span(self, handle: list | None, name: str, **kwargs: Any) -> list | None:
         return self.span_start(handle, name, **kwargs)
 
