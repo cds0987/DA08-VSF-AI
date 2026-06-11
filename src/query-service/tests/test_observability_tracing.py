@@ -73,6 +73,7 @@ def test_composite_tracer_span_skips_backends_without_span_support():
             {
                 "handle": "supported-handle",
                 "name": "tool.hr_query",
+                "parent": None,
                 "input": {"intent": "leave_balance"},
             },
         )
@@ -84,6 +85,7 @@ def test_composite_tracer_span_skips_backends_without_span_support():
             {
                 "handle": "supported-handle",
                 "name": "tool.hr_query",
+                "parent": None,
                 "input": {"intent": "leave_balance"},
             },
             {"output": "done"},

@@ -46,16 +46,25 @@ class CompositeTracer:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("composite_trace_finish_failed", extra={"error": str(exc)[:200]})
 
-    def span_start(self, handle: list | None, name: str, **kwargs: Any) -> list | None:
+    def span_start(self, handle: list | None, name: str, parent: list | None = None,
+                   **kwargs: Any) -> list | None:
         if not handle:
             return None
+        # parent là composite span-handle (list[(tracer, span)]) -> map về span của
+        # đúng tracer để span con LỒNG đúng backend.
+        parent_map = {id(tr): sp for tr, sp in parent} if parent else {}
         children = []
         for tracer, child_handle in handle:
             fn = getattr(tracer, "span_start", None) or getattr(tracer, "span", None)
             if fn is None:
                 continue
+            p = parent_map.get(id(tracer))
             try:
-                children.append((tracer, fn(child_handle, name, **kwargs)))
+                try:
+                    children.append((tracer, fn(child_handle, name, parent=p, **kwargs)))
+                except TypeError:
+                    # tracer cũ không nhận `parent` -> gọi không kèm (span phẳng).
+                    children.append((tracer, fn(child_handle, name, **kwargs)))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("composite_span_failed", extra={"error": str(exc)[:200]})
         return children or None

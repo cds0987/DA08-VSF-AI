@@ -340,9 +340,12 @@ class QueryOrchestrationUseCase:
                         if node_name == "act":
                             _tc = _extract_tool_call(event)
                             if _tc:
+                                # Lồng tool span VÀO TRONG act span vừa mở.
+                                _act_parent = (_active_spans.get("act") or [None])[-1]
                                 _tspan = tracer.span_start(
                                     trace_handle, name=f"tool.{_tc['name']}",
                                     input_data={"tool": _tc["name"], "args": _tc.get("args", {})},
+                                    parent=_act_parent,
                                 )
                                 if _tspan:
                                     _active_spans.setdefault(f"tool.{_tc['name']}", []).append(_tspan)
@@ -352,9 +355,13 @@ class QueryOrchestrationUseCase:
                 elif event_type == "on_chat_model_start":
                     if tracer and trace_handle:
                         _node = (event.get("metadata") or {}).get("langgraph_node") or "call"
+                        # Lồng span llm.<node> VÀO TRONG node span tương ứng (think/triage/
+                        # answer) để cây trace gọn: click node -> thấy ngay model I/O.
+                        _parent = (_active_spans.get(_node) or [None])[-1]
                         _mspan = tracer.span_start(
                             trace_handle, name=f"llm.{_node}",
                             input_data=_render_chat_input(event),
+                            parent=_parent,
                         )
                         if _mspan:
                             _active_spans.setdefault("llm.call", []).append(_mspan)

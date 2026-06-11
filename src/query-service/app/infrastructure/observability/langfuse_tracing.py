@@ -80,12 +80,17 @@ class LangfuseTracer:
         name: str,
         input_data: Any = None,
         metadata: dict | None = None,
+        parent: Any = None,
     ) -> Any:
-        """Tạo child span trên trace. Trả span object hoặc None nếu lỗi. Best-effort."""
-        if handle is None:
+        """Tạo child span. Mặc định gắn lên trace (con của root); nếu truyền `parent`
+        (1 span object), tạo span LỒNG dưới parent đó (langfuse span cũng có .span()).
+        Trả span object hoặc None nếu lỗi. Best-effort."""
+        # parent (span object) ưu tiên; nếu không có thì gắn lên trace của handle.
+        target = parent if parent is not None else (handle.trace if handle is not None else None)
+        if target is None:
             return None
         try:
-            return handle.trace.span(
+            return target.span(
                 name=name,
                 start_time=datetime.now(timezone.utc),
                 input=input_data,
