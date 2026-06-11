@@ -49,7 +49,10 @@ class LangfuseTracer:
     ) -> _TraceHandle | None:
         """Tạo 1 trace cho 1 lượt query. Trả None nếu lỗi (query vẫn chạy bình thường)."""
         try:
-            metadata: dict[str, Any] = {"role": getattr(user, "role", None)}
+            metadata: dict[str, Any] = {
+                "role": getattr(user, "role", None),
+                "department": getattr(user, "department", None),
+            }
             if conversation_title:
                 metadata["conversation_title"] = conversation_title
             trace = self._client.trace(
