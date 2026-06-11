@@ -362,8 +362,11 @@ services:
       MCP_TIMEOUT_SECONDS: "20"
       MCP_INTERNAL_TOKEN: ""
       TOOL_ROUTING_MODE: native
+      # APP_ENV=production -> guard config cấm *_MODE=mock + bắt redis + dev off.
+      NATS_MODE: nats
       NATS_URL: nats://nats:4222
       NATS_JETSTREAM_ENABLED: "true"
+      ENABLE_DEV_ENDPOINTS: "false"
       QDRANT_URL: ${QDRANT_URL}
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
       QDRANT_COLLECTION: rag_chatbot
@@ -389,63 +392,6 @@ services:
         condition: service_started
     restart: unless-stopped
 
-  # ──────────────────────────── Frontend + nginx ─────────────────────────
-  frontend-chat:
-    image: frontend-chat:e2e
-    build:
-      context: ./src/frontend/chat
-    environment:
-      <<: *newrelic-off
-      NITRO_HOST: 0.0.0.0
-      NITRO_PORT: "3000"
-      NUXT_PUBLIC_API_GATEWAY_URL: ""
-      NUXT_PUBLIC_USER_SERVICE_PATH: /api/user
-      NUXT_PUBLIC_DOCUMENT_SERVICE_PATH: /api/documents
-      NUXT_PUBLIC_QUERY_SERVICE_PATH: /api/query
-      NUXT_PUBLIC_HR_SERVICE_PATH: /api/hr
-      NUXT_PUBLIC_MCP_SERVICE_PATH: /api/mcp
-      NUXT_PUBLIC_CHAT_APP_URL: /
-      NUXT_PUBLIC_ADMIN_APP_URL: /admin/
-    depends_on:
-      - user-service
-      - query-service
-    restart: unless-stopped
-
-  frontend-admin:
-    image: frontend-admin:e2e
-    build:
-      context: ./src/frontend/admin
-    environment:
-      <<: *newrelic-off
-      NITRO_HOST: 0.0.0.0
-      NITRO_PORT: "3001"
-      NUXT_APP_BASE_URL: /admin/
-      NUXT_PUBLIC_API_GATEWAY_URL: ""
-      NUXT_PUBLIC_USER_SERVICE_PATH: /api/user
-      NUXT_PUBLIC_DOCUMENT_SERVICE_PATH: /api/documents
-      NUXT_PUBLIC_QUERY_SERVICE_PATH: /api/query
-      NUXT_PUBLIC_HR_SERVICE_PATH: /api/hr
-      NUXT_PUBLIC_MCP_SERVICE_PATH: /api/mcp
-      NUXT_PUBLIC_CHAT_APP_URL: /
-      NUXT_PUBLIC_ADMIN_APP_URL: /admin/
-    depends_on:
-      - user-service
-      - document-service
-    restart: unless-stopped
-
-  nginx:
-    image: nginx:e2e
-    build:
-      context: ./nginx
-    ports:
-      - "127.0.0.1:80:80"
-    depends_on:
-      - user-service
-      - document-service
-      - query-service
-      - mcp-service
-      - hr-service
-      - rag-worker
-      - frontend-chat
-      - frontend-admin
-    restart: unless-stopped
+  # KHÔNG build frontend (Nuxt) + nginx trong e2e: run_e2e.py gọi THẲNG service port
+  # nên không cần proxy/FE -> bỏ 2 build Nuxt + nginx cho nhanh. Wiring nginx+FE đã
+  # được smoke trên VM lúc deploy (bước 5b) bao.

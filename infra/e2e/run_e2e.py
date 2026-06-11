@@ -12,8 +12,9 @@ Chạy đúng MỘT lượt, mô phỏng FE thật, nghiệm thu toàn bộ mắ
   7. verify Langfuse NHẬN trace query của query-service (đường observability query)
   8. cleanup: xóa object GCS + collection Qdrant đã tạo (cloud bền -> phải dọn).
 
-Mọi bước fail -> exit non-zero (CI fail). Env: xem docker-compose.e2e.yml header +
-GATEWAY_URL (mặc định http://localhost), DOC_URL (http://localhost:8002),
+Mọi bước fail -> exit non-zero (CI fail). Gọi THẲNG service port (không qua nginx).
+Env: xem docker-compose.e2e.yml header + USER_URL (http://localhost:8000),
+QUERY_URL (http://localhost:8001), DOC_URL (http://localhost:8002),
 QDRANT_URL/QDRANT_API_KEY, S3_* (GCS), LANGFUSE_* (verify trace), VALIDATION_DIR.
 """
 from __future__ import annotations
@@ -28,7 +29,11 @@ import urllib.error
 import urllib.request
 
 ALLOWED = {"pdf", "docx", "txt", "xlsx", "csv", "pptx", "md"}
-GATEWAY = os.environ.get("GATEWAY_URL", "http://localhost").rstrip("/")
+# Gọi THẲNG service port (không qua nginx) -> e2e không cần build nginx + 2 Nuxt FE
+# (nhanh hơn nhiều). Wiring nginx+FE đã được smoke trên VM lúc deploy bao. Path gốc
+# lấy từ nginx.conf: /api/user/->:8000/, /api/query/query->:8001/query, upload->:8002.
+USER_URL = os.environ.get("USER_URL", "http://localhost:8000").rstrip("/")
+QUERY_URL = os.environ.get("QUERY_URL", "http://localhost:8001").rstrip("/")
 DOC_URL = os.environ.get("DOC_URL", "http://localhost:8002").rstrip("/")
 ADMIN_EMAIL = os.environ.get("SEED_ADMIN_EMAIL", "admin@company.com")
 ADMIN_PW = os.environ.get("SEED_ADMIN_PASSWORD", "***REDACTED-SEED-ADMIN-PW***")
@@ -54,7 +59,7 @@ def login() -> tuple[str, str]:
     last = ""
     for _ in range(30):  # user-service + nginx có thể chưa sẵn sàng ngay
         try:
-            st, raw = _http("POST", f"{GATEWAY}/api/user/auth/login",
+            st, raw = _http("POST", f"{USER_URL}/auth/login",
                             headers={"Content-Type": "application/json"}, data=body)
             tok = json.loads(raw).get("access_token", "")
             if st == 200 and tok:
@@ -212,7 +217,7 @@ def _parse_sse(raw: bytes, label: str, need_sources: bool) -> None:
 
 def query(label: str, token: str, uid: str, question: str, need_sources: bool) -> None:
     body = json.dumps({"question": question, "user_id": uid}).encode()
-    st, raw = _http("POST", f"{GATEWAY}/api/query/query",
+    st, raw = _http("POST", f"{QUERY_URL}/query",
                     headers={"Authorization": "Bearer " + token,
                              "Content-Type": "application/json"},
                     data=body, timeout=120)
