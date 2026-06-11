@@ -333,6 +333,19 @@ class QueryOrchestrationUseCase:
                         )
                         if _span:
                             _active_spans.setdefault(node_name, []).append(_span)
+                        # Tool span: agent gọi tool THẲNG trong act_node (KHÔNG qua LangChain
+                        # ToolNode) nên on_tool_start/on_tool_end KHÔNG bao giờ bắn. Lấy
+                        # tool call từ chính input state của act_node để vẫn có span
+                        # `tool.<name>` (args lúc mở, result lúc act_node xong).
+                        if node_name == "act":
+                            _tc = _extract_tool_call(event)
+                            if _tc:
+                                _tspan = tracer.span_start(
+                                    trace_handle, name=f"tool.{_tc['name']}",
+                                    input_data={"tool": _tc["name"], "args": _tc.get("args", {})},
+                                )
+                                if _tspan:
+                                    _active_spans.setdefault(f"tool.{_tc['name']}", []).append(_tspan)
 
                 # Token stream from LLM
                 elif event_type == "on_chat_model_stream":
@@ -433,11 +446,21 @@ class QueryOrchestrationUseCase:
                     if run_name not in ("VinSmartFutureReActAgent", "VinSmartFutureAgent"):
                         # Sub-node completed — close its Langfuse span (LIFO pop by name)
                         if tracer:
+                            _out = event.get("data", {}).get("output") or {}
                             _node_stack = _active_spans.get(run_name)
                             if _node_stack:
                                 _span = _node_stack.pop()
-                                _out = event.get("data", {}).get("output") or {}
                                 tracer.span_end(_span, output_data=_node_output_summary(_out))
+                            # Đóng span tool mở ở act_node (result = output của act_node:
+                            # sources/phase...). on_tool_end không bắn nên đóng tại đây.
+                            if run_name == "act":
+                                for _k in [k for k in _active_spans if k.startswith("tool.")]:
+                                    _tstack = _active_spans.get(_k)
+                                    while _tstack:
+                                        tracer.span_end(
+                                            _tstack.pop(),
+                                            output_data=_node_output_summary(_out),
+                                        )
                         continue
 
                     final_state = event.get("data", {}).get("output", {})
@@ -998,6 +1021,30 @@ def _is_fallback_answer(answer: str) -> bool:
     """
     normalized = _normalize_text(answer)
     return "khong tim thay thong tin" in normalized
+
+
+def _extract_tool_call(event: Any) -> dict | None:
+    """Rút (name, args) của tool call từ input state của act_node.
+
+    act_node nhận state có messages; AIMessage cuối mang tool_calls. Trả None nếu không
+    có tool call (best-effort — mọi lỗi nuốt, KHÔNG làm vỡ stream)."""
+    try:
+        state = (event.get("data") or {}).get("input")
+        messages = state.get("messages") if isinstance(state, dict) else None
+        if not messages:
+            return None
+        last = messages[-1]
+        tool_calls = getattr(last, "tool_calls", None)
+        if not tool_calls:
+            return None
+        tc = tool_calls[0]
+        if isinstance(tc, dict):
+            name, args = tc.get("name"), tc.get("args", {})
+        else:
+            name, args = getattr(tc, "name", None), getattr(tc, "args", {})
+        return {"name": name, "args": args} if name else None
+    except Exception:  # noqa: BLE001 — tracing best-effort
+        return None
 
 
 def _node_output_summary(output: Any) -> dict:
