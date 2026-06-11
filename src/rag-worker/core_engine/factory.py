@@ -59,6 +59,7 @@ def _wire(
     dim: int,
     *,
     caption: bool | None,
+    tracer: object | None,
 ) -> HaystackRagEngine:
     resolved_caption = _resolve_caption_enabled(caption)
     resolved_vector_config = vector_config or VectorStoreConfig.from_env(dimension=dim)
@@ -102,6 +103,7 @@ def _wire(
         provider=provider,
         dim=dim,
         vector_config_override=resolved_vector_config,
+        tracer=tracer,
     )
 
 
@@ -111,6 +113,7 @@ def build_engine(
     *,
     caption: bool | None = None,
     vector_config: VectorStoreConfig | None = None,
+    tracer: object | None = None,
 ) -> HaystackRagEngine:
     """Wire engine without needing network access."""
     provider = provider or get_ai_provider()
@@ -120,7 +123,7 @@ def build_engine(
         if provider.fixed_dimension is not None
         else settings.embed_dimension
     )
-    return _wire(settings, provider, vector_config, dim, caption=caption)
+    return _wire(settings, provider, vector_config, dim, caption=caption, tracer=tracer)
 
 
 async def build_engine_probe(
@@ -129,6 +132,7 @@ async def build_engine_probe(
     *,
     caption: bool | None = None,
     vector_config: VectorStoreConfig | None = None,
+    tracer: object | None = None,
 ) -> HaystackRagEngine:
     """Like build_engine, but probes the real dimension from an OpenAI model."""
     provider = provider or get_ai_provider()
@@ -139,4 +143,4 @@ async def build_engine_probe(
         dim = await provider.probe_dimension()
     else:
         dim = settings.embed_dimension
-    return _wire(settings, provider, vector_config, dim, caption=caption)
+    return _wire(settings, provider, vector_config, dim, caption=caption, tracer=tracer)

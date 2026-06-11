@@ -28,6 +28,7 @@ from app.domain.repositories.parser import Parser
 from app.infrastructure.db import InMemoryDocumentRepository
 from app.infrastructure.external.local_artifact_store import LocalArtifactStore
 from app.infrastructure.external.object_store_lister import S3ObjectStoreLister
+from app.infrastructure.observability import build_ingest_tracer
 from app.infrastructure.external.s3_artifact_store import S3ArtifactStore
 from app.infrastructure.external.s3_parser import S3SourceParser
 from app.interfaces.api.composition import resolve_parser
@@ -166,6 +167,8 @@ def validate_runtime_settings() -> None:
         raise ValueError("CHILD_OVERLAP_WORDS must be >= 0")
     if settings.child_overlap_words >= settings.child_max_words:
         raise ValueError("CHILD_OVERLAP_WORDS must be < CHILD_MAX_WORDS")
+    if settings.langfuse_sample_rate < 0 or settings.langfuse_sample_rate > 1:
+        raise ValueError("LANGFUSE_SAMPLE_RATE must be between 0 and 1")
     validate_job_log_retention_settings()
     validate_ingest_lease_settings()
     validate_parser_execution_settings()
@@ -653,6 +656,7 @@ def bootstrap_runtime() -> RuntimeState:
 
     reasons: list[str] = []
     startup_reasons: list[str] = []
+    tracer = build_ingest_tracer(settings)
     if provider.name == "offline":
         reasons.append("AI provider is offline.")
     if vector_config.deployment != "remote":
@@ -697,12 +701,14 @@ def bootstrap_runtime() -> RuntimeState:
                 pipeline_cfg,
                 provider=provider,
                 vector_config_override=vector_config,
+                tracer=tracer,
             )
         else:
             parser = build_parser(provider)
             engine = build_engine(
                 provider=provider,
                 vector_config=vector_config,
+                tracer=tracer,
             )
         artifact_store = build_artifact_store(
             parser=parser,
@@ -716,6 +722,7 @@ def bootstrap_runtime() -> RuntimeState:
             parser,
             artifact_store,
             claim_heartbeat_interval_seconds=lease_settings.heartbeat_interval_seconds,
+            tracer=tracer,
         )
         storage_reasons, storage_warnings = parser.startup_diagnostics(
             source_bucket=source_bucket

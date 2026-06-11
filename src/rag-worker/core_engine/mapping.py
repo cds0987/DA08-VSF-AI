@@ -112,6 +112,12 @@ def to_settings(cfg: PipelineConfig, *, dim: int) -> HaystackSettings:
         parent_max_words=int(cfg.chunker.params.get("parent_max_words", 220)),
         child_max_words=int(cfg.chunker.params.get("child_max_words", 90)),
         child_overlap_words=int(cfg.chunker.params.get("child_overlap_words", 15)),
+        langfuse_enabled=cfg.langfuse.enabled,
+        langfuse_public_key=cfg.langfuse.public_key,
+        langfuse_secret_key=cfg.langfuse.secret_key,
+        langfuse_host=cfg.langfuse.host,
+        langfuse_sample_rate=cfg.langfuse.sample_rate,
+        langfuse_trace_on_error=cfg.langfuse.trace_on_error,
     )
 
 
@@ -146,6 +152,7 @@ def build_engine_from_config(
     provider: AIProvider | None = None,
     dim: int | None = None,
     vector_config_override: VectorStoreConfig | None = None,
+    tracer: object | None = None,
 ) -> HaystackRagEngine:
     provider = provider or build_ai_provider(cfg)
     resolved_dim = (
@@ -178,6 +185,7 @@ def build_engine_from_config(
         vectors=build_vector_repository(vector_config),
         captioner=resolve("captioner", cfg.captioner, ctx),
         chunker=resolve("chunker", cfg.chunker, ctx),
+        tracer=tracer,
     )
 
 

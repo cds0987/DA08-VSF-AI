@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import logging
 import os
 from typing import List, Optional
@@ -34,6 +36,7 @@ class IngestInput:
     source_uri: Optional[str] = None
     artifact_uri: Optional[str] = None
     correlation_id: Optional[str] = None
+    trace_handle: object | None = None
 
 
 class HaystackRagEngine:
@@ -44,11 +47,13 @@ class HaystackRagEngine:
         vectors: VectorRepository,
         captioner: Optional[Captioner] = None,
         chunker: Chunker | None = None,
+        tracer: object | None = None,
     ):
         self.settings = settings or load_settings()
         self.embedder = embedder
         self.vectors = vectors
         self.captioner = captioner
+        self._tracer = tracer
         self.chunker = chunker or SectionChunker(
             parent_max_words=self.settings.parent_max_words,
             child_max_words=self.settings.child_max_words,
@@ -63,6 +68,71 @@ class HaystackRagEngine:
             1.0,
             max(0.0, float(os.getenv("CAPTION_FALLBACK_THRESHOLD", "0.3"))),
         )
+
+    def _span_start(self, trace: object | None, name: str, payload: dict) -> object | None:
+        if self._tracer is None:
+            return None
+        try:
+            return self._tracer.span_start(trace, name, payload)
+        except Exception:
+            return None
+
+    def _span_ok(self, span: object | None, payload: dict) -> None:
+        if self._tracer is None:
+            return
+        with contextlib.suppress(Exception):
+            self._tracer.span_ok(span, payload)
+
+    def _span_error(self, span: object | None, exc: BaseException) -> None:
+        if self._tracer is None:
+            return
+        with contextlib.suppress(Exception):
+            self._tracer.span_error(span, exc)
+
+    def _generation(
+        self,
+        trace: object | None,
+        *,
+        name: str,
+        model: str,
+        start_time: datetime,
+        input_data: dict,
+        output: dict,
+        metadata: dict,
+    ) -> None:
+        if self._tracer is None:
+            return
+        with contextlib.suppress(Exception):
+            self._tracer.generation(
+                trace,
+                name=name,
+                model=model,
+                start_time=start_time,
+                input_data=input_data,
+                output=output,
+                metadata=metadata,
+            )
+
+    def _safe_model(self, component: object | None, capability: str, fallback: str) -> str:
+        with contextlib.suppress(Exception):
+            provider = getattr(component, "_provider", None)
+            if provider is None or not hasattr(provider, "cap"):
+                return fallback
+            config = provider.cap(capability)
+            model = getattr(config, "model", "")
+            if isinstance(model, str) and model.strip():
+                return model
+        return fallback
+
+    def _safe_collection_name(self) -> str:
+        with contextlib.suppress(Exception):
+            config = getattr(self.vectors, "config", None)
+            if config is None or not hasattr(config, "index_id"):
+                return ""
+            name = config.index_id()
+            if isinstance(name, str):
+                return name
+        return ""
 
     async def ingest(self, doc: IngestInput) -> int:
         request_correlation_id = doc.correlation_id or str(uuid4())
@@ -79,9 +149,26 @@ class HaystackRagEngine:
         settings = self.settings
         source_uri = doc.source_uri or f"local://{doc.document_id}"
         artifact_uri = doc.artifact_uri or f"{source_uri}#artifact"
+        trace = getattr(doc, "trace_handle", None)
+        split_span = self._span_start(
+            trace,
+            "chunk",
+            {"chars": len(doc.markdown or ""), "source_uri": source_uri},
+        )
         split_sw = Stopwatch()
-        sections = self.chunker.split(doc.markdown)
+        try:
+            sections = self.chunker.split(doc.markdown)
+        except Exception as exc:
+            self._span_error(split_span, exc)
+            raise
         split_ms = split_sw.elapsed_ms()
+        self._span_ok(
+            split_span,
+            {
+                "num_sections": len(sections),
+                "num_chunks": sum(len(section.children) for section in sections),
+            },
+        )
         caption_ms = 0.0
         caption_fallbacks = 0
         total_children = sum(len(section.children) for section in sections)
@@ -104,15 +191,41 @@ class HaystackRagEngine:
                     caption = await self.captioner.caption(text)
                     return index, caption, False
 
-            caption_sw = Stopwatch()
-            caption_results = await asyncio.gather(
-                *[_caption_one(index, section.parent_text) for index, section in enumerate(sections)]
+            caption_start = datetime.now(timezone.utc)
+            caption_span = self._span_start(
+                trace,
+                "caption",
+                {"sections": len(sections), "max_chars": max(len(section.parent_text) for section in sections)},
             )
+            caption_sw = Stopwatch()
+            try:
+                caption_results = await asyncio.gather(
+                    *[_caption_one(index, section.parent_text) for index, section in enumerate(sections)]
+                )
+            except Exception as exc:
+                self._span_error(caption_span, exc)
+                raise
             caption_ms = caption_sw.elapsed_ms()
             for index, caption, used_fallback in caption_results:
                 captions_by_index[index] = caption
                 if used_fallback:
                     caption_fallbacks += 1
+            self._generation(
+                trace,
+                name="caption",
+                model=self._safe_model(self.captioner, "caption", "caption"),
+                start_time=caption_start,
+                input_data={"sections": len(sections)},
+                output={"captions": len(caption_results), "fallback_count": caption_fallbacks},
+                metadata={"stage": "caption"},
+            )
+            self._span_ok(
+                caption_span,
+                {
+                    "sections": len(sections),
+                    "fallback_count": caption_fallbacks,
+                },
+            )
 
         for parent_index, section in enumerate(sections):
             parent_id = f"{doc.document_id}::p{parent_index}"
@@ -172,19 +285,61 @@ class HaystackRagEngine:
                     f"{self._caption_fallback_threshold:.3f}"
                 )
 
+        embed_span = self._span_start(
+            trace,
+            "embed",
+            {"chunks": len(embed_texts), "dimension": settings.embed_dimension},
+        )
+        embed_start = datetime.now(timezone.utc)
         embed_sw = Stopwatch()
-        vectors = await self.embedder.embed_batch(embed_texts)
+        try:
+            vectors = await self.embedder.embed_batch(embed_texts)
+        except Exception as exc:
+            self._span_error(embed_span, exc)
+            raise
         embed_ms = embed_sw.elapsed_ms()
+        self._generation(
+            trace,
+            name="embed",
+            model=self._safe_model(self.embedder, "embed", "embed"),
+            start_time=embed_start,
+            input_data={"chunks": len(embed_texts)},
+            output={"vectors": len(vectors), "dimension": settings.embed_dimension},
+            metadata={"stage": "embed", "dimension": settings.embed_dimension},
+        )
+        self._span_ok(
+            embed_span,
+            {"vectors": len(vectors), "dimension": settings.embed_dimension},
+        )
         records = [
             VectorRecord(chunk_id=chunk_id, vector=vector, payload=payload)
             for chunk_id, vector, payload in zip(chunk_ids, vectors, payloads)
         ]
+        write_span = self._span_start(
+            trace,
+            "qdrant-write",
+            {
+                "collection": self._safe_collection_name(),
+                "num_vectors": len(records),
+            },
+        )
         write_sw = Stopwatch()
-        await self.vectors.upsert_many(records)
-        stale_chunk_ids = sorted(existing_chunk_ids - set(chunk_ids))
-        if stale_chunk_ids:
-            await self.vectors.delete_many(stale_chunk_ids)
+        try:
+            await self.vectors.upsert_many(records)
+            stale_chunk_ids = sorted(existing_chunk_ids - set(chunk_ids))
+            if stale_chunk_ids:
+                await self.vectors.delete_many(stale_chunk_ids)
+        except Exception as exc:
+            self._span_error(write_span, exc)
+            raise
         write_ms = write_sw.elapsed_ms()
+        self._span_ok(
+            write_span,
+            {
+                "upserted": len(records),
+                "pruned_chunk_count": len(stale_chunk_ids),
+            },
+        )
         log_event(
             self._logger,
             logging.INFO,

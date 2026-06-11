@@ -135,6 +135,23 @@ class VectorStoreConfigModel(ComponentWithParams):
         return self
 
 
+class LangfuseConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    public_key: str = ""
+    secret_key: str = ""
+    host: str = "http://langfuse-web:3000"
+    sample_rate: float = 0.0
+    trace_on_error: bool = True
+
+    @model_validator(mode="after")
+    def validate_langfuse(self) -> "LangfuseConfig":
+        if self.sample_rate < 0 or self.sample_rate > 1:
+            raise ValueError("LANGFUSE_SAMPLE_RATE must be between 0 and 1")
+        return self
+
+
 class PipelineConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -161,3 +178,4 @@ class PipelineConfig(BaseModel):
         )
     )
     vectorstore_contract: VectorstoreContractConfig | None = None
+    langfuse: LangfuseConfig = Field(default_factory=LangfuseConfig)
