@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     langfuse_secret_key: str | None = None
     langfuse_host: str = "http://localhost:3100"
 
+    # Model-price catalog -> tự tính cost gửi vào Langfuse generation (Langfuse self-host
+    # v2 không có sẵn pricing model mới). Runtime CHỈ đọc model_prices.json (TOÀN BỘ
+    # dataset OpenRouter) đã bundle vào image lúc build (builder stage refresh từ HF; HF
+    # lỗi -> giữ bộ dataset cũ đã commit). Không hf/pyarrow ở runtime.
+    # override_path: file tuỳ chọn (vd trên volume) ĐÈ bản bundle -> cập nhật giá nóng.
+    model_price_enabled: bool = True
+    model_price_path: str = "/app/app/infrastructure/observability/data/model_prices.json"
+    model_price_override_path: str | None = None
+
     guardrails_mode: str = "off"
     observability_mode: str = "off"
 

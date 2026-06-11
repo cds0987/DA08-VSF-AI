@@ -4,6 +4,7 @@ import json
 import logging
 import re
 from time import perf_counter
+from typing import Any
 import unicodedata
 from uuid import uuid4
 
@@ -96,16 +97,20 @@ class QueryOrchestrationUseCase:
         tracer = self._tracer
         trace = None
         last_done: dict | None = None
+        usage_meta: dict | None = None
         try:
             async for event in self._stream_inner(question, user):
                 if trace is None and tracer is not None:
                     trace = tracer.start(question, user, trace_session or event.get("session_id"))
                 if event.get("done"):
+                    # _usage là kênh nội bộ (token/model cho langfuse) — pop ra để KHÔNG
+                    # rò xuống SSE/frontend; chỉ tracer dùng.
+                    usage_meta = event.pop("_usage", None)
                     last_done = event
                 yield event
         finally:
             if tracer is not None and trace is not None:
-                tracer.finish(trace, last_done)
+                tracer.finish(trace, last_done, usage_meta)
 
     async def _stream_inner(
         self,
@@ -461,7 +466,7 @@ class QueryOrchestrationUseCase:
                         answer = await self._output_guardrail.redact(answer)
 
                         await self._save_assistant(user.id, session_id, answer, sources, started)
-                        yield {
+                        done_event = {
                             "done": True,
                             "sources": sources,
                             "session_id": session_id,
@@ -469,6 +474,12 @@ class QueryOrchestrationUseCase:
                             "agent_mode": "langgraph",
                             "iterations": final_iteration,
                         }
+                        # Token/model usage cho langfuse (cost+latency). Kênh nội bộ _usage:
+                        # wrapper stream() pop ra trước khi yield SSE -> KHÔNG rò xuống FE.
+                        usage_meta = _collect_usage(final_state, self._settings.openai_llm_model)
+                        if usage_meta is not None:
+                            done_event["_usage"] = usage_meta
+                        yield done_event
                         return
 
         except Exception as _stream_exc:
@@ -800,6 +811,38 @@ class QueryOrchestrationUseCase:
             "score": result.score,
             "source_gcs_uri": result.source_gcs_uri,
         }
+
+
+def _collect_usage(final_state: Any, default_model: str) -> dict | None:
+    """
+    Gom token usage từ mọi AIMessage trong final_state (triage + think + answer đều qua
+    OpenAIResponsesChatModel) -> {model, input_tokens, output_tokens, cached_tokens}.
+
+    Trả None nếu không có token nào (mock mode / model không trả usage) -> langfuse bỏ
+    qua generation. model lấy từ response_metadata.model_name của AIMessage; nhiều model
+    khác nhau (vd intent gpt-4o-mini) thì lấy cái cuối cùng có usage.
+    """
+    messages = final_state.get("messages", []) if isinstance(final_state, dict) else []
+    input_tokens = output_tokens = cached_tokens = 0
+    model: str | None = None
+    for msg in messages:
+        usage_metadata = getattr(msg, "usage_metadata", None)
+        if not usage_metadata:
+            continue
+        input_tokens += int(usage_metadata.get("input_tokens", 0) or 0)
+        output_tokens += int(usage_metadata.get("output_tokens", 0) or 0)
+        details = usage_metadata.get("input_token_details") or {}
+        cached_tokens += int(details.get("cache_read", 0) or 0)
+        response_metadata = getattr(msg, "response_metadata", None) or {}
+        model = response_metadata.get("model_name") or model
+    if input_tokens == 0 and output_tokens == 0:
+        return None
+    return {
+        "model": model or default_model,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cached_tokens": cached_tokens,
+    }
 
 
 def _hr_context_text(result: HrQueryResultLike) -> str:

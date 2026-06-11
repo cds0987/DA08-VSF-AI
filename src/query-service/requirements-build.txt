@@ -1,0 +1,5 @@
+# Build-time ONLY deps (KHÔNG nằm trong image runtime). Dùng ở builder stage để tải
+# dataset giá model từ HuggingFace + parse parquet -> model_prices.json (bundle vào image).
+# Xem scripts/build_price_catalog.py và Dockerfile (stage price-builder).
+huggingface-hub>=0.23.0
+pyarrow>=15.0.0

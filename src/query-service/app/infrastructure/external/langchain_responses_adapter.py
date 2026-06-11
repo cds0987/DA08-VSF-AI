@@ -177,6 +177,29 @@ class OpenAIResponsesChatModel(BaseChatModel):
             asyncio.set_event_loop(loop)
         return loop.run_until_complete(self.openai_client.responses.create(**params))
 
+    def _usage_metadata(self, response) -> dict | None:
+        """
+        Extract token usage from a Responses API result → LangChain usage_metadata.
+
+        Returns None when the response carries no usage block (e.g. mock/streaming
+        chunk).  cached_tokens (prompt cache hit) is surfaced under
+        input_token_details.cache_read so cost can price it cheaper downstream.
+        """
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return None
+        input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+        output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+        total_tokens = int(getattr(usage, "total_tokens", 0) or (input_tokens + output_tokens))
+        details = getattr(usage, "input_tokens_details", None)
+        cached = int(getattr(details, "cached_tokens", 0) or 0) if details is not None else 0
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "input_token_details": {"cache_read": cached},
+        }
+
     def _parse_response(self, response) -> AIMessage:
         """Parse OpenAI Responses API response → LangChain AIMessage."""
         content_parts: list[str] = []
@@ -209,9 +232,17 @@ class OpenAIResponsesChatModel(BaseChatModel):
 
         content = "".join(content_parts)
 
+        # Carry token usage + model so the orchestration layer can build a Langfuse
+        # `generation` (cost + latency).  response_metadata.model_name lets cost lookup
+        # work even if multiple models are used across the agent's messages.
+        usage_metadata = self._usage_metadata(response)
+        extra: dict[str, Any] = {"response_metadata": {"model_name": self.model}}
+        if usage_metadata is not None:
+            extra["usage_metadata"] = usage_metadata
+
         if tool_calls:
-            return AIMessage(content=content, tool_calls=tool_calls)
-        return AIMessage(content=content)
+            return AIMessage(content=content, tool_calls=tool_calls, **extra)
+        return AIMessage(content=content, **extra)
 
     # -------------------------------------------------------------------------
     # LangChain BaseChatModel interface methods
@@ -319,3 +350,14 @@ class OpenAIResponsesChatModel(BaseChatModel):
                 delta = getattr(event, "delta", "") or ""
                 if delta:
                     yield AIMessage(content=delta)
+            elif event_type == "response.completed":
+                # Final event carries the aggregated usage block — emit an empty chunk
+                # that only carries usage so LangChain accumulates it onto the message.
+                final = getattr(event, "response", None)
+                usage_metadata = self._usage_metadata(final) if final is not None else None
+                if usage_metadata is not None:
+                    yield AIMessage(
+                        content="",
+                        usage_metadata=usage_metadata,
+                        response_metadata={"model_name": self.model},
+                    )
