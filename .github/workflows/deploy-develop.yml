@@ -869,6 +869,19 @@ jobs:
               done
               [ "$seen" = 1 ] || { lf_warn "trace không hiện ra sau ingest (xử lý treo?)"; return 0; }
 
+              # ── INTEGRATION: đường THẬT service dùng = container -> http://langfuse:3000 ──
+              # Loopback :3100 ở trên chỉ chứng minh "host gọi được" + auth/ingest đúng. Nhưng
+              # service thật gọi qua DNS mạng compose `langfuse:3000` (KHÔNG qua loopback host).
+              # Test path đó từ TRONG container query-service (python:3.11-slim có sẵn python+urllib,
+              # không cần bật observability/đổi env). Đây là cái cover gap "service gọi vào được chưa".
+              echo "  → integration: query-service container -> http://langfuse:3000 (DNS mạng compose)"
+              if docker exec da08-vsf-query-service-1 \
+                   python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://langfuse:3000/api/public/health',timeout=5).status==200 else 1)" >/dev/null 2>&1; then
+                echo "  OK nội mạng: query-service -> langfuse:3000 THÔNG -> bật OBSERVABILITY_MODE=langfuse là gửi được trace"
+              else
+                lf_warn "query-service container KHÔNG tới được http://langfuse:3000 (DNS/mạng compose?) -> dù bật observability vẫn KHÔNG gửi được trace"
+              fi
+
               docker exec da08-vsf-langfuse-db-1 psql -U langfuse -d langfuse \
                 -c "DELETE FROM observations WHERE trace_id='$TID';" \
                 -c "DELETE FROM scores WHERE trace_id='$TID';" \
