@@ -319,6 +319,8 @@ class QueryOrchestrationUseCase:
         # _lang_trace=None (no tracer or guardrail blocked) → these dicts stay empty.
         _llm_runs: dict[str, dict] = {}   # run_id → {node, start_dt, input_text}
         _tool_runs: dict[str, dict] = {}  # run_id → {name, input_args, start_dt}
+        _active_spans: dict[str, Any] = {}  # run_id → span for node lifecycle
+        _SPAN_NODES = {"triage", "think", "act", "observe", "answer", "shortcut"}
         _tracer = self._tracer  # LangfuseTracer | None
 
         # recursion_limit is a defence-in-depth net; Part 1 (force_answer + act→observe→think
@@ -348,6 +350,15 @@ class QueryOrchestrationUseCase:
                     if node_name in ("act", "observe"):
                         last_iteration = max(last_iteration, 1)
                     # NOTE: do NOT increment for "think" or "answer" — shortcut path has 0 iterations
+                    if node_name in _SPAN_NODES and _lang_trace is not None and _tracer is not None:
+                        run_id = event.get("run_id", "")
+                        if run_id:
+                            span = _tracer.span_start(
+                                _lang_trace, name=node_name,
+                                input_data={"iteration": last_iteration},
+                            )
+                            if span is not None:
+                                _active_spans[run_id] = span
 
                 # LLM call started — record start time + input for langfuse enriched trace
                 elif event_type == "on_chat_model_start":
@@ -495,6 +506,11 @@ class QueryOrchestrationUseCase:
                 elif event_type == "on_chain_end":
                     run_name = event.get("name", "")
                     if run_name not in ("VinSmartFutureReActAgent", "VinSmartFutureAgent"):
+                        run_id = event.get("run_id", "")
+                        span = _active_spans.pop(run_id, None)
+                        if span is not None and _tracer is not None:
+                            output = event.get("data", {}).get("output") or {}
+                            _tracer.span_end(span, output_data=_node_output_summary(output))
                         continue
 
                     final_state = event.get("data", {}).get("output", {})
