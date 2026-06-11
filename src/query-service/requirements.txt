@@ -21,4 +21,6 @@ llm-guard>=0.3.0
 # Dùng LOW-LEVEL client (langfuse.Langfuse), KHÔNG dùng CallbackHandler -> KHÔNG cần
 # `langchain` (thêm langchain sẽ hạ cấp langchain-core 1.x -> vỡ langgraph).
 langfuse>=2.0.0,<3
+# Model-price catalog: runtime CHỈ đọc model_prices.json đã bundle vào image (xem
+# Dockerfile stage price-builder + requirements-build.txt). KHÔNG cần hf/pyarrow ở runtime.
 newrelic>=9.0.0
