@@ -298,6 +298,10 @@ class QueryOrchestrationUseCase:
         # LIFO stack là đủ chính xác.
         _active_spans: dict[str, list] = {}
         _SPAN_NODES = {"shortcut", "triage", "think", "act", "observe", "answer"}
+        # Gom usage từ MỌI model call (on_chat_model_end) — gồm cả triage. _collect_usage
+        # cũ chỉ đọc final_state["messages"] nên off-topic (triage không vào messages) ra
+        # 0 token -> trace $0.00 dù triage vẫn tốn tiền. Accumulator này phủ mọi path.
+        _usage_acc: dict[str, Any] = {"input": 0, "output": 0, "cached": 0, "model": None}
 
         # recursion_limit is a defence-in-depth net; Part 1 (force_answer + act→observe→think
         # wiring) provides the logical hard cap.  Set to 3 * max_iterations + overhead.
@@ -373,6 +377,8 @@ class QueryOrchestrationUseCase:
                         _mstack = _active_spans.get("llm.call")
                         if _mstack:
                             tracer.span_end(_mstack.pop(), output_data=_render_chat_output(event))
+                    # Cộng dồn token của LẦN GỌI NÀY (triage/think/answer) vào rollup.
+                    _accumulate_usage(_usage_acc, event)
 
                 # Token stream from LLM
                 elif event_type == "on_chat_model_stream":
@@ -576,7 +582,10 @@ class QueryOrchestrationUseCase:
                         }
                         # Token/model usage cho langfuse (cost+latency). Kênh nội bộ _usage:
                         # wrapper stream() pop ra trước khi yield SSE -> KHÔNG rò xuống FE.
-                        usage_meta = _collect_usage(final_state, self._settings.openai_llm_model)
+                        # Ưu tiên accumulator (gom MỌI model call gồm triage); fallback
+                        # _collect_usage cho path không qua on_chat_model_end (mock/non-stream).
+                        usage_meta = _usage_from_acc(_usage_acc, self._settings.openai_llm_model) \
+                            or _collect_usage(final_state, self._settings.openai_llm_model)
                         if usage_meta is not None:
                             done_event["_usage"] = usage_meta
                         yield done_event
@@ -929,6 +938,39 @@ class QueryOrchestrationUseCase:
             "score": result.score,
             "source_gcs_uri": result.source_gcs_uri,
         }
+
+
+def _accumulate_usage(acc: dict, event: Any) -> None:
+    """Cộng usage của 1 model call (on_chat_model_end.data.output = AIMessage) vào acc.
+    Phủ MỌI lần gọi model (triage/think/answer) -> off-topic vẫn có token triage.
+    Best-effort: lỗi/không có usage thì bỏ qua."""
+    try:
+        out = (event.get("data") or {}).get("output")
+        if hasattr(out, "generations"):
+            gens = out.generations
+            out = gens[0][0].message if gens and gens[0] else out
+        um = getattr(out, "usage_metadata", None)
+        if not um:
+            return
+        acc["input"] += int(um.get("input_tokens", 0) or 0)
+        acc["output"] += int(um.get("output_tokens", 0) or 0)
+        acc["cached"] += int((um.get("input_token_details") or {}).get("cache_read", 0) or 0)
+        rm = getattr(out, "response_metadata", None) or {}
+        acc["model"] = rm.get("model_name") or acc["model"]
+    except Exception:  # noqa: BLE001 — gom usage best-effort
+        return
+
+
+def _usage_from_acc(acc: dict, default_model: str) -> dict | None:
+    """Đổi accumulator -> usage_meta cho tracer. None nếu chưa gom được token nào."""
+    if acc["input"] == 0 and acc["output"] == 0:
+        return None
+    return {
+        "model": acc["model"] or default_model,
+        "input_tokens": acc["input"],
+        "output_tokens": acc["output"],
+        "cached_tokens": acc["cached"],
+    }
 
 
 def _collect_usage(final_state: Any, default_model: str) -> dict | None:
