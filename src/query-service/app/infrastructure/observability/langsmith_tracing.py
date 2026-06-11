@@ -44,8 +44,12 @@ class LangSmithTracer:
         self._project = project
         self._prices = price_catalog
 
-    def start(self, question: str, user: Any, session_id: str | None) -> _LSTraceHandle | None:
-        """Tạo 1 root run cho 1 lượt query. None nếu lỗi (query vẫn chạy bình thường)."""
+    def start(self, question: str, user: Any, session_id: str | None,
+              conversation_title: str | None = None) -> _LSTraceHandle | None:
+        """Tạo 1 root run cho 1 lượt query. None nếu lỗi (query vẫn chạy bình thường).
+
+        conversation_title: phải nhận kwarg này (CompositeTracer truyền cho mọi backend
+        khi langfuse thêm title) — thiếu nó -> TypeError -> langsmith mất trace mọi query."""
         try:
             from langsmith.run_trees import RunTree  # type: ignore[import]
 
@@ -56,6 +60,8 @@ class LangSmithTracer:
             # session_id: LangSmith gom hội thoại theo metadata thread/session.
             if session_id:
                 metadata["session_id"] = session_id
+            if conversation_title:
+                metadata["conversation_title"] = conversation_title
 
             # Smoke CI (header X-CI-Smoke -> session_id='ci-smoke') ghi sang PROJECT RIÊNG
             # `{project}-ci-smoke` -> deploy kế xóa nguyên project đó (delete_project), KHÔNG
