@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     langfuse_secret_key: str | None = None
     langfuse_host: str = "http://localhost:3100"
 
+    # LangSmith — chạy SONG SONG langfuse (OBSERVABILITY_MODE=langfuse,langsmith). Low-level
+    # RunTree, KHÔNG callback. EU: https://eu.api.smith.langchain.com.
+    langsmith_api_key: str | None = None
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_project: str = "rag-query"
+
     # Model-price catalog -> tự tính cost gửi vào Langfuse generation (Langfuse self-host
     # v2 không có sẵn pricing model mới). Runtime CHỈ đọc model_prices.json (TOÀN BỘ
     # dataset OpenRouter) đã bundle vào image lúc build (builder stage refresh từ HF; HF
@@ -113,19 +119,28 @@ class Settings(BaseSettings):
                 raise ValueError("RATE_LIMITER_MODE=redis is required in production")
 
         # Cơ chế LINH HOẠT (mọi môi trường): tích hợp tùy chọn (observability/guardrails)
-        # chỉ bật khi có đủ thông tin; thiếu -> tự OFF thay vì crash. Trước đây production
-        # BẮT BUỘC llm_guard + langfuse -> không có key Langfuse là service không boot.
-        if self.observability_mode.strip().lower() == "langfuse" and (
-            not self.langfuse_public_key or not self.langfuse_secret_key
-        ):
-            # Yêu cầu langfuse nhưng thiếu key -> tắt observability thay vì dừng app.
-            self.observability_mode = "off"
+        # chỉ bật khi có đủ thông tin; thiếu -> tự bỏ backend đó thay vì crash. Trước đây
+        # production BẮT BUỘC llm_guard + langfuse -> không có key Langfuse là service không boot.
+        # Nay OBSERVABILITY_MODE là danh sách (langfuse,langsmith); lọc backend thiếu key.
+        backends = self.observability_backends
+        kept: list[str] = []
+        if "langfuse" in backends and self.langfuse_public_key and self.langfuse_secret_key:
+            kept.append("langfuse")
+        if "langsmith" in backends and self.langsmith_api_key:
+            kept.append("langsmith")
+        self.observability_mode = ",".join(kept) if kept else "off"
 
         return self
 
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
+
+    @property
+    def observability_backends(self) -> set[str]:
+        """OBSERVABILITY_MODE -> set backend (langfuse/langsmith); 'off'/rỗng -> set rỗng."""
+        raw = self.observability_mode.strip().lower().replace(";", ",")
+        return {b.strip() for b in raw.split(",") if b.strip() and b.strip() != "off"}
 
 
 def _is_weak_jwt_secret(secret: str | None) -> bool:
