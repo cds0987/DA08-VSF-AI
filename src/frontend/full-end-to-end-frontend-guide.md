@@ -1,5 +1,10 @@
 # Hướng dẫn chạy Full Luồng Frontend Đầu-đến-Đầu (End-to-End)
 
+> ⚠️ **LƯU Ý (2026-06-12):** `docker-compose.localtest.yml`/`docker-compose.local.yml` đã bị xóa.
+> Stack tích hợp chuẩn giờ là **`docker-compose.e2e.yml`** (xem [`infra/e2e/README.md`](../../infra/e2e/README.md)).
+> Các lệnh `docker compose -f docker-compose.localtest.yml ...` dưới đây cần thay bằng
+> `docker-compose.e2e.yml` (e2e KHÔNG build frontend/nginx — dựng FE riêng để dev UI).
+
 > **Mục tiêu:** Cung cấp tài liệu tổng hợp, chi tiết từng bước để một lập trình viên có thể tự cấu hình, khởi động và kiểm thử toàn bộ luồng hoạt động từ Frontend (Admin, Chat) đi qua toàn bộ các service Backend (User, Document, Query, MCP, RAG Worker) và hạ tầng (Qdrant Cloud, GCS, PostgreSQL, NATS).
 
 Tài liệu này được tổng hợp từ các file integration contract hiện có (`document-service`, `query-service`, `mcp-service`, `rag-worker`) và các báo cáo kiến trúc của Nuxt Frontend.

@@ -9,22 +9,19 @@ from tests.conftest import HR_USER_ID, ADMIN_USER_ID
 async def _seed_notification(user_id: str, doc_id: str = "doc-001", is_read: bool = False) -> str:
     """Directly seed a notification into the mock repo and return its ID."""
     from app.interfaces.api.dependencies import get_notification_repo
-    from app.domain.entities.notification import Notification
-    import uuid
-    from datetime import datetime, timezone
 
+    # save() nhận field rời (user_id, event, message, doc_id) + trả Notification mới
+    # (id + is_read=False). Muốn is_read=True thì mark_read sau khi tạo.
     repo = get_notification_repo()
-    notif = Notification(
-        id=str(uuid.uuid4()),
+    saved = await repo.save(
         user_id=user_id,
         event="doc_new",
         message=f"New document {doc_id} indexed",
         doc_id=doc_id,
-        is_read=is_read,
-        created_at=datetime.now(timezone.utc),
     )
-    await repo.save(notif)
-    return notif.id
+    if is_read:
+        await repo.mark_read(saved.id)
+    return saved.id
 
 
 # ---------------------------------------------------------------------------
