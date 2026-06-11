@@ -39,12 +39,12 @@ const smoothScrollToBottom = useDebounceFn(() => {
 
 function markForInstantScroll() {
   requiresInstantScroll = true
-  smoothScrollToBottom.cancel()
+  smoothScrollToBottom?.cancel?.()
 }
 
 function scheduleInstantScroll() {
   markForInstantScroll()
-  if (instantScrollScheduled) return
+  if (!import.meta.client || instantScrollScheduled) return
 
   instantScrollScheduled = true
   // Double rAF to ensure browser has updated DOM and height is available
