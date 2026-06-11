@@ -364,6 +364,7 @@ export const useChatStore = defineStore('chat', () => {
     const request: QueryRequest = {
       question,
       user_id: String(userId),
+      trace_session: currentConversationId.value ?? undefined,
     }
 
     const PHASE_MAP: Record<string, number> = {
