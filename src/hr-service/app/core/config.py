@@ -38,6 +38,8 @@ class HrSettings:
     database_url: str
     internal_token: str
     auto_provision_leave_balance: bool
+    default_annual_leave: int
+    default_sick_leave: int
     nats_url: str
     nats_jetstream_enabled: bool
     user_events_enabled: bool
@@ -53,6 +55,8 @@ def load_settings(path: str | os.PathLike[str] | None = None) -> HrSettings:
         database_url=str(raw.get("database_url") or "").strip(),
         internal_token=str(raw.get("internal_token") or "").strip(),
         auto_provision_leave_balance=_as_bool(raw.get("auto_provision_leave_balance"), True),
+        default_annual_leave=int(str(raw.get("default_annual_leave") or 12).strip() or 12),
+        default_sick_leave=int(str(raw.get("default_sick_leave") or 10).strip() or 10),
         nats_url=str(raw.get("nats_url") or "nats://nats:4222").strip() or "nats://nats:4222",
         nats_jetstream_enabled=_as_bool(raw.get("nats_jetstream_enabled"), True),
         user_events_enabled=_as_bool(raw.get("user_events_enabled"), True),

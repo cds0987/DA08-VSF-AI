@@ -4,9 +4,14 @@ log_level: ${LOG_LEVEL:-INFO}
 database_url: ${HR_DATABASE_URL:-}
 internal_token: ${HR_INTERNAL_TOKEN:-}
 # Lazy auto-provision: hỏi leave_balance mà user chưa có hồ sơ -> tự tạo bản ghi mặc
-# định (12 phép năm / 10 phép ốm theo server_default) thay vì trả 404. Idempotent.
+# định (default_annual_leave / default_sick_leave bên dưới) thay vì trả 404. Idempotent.
 # Lưới an toàn cho user tạo trước khi có event user.created (vd admin cũ). Bật mặc định.
 auto_provision_leave_balance: ${HR_AUTO_PROVISION_LEAVE_BALANCE:-true}
+# Hạn mức phép mặc định khi cấp phát hồ sơ mới (cả lazy read-path lẫn event user.created).
+# Đưa ra config thay vì chôn trong server_default migration -> đổi qua env, không cần migration.
+# CHỈ áp cho entitlement (leave_balance); các bảng fact khác (payroll/attendance...) KHÔNG default.
+default_annual_leave: ${HR_DEFAULT_ANNUAL_LEAVE:-12}
+default_sick_leave: ${HR_DEFAULT_SICK_LEAVE:-10}
 # Subscriber user.* (USER_EVENTS): nghe user-service phát để tự cấp phát hồ sơ. Best-effort.
 nats_url: ${NATS_URL:-nats://nats:4222}
 nats_jetstream_enabled: ${NATS_JETSTREAM_ENABLED:-true}
