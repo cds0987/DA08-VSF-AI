@@ -1,5 +1,0 @@
-# OPT-IN: chỉ cài khi GUARDRAILS_MODE=llm_guard (build-arg INSTALL_LLM_GUARD=1).
-# llm-guard kéo torch + transformers (~GB) -> KHÔNG nằm trong image mặc định vì prod
-# chạy GUARDRAILS_MODE=off. Code import llm_guard đã lazy (raise lỗi rõ nếu thiếu khi
-# bật mode). Xem Dockerfile (ARG INSTALL_LLM_GUARD) + app/infrastructure/guardrails/.
-llm-guard>=0.3.0

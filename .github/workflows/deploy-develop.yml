@@ -228,7 +228,7 @@ jobs:
           python-version: "3.13"
       # buildx (docker-container driver) + COMPOSE_BAKE -> compose build qua bake để
       # honor cache_from/cache_to type=gha trong docker-compose.e2e.yml -> build lần
-      # sau tái dùng layer (đỡ build lại torch/transformers của query-service).
+      # sau tái dùng layer (đỡ cài lại dependency nặng giữa các lần build).
       - uses: docker/setup-buildx-action@v3
       - name: Install e2e client deps
         run: python -m pip install --upgrade pip && pip install requests boto3
