@@ -1,5 +1,8 @@
 # ONBOARD — CI/CD & Env (handoff)
 
+> ⚠️ **2026-06-13 di trú hạ tầng** — nguồn sự thật mới: [docs/onboard_cicd.md](docs/onboard_cicd.md).
+> Project `vintravel-chatbot`; **1 VM** in-compose (BỎ Cloud SQL → `app-postgres`; BỎ qdrant-base → `qdrant:6333`); GCS keyless (SA `vsf-storage` gắn VM); **CI/CD từ fork `cds0987/DA08-VSF`**; production `http://35.240.193.13`. Deploy CHỈ qua CI, không `docker compose up` tay trên VM.
+
 > File bàn giao để tiếp tục công việc CI/CD ở session khác. Nguồn sự thật chi tiết: [CICD.md](CICD.md) + [.github/workflows/deploy-develop.yml](.github/workflows/deploy-develop.yml).
 > Trạng thái tại 2026-06-10, nhánh làm việc: **`nguyendev`**.
 
@@ -21,11 +24,11 @@ Hai khối thay đổi (đã code xong, đã verify cục bộ, **commit trên `
 - `deploy/env/<service>.env` = chỉ biến riêng. **`DATABASE_URL` per-service** (db name khác nhau; **driver `postgresql+psycopg`** cho TẤT CẢ — KHÔNG asyncpg, vì VM đang chạy psycopg3). hr dùng `HR_DATABASE_URL`.
 - compose `env_file: [common.env, <svc>.env]` — common nạp trước, file service override khi trùng. Quy tắc thêm key: **mặc định để ở service; chỉ nâng lên common khi service thứ 2 cần**; nhóm contract-critical bắt buộc ở common.
 - **Commit thẳng vào git** (repo private). `git reset --hard` lúc deploy đồng bộ env cùng code → hết drift. `.gitignore` KHÔNG còn ignore `deploy/env`.
-- Giá trị thật đã điền từ container đang chạy trên VM (login/token/key khớp 100%): `JWT_SECRET_KEY`, `OPENAI_API_KEY` (OpenAI direct sk-proj), `MCP_INTERNAL_TOKEN` (mcp==query), `HR_INTERNAL_TOKEN` (hr==mcp), GCS HMAC (rag-worker S3_*), Cloud SQL `***REDACTED-DB-PW***@34.87.63.152`.
+- Giá trị thật đã điền từ container đang chạy trên VM (login/token/key khớp 100%): `JWT_SECRET_KEY`, `OPENAI_API_KEY` (OpenAI direct sk-proj), `MCP_INTERNAL_TOKEN` (mcp==query), `HR_INTERNAL_TOKEN` (hr==mcp), GCS HMAC (rag-worker S3_*), Cloud SQL `***REDACTED-DB-PW***@app-postgres`.
 - **Bỏ bẫy cũ**: compose không còn `environment: DATABASE_URL` override (từng đè env_file); hr alembic `migrations/env.py` đọc `HR_DATABASE_URL` (hết split-brain migrate vs runtime); bind-mount SA đổi `/home/<user>/...` → `./deploy/secrets/gcp-sa.json`.
 
 ### Việc thủ công đã làm trên VM (KHÔNG trong git)
-- SA JSON đã copy: `$APP_DIR/deploy/secrets/gcp-sa.json` (APP_DIR=`/home/tranhuugiahuynb/DA08-VSF`). Untracked nên `git reset --hard` không xoá. Nếu dựng VM mới phải đặt lại file này.
+- SA JSON đã copy: `$APP_DIR/deploy/secrets/gcp-sa.json` (APP_DIR=`/home/TOMAP/DA08-VSF`). Untracked nên `git reset --hard` không xoá. Nếu dựng VM mới phải đặt lại file này.
 
 ---
 
@@ -58,9 +61,9 @@ Trigger: push `develop` (bỏ qua docs/**, **.md) | `workflow_dispatch`. Concurr
 
 ## 4. Hạ tầng (ghi nhớ vận hành)
 
-- gcloud máy dev mặc định trỏ SAI project → luôn `gcloud config set project vsf-rag-chatbot-dev` trước.
-- VM `vsf-rag-demo-vm` (asia-southeast1-a, 34.158.47.236), SSH qua IAP: `gcloud compute ssh vsf-rag-demo-vm --zone asia-southeast1-a --tunnel-through-iap --command "..."`, cần `sudo docker`. Container prefix `da08-vsf-<svc>-1`. APP_DIR=`/home/tranhuugiahuynb/DA08-VSF`.
-- Cloud SQL `34.87.63.152` (postgres-18), GCS `vsf-rag-chatbot-docs-dev`. Qdrant chạy NỘI BỘ compose (`qdrant:6333`) — KHÔNG Qdrant Cloud trên VM.
+- gcloud máy dev mặc định trỏ SAI project → luôn `gcloud config set project vintravel-chatbot` trước.
+- VM `vsf-rag-demo-vm` (asia-southeast1-a, 34.158.47.236), SSH qua IAP: `gcloud compute ssh vsf-rag-demo-vm --zone asia-southeast1-a --tunnel-through-iap --command "..."`, cần `sudo docker`. Container prefix `da08-vsf-<svc>-1`. APP_DIR=`/home/TOMAP/DA08-VSF`.
+- Cloud SQL `app-postgres` (postgres-18), GCS `vintravel-chatbot-docs-dev`. Qdrant chạy NỘI BỘ compose (`qdrant:6333`) — KHÔNG Qdrant Cloud trên VM.
 - Đổi cấu hình vận hành (model/threshold/mode/key) = sửa `deploy/env/*.env` + commit + deploy. KHÔNG sửa code.
 
 ---

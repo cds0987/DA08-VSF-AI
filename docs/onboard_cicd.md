@@ -1,6 +1,14 @@
 # Onboarding: thao tác GCP & CI/CD từ một PC mới
 
-> Mục tiêu: cầm 1 máy trắng (Windows) là **đăng nhập GCP, SSH vào VM, đụng được Cloud SQL / GCS / Qdrant, và hiểu luồng CI/CD** trong thời gian ngắn nhất, không vướng các bẫy thực tế của project này.
+> Mục tiêu: cầm 1 máy trắng (Windows) là **đăng nhập GCP, SSH vào VM, hiểu luồng CI/CD** trong thời gian ngắn nhất, không vướng các bẫy thực tế của project này.
+
+> ⚠️ **CẬP NHẬT 2026-06-13 — đã di trú hạ tầng (đọc kỹ):**
+> - **Project mới = `vintravel-chatbot`** (billing trả tiền). Project cũ `vsf-rag-chatbot-dev` ĐÃ BỊ XÓA (hết credit trial).
+> - **Nguyên tắc 1-VM:** TẤT CẢ chạy in-compose trên 1 VM duy nhất. **BỎ Cloud SQL** → Postgres in-compose (`app-postgres`). **BỎ VM `qdrant-base`** → Qdrant in-compose (`qdrant:6333`).
+> - **GCS keyless:** VM gắn SA `vsf-storage` → document-service dùng ADC (không cần JSON key). rag-worker S3-interop vẫn dùng HMAC.
+> - **CI/CD chạy từ FORK `cds0987/DA08-VSF`** (repo gốc lehuuhung2001 hết Actions minutes). Image push Docker Hub `dadlks08`.
+> - **Production LIVE:** `http://35.240.193.13` (chat `/`, admin `/admin/`).
+> - **TUYỆT ĐỐI không `docker compose up` tay trên VM production — chỉ deploy qua CI.**
 
 Tài liệu liên quan (đọc kèm khi cần đào sâu):
 - [devops-deployment-architecture.md](devops-deployment-architecture.md) — kiến trúc tổng thể.
@@ -14,14 +22,15 @@ Tài liệu liên quan (đọc kèm khi cần đào sâu):
 
 | Hạng mục | Giá trị |
 |---|---|
-| GCP Project ID | `vsf-rag-chatbot-dev` |
+| GCP Project ID | `vintravel-chatbot` (cũ `vsf-rag-chatbot-dev` đã xóa) |
 | Region chính | `asia-southeast1` (Singapore) |
-| VM app (compose) | `vsf-rag-demo-vm` — zone `asia-southeast1-a` |
-| VM Qdrant | `qdrant-base` — zone `asia-southeast1-c` |
-| Cloud SQL (Postgres) | host `34.87.63.152:5432` (6 DB: `user_db`, `doc_db`, `query_db`, `mcp_db`, `hr_db`, `langfuse_db`) |
-| GCS bucket tài liệu | `vsf-rag-chatbot-docs-dev` |
-| App dir trên VM | `~/DA08-VSF` (của user deploy; `docker-compose.yml` + `deploy/env/`) |
-| Git repo | `github.com/lehuuhung2001/DA08-VSF` (private) — branch deploy: `develop` |
+| VM app (TẤT CẢ in-compose) | `vsf-rag-demo-vm` — zone `asia-southeast1-a` — external IP `35.240.193.13` |
+| Postgres | **in-compose** service `app-postgres` (KHÔNG Cloud SQL) — 5 DB: `user_db`, `doc_db`, `query_db`, `rag_db`, `hr_db` |
+| Qdrant | **in-compose** `qdrant:6333` (KHÔNG VM riêng, KHÔNG Qdrant Cloud) |
+| GCS bucket tài liệu | `vintravel-chatbot-docs-dev` (SA `vsf-storage` gắn VM = keyless ADC) |
+| App dir trên VM | `/home/TOMAP/DA08-VSF` (`docker-compose.yml` + `deploy/env/`) |
+| Git repo (deploy) | **FORK `github.com/cds0987/DA08-VSF`** (private) — branch deploy: `develop` |
+| Public URL | `http://35.240.193.13` — chat `/`, admin `/admin/`, login `admin@company.com` |
 
 > Secret thật (OpenAI key, DB pass, JWT, GCS HMAC, internal token) **không nằm trong git**. Chúng ở **GitHub Secrets** và được ghi ra `deploy/env/*.env` trên VM lúc deploy. Xem mục 6.
 
@@ -55,7 +64,7 @@ git --version
 
 ```powershell
 gcloud auth login                 # mở browser, đăng nhập tài khoản được cấp quyền
-gcloud config set project vsf-rag-chatbot-dev
+gcloud config set project vintravel-chatbot
 gcloud config set compute/region asia-southeast1
 gcloud config set core/disable_prompts true   # tránh prompt treo trong script/agent
 ```
@@ -64,7 +73,7 @@ Kiểm tra:
 
 ```powershell
 gcloud auth list          # thấy account active
-gcloud config list        # thấy project = vsf-rag-chatbot-dev
+gcloud config list        # thấy project = vintravel-chatbot
 ```
 
 ### 2.2 ⚠️ BẪY SSL sau proxy công ty (rất hay gặp ở môi trường nội bộ)
@@ -120,7 +129,7 @@ gcloud iam service-accounts list
 
 # Tạo key JSON cho 1 SA (ví dụ SA ingest/GCS)
 gcloud iam service-accounts keys create gcp-sa.json `
-  --iam-account=<SA_NAME>@vsf-rag-chatbot-dev.iam.gserviceaccount.com
+  --iam-account=<SA_NAME>@vintravel-chatbot.iam.gserviceaccount.com
 ```
 
 > File `gcp-sa.json` là **secret** — KHÔNG commit, để ngoài git (đã có trong `.gitignore`).
@@ -135,7 +144,7 @@ Nguyên tắc:
 rag-worker đọc GCS qua giao thức S3 (`S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`). Tạo HMAC:
 
 ```powershell
-gcloud storage hmac create <SA_NAME>@vsf-rag-chatbot-dev.iam.gserviceaccount.com
+gcloud storage hmac create <SA_NAME>@vintravel-chatbot.iam.gserviceaccount.com
 # in ra accessId + secret -> đưa vào deploy/env/rag-worker.env (hoặc GitHub Secret)
 ```
 
@@ -177,25 +186,21 @@ sudo ls -la deploy/env/                     # các file env thật (secret)
 
 ---
 
-## 5. Truy cập Cloud SQL (Postgres)
+## 5. Truy cập Postgres (in-compose — KHÔNG còn Cloud SQL)
 
-Hai cách:
+> ⚠️ Từ 2026-06-13 **BỎ Cloud SQL**. Postgres chạy in-compose (`app-postgres`) ngay trên VM.
+> Connection string trỏ host `app-postgres:5432` (trong mạng compose), KHÔNG còn `34.87.63.152`.
 
-**A. Qua VM (đơn giản nhất — VM đã được whitelist):**
 ```bash
-# trên VM
-psql "postgresql://postgres:<PASS>@34.87.63.152:5432/query_db"
+# trên VM — vào psql trong container app-postgres
+cd ~/DA08-VSF
+docker compose exec app-postgres psql -U postgres -d query_db
+# 5 DB: user_db / doc_db / query_db / rag_db / hr_db (pass: ***REDACTED-DB-PW***)
 ```
 
-**B. Từ máy local qua Cloud SQL Auth Proxy (an toàn, không cần mở IP):**
-```powershell
-gcloud auth application-default login
-# tải cloud-sql-proxy.exe, rồi:
-.\cloud-sql-proxy.exe vsf-rag-chatbot-dev:asia-southeast1:<INSTANCE> --port 5432
-# sau đó psql/DBeaver nối localhost:5432
-```
-
-> DB password & connection string thật nằm trong `deploy/env/*.env` trên VM, không có trong git.
+> ⚠️ `app-postgres` data nằm trong volume `app_pg_data` trên VM → **mất VM = mất DB**.
+> Nên cron `pg_dump` đẩy GCS để backup (chưa làm).
+> DB password thật nằm trong `deploy/env/*.env` (commit thẳng vì repo private).
 
 ---
 
@@ -229,7 +234,7 @@ $headers = @{ Authorization = "token $token"; Accept = "application/vnd.github+j
 
 # Danh sách run gần nhất của workflow deploy + thời gian chạy
 $runs = Invoke-RestMethod -Headers $headers `
-  "https://api.github.com/repos/lehuuhung2001/DA08-VSF/actions/workflows/deploy-develop.yml/runs?per_page=10"
+  "https://api.github.com/repos/cds0987/DA08-VSF/actions/workflows/deploy-develop.yml/runs?per_page=10"
 $runs.workflow_runs | ForEach-Object {
   $min = [math]::Round(([datetime]$_.updated_at - [datetime]$_.created_at).TotalMinutes,1)
   [PSCustomObject]@{ Run=$_.run_number; Concl=$_.conclusion; Min=$min; SHA=$_.head_sha.Substring(0,7) }
@@ -256,7 +261,7 @@ Sửa `docs/**` hoặc `**.md` → **không trigger gì** (paths-ignore).
 ## 8. Checklist máy mới (rút gọn)
 
 - [ ] `winget install Google.CloudSDK Git.Git` (+ `GitHub.cli` khuyến nghị)
-- [ ] `gcloud auth login` → `gcloud config set project vsf-rag-chatbot-dev`
+- [ ] `gcloud auth login` → `gcloud config set project vintravel-chatbot`
 - [ ] Nếu lỗi SSL: tạo `win-ca-bundle.pem` + `gcloud config set core/custom_ca_certs_file ...` (mục 2.2)
 - [ ] `gcloud compute instances list` chạy được (xác nhận auth OK)
 - [ ] `gcloud compute ssh vsf-rag-demo-vm --zone=asia-southeast1-a` vào được VM
@@ -285,16 +290,17 @@ gcloud auth application-default revoke
 
 | Thành phần | Chi tiết |
 |---|---|
-| Project | `vsf-rag-chatbot-dev`, **number `538092122679`** |
-| Cloud SQL instance | `vsf-rag-postgres-dev`, **POSTGRES_18**, asia-southeast1, IP `34.87.63.152`, superuser `postgres` / pass `***REDACTED-DB-PW***` (URL-encode `%401`) |
-| VM app | `vsf-rag-demo-vm` — asia-southeast1-a, e2-standard-2, ext `34.158.47.236` |
-| VM Qdrant | `qdrant-base` — asia-southeast1-c, e2-medium, ext `34.87.176.141` |
-| GCS | `gs://vsf-rag-chatbot-docs-dev/` |
+| Project | `vintravel-chatbot`, **number `289299478169`** |
+| Postgres | **in-compose** `app-postgres` (KHÔNG Cloud SQL) — 5 DB, superuser `postgres` / pass `***REDACTED-DB-PW***` (URL-encode `%401`), host nội bộ `app-postgres:5432`, volume `app_pg_data` |
+| VM app (TẤT CẢ in-compose) | `vsf-rag-demo-vm` — asia-southeast1-a, e2-standard-4, ext `35.240.193.13` |
+| Qdrant | **in-compose** `qdrant:6333` (KHÔNG VM `qdrant-base`, KHÔNG Qdrant Cloud) |
+| GCS | `gs://vintravel-chatbot-docs-dev/` — SA `vsf-storage` gắn VM (keyless ADC); HMAC cho rag-worker S3 |
 | Docker Hub | namespace `dadlks08` (`dadlks08/<svc>:develop` + `:<git-sha>`) |
-| VM deploy user | `tranhuugiahuynb`, repo `/home/tranhuugiahuynb/DA08-VSF`, compose project `da08-vsf` |
+| VM deploy user | `TOMAP`, repo `/home/TOMAP/DA08-VSF`, compose project `da08-vsf` |
 
-- **KHÔNG có Cloud Run** — dù một số config gợi ý vậy, Cloud Run API chưa bật, mọi service chạy bằng `docker compose` trên VM.
+- **KHÔNG có Cloud Run / GKE / Cloud SQL** — đã xóa hết hạ tầng cũ; mọi thứ chạy `docker compose` trên 1 VM.
 - gcloud bản winget nằm ở `...\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd` (kèm gsutil, bq). Login hiện tại: `ttnguyen1410@gmail.com`.
+- ⚠️ Org policy `iam.disableServiceAccountKeyCreation` đã tắt scope project (để tạo HMAC) — bật lại khi siết bảo mật.
 
 ### 10.2 SSH vào VM — dùng IAP tunnel
 
@@ -306,13 +312,17 @@ gcloud compute ssh vsf-rag-demo-vm --zone=asia-southeast1-a --tunnel-through-iap
 ```
 
 - Lần đầu plink hỏi cache host key → nhập `y`.
-- Repo trên VM thuộc `tranhuugiahuynb` → đọc/ghi file của họ phải `sudo`; **không `cd` được** vào thư mục home của họ bằng account khác, dùng `sudo cat <path>` với đường dẫn tuyệt đối.
+- Repo trên VM thuộc `TOMAP` → đọc/ghi file của họ phải `sudo`; **không `cd` được** vào thư mục home của họ bằng account khác, dùng `sudo cat <path>` với đường dẫn tuyệt đối.
 
-### 10.3 Qdrant thật của runtime ≠ container "qdrant" rỗng
+### 10.3 Qdrant = in-compose (đã bỏ VM qdrant-base + Qdrant Cloud)
 
-- Qdrant production = **VM `qdrant-base` (34.87.176.141)**: Qdrant bind `127.0.0.1:6333`, đứng sau **nginx :80 + Basic Auth** (`/etc/nginx/.htpasswd`, user `qdrantteam` / pass `123`).
-- **BẪY port:** URL http thiếu port → qdrant-client rớt về `:6333` → connection refused. Phải ghi **rõ `:80`**: `VECTOR_DB_URL=http://34.87.176.141:80` + `VECTOR_DB_BASIC_AUTH=***REDACTED-QDRANT-AUTH***`, để trống `VECTOR_DB_API_KEY`. (SCHEME_FORCED_PORT chỉ ép https→443, không ép http.)
-- Trong compose nội bộ thì các service trỏ `http://qdrant:6333` — nhưng **container `qdrant` trên demo VM là RÁC**, runtime thật ăn qdrant-base. Qdrant Cloud (`a0016cd3...`) là endpoint **CŨ** (e2e cleanup từng xoá collection → prod 404). Đừng trỏ env về Qdrant Cloud.
+- Từ 2026-06-13: Qdrant chạy **in-compose** (`qdrant/qdrant:v1.12.4`), mọi service trỏ
+  `VECTOR_DB_URL=http://qdrant:6333` (qua `common.env`). Container `qdrant` GIỜ LÀ runtime thật
+  (không còn "rác" như khi còn VM qdrant-base).
+- **ĐÃ BỎ hẳn:** VM `qdrant-base` (34.87.176.141) + nginx Basic Auth + Qdrant Cloud. Không
+  còn `VECTOR_DB_BASIC_AUTH`/`VECTOR_DB_API_KEY`. Đừng trỏ env về bất kỳ Qdrant ngoài VM.
+- e2e (`docker-compose.e2e.yml`) cũng dùng Qdrant in-compose để mô phỏng đúng prod (expose
+  `127.0.0.1:6333` cho `run_e2e.py` poll).
 - Code rag-worker: mọi remote client phải qua `VectorStoreConfig.remote_client_kwargs()` (chuẩn hoá `:443` + timeout). Có **2 code-path** build config: `from_env` (env) và `to_vector_store_config` (config.yaml params, dùng ở production APP_ENV) — thêm field mới (vd `basic_auth`) phải map ở **cả hai** + thêm `${VAR}` vào config.yaml, nếu không CI production fail dù local pass.
 
 ### 10.4 CI/CD — bẫy đã tốn nhiều vòng debug
@@ -339,7 +349,7 @@ rag-worker đọc GCS bằng giao thức S3 (`S3_ENDPOINT_URL=https://storage.go
 ```bash
 TOKEN=$(printf "protocol=https\nhost=github.com\n\n" | git credential fill 2>/dev/null | grep '^password=' | cut -d= -f2-)
 curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://api.github.com/repos/lehuuhung2001/DA08-VSF/actions/runs?branch=develop&per_page=5"
+  "https://api.github.com/repos/cds0987/DA08-VSF/actions/runs?branch=develop&per_page=5"
 # run_id -> /actions/runs/$RUN_ID/jobs -> job id -> /actions/jobs/$JID/logs
 ```
 

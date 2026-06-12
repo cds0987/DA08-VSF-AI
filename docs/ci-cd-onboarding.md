@@ -1,6 +1,9 @@
 # CI/CD Onboarding — DA08-VSF
 
-Tài liệu cho teammate hiểu nhanh quy trình CI/CD và cách vận hành. Cập nhật: 2026-06-09.
+> ⚠️ **2026-06-13 di trú hạ tầng** — nguồn sự thật mới: [onboard_cicd.md](onboard_cicd.md).
+> Project `vintravel-chatbot`; **1 VM** in-compose (BỎ Cloud SQL → `app-postgres`; Qdrant in-compose `qdrant:6333`); GCS keyless (SA `vsf-storage` gắn VM); **CI/CD từ fork `cds0987/DA08-VSF`**; production `http://35.240.193.13`. Deploy CHỈ qua CI.
+
+Tài liệu cho teammate hiểu nhanh quy trình CI/CD và cách vận hành. Cập nhật: 2026-06-13.
 
 ---
 
@@ -62,11 +65,11 @@ Luồng làm việc khuyến nghị: code trên feature branch → CI feature br
 
 - **Registry**: Docker Hub, namespace **`dadlks08`** → image `dadlks08/<service>` (6 service:
   `rag-worker`, `mcp-service`, `hr-service`, `user-service`, `document-service`, `query-service`).
-- **VM**: GCP `vsf-rag-demo-vm` (project `vsf-rag-chatbot-dev`, zone `asia-southeast1-a`),
-  IP ngoài `34.158.47.236`. App dir: `/home/tranhuugiahuynb/DA08-VSF`.
+- **VM**: GCP `vsf-rag-demo-vm` (project `vintravel-chatbot`, zone `asia-southeast1-a`),
+  IP ngoài `34.158.47.236`. App dir: `/home/TOMAP/DA08-VSF`.
 - **Compose**: `docker-compose.yml` — 6 service dùng `image: ${DOCKERHUB_USERNAME}/<svc>:${IMAGE_TAG:-develop}`
   (KHÔNG còn `build:`). Hạ tầng kèm: NATS, Redis, **Qdrant nội bộ** (`qdrant:6333`), nginx.
-- **DB**: Cloud SQL Postgres `34.87.63.152` — `rag_db` (rag-worker), `hr_db` (hr-service).
+- **DB**: Cloud SQL Postgres `app-postgres` — `rag_db` (rag-worker), `hr_db` (hr-service).
 - **Qdrant**: chạy **nội bộ trong compose** (`http://qdrant:6333`), KHÔNG dùng Qdrant Cloud.
 
 ---
@@ -79,7 +82,7 @@ Repo → Settings → Secrets and variables → Actions. Pipeline cần:
 |--------|----------|
 | `DOCKERHUB_USERNAME` | `dadlks08` |
 | `DOCKERHUB_TOKEN` | Docker Hub access token (Read & Write) |
-| `VM_HOST` / `VM_USER` / `VM_SSH_KEY` | IP VM / user (`tranhuugiahuynb`) / **private key** CI (đủ dòng BEGIN/END) |
+| `VM_HOST` / `VM_USER` / `VM_SSH_KEY` | IP VM / user (`TOMAP`) / **private key** CI (đủ dòng BEGIN/END) |
 | `APP_DIR` | đường dẫn app trên VM |
 | `RAG_WORKER_ENV` | **toàn bộ nội dung** file `deploy/env/rag-worker.env` |
 | `MCP_SERVICE_ENV` | **toàn bộ nội dung** file `deploy/env/mcp-service.env` |
@@ -90,7 +93,7 @@ Repo → Settings → Secrets and variables → Actions. Pipeline cần:
 > cần source code; env chỉ dùng ở phase deploy.
 
 `VM_SSH_KEY`: là **private key** (ed25519) của cặp khóa CI. Public key tương ứng phải nằm trong
-VM metadata `ssh-keys` (hoặc `~/.ssh/authorized_keys`) của user `tranhuugiahuynb`. OS Login đang TẮT.
+VM metadata `ssh-keys` (hoặc `~/.ssh/authorized_keys`) của user `TOMAP`. OS Login đang TẮT.
 
 ---
 
@@ -129,7 +132,7 @@ Image có tag `:<git-sha>` cho **những lần thực sự build** service đó 
 sha có đủ tag cho service cần rollback. SSH vào VM và up lại với tag cũ:
 
 ```bash
-cd /home/tranhuugiahuynb/DA08-VSF
+cd /home/TOMAP/DA08-VSF
 export DOCKERHUB_USERNAME=dadlks08
 export IMAGE_TAG=<git-sha-muốn-rollback>
 docker compose pull rag-worker mcp-service hr-service
@@ -138,7 +141,7 @@ docker compose up -d --no-build rag-worker mcp-service hr-service
 
 ### Kiểm tra health trên VM
 ```bash
-sudo docker compose -f /home/tranhuugiahuynb/DA08-VSF/docker-compose.yml ps
+sudo docker compose -f /home/TOMAP/DA08-VSF/docker-compose.yml ps
 sudo docker compose -f .../docker-compose.yml logs --tail 60 rag-worker
 ```
 Health gate của deploy chờ: `rag-worker=healthy`, `hr-service=healthy`,
