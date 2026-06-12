@@ -58,7 +58,11 @@ class Settings(BaseSettings):
     model_price_path: str = "/app/app/infrastructure/observability/data/model_prices.json"
     model_price_override_path: str | None = None
 
-    guardrails_mode: str = "off"
+    guardrails_mode: str = "off"  # off | llm_api (LLM-judge injection + regex PII)
+    # Model dùng cho LLM-judge guardrail; rỗng -> dùng openai_llm_model. Có thể trỏ model
+    # rẻ (gpt-5.4-mini/nano) vì việc phân loại injection nhẹ. Gọi qua provider sẵn có,
+    # KHÔNG nhúng model vào container -> không torch.
+    guardrail_model: str | None = None
     observability_mode: str = "off"
 
     allowed_origins: str = Field(
