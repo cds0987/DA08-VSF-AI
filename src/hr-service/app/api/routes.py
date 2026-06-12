@@ -107,9 +107,15 @@ def _performance_summary(period: str, rating: str) -> str:
 async def hr_query(
     body: HrQueryRequest,
     repo: HrRepository = Depends(get_repo),
+    settings: HrSettings = Depends(get_settings),
 ) -> dict[str, Any]:
     if body.intent == "leave_balance":
         dto = await repo.get_leave_balance(body.user_id)
+        if dto is None and settings.auto_provision_leave_balance:
+            # Lưới an toàn: user chưa được đồng bộ (vd admin tạo trước khi có event
+            # user.created) -> tự tạo hồ sơ phép mặc định idempotent rồi đọc lại.
+            await repo.ensure_leave_balance(body.user_id)
+            dto = await repo.get_leave_balance(body.user_id)
         if dto is None:
             raise HTTPException(status_code=404, detail="no HR data for this user")
         data = {

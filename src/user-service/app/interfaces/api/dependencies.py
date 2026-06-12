@@ -25,6 +25,7 @@ from app.infrastructure.db.postgres_user_repository import (
     PostgresUserRepository,
 )
 from app.infrastructure.db.session import get_session
+from app.infrastructure.messaging.user_event_emitter import NatsUserEventEmitter
 from app.infrastructure.security.jwt_token_service import JwtTokenService
 from app.infrastructure.security.password_hasher import BcryptPasswordHasher
 from app.infrastructure.security.refresh_token_issuer import RefreshTokenIssuer
@@ -134,11 +135,27 @@ def get_list_users_use_case(
     return ListUsersUseCase(user_repository)
 
 
+def get_user_event_emitter(
+    settings: Settings = Depends(get_settings),
+) -> "NatsUserEventEmitter | None":
+    if not settings.user_events_enabled:
+        return None
+    from app.infrastructure.messaging.user_event_emitter import NatsUserEventEmitter
+    from app.infrastructure.messaging.user_event_publisher import UserEventPublisher
+
+    publisher = UserEventPublisher(
+        nats_url=settings.nats_url,
+        jetstream_enabled=settings.nats_jetstream_enabled,
+    )
+    return NatsUserEventEmitter(publisher)
+
+
 def get_set_user_active_use_case(
     user_repository: PostgresUserRepository = Depends(get_user_repository),
     audit_logger: PostgresAuditLogRepository = Depends(get_audit_logger),
+    event_emitter: "NatsUserEventEmitter | None" = Depends(get_user_event_emitter),
 ) -> SetUserActiveUseCase:
-    return SetUserActiveUseCase(user_repository, audit_logger)
+    return SetUserActiveUseCase(user_repository, audit_logger, event_emitter=event_emitter)
 
 
 async def get_current_user(

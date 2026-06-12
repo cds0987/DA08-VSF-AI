@@ -37,6 +37,10 @@ class HrSettings:
     log_level: str
     database_url: str
     internal_token: str
+    auto_provision_leave_balance: bool
+    nats_url: str
+    nats_jetstream_enabled: bool
+    user_events_enabled: bool
 
 
 def load_settings(path: str | os.PathLike[str] | None = None) -> HrSettings:
@@ -48,7 +52,19 @@ def load_settings(path: str | os.PathLike[str] | None = None) -> HrSettings:
         log_level=str(raw.get("log_level") or "INFO").strip() or "INFO",
         database_url=str(raw.get("database_url") or "").strip(),
         internal_token=str(raw.get("internal_token") or "").strip(),
+        auto_provision_leave_balance=_as_bool(raw.get("auto_provision_leave_balance"), True),
+        nats_url=str(raw.get("nats_url") or "nats://nats:4222").strip() or "nats://nats:4222",
+        nats_jetstream_enabled=_as_bool(raw.get("nats_jetstream_enabled"), True),
+        user_events_enabled=_as_bool(raw.get("user_events_enabled"), True),
     )
+
+
+def _as_bool(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def get_settings() -> HrSettings:

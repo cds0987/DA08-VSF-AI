@@ -35,6 +35,15 @@ class FakeHrRepository(HrRepository):
         }
         return data.get(user_id)
 
+    async def ensure_leave_balance(self, user_id: str) -> None:
+        # Fake mặc định KHÔNG provision -> giữ nguyên ngữ nghĩa 404 cho user lạ.
+        return None
+
+    async def upsert_employee_from_user(
+        self, user_id: str, email: str, department: str, is_active: bool
+    ) -> None:
+        return None
+
     async def get_leave_requests(self, user_id: str):
         data = {
             USER_HR: [
@@ -123,6 +132,10 @@ def setup_module() -> None:
         log_level="INFO",
         database_url="",
         internal_token=TOKEN,
+        auto_provision_leave_balance=True,
+        nats_url="nats://localhost:4222",
+        nats_jetstream_enabled=False,
+        user_events_enabled=False,
     )
     app.dependency_overrides[core_config.get_settings] = lambda: HrSettings(
         host="0.0.0.0",
@@ -130,6 +143,10 @@ def setup_module() -> None:
         log_level="INFO",
         database_url="",
         internal_token=TOKEN,
+        auto_provision_leave_balance=True,
+        nats_url="nats://localhost:4222",
+        nats_jetstream_enabled=False,
+        user_events_enabled=False,
     )
 
 
@@ -191,6 +208,80 @@ def test_unknown_user_returns_404() -> None:
         headers={"X-Internal-Token": TOKEN},
     )
     assert response.status_code == 404
+
+
+class ProvisioningFakeHrRepository(FakeHrRepository):
+    """Fake mô phỏng lazy auto-create: ensure_leave_balance tạo hồ sơ mặc định, lần
+    đọc sau trả về DTO mặc định (12/10)."""
+
+    def __init__(self) -> None:
+        self._provisioned: set[str] = set()
+
+    async def get_leave_balance(self, user_id: str):
+        base = await super().get_leave_balance(user_id)
+        if base is not None:
+            return base
+        if user_id in self._provisioned:
+            return LeaveBalanceDTO(12, 0, 12, 10, 0, 10)
+        return None
+
+    async def ensure_leave_balance(self, user_id: str) -> None:
+        self._provisioned.add(user_id)
+
+
+def test_leave_balance_auto_provisioned_for_new_user() -> None:
+    new_user = "abcabcab-abca-4bca-8bca-abcabcabcabc"
+    app.dependency_overrides[get_repo] = lambda: ProvisioningFakeHrRepository()
+    try:
+        client = _client()
+        response = client.post(
+            "/hr/query",
+            json={"user_id": new_user, "intent": "leave_balance"},
+            headers={"X-Internal-Token": TOKEN},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["data"]["annual_remaining"] == 12
+        assert body["data"]["sick_remaining"] == 10
+    finally:
+        app.dependency_overrides[get_repo] = lambda: FakeHrRepository()
+
+
+def test_leave_balance_404_when_auto_provision_disabled() -> None:
+    new_user = "abcabcab-abca-4bca-8bca-abcabcabcabc"
+    app.dependency_overrides[get_repo] = lambda: ProvisioningFakeHrRepository()
+    app.dependency_overrides[get_settings] = lambda: HrSettings(
+        host="0.0.0.0",
+        port=8004,
+        log_level="INFO",
+        database_url="",
+        internal_token=TOKEN,
+        auto_provision_leave_balance=False,
+        nats_url="nats://localhost:4222",
+        nats_jetstream_enabled=False,
+        user_events_enabled=False,
+    )
+    try:
+        client = _client()
+        response = client.post(
+            "/hr/query",
+            json={"user_id": new_user, "intent": "leave_balance"},
+            headers={"X-Internal-Token": TOKEN},
+        )
+        assert response.status_code == 404
+    finally:
+        app.dependency_overrides[get_repo] = lambda: FakeHrRepository()
+        app.dependency_overrides[get_settings] = lambda: HrSettings(
+            host="0.0.0.0",
+            port=8004,
+            log_level="INFO",
+            database_url="",
+            internal_token=TOKEN,
+            auto_provision_leave_balance=True,
+            nats_url="nats://localhost:4222",
+            nats_jetstream_enabled=False,
+            user_events_enabled=False,
+        )
 
 
 def test_invalid_intent_rejected() -> None:

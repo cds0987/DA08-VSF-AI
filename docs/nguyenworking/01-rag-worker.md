@@ -1,6 +1,6 @@
 # RAG Worker — Tiến độ & việc cần làm
 
-**Trạng thái:** 🟢 Production, verified E2E · **Mức hoàn thiện:** ~93% · **Cập nhật:** 2026-06-11
+**Trạng thái:** 🟢 Production, verified E2E · **Mức hoàn thiện:** ~93% · **Cập nhật:** 2026-06-12
 **Vai trò:** Subscriber NATS — ingest (OCR → chunk → caption → embed) → ghi Qdrant. Không HTTP serving nghiệp vụ, không DB nghiệp vụ.
 
 > **Mới hoàn thành (2026-06-11, đã deploy develop):** Langfuse tracing cho luồng ingest + CI siết failure-path. Pipeline `develop` PASS full (validate→build→deploy production). Chi tiết: [rag-worker-langfuse.md](rag-worker-langfuse.md).

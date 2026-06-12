@@ -18,7 +18,7 @@ bootstrap/migrate hỏng = `compose up` fail = test fail — đúng lớp lỗi 
 
 - Build từ source (không pull Docker Hub).
 - Postgres / NATS / Redis = container; **GCS + Qdrant = CLOUD THẬT**.
-- Thêm seed one-shot (`seed-user`, `seed-doc`) vì prod seed Cloud SQL tay 1 lần.
+- Migrate one-shot Alembic (`user-migrate`, `doc-migrate`, `hr-migrate`, `rag-migrate`) dựng schema; `seed-user` chỉ seed admin (prod seed Cloud SQL tay 1 lần).
 - Langfuse **v2** self-host (khớp prod) + **bật trace** query-service lẫn rag-worker.
 
 ## Chạy local
@@ -42,6 +42,5 @@ docker compose -f docker-compose.e2e.yml down -v
 ## Files
 
 - `init-db.sql` — tạo các database (user/doc/query/rag/hr).
-- `seed_user.py` — create_all + seed admin cho user-service (chạy trong image user-service).
-- `seed_doc.sql` — schema `doc_svc` cho document-service.
+- `seed_user.py` — seed admin cho user-service (schema do `user-migrate`/Alembic dựng; create_all chỉ là safety idempotent).
 - `run_e2e.py` — orchestrator 1 flow: login → upload → ingest → trace → query RAG/HR → trace → cleanup.

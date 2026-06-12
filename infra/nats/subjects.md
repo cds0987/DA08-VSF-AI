@@ -43,11 +43,14 @@ The business fields documented below remain top-level fields, so existing DTOs c
 | `doc.access` | JetStream publish/subscribe durable | Document Service | Query Service | `DOC_EVENTS` | at-least-once, durable, explicit ack | `event_id`; fallback `doc_id` with latest `occurred_at` |
 | `hr.employee_profile.updated` | JetStream publish/subscribe durable | HR Service | Query Service | `HR_EVENTS` | at-least-once, durable, explicit ack | `event_id`; fallback `user_id` with latest `occurred_at` |
 | `notify.doc_new` | JetStream publish/subscribe | Document Service | Query Service | `NOTIFY_EVENTS` | at-least-once, explicit ack | `event_id`; fallback `doc_id + "doc_new"` |
+| `user.created` | JetStream publish/subscribe durable | User Service | HR Service | `USER_EVENTS` | at-least-once, durable, explicit ack | `event_id`; fallback `user_id + "user.created"` |
+| `user.updated` | JetStream publish/subscribe durable | User Service | HR Service | `USER_EVENTS` | at-least-once, durable, explicit ack | `event_id`; fallback `user_id` with latest `occurred_at` |
+| `user.deactivated` | JetStream publish/subscribe durable | User Service | HR Service | `USER_EVENTS` | at-least-once, durable, explicit ack | `event_id`; fallback `user_id + "user.deactivated"` |
 | `rag.search` | Core NATS request-reply | MCP Service tool `rag_search` | RAG Worker | none | synchronous, timeout 10s | request-scoped; no persistence |
 
 ## Error And Retry Rules
 
-- JetStream events (`doc.ingest`, `doc.status`, `doc.access`, `hr.employee_profile.updated`, `notify.doc_new`) are at-least-once. Consumers must be idempotent.
+- JetStream events (`doc.ingest`, `doc.status`, `doc.access`, `hr.employee_profile.updated`, `notify.doc_new`, `user.created`, `user.updated`, `user.deactivated`) are at-least-once. Consumers must be idempotent.
 - Consumers deduplicate by `event_id` when present. If metadata is missing during transition, use the fallback key listed in the overview.
 - Consumers must ack only after durable side effects complete.
 - If processing fails with a retryable error, do not ack; JetStream will redeliver based on consumer config.
@@ -251,6 +254,47 @@ Payload example:
 ```
 
 Required fields: `event_id`, `event_version`, `occurred_at`, `doc_id`, `document_name`, `classification`, `allowed_departments`, `allowed_user_ids`.
+
+## `user.created` / `user.updated` / `user.deactivated`
+
+Purpose: User Service phát vòng đời tài khoản. HR Service lắng nghe để tự cấp phát /
+cập nhật hồ sơ nhân sự (leave_balance mặc định, employees department/email/status) —
+KHÔNG đọc thẳng DB user-service. Bổ trợ (không thay thế) `hr.employee_profile.updated`
+(chiều HR -> Query Service).
+
+| Field | Value |
+| --- | --- |
+| Owner | Backend Dev - Vu Quang Dung |
+| Producer | User Service |
+| Consumer | HR Service |
+| Type | JetStream publish/subscribe durable |
+| Stream | `USER_EVENTS` |
+| Durability | HR Service nên dùng durable consumer như `HR_USER_LIFECYCLE` |
+| Delivery | at-least-once, explicit ack |
+| Retry | retry tới khi HR Service ghi xong (upsert hồ sơ) |
+| Idempotency key | `event_id`; fallback `user_id + subject` |
+
+Payload example (`user.created`):
+
+```json
+{
+  "event_id": "uuid",
+  "event_version": 1,
+  "occurred_at": "2026-06-12T09:15:30Z",
+  "user_id": "4f44e7f7-....",
+  "email": "admin@company.com",
+  "role": "admin",
+  "department": "HR",
+  "account_type": "internal",
+  "is_active": true
+}
+```
+
+Required fields: `event_id`, `event_version`, `occurred_at`, `user_id`, `email`, `role`, `department`, `account_type`, `is_active`.
+
+- `user.updated`: cùng payload; HR cập nhật department/email/status.
+- `user.deactivated`: cùng payload với `is_active=false`; HR set `employment_status='inactive'`.
+- Backfill go-live: User Service replay `user.created` cho toàn bộ user hiện có (one-shot, idempotent nhờ HR consumer dedupe + upsert).
 
 ## `rag.search`
 

@@ -24,6 +24,20 @@ class HrRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def ensure_leave_balance(self, user_id: str) -> None:
+        """Tạo bản ghi leave_balance mặc định nếu chưa có (idempotent). Lưới an toàn
+        cho user chưa được đồng bộ qua event user.created."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def upsert_employee_from_user(
+        self, user_id: str, email: str, department: str, is_active: bool
+    ) -> None:
+        """Upsert hồ sơ nhân viên từ event user.* (idempotent). KHÔNG đọc DB user-service;
+        chỉ ghi từ payload event."""
+        raise NotImplementedError
+
+    @abstractmethod
     async def get_leave_requests(self, user_id: str) -> List[LeaveRequestDTO]:
         raise NotImplementedError
 

@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir -r re
 
 COPY app ./app
 COPY migrations ./migrations
+COPY alembic.ini ./alembic.ini
 COPY .env.example ./.env.example
 
 EXPOSE 8002

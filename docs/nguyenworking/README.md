@@ -1,7 +1,7 @@
 # Nguyen Working — Sổ tay phụ trách 3 service
 
 **Người phụ trách:** Nguyen Tran · **Branch làm việc:** `nguyendev` (PR → `develop` → deploy VM)
-**Cập nhật:** 2026-06-11
+**Cập nhật:** 2026-06-12
 
 Folder này là khu vực làm việc cá nhân theo dõi tiến độ và lộ trình **đưa 3 service chính vào production thật**:
 
@@ -18,6 +18,7 @@ Folder này là khu vực làm việc cá nhân theo dõi tiến độ và lộ 
 - **Hướng dẫn dev (cách code + viết test chặt, tránh vỡ codebase):** [dev.md](dev.md) ← dev mới đọc cái này
 - **Trace & debug rag-worker bằng Langfuse (biết crash ở đâu):** [rag-worker-langfuse.md](rag-worker-langfuse.md)
 - **Định nghĩa "Production-Ready":** [04-definition-of-done.md](04-definition-of-done.md)
+- **Refactor DB migration (doc/user → Alembic) + cơ chế đồng bộ danh tính:** [05-db-migration-va-dong-bo.md](05-db-migration-va-dong-bo.md)
 
 ## Quy ước
 - Mọi mốc relative date đổi sang absolute (vd "tuần sau" → ghi ngày cụ thể).

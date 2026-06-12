@@ -16,8 +16,8 @@
 #   - Postgres + NATS + Redis = container (prod: Cloud SQL + NATS VM).
 #   - GCS + Qdrant = CLOUD THẬT (key đọc từ .env / secrets CI) -> nghiệm thu
 #     đúng đường tích hợp cloud.
-#   - thêm seed one-shot (seed-user, seed-doc): prod seed Cloud SQL tay 1 lần;
-#     e2e self-contained nên tự dựng schema + admin.
+#   - migrate one-shot (user-migrate, doc-migrate, hr-migrate, rag-migrate) dựng schema
+#     bằng Alembic; seed-user chỉ seed admin (prod seed Cloud SQL tay 1 lần).
 #   - Langfuse v2 self-host (KHỚP prod) + BẬT trace cả query-service lẫn
 #     rag-worker (mặc định prod off) -> test thật đường observability.
 #
@@ -166,21 +166,49 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      user-migrate:
+        condition: service_completed_successfully
     restart: "no"
 
-  # document-service KHÔNG tự tạo schema doc_svc -> psql apply seed_doc.sql.
-  seed-doc:
-    image: postgres:16-alpine
-    entrypoint:
-      ["sh", "-c", "psql postgresql://postgres:postgres@postgres:5432/doc_db -v ON_ERROR_STOP=1 -f /seed/seed_doc.sql"]
-    volumes:
-      - ./infra/e2e/seed_doc.sql:/seed/seed_doc.sql:ro
+  # ──────────────────────────── DB Migrations ────────────────────────────
+  # document-service giờ dùng Alembic (như hr/rag) -> doc-migrate one-shot thay cho
+  # seed_doc.sql tay cũ (đã xóa). env.py đọc DOCUMENT_SERVICE_DATABASE_URL/DATABASE_URL.
+  doc-migrate:
+    image: document-service:e2e
+    build:
+      context: ./src/document-service
+      cache_from:
+        - type=gha,scope=e2e-document-service
+      cache_to:
+        - type=gha,scope=e2e-document-service,mode=max
+    command: ["alembic", "upgrade", "head"]
+    working_dir: /app
+    environment:
+      DOCUMENT_SERVICE_DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/doc_db
     depends_on:
       postgres:
         condition: service_healthy
     restart: "no"
 
-  # ──────────────────────────── DB Migrations ────────────────────────────
+  # user-service giờ dùng Alembic -> user-migrate dựng schema user_svc; seed-user chỉ
+  # còn việc seed admin (chạy SAU migrate).
+  user-migrate:
+    image: user-service:e2e
+    build:
+      context: ./src/user-service
+      cache_from:
+        - type=gha,scope=e2e-user-service
+      cache_to:
+        - type=gha,scope=e2e-user-service,mode=max
+    command: ["alembic", "upgrade", "head"]
+    working_dir: /app
+    environment:
+      USER_SERVICE_DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/user_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   rag-migrate:
     image: rag-worker:e2e
     command: ["alembic", "upgrade", "head"]
@@ -257,7 +285,7 @@ services:
         condition: service_started
       nats-bootstrap:
         condition: service_completed_successfully
-      seed-doc:
+      doc-migrate:
         condition: service_completed_successfully
     restart: unless-stopped
 
