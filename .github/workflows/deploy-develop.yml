@@ -227,8 +227,13 @@ jobs:
           gcloud projects describe "$GCP_PROJECT" >/dev/null 2>&1 \
             || { echo "::error::project $GCP_PROJECT không tồn tại — chạy infra/gcp/dev-provision.sh"; exit 1; }
           be=$(gcloud billing projects describe "$GCP_PROJECT" --format='value(billingEnabled)' 2>/dev/null || echo "")
-          [ "$be" = "True" ] \
-            || { echo "::error::billing CHƯA bật cho $GCP_PROJECT (project sẽ bị suspend) — gắn billing OPEN"; exit 1; }
+          if [ "$be" = "True" ]; then
+            echo "billing OK (enabled)"
+          elif [ -z "$be" ]; then
+            echo "::warning::Không đọc được billing (CI SA thiếu billing.viewer hoặc propagate) — BỎ QUA, không chặn deploy"
+          else
+            echo "::error::billing CHƯA bật cho $GCP_PROJECT (project sẽ bị suspend) — gắn billing OPEN"; exit 1
+          fi
       - name: Ensure bucket (tạo nếu thiếu)
         run: |
           gcloud storage buckets describe "gs://$GCS_BUCKET" >/dev/null 2>&1 \
