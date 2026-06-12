@@ -28,6 +28,7 @@ STREAMS = [
     ("DOC_EVENTS", ["doc.ingest", "doc.status", "doc.access"]),
     ("NOTIFY_EVENTS", ["notify.doc_new"]),
     ("HR_EVENTS", ["hr.*", "hr.employee_profile.updated"]),
+    ("USER_EVENTS", ["user.created", "user.updated", "user.deactivated"]),
 ]
 LEGACY_STREAMS = ["DOCS"]  # migrate: xóa stream cũ đè subject của DOC_EVENTS
 

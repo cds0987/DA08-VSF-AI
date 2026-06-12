@@ -3,6 +3,7 @@ uvicorn[standard]
 sqlalchemy
 asyncpg
 psycopg[binary]>=3.1
+alembic>=1.13
 python-dotenv
 python-jose
 python-multipart

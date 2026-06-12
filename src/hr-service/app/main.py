@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
@@ -14,7 +15,22 @@ def create_app() -> FastAPI:
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    app = FastAPI(title="hr-service")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        from app.infrastructure.db.postgres_hr_repository import PostgresHrRepository
+        from app.infrastructure.user_events_subscriber import start_user_events_subscriber
+
+        handle = await start_user_events_subscriber(
+            settings,
+            repo_factory=lambda: PostgresHrRepository(settings.database_url),
+        )
+        try:
+            yield
+        finally:
+            await handle.close()
+
+    app = FastAPI(title="hr-service", lifespan=lifespan)
     app.include_router(router)
     return app
 

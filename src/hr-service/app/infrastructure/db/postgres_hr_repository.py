@@ -73,6 +73,55 @@ class PostgresHrRepository(HrRepository):
 
         return await asyncio.to_thread(_query)
 
+    async def ensure_leave_balance(self, user_id: str) -> None:
+        def _ensure() -> None:
+            with self._session() as session:
+                # Chỉ chèn user_id; các cột còn lại lấy server_default migration (12/10/0/now).
+                # ON CONFLICT DO NOTHING -> idempotent, an toàn khi gọi đua.
+                session.execute(
+                    sa.text(
+                        "INSERT INTO hr_svc.leave_balance (user_id) VALUES (:uid) "
+                        "ON CONFLICT (user_id) DO NOTHING"
+                    ),
+                    {"uid": user_id},
+                )
+                session.commit()
+
+        await asyncio.to_thread(_ensure)
+
+    async def upsert_employee_from_user(
+        self, user_id: str, email: str, department: str, is_active: bool
+    ) -> None:
+        import uuid
+
+        status = "active" if is_active else "inactive"
+
+        def _upsert() -> None:
+            with self._session() as session:
+                # Upsert theo user_id (unique). created_at/updated_at lấy server_default.
+                session.execute(
+                    sa.text(
+                        "INSERT INTO hr_svc.employees "
+                        "(id, user_id, company_email, department, employment_status) "
+                        "VALUES (:id, :uid, :email, :dept, :status) "
+                        "ON CONFLICT (user_id) DO UPDATE SET "
+                        "  company_email = EXCLUDED.company_email, "
+                        "  department = EXCLUDED.department, "
+                        "  employment_status = EXCLUDED.employment_status, "
+                        "  updated_at = now()"
+                    ),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "uid": user_id,
+                        "email": email or f"{user_id}@unknown.local",
+                        "dept": department or "",
+                        "status": status,
+                    },
+                )
+                session.commit()
+
+        await asyncio.to_thread(_upsert)
+
     async def get_leave_requests(self, user_id: str) -> List[LeaveRequestDTO]:
         def _query() -> List[LeaveRequestDTO]:
             with self._session() as session:

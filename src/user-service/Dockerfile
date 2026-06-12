@@ -24,9 +24,14 @@
       bcrypt \
       passlib \
       email-validator \
+      "alembic>=1.13" \
+      "nats-py>=2.6" \
       newrelic
 
   COPY app ./app
+  COPY migrations ./migrations
+  COPY scripts ./scripts
+  COPY alembic.ini ./alembic.ini
 
   EXPOSE 8000
 
