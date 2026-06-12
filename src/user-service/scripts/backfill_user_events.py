@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from collections.abc import Iterable
+from typing import Any
 
 from app.infrastructure.db.models import UserModel  # noqa: E402
 from app.infrastructure.messaging.user_event_publisher import UserEventPublisher  # noqa: E402
@@ -37,30 +39,35 @@ def _role_value(role: object) -> str:
     return str(value if value is not None else role)
 
 
+async def backfill_users(users: Iterable[Any], publisher: UserEventPublisher) -> int:
+    sent = 0
+    for u in users:
+        await publisher.publish_user_event(
+            "user.created",
+            {
+                "user_id": str(u.id),
+                "email": u.email,
+                "role": _role_value(u.role),
+                "department": u.department,
+                "account_type": u.account_type,
+                "is_active": u.is_active,
+            },
+        )
+        sent += 1
+    return sent
+
+
 async def _main() -> int:
     engine = create_async_engine(_db_url(), pool_pre_ping=True)
     publisher = UserEventPublisher(
         nats_url=os.getenv("NATS_URL", "nats://nats:4222"),
         jetstream_enabled=_jetstream_enabled(),
     )
-    sent = 0
     try:
         Session = async_sessionmaker(engine, expire_on_commit=False)
         async with Session() as s:
             rows = (await s.scalars(select(UserModel))).all()
-        for u in rows:
-            await publisher.publish_user_event(
-                "user.created",
-                {
-                    "user_id": str(u.id),
-                    "email": u.email,
-                    "role": _role_value(u.role),
-                    "department": u.department,
-                    "account_type": u.account_type,
-                    "is_active": u.is_active,
-                },
-            )
-            sent += 1
+        sent = await backfill_users(rows, publisher)
         print(f"backfill: đã phát user.created cho {sent} user", flush=True)
         return 0
     finally:
@@ -68,6 +75,10 @@ async def _main() -> int:
         await engine.dispose()
 
 
+def main() -> int:
+    return asyncio.run(_main())
+
+
 if __name__ == "__main__":
     # Fail-fast: lỗi thoát non-zero ngay, KHÔNG nuốt.
-    sys.exit(asyncio.run(_main()))
+    sys.exit(main())

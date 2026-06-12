@@ -18,17 +18,21 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        from app.infrastructure.nats_publisher import NatsPublisher
         from app.infrastructure.db.postgres_hr_repository import PostgresHrRepository
         from app.infrastructure.user_events_subscriber import start_user_events_subscriber
 
+        publisher = NatsPublisher(settings)
         handle = await start_user_events_subscriber(
             settings,
             repo_factory=lambda: PostgresHrRepository(settings.database_url),
+            publisher=publisher,
         )
         try:
             yield
         finally:
             await handle.close()
+            await publisher.aclose()
 
     app = FastAPI(title="hr-service", lifespan=lifespan)
     app.include_router(router)
