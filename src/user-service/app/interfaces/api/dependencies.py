@@ -10,6 +10,7 @@ from app.application.exceptions import (
     PermissionDeniedError,
 )
 from app.application.use_cases.auth.login_use_case import LoginUseCase
+from app.application.use_cases.auth.logout_use_case import LogoutUseCase
 from app.application.use_cases.auth.refresh_token_use_case import RefreshTokenUseCase
 from app.application.use_cases.auth.verify_token_use_case import VerifyTokenUseCase
 from app.application.use_cases.users.list_users_use_case import ListUsersUseCase
@@ -126,6 +127,18 @@ def get_refresh_token_use_case(
         refresh_token_issuer=refresh_token_issuer,
         password_hasher=password_hasher,
         token_service=token_service,
+    )
+
+
+def get_logout_use_case(
+    refresh_token_repository: PostgresRefreshTokenRepository = Depends(
+        get_refresh_token_repository,
+    ),
+    password_hasher: BcryptPasswordHasher = Depends(get_password_hasher),
+) -> LogoutUseCase:
+    return LogoutUseCase(
+        refresh_token_repository=refresh_token_repository,
+        password_hasher=password_hasher,
     )
 
 

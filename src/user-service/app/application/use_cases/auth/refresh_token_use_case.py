@@ -65,13 +65,15 @@ class RefreshTokenUseCase:
         ):
             raise InvalidTokenError()
 
+        # Revoke before user checks so a compromised token can't be replayed
+        await self.refresh_token_repository.revoke(record.id)
+
         user = await self.user_repository.get_by_id(record.user_id)
         if user is None:
             raise InvalidTokenError()
         if not user.is_active:
             raise InactiveUserError()
 
-        await self.refresh_token_repository.revoke(record.id)
         access_token = self.token_service.create_access_token(user)
         new_refresh = await self.refresh_token_issuer.issue(user.id)
         return RefreshResult(

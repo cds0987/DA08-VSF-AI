@@ -8,11 +8,13 @@ from app.application.exceptions import (
     InvalidTokenError,
 )
 from app.application.use_cases.auth.login_use_case import LoginUseCase
+from app.application.use_cases.auth.logout_use_case import LogoutUseCase
 from app.application.use_cases.auth.refresh_token_use_case import RefreshTokenUseCase
 from app.domain.entities.user import User
 from app.interfaces.api.dependencies import (
     get_current_user,
     get_login_use_case,
+    get_logout_use_case,
     get_refresh_token_use_case,
 )
 from app.interfaces.api.schemas.auth import MeResponse, RefreshTokenRequest, TokenResponse
@@ -83,6 +85,17 @@ async def _login(
         refresh_token=result.refresh_token,
         token_type=result.token_type,
     )
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(
+    payload: RefreshTokenRequest,
+    use_case: LogoutUseCase = Depends(get_logout_use_case),
+) -> None:
+    try:
+        await use_case.execute(payload.refresh_token)
+    except InvalidTokenError:
+        pass  # Idempotent — already revoked or invalid tokens are fine
 
 
 @router.get("/me", response_model=MeResponse)
