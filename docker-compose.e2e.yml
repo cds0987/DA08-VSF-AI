@@ -170,6 +170,22 @@ services:
         condition: service_completed_successfully
     restart: "no"
 
+  user-backfill:
+    image: user-service:e2e
+    command: ["python", "scripts/backfill_user_events.py"]
+    working_dir: /app
+    environment:
+      USER_SERVICE_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/user_db
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/user_db
+      NATS_URL: nats://nats:4222
+      NATS_JETSTREAM_ENABLED: "true"
+    depends_on:
+      seed-user:
+        condition: service_completed_successfully
+      nats-bootstrap:
+        condition: service_completed_successfully
+    restart: "no"
+
   # ──────────────────────────── DB Migrations ────────────────────────────
   # document-service giờ dùng Alembic (như hr/rag) -> doc-migrate one-shot thay cho
   # seed_doc.sql tay cũ (đã xóa). env.py đọc DOCUMENT_SERVICE_DATABASE_URL/DATABASE_URL.

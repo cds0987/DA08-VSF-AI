@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
+from typing import Any, Protocol
 
 from app.core.config import HrSettings
 from app.domain.repositories.hr_repository import HrRepository
@@ -15,7 +16,17 @@ STREAM_NAME = "USER_EVENTS"
 DURABLE = "HR_USER_LIFECYCLE"
 
 
-async def handle_user_event(subject: str, payload: dict, repo: HrRepository) -> None:
+class ProfilePublisher(Protocol):
+    async def publish_profile_updated(self, payload: dict[str, Any]) -> None:
+        ...
+
+
+async def handle_user_event(
+    subject: str,
+    payload: dict,
+    repo: HrRepository,
+    publisher: ProfilePublisher | None = None,
+) -> None:
     """Áp event vòng đời user vào hồ sơ HR. Idempotent (upsert + ON CONFLICT). Tách
     riêng khỏi NATS để test nhanh, không nuốt lỗi (lỗi -> raise cho caller nak/retry)."""
     user_id = str(payload["user_id"]).strip()
@@ -23,12 +34,30 @@ async def handle_user_event(subject: str, payload: dict, repo: HrRepository) -> 
         raise ValueError("user event missing user_id")
     email = str(payload.get("email", ""))
     department = str(payload.get("department", ""))
+    account_type = str(payload.get("account_type", "internal") or "internal")
     is_active = bool(payload.get("is_active", subject != "user.deactivated"))
+    employment_status = "active" if is_active else "inactive"
 
     await repo.upsert_employee_from_user(user_id, email, department, is_active)
     if is_active:
         # User đang hoạt động -> đảm bảo có hồ sơ phép mặc định.
         await repo.ensure_leave_balance(user_id)
+    if publisher is not None:
+        try:
+            await publisher.publish_profile_updated(
+                {
+                    "user_id": user_id,
+                    "account_type": account_type,
+                    "department": department,
+                    "employment_status": employment_status,
+                }
+            )
+        except Exception:
+            logger.warning(
+                "failed to publish hr.employee_profile.updated for user_id=%s",
+                user_id,
+                exc_info=True,
+            )
 
 
 @dataclass
@@ -43,6 +72,9 @@ class SubscriberHandle:
 async def start_user_events_subscriber(
     settings: HrSettings,
     repo_factory,
+    publisher: ProfilePublisher | None = None,
+    *,
+    nats_module=None,
 ) -> SubscriberHandle:
     """Best-effort: lỗi kết nối CHỈ log warning + trả handle rỗng, KHÔNG crash service.
     Sync vẫn được lưới an toàn bởi hr lazy auto-create."""
@@ -50,7 +82,7 @@ async def start_user_events_subscriber(
         logger.info("user_events subscriber disabled")
         return SubscriberHandle(connection=None)
     try:
-        import nats
+        nats = nats_module or __import__("nats")
     except ImportError:
         logger.warning("nats-py not installed; user_events subscriber not started")
         return SubscriberHandle(connection=None)
@@ -63,7 +95,7 @@ async def start_user_events_subscriber(
                 payload = json.loads(message.data.decode("utf-8"))
                 repo = repo_factory()
                 try:
-                    await handle_user_event(message.subject, payload, repo)
+                    await handle_user_event(message.subject, payload, repo, publisher)
                 finally:
                     await repo.aclose()
                 if hasattr(message, "ack"):

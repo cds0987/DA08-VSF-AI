@@ -19,6 +19,7 @@ Folder này là khu vực làm việc cá nhân theo dõi tiến độ và lộ 
 - **Trace & debug rag-worker bằng Langfuse (biết crash ở đâu):** [rag-worker-langfuse.md](rag-worker-langfuse.md)
 - **Định nghĩa "Production-Ready":** [04-definition-of-done.md](04-definition-of-done.md)
 - **Refactor DB migration (doc/user → Alembic) + cơ chế đồng bộ danh tính:** [05-db-migration-va-dong-bo.md](05-db-migration-va-dong-bo.md)
+- **Đồng bộ data tồn đọng (việc còn lại — đọc kỹ trước khi làm):** [06-dong-bo-data-ton-dong.md](06-dong-bo-data-ton-dong.md)
 
 ## Quy ước
 - Mọi mốc relative date đổi sang absolute (vd "tuần sau" → ghi ngày cụ thể).

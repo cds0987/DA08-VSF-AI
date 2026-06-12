@@ -121,6 +121,20 @@ services:
       - ./deploy/env/user-service.env
     restart: "no"
 
+  user-backfill:
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/user-service:${IMAGE_TAG:-develop}
+    command: ["python", "scripts/backfill_user_events.py"]
+    working_dir: /app
+    env_file:
+      - ./deploy/env/common.env
+      - ./deploy/env/user-service.env
+    depends_on:
+      user-migrate:
+        condition: service_completed_successfully
+      nats-bootstrap:
+        condition: service_completed_successfully
+    restart: "no"
+
   user-service:
     image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/user-service:${IMAGE_TAG:-develop}
     ports:
