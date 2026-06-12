@@ -1,12 +1,14 @@
 """
-LangGraph node implementations for the VinSmartFuture ReAct agent.
+LangGraph node implementations for the VinSmartFuture Plan-and-Execute agent.
 
-Architecture:
+Architecture (Plan-and-Execute):
   shortcut_node  - Fast-path for identity/clarify/security/off-topic (no LLM call)
-  think_node     - LLM decides action via structured tool_calls
-  act_node       - Execute tool with ACL guard
+  triage_node    - LLM classifies question (ALLOW/REFUSE/CLARIFY/SAFETY/META)
+  plan_node      - LLM produces an ordered list of tool steps (ToolPlan, structured output)
+  act_node       - Execute one tool step from plan (ACL guard; no LLM involvement)
   observe_node   - Log state + increment iteration counter
-  answer_node    - Stream final answer
+  think_node     - LLM judges sufficiency of gathered context (Sufficiency, structured output)
+  answer_node    - Stream final answer synthesised from tool results (ANSWER_SYSTEM_PROMPT)
 """
 
 import json
@@ -25,6 +27,7 @@ from app.application.langgraph_state import (
     ToolCallResult,
     SourceDoc,
 )
+from app.application.plan_models import ToolPlan, Sufficiency
 from app.application.ports import MCPToolClient
 from app.infrastructure.external.mcp_client import MCPCircuitOpenError
 from app.application.shortcuts import (
@@ -46,7 +49,12 @@ from app.application.shortcuts import (
     normalize as _normalize,
 )
 from app.application.tools import TOOL_DEFINITIONS, ACL_WHITELIST
-from app.application.prompts import TRIAGE_SYSTEM_PROMPT
+from app.application.prompts import (
+    TRIAGE_SYSTEM_PROMPT,
+    TOOL_PLAN_SYSTEM_PROMPT,
+    SUFFICIENCY_SYSTEM_PROMPT,
+    ANSWER_SYSTEM_PROMPT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -344,90 +352,141 @@ def shortcut_node(state: AgentState) -> dict:
 # Node: think_node
 # ---------------------------------------------------------------------------
 
+async def plan_node(
+    state: AgentState,
+    model: BaseChatModel,
+) -> dict:
+    """
+    plan_node: Produce an ordered list of tool steps for the current question.
+
+    Called once after triage (ALLOW path) and optionally again if think_node
+    decides the first round of results was insufficient (bounded replan: max 1).
+
+    Uses with_structured_output(ToolPlan) — non-streaming, silent to SSE.
+    The planner sees the conversation history (including any prior ToolMessages
+    from a previous plan cycle) so a replan has context on what was already tried.
+    """
+    from langchain_core.messages import SystemMessage, HumanMessage
+
+    question = state["question"]
+    is_replan = bool(state.get("tool_plan"))  # non-empty → this is a replan cycle
+
+    logger.info(
+        "langgraph_plan",
+        extra={
+            "session_id": state["session_id"],
+            "is_replan": is_replan,
+            "replan_count": state.get("replan_count", 0),
+        },
+    )
+
+    # Build message list: system + prior conversation (including any tool results) + question.
+    history = list(state.get("messages") or [])
+    messages: list = [SystemMessage(content=TOOL_PLAN_SYSTEM_PROMPT)] + history
+
+    # On replan: append hint from sufficiency verdict if available.
+    if is_replan:
+        suf = state.get("sufficiency") or {}
+        refine_query = suf.get("refine_query")
+        hint = (
+            f"Lần tìm kiếm trước chưa đủ. Lý do: {suf.get('reason', '')}. "
+            + (f"Gợi ý tìm lại với: {refine_query}" if refine_query else "")
+        ).strip()
+        messages.append(HumanMessage(content=f"{question}\n\n[Planner note: {hint}]"))
+    else:
+        messages.append(HumanMessage(content=question))
+
+    planner = model.with_structured_output(ToolPlan)
+    try:
+        plan: ToolPlan = await planner.ainvoke(messages)
+    except Exception as exc:
+        logger.warning(
+            "langgraph_plan_parse_error — fallback to single rag_search step: %s", exc
+        )
+        from app.application.plan_models import PlanStep
+        plan = ToolPlan(
+            direct_answer=False,
+            steps=[PlanStep(tool="rag_search", query=None, intent=None, reason="fallback")],
+        )
+
+    logger.info(
+        "langgraph_plan_done",
+        extra={
+            "session_id": state["session_id"],
+            "direct_answer": plan.direct_answer,
+            "steps": [s.tool for s in plan.steps],
+        },
+    )
+
+    result: dict = {
+        "tool_plan": [s.model_dump() for s in plan.steps],
+        "plan_cursor": 0,
+        "phase": AgentPhase.PLANNING,
+        "previous_phase": state["phase"],
+    }
+    # Increment replan_count when this is a replan call (tool_plan was non-empty before).
+    if is_replan:
+        result["replan_count"] = state.get("replan_count", 0) + 1
+
+    # direct_answer: no tool needed → store as empty plan; route_after_plan will skip to answer.
+    if plan.direct_answer:
+        result["tool_plan"] = []
+
+    return result
+
+
 async def think_node(
     state: AgentState,
     model: BaseChatModel,
-    mcp_client: MCPToolClient,
-    tools_loader=None,
 ) -> dict:
     """
-    think_node: LLM decides the next action.
+    think_node: Judge whether the gathered tool results are sufficient to answer.
 
-    Inputs:  state["messages"] (LangGraph-managed message list)
-    Outputs: state mutations (messages append, phase transition)
+    Called once after all plan steps have been executed (plan_cursor == len(tool_plan)).
+    Returns a Sufficiency verdict which route_after_think uses to decide:
+      - enough=True OR replan_count >= 1  → answer_node (synthesize)
+      - enough=False AND replan_count < 1  → plan_node (replan with refined query)
 
-    Routing logic lives in the EDGES, not here.
-
-    tools_loader: optional LangChainMCPToolsLoader; when provided its
-        get_acl_tools() is used instead of build_langgraph_tools() so
-        that tool descriptions are auto-discovered from the MCP server.
+    Uses with_structured_output(Sufficiency) — non-streaming, silent to SSE.
     """
-    from langchain_core.messages import HumanMessage
+    from langchain_core.messages import SystemMessage, HumanMessage
 
     logger.info(
         "langgraph_think",
         extra={"session_id": state["session_id"], "iteration": state["iteration"]},
     )
 
-    user_id = state["user_id"]
-    allowed_doc_ids = frozenset(state["allowed_doc_ids"])
+    # Build message list: system + conversation history (includes ToolMessages) + question.
+    history = list(state.get("messages") or [])
+    question = state["question"]
+    messages: list = [SystemMessage(content=SUFFICIENCY_SYSTEM_PROMPT)] + history
+    # Ensure question is the last HumanMessage so the checker has the clear target.
+    from langchain_core.messages import HumanMessage as _HM
+    last_human = next((m for m in reversed(history) if isinstance(m, _HM)), None)
+    if last_human is None or str(last_human.content).strip() != question.strip():
+        messages.append(HumanMessage(content=question))
 
-    if tools_loader is not None:
-        tools = await tools_loader.get_acl_tools(
-            user_id=user_id,
-            allowed_doc_ids=allowed_doc_ids,
+    checker = model.with_structured_output(Sufficiency)
+    try:
+        verdict: Sufficiency = await checker.ainvoke(messages)
+    except Exception as exc:
+        logger.warning(
+            "langgraph_think_parse_error — fallback to enough=True: %s", exc
         )
-    else:
-        tools = await build_langgraph_tools(
-            mcp_client=mcp_client,
-            allowed_doc_ids=allowed_doc_ids,
-            user_id=user_id,
-        )
+        verdict = Sufficiency(enough=True, reason="parse_error_fallback", refine_query=None)
 
-    # Append the current question so the LLM sees:
-    #   [prior turn 1] [prior turn 2] ... [current question]
-    # On second+ think iterations (after act_node), messages[-1] is a ToolMessage,
-    # so check the LAST HumanMessage in the list to avoid re-appending the question.
-    messages = list(state["messages"])
-    q = state["question"]
-    last_human = next((m for m in reversed(messages) if isinstance(m, HumanMessage)), None)
-    if last_human is None or last_human.content != q:
-        messages.append(HumanMessage(content=q))
-
-    # If force_answer is set (iteration cap reached or duplicate tool call detected),
-    # invoke the model WITHOUT tools so it MUST emit a final text answer synthesised
-    # from the gathered ToolMessage context.  route_after_think will then route to
-    # answer_node because there are no tool_calls in the response.
-    if state.get("force_answer"):
-        logger.info(
-            "langgraph_think_forced_answer",
-            extra={"session_id": state["session_id"], "iteration": state["iteration"]},
-        )
-        response: AIMessage = await model.ainvoke(messages)
-    else:
-        # Bind tools and invoke model. On the FIRST ReAct iteration force a tool
-        # call ("required") so a weak model (gpt-4o-mini) cannot skip retrieval and
-        # emit a premature "no info" answer — triage_node has already filtered out
-        # off-topic / clarify / greeting questions, so an in_scope question here
-        # always warrants rag_search or hr_query. Later iterations use "auto" so the
-        # model can synthesise the final answer from gathered tool results.
-        tool_choice = "required" if state["iteration"] == 0 else "auto"
-        bound_model = model.bind_tools(tools, tool_choice=tool_choice)
-        response: AIMessage = await bound_model.ainvoke(messages)
-
-    tool_names = [tc["name"] for tc in (response.tool_calls or [])]
     logger.info(
         "langgraph_think_done",
         extra={
             "session_id": state["session_id"],
-            "has_tool_calls": bool(response.tool_calls),
-            "tool_names": tool_names,
-            "content_length": len(response.content or ""),
+            "enough": verdict.enough,
+            "reason": verdict.reason[:120],
+            "replan_count": state.get("replan_count", 0),
         },
     )
 
     return {
-        "messages": [response],
+        "sufficiency": verdict.model_dump(),
         "phase": AgentPhase.THINKING,
         "previous_phase": state["phase"],
     }
@@ -442,49 +501,48 @@ async def act_node(
     mcp_client: MCPToolClient,
 ) -> dict:
     """
-    act_node: Execute one tool call with ACL guard (async version).
+    act_node: Execute one tool step from the plan with ACL guard.
+
+    Reads the current step from state["tool_plan"][state["plan_cursor"]] — the plan
+    was produced by plan_node (structured LLM call) and is not modifiable by the LLM
+    at execution time.
 
     ACL GUARD: user_id and allowed_doc_ids come from state (set at entry),
-    never from LLM arguments. This prevents privilege escalation.
+    never from the plan/LLM arguments. This prevents privilege escalation.
 
-    Returns a ToolMessage added to the message history.
+    Returns a ToolMessage added to message history and increments plan_cursor.
     """
-    last_msg: AIMessage = state["messages"][-1]
+    tool_plan = state.get("tool_plan") or []
+    cursor = state.get("plan_cursor", 0)
 
-    if not last_msg.tool_calls:
-        return {"phase": AgentPhase.ACTING}
+    if cursor >= len(tool_plan):
+        # Safety: should not reach here if routing is correct
+        logger.warning(
+            "langgraph_act_no_step",
+            extra={"session_id": state["session_id"], "cursor": cursor, "plan_len": len(tool_plan)},
+        )
+        return {"phase": AgentPhase.ACTING, "plan_cursor": cursor}
 
-    tool_call = last_msg.tool_calls[0]
-    tool_name = tool_call["name"]
-    tool_args = tool_call.get("args", {})
-    tool_call_id = tool_call.get("id", f"call_{tool_name}")
+    step = tool_plan[cursor]
+    tool_name = step.get("tool", "rag_search")
+    # Use step's query hint if provided, else fall back to user's raw question.
+    step_query = step.get("query") or state["question"]
+    step_intent = step.get("intent") or "leave_balance"
+    tool_call_id = f"plan_step_{cursor}"
 
-    # For rag_search: log the actual query being sent (state["question"]), not the LLM-suggested
-    # tool arg (which is ignored).  This makes traces unambiguous in Langfuse.
-    actual_query = state["question"] if tool_name == "rag_search" else None
     logger.info(
         "langgraph_act",
         extra={
             "session_id": state["session_id"],
             "tool": tool_name,
-            "args_keys": list(tool_args.keys()),
-            **({"query": actual_query} if actual_query is not None else {}),
+            "cursor": cursor,
+            "plan_len": len(tool_plan),
+            **({"query": step_query} if tool_name == "rag_search" else {}),
         },
     )
 
     allowed_doc_ids = frozenset(state["allowed_doc_ids"])
     user_id = state["user_id"]
-
-    # Dedup guard: if we have already executed this exact (tool, args) pair in a prior
-    # iteration, set force_answer so think_node will emit a final text response instead
-    # of looping again.  We still execute the tool this time so the LLM has the result.
-    existing_sigs = list(state.get("tool_call_signatures") or [])
-    try:
-        sig = f"{tool_name}:{json.dumps(tool_args, sort_keys=True)}"
-    except (TypeError, ValueError):
-        sig = f"{tool_name}:{str(sorted(tool_args.items()))}"
-    is_duplicate = sig in existing_sigs
-    new_sigs = existing_sigs + [sig]
 
     # Observability: filled by rag_search branch, None for all other tools.
     _rag_event: dict | None = None
@@ -496,11 +554,11 @@ async def act_node(
                 success = False
                 new_sources = []
             else:
-                # top_k ưu tiên từ LLM tool_args, fallback về giá trị config-driven trong state.
-                effective_top_k = tool_args.get("top_k", state.get("rag_top_k", 5))
+                # top_k: config-driven from state (set by orchestration from settings.rag_top_k).
+                effective_top_k = state.get("rag_top_k", 5)
                 _rag_start_dt = datetime.now(timezone.utc)
                 results = await mcp_client.rag_search(
-                    query=state["question"],  # raw question — server-injected, like user_id
+                    query=step_query,  # from plan step (refined) or user's raw question
                     document_ids=list(allowed_doc_ids),
                     top_k=effective_top_k,
                 )
@@ -522,7 +580,7 @@ async def act_node(
                 # Ghi debug event (JSON-safe) vào state để orchestration dựng Langfuse span.
                 # Tất cả giá trị là scalar/list[str/float] — an toàn với checkpointer.
                 _rag_event = {
-                    "query": state["question"],
+                    "query": step_query,
                     "top_k": effective_top_k,
                     "allowed_count": len(allowed_doc_ids),
                     "threshold": threshold,
@@ -576,7 +634,7 @@ async def act_node(
         elif tool_name == "hr_query":
             result = await mcp_client.hr_query(
                 user_id=user_id,  # ACL enforced — LLM cannot override
-                intent=tool_args.get("intent", "leave_balance"),
+                intent=step_intent,  # from plan step (validated by Literal type)
             )
             data = result.summary
             success = True
@@ -588,7 +646,7 @@ async def act_node(
             # unknown kwargs they don't declare.
             raw = await mcp_client.call_tool(
                 tool_name,
-                {**tool_args, "user_id": user_id},
+                {"user_id": user_id},
             )
             summary = str(
                 raw.get("summary") or raw.get("answer") or raw.get("text") or ""
@@ -635,16 +693,8 @@ async def act_node(
         "phase": AgentPhase.ACTING,
         "previous_phase": state["phase"],
         "tool_results": state.get("tool_results", []) + [tool_result],
-        "tool_call_signatures": new_sigs,
+        "plan_cursor": cursor + 1,  # advance to next step in plan
     }
-
-    # Duplicate tool call detected — force final text answer on the next think iteration.
-    if is_duplicate:
-        logger.info(
-            "langgraph_act_duplicate_tool_call",
-            extra={"session_id": state["session_id"], "tool": tool_name, "sig": sig[:120]},
-        )
-        new_state["force_answer"] = True
 
     if tool_name == "rag_search" and success:
         seen_docs = {s["document_name"] for s in existing_sources}
@@ -692,18 +742,19 @@ def observe_node(state: AgentState) -> dict:
         "iteration": new_iteration,
     }
 
-    # Iteration cap reached — tell think_node to produce the final answer without
-    # calling any more tools. This makes the loop hard-bounded at max_iterations.
+    # In Plan-and-Execute, routing after observe is based on plan_cursor vs plan length,
+    # not on iteration count. iteration is kept for logging / safety reference only.
+    # If iteration cap is hit AND no more plan steps remain, route_after_observe will
+    # send to think_node which will mark enough=True (fail-safe) → answer.
     if new_iteration >= state["max_iterations"]:
         logger.info(
-            "langgraph_observe_cap_reached",
+            "langgraph_observe_iteration_cap",
             extra={
                 "session_id": state["session_id"],
                 "iteration": new_iteration,
                 "max_iterations": state["max_iterations"],
             },
         )
-        result["force_answer"] = True
 
     return result
 
@@ -712,17 +763,23 @@ def observe_node(state: AgentState) -> dict:
 # Node: answer_node
 # ---------------------------------------------------------------------------
 
-def answer_node(state: AgentState) -> dict:
+async def answer_node(state: AgentState, model: BaseChatModel) -> dict:
     """
-    answer_node: Mark the end of the agent run.
+    answer_node: Stream the final answer synthesised from tool results.
 
-    - shortcut path: uses state["shortcut_response"] directly
-    - think path: LLM already gave content in the last AIMessage
-
-    Phase is set to DONE so the SSE stream knows to emit the final event.
+    Two paths:
+      - shortcut/canned path (shortcut_outcome is set): no LLM call needed — the
+        answer is already in state["shortcut_response"]. orchestration streams it
+        via _word_chunks fallback (answer_accumulator stays empty).
+      - plan path (tool results gathered): call model with ANSWER_SYSTEM_PROMPT so
+        it synthesises a full, cited answer from the ToolMessages in state["messages"].
+        Streaming is active (answer_node is not filtered by orchestration), so tokens
+        flow through on_chat_model_stream → SSE in real-time.
     """
+    from langchain_core.messages import SystemMessage, HumanMessage
+
     outcome = state.get("shortcut_outcome") or "SUCCESS"
-    has_tool_calls = bool(state.get("tool_results"))
+    has_tool_results = bool(state.get("tool_results"))
 
     logger.info(
         "langgraph_answer",
@@ -731,11 +788,36 @@ def answer_node(state: AgentState) -> dict:
             "iteration": state["iteration"],
             "outcome": outcome,
             "sources_count": len(state.get("sources", [])),
-            "has_tool_calls": has_tool_calls,
+            "has_tool_results": has_tool_results,
+            "is_canned": bool(state.get("shortcut_outcome")),
         },
     )
 
+    # Canned path: triage set shortcut_response (REFUSE/CLARIFY/SAFETY/META).
+    # No model call — orchestration will stream shortcut_response via _word_chunks.
+    if state.get("shortcut_outcome"):
+        return {
+            "phase": AgentPhase.DONE,
+            "previous_phase": state["phase"],
+        }
+
+    # Plan path: synthesise answer from gathered tool results.
+    history = list(state.get("messages") or [])
+    question = state["question"]
+    messages: list = [SystemMessage(content=ANSWER_SYSTEM_PROMPT)] + history
+
+    # Ensure question is present so the model knows what to answer.
+    from langchain_core.messages import HumanMessage as _HM
+    last_human = next((m for m in reversed(history) if isinstance(m, _HM)), None)
+    if last_human is None or str(last_human.content).strip() != question.strip():
+        messages.append(HumanMessage(content=question))
+
+    # model.ainvoke triggers _astream internally (answer_node has no _structured_format)
+    # → on_chat_model_stream events fire under node="answer" → SSE token stream.
+    response: AIMessage = await model.ainvoke(messages)
+
     return {
+        "messages": [response],
         "phase": AgentPhase.DONE,
         "previous_phase": state["phase"],
     }

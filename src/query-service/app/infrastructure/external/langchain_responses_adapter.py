@@ -9,12 +9,12 @@ Key translation:
   LangGraph/LC  ->  Responses API:
     .invoke([HumanMessage])           -> client.responses.create(input=..., instructions=...)
     .bind_tools([BaseTool])           -> serializes to OpenAI function tool schema
-    .with_structured_output(S)         -> uses response_format with json_schema
+    .with_structured_output(S)         -> uses text.format (json_schema) — Responses API
     .stream(input)                     -> streams response tokens
 
   Responses API  ->  LangGraph/LC:
     function_call output item          -> AIMessage.tool_calls
-    output_text                        -> AIMessage.content
+    output_text / json_schema          -> AIMessage.content
 """
 
 import json
@@ -31,6 +31,64 @@ from openai import AsyncOpenAI
 from app.application.prompts import AGENT_SYSTEM_PROMPT as DEFAULT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
+
+
+class _StructuredRunnable:
+    """
+    Lightweight runnable wrapper returned by OpenAIResponsesChatModel.with_structured_output().
+
+    Wraps a bound_model (with _structured_format set → non-streaming, text.format param)
+    and parses its JSON output back to a Pydantic model instance.
+
+    This is intentionally NOT a LangChain Runnable subclass — nodes call it directly,
+    which means it never fires on_chat_model_stream events in astream_events. Plan-and-Execute
+    nodes (plan_node, think_node) use this to ensure their structured LLM calls stay silent
+    to the SSE stream while answer_node's plain model.ainvoke() streams as usual.
+    """
+
+    def __init__(self, bound_model: "OpenAIResponsesChatModel", schema: type | None) -> None:
+        self._bound_model = bound_model
+        self._schema = schema
+
+    @staticmethod
+    def _strip_fences(content: str) -> str:
+        """Strip ```json ... ``` code fences that some models add around JSON."""
+        content = content.strip()
+        if content.startswith("```"):
+            lines = content.splitlines()
+            # Remove opening fence (``` or ```json)
+            lines = lines[1:]
+            # Remove closing fence if present
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            content = "\n".join(lines).strip()
+        return content
+
+    async def ainvoke(self, messages: Sequence["BaseMessage"]) -> Any:
+        """Async: call model (non-streaming) → parse JSON → return Pydantic instance."""
+        ai_msg = await self._bound_model.ainvoke(messages)
+        content = self._strip_fences(str(ai_msg.content or ""))
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError as exc:
+            logger.warning("structured_output_json_parse_failed: %s | content=%s", exc, content[:200])
+            raise
+        if self._schema is not None:
+            return self._schema.model_validate(data)
+        return data
+
+    def invoke(self, messages: Sequence["BaseMessage"]) -> Any:
+        """Sync: call model → parse JSON → return Pydantic instance."""
+        ai_msg = self._bound_model.invoke(messages)
+        content = self._strip_fences(str(ai_msg.content or ""))
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError as exc:
+            logger.warning("structured_output_json_parse_failed: %s | content=%s", exc, content[:200])
+            raise
+        if self._schema is not None:
+            return self._schema.model_validate(data)
+        return data
 
 
 class OpenAIResponsesChatModel(BaseChatModel):
@@ -50,7 +108,12 @@ class OpenAIResponsesChatModel(BaseChatModel):
     _client: Any = None  # type: ignore[assignment]
     _bound_tools: Any = None  # type: ignore[assignment]
     _tool_choice: Any = None  # type: ignore[assignment]
-    _response_format: Any = None  # type: ignore[assignment]
+    _response_format: Any = None  # type: ignore[assignment]  # kept for compat but unused in new arch
+    # Structured output (Plan-and-Execute arch): set by with_structured_output()
+    # _structured_format → passed as text.format to Responses API (correct param)
+    # _structured_schema → Pydantic class for model_validate after JSON parse
+    _structured_format: Any = None  # type: ignore[assignment]
+    _structured_schema: Any = None  # type: ignore[assignment]
 
     @property
     def _llm_type(self) -> str:
@@ -154,16 +217,19 @@ class OpenAIResponsesChatModel(BaseChatModel):
             "timeout": self.timeout,
             "temperature": self.temperature,
         }
-        if self._bound_tools:
-            params["tools"] = self._bound_tools
-            # tool_choice ("auto" | "required" | "none") is only meaningful when
-            # tools are present. think_node forces "required" on the first ReAct
-            # iteration so gpt-4o-mini cannot short-circuit to a "no info" answer
-            # without first calling rag_search/hr_query.
-            if self._tool_choice:
-                params["tool_choice"] = self._tool_choice
-        if self._response_format:
-            params["response_format"] = self._response_format
+        if self._structured_format:
+            # Structured output (Plan-and-Execute): Responses API uses text.format,
+            # NOT response_format (which is a Chat Completions API param). Structured
+            # calls are intentionally non-streaming (_should_stream returns False).
+            # Do NOT set tools when using structured format.
+            params["text"] = {"format": self._structured_format}
+        else:
+            if self._bound_tools:
+                params["tools"] = self._bound_tools
+                # tool_choice ("auto" | "required" | "none") is only meaningful when
+                # tools are present.
+                if self._tool_choice:
+                    params["tool_choice"] = self._tool_choice
         return params
 
     def _invoke_sync(self, messages: Sequence[BaseMessage]) -> Any:
@@ -277,17 +343,22 @@ class OpenAIResponsesChatModel(BaseChatModel):
         run_manager: Any = None,
         **kwargs,
     ) -> bool:
-        """Luôn dùng streaming cho async path (chúng ta implement _astream).
+        """Streaming chỉ dùng cho câu trả lời cuối (answer_node).
+
+        - Structured output calls (plan_node / think_node với _structured_format set):
+          LUÔN non-streaming → _agenerate → không phát on_chat_model_stream → im lặng với SSE.
+        - Câu trả lời cuối (answer_node): streaming qua _astream → phát token ra SSE.
 
         langchain-core 1.x _should_stream() trả True chỉ khi: streaming callback được
-        gắn, hoặc streaming=True trong model_fields_set, hoặc stream=True kwarg. Không
-        có điều kiện nào trên thì trả False dù _astream đã override.
-        Override này bật streaming khi async_api=True và _astream tồn tại, vẫn tôn trọng
-        _streaming_disabled() (disable_streaming=True / "tool_calling" vẫn tắt).
+        gắn, hoặc streaming=True trong model_fields_set, hoặc stream=True kwarg. Override
+        này bật streaming khi async_api=True, trừ khi đang dùng structured output.
         """
         if self._streaming_disabled(**kwargs):
             return False
-        return async_api  # True → _astream; False → _generate (sync, không dùng async streaming)
+        if self._structured_format is not None:
+            # Structured output → non-streaming always (JSON must arrive complete to parse)
+            return False
+        return async_api  # True → _astream; False → _generate
 
     async def _astream(  # type: ignore[override]
         self,
@@ -421,10 +492,15 @@ class OpenAIResponsesChatModel(BaseChatModel):
         self,
         schema: type | dict,
         **kwargs,
-    ) -> "OpenAIResponsesChatModel":
+    ) -> "_StructuredRunnable":
         """
-        Bind a structured output schema. Returns a model that produces a
-        Pydantic/model instance from .invoke().
+        Bind a structured output schema. Returns a _StructuredRunnable that:
+          1. Calls the model with text.format (Responses API correct param — NOT response_format)
+          2. Parses the JSON response back to a Pydantic model instance.
+
+        Calling ainvoke() on the returned runnable returns the Pydantic instance, not AIMessage.
+        The underlying model call is always non-streaming (_should_stream returns False when
+        _structured_format is set), so no on_chat_model_stream events leak to SSE.
         """
         if isinstance(schema, type):
             json_schema = schema.model_json_schema()
@@ -432,17 +508,19 @@ class OpenAIResponsesChatModel(BaseChatModel):
         else:
             json_schema = schema
             schema_name = json_schema.get("name", "Answer")
+            schema = None  # type: ignore[assignment]  # no Pydantic class for dict schema
 
-        response_format = {
+        # Responses API structured format: text.format (NOT response_format)
+        structured_format = {
             "type": "json_schema",
-            "json_schema": {
-                "name": schema_name,
-                "schema": json_schema,
-            },
+            "name": schema_name,
+            "schema": json_schema,
+            "strict": True,
         }
         bound = self.copy()
-        bound._response_format = response_format  # type: ignore[attr-defined]
-        return bound
+        bound._structured_format = structured_format  # type: ignore[attr-defined]
+        bound._structured_schema = schema  # type: ignore[attr-defined]
+        return _StructuredRunnable(bound_model=bound, schema=schema)
 
     def stream(
         self,
