@@ -26,6 +26,9 @@ async def handle_user_event(
     payload: dict,
     repo: HrRepository,
     publisher: ProfilePublisher | None = None,
+    *,
+    default_annual_leave: int = 12,
+    default_sick_leave: int = 10,
 ) -> None:
     """Áp event vòng đời user vào hồ sơ HR. Idempotent (upsert + ON CONFLICT). Tách
     riêng khỏi NATS để test nhanh, không nuốt lỗi (lỗi -> raise cho caller nak/retry)."""
@@ -40,8 +43,8 @@ async def handle_user_event(
 
     await repo.upsert_employee_from_user(user_id, email, department, is_active)
     if is_active:
-        # User đang hoạt động -> đảm bảo có hồ sơ phép mặc định.
-        await repo.ensure_leave_balance(user_id)
+        # User đang hoạt động -> đảm bảo có hồ sơ phép với hạn mức mặc định từ config.
+        await repo.ensure_leave_balance(user_id, default_annual_leave, default_sick_leave)
     if publisher is not None:
         try:
             await publisher.publish_profile_updated(
@@ -95,7 +98,14 @@ async def start_user_events_subscriber(
                 payload = json.loads(message.data.decode("utf-8"))
                 repo = repo_factory()
                 try:
-                    await handle_user_event(message.subject, payload, repo, publisher)
+                    await handle_user_event(
+                        message.subject,
+                        payload,
+                        repo,
+                        publisher,
+                        default_annual_leave=settings.default_annual_leave,
+                        default_sick_leave=settings.default_sick_leave,
+                    )
                 finally:
                     await repo.aclose()
                 if hasattr(message, "ack"):

@@ -114,7 +114,9 @@ async def hr_query(
         if dto is None and settings.auto_provision_leave_balance:
             # Lưới an toàn: user chưa được đồng bộ (vd admin tạo trước khi có event
             # user.created) -> tự tạo hồ sơ phép mặc định idempotent rồi đọc lại.
-            await repo.ensure_leave_balance(body.user_id)
+            await repo.ensure_leave_balance(
+                body.user_id, settings.default_annual_leave, settings.default_sick_leave
+            )
             dto = await repo.get_leave_balance(body.user_id)
         if dto is None:
             raise HTTPException(status_code=404, detail="no HR data for this user")

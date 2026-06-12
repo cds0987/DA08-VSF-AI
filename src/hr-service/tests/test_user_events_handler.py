@@ -22,8 +22,11 @@ class RecordingRepo:
         self.ensured: list[str] = []
         self.upserts: list[tuple[str, str, str, bool]] = []
 
-    async def ensure_leave_balance(self, user_id: str) -> None:
+    async def ensure_leave_balance(
+        self, user_id: str, annual_total: int = 12, sick_total: int = 10
+    ) -> None:
         self.ensured.append(user_id)
+        self.ensured_totals = (annual_total, sick_total)
 
     async def upsert_employee_from_user(
         self, user_id: str, email: str, department: str, is_active: bool
@@ -79,6 +82,18 @@ def test_user_created_provisions_employee_and_leave_balance() -> None:
             "employment_status": "active",
         }
     ]
+
+
+def test_user_created_uses_config_default_leave_limits() -> None:
+    repo = RecordingRepo()
+    payload = {"user_id": "u-9", "email": "a@b.c", "department": "HR", "is_active": True}
+    _run(
+        handle_user_event(
+            "user.created", payload, repo, default_annual_leave=18, default_sick_leave=5
+        )
+    )
+    assert repo.ensured == ["u-9"]
+    assert repo.ensured_totals == (18, 5)
 
 
 def test_user_deactivated_sets_inactive_no_leave_balance() -> None:
@@ -141,6 +156,8 @@ class FakeSettings:
     nats_url: str = "nats://nats:4222"
     nats_jetstream_enabled: bool = True
     user_events_enabled: bool = True
+    default_annual_leave: int = 12
+    default_sick_leave: int = 10
 
 
 class FakeConnection:

@@ -24,9 +24,12 @@ class HrRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def ensure_leave_balance(self, user_id: str) -> None:
-        """Tạo bản ghi leave_balance mặc định nếu chưa có (idempotent). Lưới an toàn
-        cho user chưa được đồng bộ qua event user.created."""
+    async def ensure_leave_balance(
+        self, user_id: str, annual_total: int, sick_total: int
+    ) -> None:
+        """Tạo bản ghi leave_balance với hạn mức mặc định cho trước nếu chưa có
+        (idempotent). Lưới an toàn cho user chưa được đồng bộ qua event user.created.
+        Hạn mức do caller truyền vào (từ HrSettings), KHÔNG hardcode trong repo/migration."""
         raise NotImplementedError
 
     @abstractmethod

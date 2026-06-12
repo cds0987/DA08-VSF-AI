@@ -73,17 +73,21 @@ class PostgresHrRepository(HrRepository):
 
         return await asyncio.to_thread(_query)
 
-    async def ensure_leave_balance(self, user_id: str) -> None:
+    async def ensure_leave_balance(
+        self, user_id: str, annual_total: int, sick_total: int
+    ) -> None:
         def _ensure() -> None:
             with self._session() as session:
-                # Chỉ chèn user_id; các cột còn lại lấy server_default migration (12/10/0/now).
+                # Chèn hạn mức tường minh từ config (annual/sick); used lấy server_default 0.
                 # ON CONFLICT DO NOTHING -> idempotent, an toàn khi gọi đua.
                 session.execute(
                     sa.text(
-                        "INSERT INTO hr_svc.leave_balance (user_id) VALUES (:uid) "
+                        "INSERT INTO hr_svc.leave_balance "
+                        "(user_id, annual_leave_total, sick_leave_total) "
+                        "VALUES (:uid, :annual, :sick) "
                         "ON CONFLICT (user_id) DO NOTHING"
                     ),
-                    {"uid": user_id},
+                    {"uid": user_id, "annual": annual_total, "sick": sick_total},
                 )
                 session.commit()
 

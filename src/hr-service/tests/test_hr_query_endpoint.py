@@ -35,7 +35,9 @@ class FakeHrRepository(HrRepository):
         }
         return data.get(user_id)
 
-    async def ensure_leave_balance(self, user_id: str) -> None:
+    async def ensure_leave_balance(
+        self, user_id: str, annual_total: int = 12, sick_total: int = 10
+    ) -> None:
         # Fake mặc định KHÔNG provision -> giữ nguyên ngữ nghĩa 404 cho user lạ.
         return None
 
@@ -133,6 +135,8 @@ def setup_module() -> None:
         database_url="",
         internal_token=TOKEN,
         auto_provision_leave_balance=True,
+        default_annual_leave=12,
+        default_sick_leave=10,
         nats_url="nats://localhost:4222",
         nats_jetstream_enabled=False,
         user_events_enabled=False,
@@ -144,6 +148,8 @@ def setup_module() -> None:
         database_url="",
         internal_token=TOKEN,
         auto_provision_leave_balance=True,
+        default_annual_leave=12,
+        default_sick_leave=10,
         nats_url="nats://localhost:4222",
         nats_jetstream_enabled=False,
         user_events_enabled=False,
@@ -215,18 +221,21 @@ class ProvisioningFakeHrRepository(FakeHrRepository):
     đọc sau trả về DTO mặc định (12/10)."""
 
     def __init__(self) -> None:
-        self._provisioned: set[str] = set()
+        self._provisioned: dict[str, tuple[int, int]] = {}
 
     async def get_leave_balance(self, user_id: str):
         base = await super().get_leave_balance(user_id)
         if base is not None:
             return base
         if user_id in self._provisioned:
-            return LeaveBalanceDTO(12, 0, 12, 10, 0, 10)
+            annual, sick = self._provisioned[user_id]
+            return LeaveBalanceDTO(annual, 0, annual, sick, 0, sick)
         return None
 
-    async def ensure_leave_balance(self, user_id: str) -> None:
-        self._provisioned.add(user_id)
+    async def ensure_leave_balance(
+        self, user_id: str, annual_total: int = 12, sick_total: int = 10
+    ) -> None:
+        self._provisioned[user_id] = (annual_total, sick_total)
 
 
 def test_leave_balance_auto_provisioned_for_new_user() -> None:
@@ -257,6 +266,8 @@ def test_leave_balance_404_when_auto_provision_disabled() -> None:
         database_url="",
         internal_token=TOKEN,
         auto_provision_leave_balance=False,
+        default_annual_leave=12,
+        default_sick_leave=10,
         nats_url="nats://localhost:4222",
         nats_jetstream_enabled=False,
         user_events_enabled=False,
@@ -278,6 +289,8 @@ def test_leave_balance_404_when_auto_provision_disabled() -> None:
             database_url="",
             internal_token=TOKEN,
             auto_provision_leave_balance=True,
+            default_annual_leave=12,
+            default_sick_leave=10,
             nats_url="nats://localhost:4222",
             nats_jetstream_enabled=False,
             user_events_enabled=False,
