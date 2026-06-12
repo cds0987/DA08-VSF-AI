@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ChatMessage, Citation, PipelineStage } from '~/types'
+import type { ChatMessage, Citation, PipelineStage, TraceEntry } from '~/types'
 import UserBubble from './UserBubble.vue'
 import FallbackBlock from './FallbackBlock.vue'
 import AnswerBlock from './AnswerBlock.vue'
@@ -12,6 +12,7 @@ defineProps<{
   pipelineStages: PipelineStage[]
   streamingText: string
   thinkingStatus?: string
+  traceLog?: TraceEntry[]
 }>()
 
 const emit = defineEmits<{
@@ -34,9 +35,9 @@ const emit = defineEmits<{
     </template>
     <Pipeline
       v-if="pipeline >= 0 && pipeline < pipelineStages.length"
-      :stage="pipeline"
-      :stages="pipelineStages"
+      :trace-log="traceLog ?? []"
       :thinking-status="thinkingStatus"
+      :is-thinking="pipeline >= 0 && pipeline < pipelineStages.length"
     />
     <StreamingBlock
       v-if="pipeline === pipelineStages.length && streamingText"

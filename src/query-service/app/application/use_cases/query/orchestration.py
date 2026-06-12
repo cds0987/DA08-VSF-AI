@@ -406,6 +406,19 @@ class QueryOrchestrationUseCase:
                             "agent_mode": "langgraph",
                             "iterations": last_iteration,
                         }
+                    # Emit acting event for act node — use LLM's actual tool decision
+                    if node_name == "act":
+                        tool_info = _extract_tool_call(event)
+                        if tool_info:
+                            yield {
+                                "phase": "acting",
+                                "node": "act",
+                                "tool": tool_info["name"],
+                                "tool_args": tool_info.get("args", {}),
+                                "agent_mode": "langgraph",
+                                "session_id": session_id,
+                                "iterations": last_iteration,
+                            }
 
                 # LLM call started — record start time + input for langfuse enriched trace
                 elif event_type == "on_chat_model_start":
@@ -565,6 +578,22 @@ class QueryOrchestrationUseCase:
                         if span is not None and _tracer is not None:
                             output = event.get("data", {}).get("output") or {}
                             _tracer.span_end(span, output_data=_node_output_summary(output))
+                        # Emit observing event from act node output (ToolMessage with real results)
+                        if run_name == "act":
+                            out = (event.get("data") or {}).get("output") or {}
+                            if isinstance(out, dict):
+                                for msg in reversed(out.get("messages") or []):
+                                    t_name = getattr(msg, "name", "") or ""
+                                    if t_name:
+                                        yield {
+                                            "phase": "observing",
+                                            "tool": t_name,
+                                            "tool_result_summary": _parse_tool_result_summary(t_name, msg),
+                                            "agent_mode": "langgraph",
+                                            "session_id": session_id,
+                                            "iterations": last_iteration,
+                                        }
+                                        break
                         continue
 
                     final_state = event.get("data", {}).get("output", {})
@@ -1219,6 +1248,22 @@ def _extract_tool_call(event: Any) -> dict | None:
         return {"name": name, "args": args} if name else None
     except Exception:  # noqa: BLE001 — tracing best-effort
         return None
+
+
+def _parse_tool_result_summary(tool_name: str, msg: Any) -> dict:
+    """Parse ToolMessage content → compact summary for SSE observing event."""
+    try:
+        content = getattr(msg, "content", None) or str(msg)
+        if tool_name == "rag_search":
+            parsed = json.loads(content) if isinstance(content, str) else content
+            results = (parsed or {}).get("results", []) if isinstance(parsed, dict) else []
+            docs = list(dict.fromkeys(r.get("document_name", "") for r in results if r.get("document_name")))
+            return {"count": len(results), "docs": docs[:4]}
+        if tool_name == "hr_query":
+            return {"raw": str(content)[:120]}
+    except Exception:  # noqa: BLE001 — best-effort
+        pass
+    return {}
 
 
 def _msg_brief(msg: Any) -> dict:

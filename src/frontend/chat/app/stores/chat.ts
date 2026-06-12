@@ -13,6 +13,7 @@ import type {
   QueryRequest,
   QuerySource,
   QueryTokenEvent,
+  TraceEntry,
 } from '~/types'
 import {
   QueryServiceError,
@@ -66,6 +67,7 @@ function toCitation(source: QuerySource, id: string): Citation {
     caption: source.caption,
     heading_path: source.heading_path,
     page_number: source.page_number,
+    ref: source.ref,
   }
 }
 
@@ -132,6 +134,7 @@ export const useChatStore = defineStore('chat', () => {
   const pipeline = ref<number>(-1)
   const streamingText = ref('')
   const thinkingStatus = ref('')
+  const traceLog = ref<TraceEntry[]>([])
   const panelCitation = ref<Citation | null>(null)
   const isPanelOpen = ref(false)
   let abortController: AbortController | null = null
@@ -165,6 +168,7 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = []
     pipeline.value = -1
     streamingText.value = ''
+    traceLog.value = []
     isPanelOpen.value = false
     panelCitation.value = null
     input.value = ''
@@ -363,6 +367,7 @@ export const useChatStore = defineStore('chat', () => {
 
     streamingText.value = ''
     thinkingStatus.value = ''
+    traceLog.value = []
     pipeline.value = 0
     let fullContent = ''
     let completed = false
@@ -405,6 +410,24 @@ export const useChatStore = defineStore('chat', () => {
             // Update thinking status for "AI thinking" display
             if (payload.status) {
               thinkingStatus.value = payload.status
+            }
+            // Build dynamic trace log from acting/observing events
+            if (payload.phase === 'acting' && payload.tool) {
+              traceLog.value.push({
+                tool: payload.tool,
+                args: payload.tool_args ?? {},
+                iteration: payload.iterations ?? traceLog.value.length + 1,
+                pending: true,
+              })
+            }
+            if (payload.phase === 'observing' && payload.tool) {
+              const entry = [...traceLog.value].reverse().find(e => e.tool === payload.tool && e.pending)
+              if (entry) {
+                entry.resultCount = payload.tool_result_summary?.count
+                entry.resultDocs = payload.tool_result_summary?.docs
+                entry.resultRaw = payload.tool_result_summary?.raw
+                entry.pending = false
+              }
             }
             // Update pipeline stage based on phase
             if (payload.phase && PHASE_MAP[payload.phase] !== undefined) {
@@ -521,6 +544,7 @@ export const useChatStore = defineStore('chat', () => {
     pipeline,
     streamingText,
     thinkingStatus,
+    traceLog,
     panelCitation,
     isPanelOpen,
     setInput,

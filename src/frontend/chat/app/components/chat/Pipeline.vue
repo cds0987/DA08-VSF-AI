@@ -1,62 +1,123 @@
 <script setup lang="ts">
-import { Sparkles } from '@lucide/vue'
-import { cn } from '~/lib/utils'
-import type { PipelineStage } from '~/types'
+import { Search, Database, Loader2, CheckCircle2, Sparkles } from '@lucide/vue'
+import type { TraceEntry } from '~/types'
 
 interface Props {
-  stage: number
-  stages: PipelineStage[]
+  traceLog: TraceEntry[]
   thinkingStatus?: string
+  isThinking?: boolean
 }
 
 const props = defineProps<Props>()
+
+const TOOL_LABEL: Record<string, string> = {
+  rag_search: 'Tìm kiếm tài liệu',
+  hr_query: 'Truy vấn dữ liệu HR',
+}
+
+const TOOL_ICON: Record<string, any> = {
+  rag_search: Search,
+  hr_query: Database,
+}
+
+function getQueryLabel(entry: TraceEntry): string {
+  const args = entry.args
+  if (entry.tool === 'rag_search') {
+    const q = (args.query as string) || ''
+    return q ? `"${q}"` : ''
+  }
+  if (entry.tool === 'hr_query') {
+    const intent = (args.intent as string) || ''
+    const labelMap: Record<string, string> = {
+      leave_balance: 'số ngày phép còn lại',
+      leave_requests: 'lịch sử đơn nghỉ phép',
+      payroll: 'thông tin lương',
+    }
+    return labelMap[intent] || intent
+  }
+  return ''
+}
+
+function getResultLabel(entry: TraceEntry): string {
+  if (entry.tool === 'rag_search') {
+    const count = entry.resultCount ?? 0
+    if (count === 0) return 'Không tìm thấy kết quả'
+    const docs = entry.resultDocs ?? []
+    const docStr = docs.length > 0 ? ` — ${docs.slice(0, 2).join(', ')}${docs.length > 2 ? '...' : ''}` : ''
+    return `${count} tài liệu${docStr}`
+  }
+  if (entry.tool === 'hr_query' && entry.resultRaw) {
+    return entry.resultRaw.slice(0, 60) + (entry.resultRaw.length > 60 ? '…' : '')
+  }
+  return ''
+}
 </script>
 
 <template>
-  <div class="rounded-xl bg-transparent p-4">
-    <div class="mb-3 flex items-center gap-2 text-[12px] font-medium text-slate-800 dark:text-foreground">
+  <div class="rounded-xl bg-transparent px-4 py-3">
+    <div class="mb-2.5 flex items-center gap-2 text-[12px] font-medium text-slate-700 dark:text-foreground/80">
       <Sparkles class="h-3.5 w-3.5 text-blue-500" />
-      Retrieval pipeline
+      Agent đang xử lý
     </div>
-    <div class="space-y-1.5">
+
+    <!-- Thinking indicator (before any tool calls) -->
+    <div
+      v-if="isThinking && traceLog.length === 0"
+      class="flex items-center gap-2.5 rounded-md px-2 py-1.5"
+    >
+      <Loader2 class="h-3.5 w-3.5 shrink-0 animate-spin text-blue-500" />
+      <span class="text-[12.5px] text-slate-600 dark:text-muted-foreground animate-pulse">
+        {{ thinkingStatus || 'Đang suy nghĩ…' }}
+      </span>
+    </div>
+
+    <!-- Trace entries -->
+    <div class="space-y-1">
       <div
-        v-for="(s, i) in stages"
-        :key="s.label"
-        :class="cn(
-          'flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[12.5px]',
-          i === stage && 'bg-blue-50 dark:bg-blue-500/10 text-slate-900 dark:text-foreground',
-          i < stage && 'text-slate-500 dark:text-muted-foreground',
-          i > stage && 'text-slate-400 dark:text-muted-foreground/70',
-        )"
+        v-for="(entry, i) in traceLog"
+        :key="i"
+        class="rounded-lg border border-slate-100 dark:border-white/5 bg-slate-50/60 dark:bg-white/[0.03] px-3 py-2"
       >
-        <span
-          :class="cn(
-            'flex h-5 w-5 items-center justify-center rounded-full border',
-            i < stage && 'border-emerald-500/50 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-            i === stage && 'border-blue-400 text-blue-600 shadow-[0_0_8px_rgba(37,99,235,0.2)]',
-            i > stage && 'border-slate-200 dark:border-border text-slate-300 dark:text-muted-foreground/50',
-          )"
+        <!-- Tool header row -->
+        <div class="flex items-center gap-2">
+          <component
+            :is="TOOL_ICON[entry.tool] ?? Search"
+            class="h-3.5 w-3.5 shrink-0 text-blue-500"
+          />
+          <span class="text-[12px] font-semibold text-slate-700 dark:text-foreground/80">
+            {{ TOOL_LABEL[entry.tool] ?? entry.tool }}
+          </span>
+          <span v-if="getQueryLabel(entry)" class="flex-1 truncate text-[11.5px] text-slate-500 dark:text-muted-foreground">
+            {{ getQueryLabel(entry) }}
+          </span>
+          <Loader2
+            v-if="entry.pending"
+            class="h-3 w-3 shrink-0 animate-spin text-blue-400"
+          />
+          <CheckCircle2
+            v-else
+            class="h-3 w-3 shrink-0 text-emerald-500"
+          />
+        </div>
+
+        <!-- Result row -->
+        <div
+          v-if="!entry.pending"
+          class="mt-1 pl-5 text-[11px] text-slate-500 dark:text-muted-foreground/80"
         >
-          <template v-if="i < stage">
-            <svg
-              viewBox="0 0 24 24"
-              class="h-3 w-3"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="3"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-          </template>
-          <component v-else :is="s.icon" class="h-3 w-3" />
+          {{ getResultLabel(entry) }}
+        </div>
+      </div>
+
+      <!-- Pending thinking status after tool calls -->
+      <div
+        v-if="isThinking && traceLog.length > 0"
+        class="flex items-center gap-2 px-1 py-1"
+      >
+        <Loader2 class="h-3 w-3 shrink-0 animate-spin text-blue-400" />
+        <span class="text-[11.5px] text-slate-500 dark:text-muted-foreground animate-pulse">
+          {{ thinkingStatus || 'Đang tổng hợp kết quả…' }}
         </span>
-        <span class="flex-1">{{ s.label }}</span>
-        <span v-if="i === stage" class="text-[11px] text-blue-500 animate-pulse">
-          {{ thinkingStatus || 'in progress…' }}
-        </span>
-        <span v-if="i < stage" class="text-[11px] text-emerald-600">done</span>
       </div>
     </div>
   </div>
