@@ -16,6 +16,9 @@ pytest-cache-files-*/
 query-body.json
 feedback-body.json
 notify-body.json
+# SA key JSON (native GCS cho document-service): KHÔNG commit — đặt trực tiếp trên
+# VM (deploy-develop.yml). Khác env: đây là private key, sinh lại được, không share git.
+deploy/secrets/
 src/mcp-service/tests/.tmp/
 src\rag-worker\deploy\standalone\docker-compose.standalone.yml
 # Chỉ KHÔNG push file khởi tạo DB (schema tạo tay theo docs); phần còn lại push bình thường.

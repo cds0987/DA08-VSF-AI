@@ -44,6 +44,26 @@ services:
       - redis_data:/data
     restart: unless-stopped
 
+  # Postgres APP in-compose (thay Cloud SQL — nguyên tắc 1-VM: không host DB ngoài VM).
+  # Tạo 5 DB (user/doc/query/rag/hr) qua init-db.sql lần đầu. Data bền qua volume
+  # app_pg_data. User/pass KHỚP DATABASE_URL trong deploy/env/*.env (postgres/***REDACTED-DB-PW***).
+  # ⚠ Mất VM = mất DB -> nên cron pg_dump đẩy GCS để backup.
+  app-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ***REDACTED-DB-PW***
+      POSTGRES_DB: postgres
+    volumes:
+      - app_pg_data:/var/lib/postgresql/data
+      - ./infra/postgres/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
   # Qdrant CÙNG VM với rag-worker + mcp-service: chạy trong compose network, KHÔNG
   # expose host port -> không truy cập được từ ngoài. Producer (rag-worker) + consumer
   # (mcp-service) nói chuyện qua http://qdrant:6333 nội bộ. Bỏ phụ thuộc Qdrant Cloud /
@@ -119,6 +139,9 @@ services:
     env_file:
       - ./deploy/env/common.env
       - ./deploy/env/user-service.env
+    depends_on:
+      app-postgres:
+        condition: service_healthy
     restart: "no"
 
   user-backfill:
@@ -163,6 +186,9 @@ services:
     env_file:
       - ./deploy/env/common.env
       - ./deploy/env/document-service.env
+    depends_on:
+      app-postgres:
+        condition: service_healthy
     restart: "no"
 
   document-service:
@@ -183,8 +209,6 @@ services:
       doc-migrate:
         condition: service_completed_successfully
     restart: unless-stopped
-    volumes:
-        - ./deploy/secrets/gcp-sa.json:/secrets/gcp-sa.json:ro
 
   query-service:
     image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/query-service:${IMAGE_TAG:-develop}
@@ -197,6 +221,8 @@ services:
       <<: *newrelic
       NEW_RELIC_APP_NAME: vsf-query-service
     depends_on:
+      app-postgres:
+        condition: service_healthy
       nats:
         condition: service_started
       redis:
@@ -205,7 +231,7 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
-  # Migration one-shot: alembic upgrade head lên Cloud SQL TRƯỚC khi rag-worker chạy.
+  # Migration one-shot: alembic upgrade head lên app-postgres TRƯỚC khi rag-worker chạy.
   # Tách riêng (không nhét vào rag-worker startup) để khi scale nhiều worker không
   # chạy đua DDL trên cùng DB, và migration lỗi -> fail-fast thay vì crash-loop.
   # DB là Cloud SQL (external, luôn sẵn) nên không depends_on service nào; DevOps
@@ -220,6 +246,9 @@ services:
       - ./deploy/env/rag-worker.env
     # DATABASE_URL đến TỪ rag-worker.env (nguồn DUY NHẤT). KHÔNG override ở đây:
     # khối `environment` của compose ĐÈ env_file, từng gây "sửa .env không ăn".
+    depends_on:
+      app-postgres:
+        condition: service_healthy
     restart: "no"
 
   rag-worker:
@@ -240,8 +269,6 @@ services:
       rag-migrate:
         condition: service_completed_successfully
     restart: unless-stopped
-    volumes:
-        - ./deploy/secrets/gcp-sa.json:/secrets/gcp-sa.json:ro
 
   mcp-service:
     image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/mcp-service:${IMAGE_TAG:-develop}
@@ -276,6 +303,9 @@ services:
     env_file:
       - ./deploy/env/common.env
       - ./deploy/env/hr-service.env
+    depends_on:
+      app-postgres:
+        condition: service_healthy
     restart: "no"
 
   hr-service:
@@ -364,3 +394,4 @@ volumes:
   redis_data:
   qdrant_data:
   langfuse_pg_data:
+  app_pg_data:

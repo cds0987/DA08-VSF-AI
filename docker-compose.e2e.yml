@@ -14,15 +14,17 @@
 # KHÁC prod (docker-compose.yml):
 #   - build từ source (không pull Docker Hub).
 #   - Postgres + NATS + Redis = container (prod: Cloud SQL + NATS VM).
-#   - GCS + Qdrant = CLOUD THẬT (key đọc từ .env / secrets CI) -> nghiệm thu
-#     đúng đường tích hợp cloud.
+#   - Qdrant = IN-COMPOSE (KHỚP prod docker-compose.yml: http://qdrant:6333, KHÔNG
+#     cloud) -> e2e mô phỏng đúng luồng VM prod, hết phụ thuộc Qdrant Cloud.
+#   - GCS = CLOUD THẬT (key đọc từ .env / secrets CI) -> nghiệm thu đường S3 cloud.
 #   - migrate one-shot (user-migrate, doc-migrate, hr-migrate, rag-migrate) dựng schema
 #     bằng Alembic; seed-user chỉ seed admin (prod seed Cloud SQL tay 1 lần).
 #   - Langfuse v2 self-host (KHỚP prod) + BẬT trace cả query-service lẫn
 #     rag-worker (mặc định prod off) -> test thật đường observability.
 #
-# Secrets từ .env (gitignored) hoặc env CI: OPENAI_API_KEY, QDRANT_URL,
-#   QDRANT_API_KEY, GCS_HMAC_KEY, GCS_HMAC_SECRET. Xem infra/e2e/README.md.
+# Secrets từ .env (gitignored) hoặc env CI: OPENAI_API_KEY, GCS_HMAC_KEY,
+#   GCS_HMAC_SECRET. (Qdrant nay in-compose -> KHÔNG cần QDRANT_URL/API_KEY nữa.)
+#   Xem infra/e2e/README.md.
 # ═══════════════════════════════════════════════════════════════════════════
 
 x-jwt: &jwt
@@ -39,11 +41,13 @@ x-gcs: &gcs-s3
   S3_SECRET_ACCESS_KEY: ${GCS_HMAC_SECRET:?set GCS_HMAC_SECRET in .env}
   S3_REGION: auto
 
-x-qdrant: &qdrant-cloud
+# Qdrant IN-COMPOSE — KHỚP prod (common.env trỏ http://qdrant:6333, KHÔNG cloud).
+x-qdrant: &qdrant
   VECTOR_DB_PROVIDER: qdrant
-  VECTOR_DB_URL: ${QDRANT_URL:?set QDRANT_URL in .env}
-  VECTOR_DB_API_KEY: ${QDRANT_API_KEY:-}
-  VECTOR_DB_BASIC_AUTH: ${VECTOR_DB_BASIC_AUTH:-}
+  VECTOR_DB_URL: http://qdrant:6333
+  VECTOR_DB_API_KEY: ""
+  VECTOR_DB_REQUIRE_API_KEY: "false"
+  VECTOR_DB_BASIC_AUTH: ""
   VECTOR_COLLECTION: rag_chatbot
 
 x-openai: &openai
@@ -74,6 +78,15 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
+
+  # Qdrant IN-COMPOSE (KHỚP prod docker-compose.yml). KHÁC prod 1 điểm: expose
+  # 127.0.0.1:6333 ra host để run_e2e.py (chạy trên runner, ngoài compose network)
+  # poll/cleanup collection. Data ephemeral — `down -v` xoá sạch.
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    ports:
+      - "127.0.0.1:6333:6333"
     restart: unless-stopped
 
   nats:
@@ -292,7 +305,7 @@ services:
       NATS_URL: nats://nats:4222
       NATS_JETSTREAM_ENABLED: "true"
       STORAGE_BACKEND: s3
-      S3_BUCKET: ${GCS_BUCKET:-vsf-rag-chatbot-docs-dev}
+      S3_BUCKET: ${GCS_BUCKET:-vintravel-chatbot-docs-dev}
       CORS_ORIGINS: "http://localhost,http://localhost:3000,http://localhost:3001"
     depends_on:
       postgres:
@@ -308,7 +321,7 @@ services:
   rag-worker:
     image: rag-worker:e2e
     environment:
-      <<: [*openai, *gcs-s3, *qdrant-cloud, *newrelic-off, *langfuse]
+      <<: [*openai, *gcs-s3, *qdrant, *newrelic-off, *langfuse]
       APP_ENV: production
       LOG_LEVEL: INFO
       AI_PROVIDER: openai
@@ -318,7 +331,7 @@ services:
       CAPTION_ENABLED: "true"
       RERANK_PROVIDER: none
       PARSER_IMPL: s3
-      S3_SOURCE_BUCKET: ${GCS_BUCKET:-vsf-rag-chatbot-docs-dev}
+      S3_SOURCE_BUCKET: ${GCS_BUCKET:-vintravel-chatbot-docs-dev}
       SOURCE_ROOT: /tmp
       ARTIFACT_ROOT: /tmp/artifacts
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/rag_db
@@ -339,6 +352,8 @@ services:
         condition: service_completed_successfully
       rag-migrate:
         condition: service_completed_successfully
+      qdrant:
+        condition: service_started
     restart: unless-stopped
 
   hr-service:
@@ -379,7 +394,7 @@ services:
     ports:
       - "127.0.0.1:8003:8003"
     environment:
-      <<: [*openai, *qdrant-cloud, *newrelic-off]
+      <<: [*openai, *qdrant, *newrelic-off]
       MCP_HOST: "0.0.0.0"
       MCP_PORT: "8003"
       LOG_LEVEL: INFO
@@ -399,6 +414,8 @@ services:
         condition: service_healthy
       hr-service:
         condition: service_healthy
+      qdrant:
+        condition: service_started
     restart: unless-stopped
 
   query-service:
@@ -435,8 +452,7 @@ services:
       NATS_URL: nats://nats:4222
       NATS_JETSTREAM_ENABLED: "true"
       ENABLE_DEV_ENDPOINTS: "false"
-      QDRANT_URL: ${QDRANT_URL}
-      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT_URL: http://qdrant:6333
       QDRANT_COLLECTION: rag_chatbot
       # BẬT trace query-service -> test thật đường observability (mặc định prod off).
       OBSERVABILITY_MODE: langfuse
