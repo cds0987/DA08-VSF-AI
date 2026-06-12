@@ -63,15 +63,20 @@ const authService = {
     return response.data
   },
 
-  logout(redirect = true): void {
-    if (import.meta.client) {
-      removeClientCookie(ACCESS_TOKEN_COOKIE)
-      removeClientCookie(REFRESH_TOKEN_COOKIE)
-      removeClientCookie(SESSION_COOKIE)
-      if (redirect) {
-        window.location.href = '/login'
+  async logout(redirect = true): Promise<void> {
+    if (!import.meta.client) return
+    const refreshToken = getClientCookie(REFRESH_TOKEN_COOKIE)
+    if (refreshToken) {
+      try {
+        await axiosClient.post('/auth/logout', { refresh_token: refreshToken }, { service: 'user' })
+      } catch {
+        // best-effort — clear cookies regardless
       }
     }
+    removeClientCookie(ACCESS_TOKEN_COOKIE)
+    removeClientCookie(REFRESH_TOKEN_COOKIE)
+    removeClientCookie(SESSION_COOKIE)
+    if (redirect) window.location.href = '/login'
   },
 
   isAuthenticated(): boolean {
