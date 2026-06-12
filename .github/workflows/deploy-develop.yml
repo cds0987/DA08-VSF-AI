@@ -409,10 +409,6 @@ jobs:
             export IMAGE_TAG="develop"
             cd "$APP_DIR"
 
-            # ── STAGE-GATE + AUTO-ROLLBACK ─────────────────────────────────────
-            # Mục tiêu: bản hỏng KHÔNG phục vụ production. Deploy xong chạy smoke
-            # luồng-vàng THẬT trên VM (đúng image+env prod+Cloud SQL+Qdrant). BẤT KỲ
-            # health/smoke nào fail -> trap tự rollback image trước -> prod giữ bản cũ.
             ROLLBACK_SVCS="rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin nginx"
             DEPLOY_OK=0; ROLLBACK_DONE=0
             rollback() {
@@ -432,9 +428,6 @@ jobs:
             git reset --hard FETCH_HEAD
 
             echo "==> 2) Env đến TỪ git (đã reset --hard ở bước 1) — deploy/env/*.env commit thẳng."
-            # KHÔNG provision từ secret nữa: env đi CÙNG code -> sửa biến = commit + deploy,
-            # git reset --hard đồng bộ luôn. common.env load trước file riêng (xem compose).
-            # FAIL-FAST: đủ 7 file env. (gcp-sa.json KHÔNG nằm trong git -> đặt 1 lần trên VM.)
             mkdir -p deploy/secrets
             miss=0
             for f in common rag-worker mcp-service hr-service query-service user-service document-service; do
@@ -456,22 +449,11 @@ jobs:
             docker compose pull qdrant langfuse-db langfuse nats-bootstrap rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin nginx
 
             echo "==> 4) Up image đã pull (deps: nats, nats-bootstrap provision stream, rag-migrate/hr-migrate one-shot alembic)"
-            #     nats-bootstrap = one-shot provision JetStream stream (DOC_EVENTS...) + migrate
-            #       xóa DOCS legacy. rag-worker/document-service/query-service depends_on nó
-            #       (service_completed_successfully) nên compose tự chạy đúng thứ tự.
-            #     nginx = image config-nướng-sẵn (không bind-mount) -> recreate để lấy image mới.
-            # langfuse + langfuse-db: hạ tầng observability, KHÔNG nằm trong health-gate/rollback
-            # (giống qdrant) -> langfuse chết cũng không kéo sập / rollback app.
             docker compose up -d --no-build qdrant langfuse-db langfuse nats-bootstrap rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin \
               || { echo "::error::compose up FAILED — dump nats-bootstrap logs:"; docker logs da08-vsf-nats-bootstrap-1 2>&1 | tail -80 || true; exit 1; }
             docker compose up -d --no-build --force-recreate nginx
 
             echo "==> 4b) LANGFUSE readiness PROD bằng KEY THẬT (NON-FATAL — chỉ cảnh báo)"
-            # Smoke THẬT trên langfuse production với cặp key thật trong common.env:
-            #   health -> ingest 1 trace -> verify NHẬN -> XÓA qua psql (v2 không có API
-            #   delete) -> confirm. MỌI lỗi -> chỉ ::warning::, KHÔNG fail/rollback (app
-            #   không phụ thuộc langfuse). Bọc trong hàm + `|| true` -> set -e bị vô hiệu
-            #   suốt hàm nên không có nhánh nào làm tụt deploy.
             lf_warn() { echo "::warning::LANGFUSE prod: $1 — kiểm tra: docker compose logs langfuse"; }
             lf_check() {
               ok=0
@@ -499,11 +481,6 @@ jobs:
               done
               [ "$seen" = 1 ] || { lf_warn "trace không hiện ra sau ingest (xử lý treo?)"; return 0; }
 
-              # ── INTEGRATION: đường THẬT service dùng = container -> http://langfuse:3000 ──
-              # Loopback :3100 ở trên chỉ chứng minh "host gọi được" + auth/ingest đúng. Nhưng
-              # service thật gọi qua DNS mạng compose `langfuse:3000` (KHÔNG qua loopback host).
-              # Test path đó từ TRONG container query-service (python:3.11-slim có sẵn python+urllib,
-              # không cần bật observability/đổi env). Đây là cái cover gap "service gọi vào được chưa".
               echo "  → integration: query-service container -> http://langfuse:3000 (DNS mạng compose)"
               if docker exec da08-vsf-query-service-1 \
                    python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://langfuse:3000/api/public/health',timeout=5).status==200 else 1)" >/dev/null 2>&1; then
@@ -521,11 +498,6 @@ jobs:
             lf_check || true
 
             echo "==> 4c) LANGSMITH readiness PROD bằng KEY THẬT (NON-FATAL — chỉ cảnh báo)"
-            # LangSmith = SaaS cloud -> không có loopback nội bộ như langfuse. Chạy THẲNG TỪ
-            # TRONG container query-service (có sẵn langsmith + LANGSMITH_API_KEY trong env):
-            # ingest 1 run THẬT vào project 'prod-readiness-smoke' -> verify NHẬN -> XÓA NGUYÊN
-            # project (delete_project). Cover luôn gap "container có outbound tới cloud + key
-            # đúng chưa". Mọi lỗi -> ::warning:: thôi (app KHÔNG phụ thuộc langsmith).
             ls_warn() { echo "::warning::LANGSMITH prod: $1 — kiểm tra: docker compose logs query-service"; }
             if grep -qE '^OBSERVABILITY_MODE=.*langsmith' deploy/env/query-service.env; then
               cat > /tmp/ls_ready.py <<'PYEOF'
@@ -596,8 +568,6 @@ jobs:
             fi
 
             echo "==> 5b) SMOKE qua nginx: status + NỘI DUNG (bắt placeholder / FE chưa serve)"
-            # /healthz chỉ cần 2xx. / và /admin/ phải là FE thật: KHÔNG chứa chuỗi placeholder
-            # và PHẢI có dấu hiệu Nuxt (__NUXT/_nuxt). Tránh pass giả khi nginx về placeholder cũ.
             for path in /healthz / /admin/; do
               body=$(curl -sL --compressed --max-time 15 "http://localhost${path}")
               code=$(curl -sL -o /dev/null -w '%{http_code}' --max-time 15 "http://localhost${path}" || echo 000)
@@ -618,11 +588,6 @@ jobs:
             done
 
             echo "==> 5c) SMOKE LUỒNG-VÀNG — CHỌN LỌC theo service đổi (detect), mô phỏng FE gửi"
-            # KHÔNG test hết mỗi lần. Chỉ smoke path có service THAY ĐỔI (như Phase 1 validate):
-            #   RAG (query->mcp->rag->qdrant): khi rag-worker|mcp-service|query-service đổi.
-            #   HR  (query->mcp->hr_query->hr-service): khi hr-service|mcp-hr|mcp-service|query-service đổi.
-            #   DOC (document-service list): khi document-service|user-service đổi.
-            # workflow_dispatch / đổi workflow -> detect FORCE run_rag/run_hr=true + services=ALL -> smoke hết.
             RUN_RAG="${{ needs.detect.outputs.run_rag }}"
             RUN_HR="${{ needs.detect.outputs.run_hr }}"
             SVCS='${{ needs.detect.outputs.services }}'
@@ -636,19 +601,12 @@ jobs:
             if [ "$SMOKE_RAG" != "true" ] && [ "$SMOKE_HR" != "true" ] && [ "$SMOKE_DOC" != "true" ]; then
             echo "  Không service tầng-dưới nào đổi -> BỎ QUA smoke luồng-vàng (đã có health 5 + FE 5b)."
             else
-            # B': XÓA trace smoke của deploy TRƯỚC (gom trong session 'ci-smoke'). Trace smoke
-            # query bên dưới gắn header X-CI-Smoke -> query-service dán session_id='ci-smoke'
-            # -> deploy này tạo trace mới, deploy KẾ xóa nó. Prod chỉ giữ trace user THẬT.
-            # CHỈ xóa đúng session 'ci-smoke' -> KHÔNG đụng query user thật. Best-effort.
             docker exec da08-vsf-langfuse-db-1 psql -U langfuse -d langfuse \
               -c "DELETE FROM observations WHERE trace_id IN (SELECT id FROM traces WHERE session_id='ci-smoke');" \
               -c "DELETE FROM scores WHERE trace_id IN (SELECT id FROM traces WHERE session_id='ci-smoke');" \
               -c "DELETE FROM traces WHERE session_id='ci-smoke';" >/dev/null 2>&1 \
               && echo "  ci-smoke: đã dọn trace smoke langfuse deploy trước" || echo "::warning::ci-smoke purge langfuse skip (langfuse-db chưa sẵn?)"
 
-            # B' (langsmith): smoke ci-smoke ghi sang PROJECT RIÊNG '{project}-ci-smoke'
-            # (xem LangSmithTracer.start). Xóa nguyên project đó -> KHÔNG đụng 'rag-query' thật.
-            # Chạy từ trong container query-service (có langsmith + key). Best-effort.
             if grep -qE '^OBSERVABILITY_MODE=.*langsmith' deploy/env/query-service.env; then
               cat > /tmp/ls_purge.py <<'PYEOF'
             import os, sys
@@ -670,7 +628,6 @@ jobs:
                 | sed 's/^/  ci-smoke langsmith: /' || echo "::warning::ci-smoke purge langsmith skip"
             fi
 
-            # Parser SSE (file riêng -> tránh quote-hell). Outcome enum: 5=SUCCESS, 6=ERROR.
             cat > /tmp/smoke_parse.py <<'PYEOF'
             import sys, json
             label, need = sys.argv[1], sys.argv[2] == "1"
@@ -695,7 +652,6 @@ jobs:
             if need and src < 1:
                 print("  [%s] FAIL: can sources>0 (query->mcp->rag->qdrant tra rong)" % label); sys.exit(1)
             PYEOF
-            # Login (FE-like) — cần cho mọi smoke có auth.
             SMOKE_EMAIL="admin@company.com"; SMOKE_PW="***REDACTED-SEED-ADMIN-PW***"
             TOK=$(curl -s --max-time 25 -X POST http://localhost/api/user/auth/login \
                     -H 'Content-Type: application/json' \
@@ -729,6 +685,13 @@ jobs:
               hrc=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "X-Internal-Token: $HR_TOKEN" http://localhost:8004/health)
               echo "  [HR] hr-service /health -> $hrc"
               case "$hrc" in 2*) : ;; *) echo "::error::SMOKE hr-service health FAIL ($hrc)"; docker compose logs --no-color --tail 80 hr-service || true; exit 1 ;; esac
+
+              [ -n "$SMOKE_UID" ] || { echo "::error::SMOKE HR sync: thiếu user_id từ token (login/JWT lỗi?)"; exit 1; }
+              HR_BAL=$(curl -s --max-time 15 -H "X-Internal-Token: $HR_TOKEN" -H 'Content-Type: application/json' \
+                         -X POST http://localhost:8004/hr/query \
+                         -d "{\"user_id\":\"$SMOKE_UID\",\"intent\":\"leave_balance\"}")
+              echo "$HR_BAL" | python3 -c 'import sys,json; d=json.load(sys.stdin); v=d.get("data",{}).get("annual_remaining"); assert isinstance(v,int), "annual_remaining khong phai so"; print("  [HR] sync user->hr OK  annual_remaining=%s" % v)' \
+                || { echo "::error::SMOKE HR sync FAIL (user->hr: 404/NO_INFO hoặc hr-service lỗi). resp=$HR_BAL"; docker compose logs --no-color --tail 100 hr-service || true; exit 1; }
             fi
             echo "  SMOKE luồng-vàng PASS (RAG=$SMOKE_RAG HR=$SMOKE_HR DOC=$SMOKE_DOC)"
             fi
