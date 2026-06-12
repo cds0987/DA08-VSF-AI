@@ -68,7 +68,7 @@ def test_verify_and_search_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         reader,
         "_search_local",
-        lambda vector, top_k, document_ids=None: [
+        lambda vector, query_text, top_k, document_ids=None: [
             SearchHit(
                 chunk_id="doc1::p0::c0",
                 document_id="doc1",

@@ -52,6 +52,56 @@ def _to_hit(payload: dict, score: float) -> SearchHit:
     )
 
 
+def _bm25_rrf(hits: List[SearchHit], query_text: str, k: int = 60) -> List[SearchHit]:
+    """RRF fusion: dense vector rank + BM25 rank trên candidate pool.
+
+    BM25 chạy trên pool đã lấy từ dense search (không cần full-corpus index riêng).
+    Graceful fallback về dense order nếu rank_bm25 chưa cài hoặc query rỗng.
+    """
+    if len(hits) < 2:
+        return hits
+    q_tokens = query_text.lower().split()
+    if not q_tokens:
+        return hits
+    try:
+        from rank_bm25 import BM25Okapi
+    except ImportError:
+        return hits
+
+    corpus = [h.caption.lower().split() for h in hits]
+    bm25 = BM25Okapi(corpus)
+    bm25_scores = bm25.get_scores(q_tokens)  # numpy array, same length as hits
+
+    # BM25 rank (1-indexed, ties broken by original dense order)
+    bm25_rank = [0] * len(hits)
+    for rank, orig_i in enumerate(
+        sorted(range(len(hits)), key=lambda i: bm25_scores[i], reverse=True), start=1
+    ):
+        bm25_rank[orig_i] = rank
+
+    # RRF: dense hits already sorted desc, so dense rank = position + 1
+    rrf_scores = [
+        1.0 / (k + (i + 1)) + 1.0 / (k + bm25_rank[i])
+        for i in range(len(hits))
+    ]
+    order = sorted(range(len(hits)), key=lambda i: rrf_scores[i], reverse=True)
+    return [
+        SearchHit(
+            chunk_id=hits[i].chunk_id,
+            document_id=hits[i].document_id,
+            document_name=hits[i].document_name,
+            caption=hits[i].caption,
+            parent_text=hits[i].parent_text,
+            heading_path=hits[i].heading_path,
+            score=rrf_scores[i],
+            page_number=hits[i].page_number,
+            source_gcs_uri=hits[i].source_gcs_uri,
+            markdown_gcs_uri=hits[i].markdown_gcs_uri,
+        )
+        for i in order
+    ]
+
+
 def _vector_size(info: object) -> int | None:
     params = getattr(getattr(info, "config", None), "params", None)
     vectors = getattr(params, "vectors", None)
@@ -179,11 +229,15 @@ class QdrantReader:
         document_ids: Sequence[str] | None = None,
     ) -> List[SearchHit]:
         if self._settings.deployment == "remote":
-            return await self._search_remote(vector, top_k, document_ids=document_ids)
-        return await asyncio.to_thread(self._search_local, vector, top_k, document_ids)
+            return await self._search_remote(vector, query_text, top_k, document_ids=document_ids)
+        return await asyncio.to_thread(self._search_local, vector, query_text, top_k, document_ids)
 
     async def _search_remote(
-        self, vector: Sequence[float], top_k: int, document_ids: Sequence[str] | None = None
+        self,
+        vector: Sequence[float],
+        query_text: str,
+        top_k: int,
+        document_ids: Sequence[str] | None = None,
     ) -> List[SearchHit]:
         client = self._remote_client()
         res = await client.query_points(
@@ -193,10 +247,15 @@ class QdrantReader:
             with_payload=True,
             query_filter=self._build_filter(document_ids),
         )
-        return [_to_hit(p.payload, p.score) for p in res.points]
+        hits = [_to_hit(p.payload, p.score) for p in res.points]
+        return _bm25_rrf(hits, query_text)
 
     def _search_local(
-        self, vector: Sequence[float], top_k: int, document_ids: Sequence[str] | None = None
+        self,
+        vector: Sequence[float],
+        query_text: str,
+        top_k: int,
+        document_ids: Sequence[str] | None = None,
     ) -> List[SearchHit]:
         client = self._local_client()
         try:
@@ -207,7 +266,8 @@ class QdrantReader:
                 with_payload=True,
                 query_filter=self._build_filter(document_ids),
             )
-            return [_to_hit(p.payload, p.score) for p in res.points]
+            hits = [_to_hit(p.payload, p.score) for p in res.points]
+            return _bm25_rrf(hits, query_text)
         finally:
             close = getattr(client, "close", None)
             if callable(close):
