@@ -239,12 +239,15 @@ def classify_shortcut(question: str) -> tuple[str, str] | None:
 
     Check order (highest-priority first):
       emergency → injury → distress → identity → user_profile → security
-      → cross_user → it_support → off_topic → clarify
+      → cross_user → off_topic → clarify
 
     Notes:
     - injury is checked BEFORE distress so "gãy chân" routes to injury, not distress.
-    - cross_user is checked AFTER security but BEFORE it_support; it must not match
-      "của tôi" self-queries (phrases are phrased to require "nhân viên"/"đồng nghiệp"/etc.).
+    - cross_user is checked AFTER security; it must not match "của tôi" self-queries
+      (phrases are phrased to require "nhân viên"/"đồng nghiệp"/etc.).
+    - IT support queries (máy tính hỏng, mất wifi, etc.) are NOT handled here —
+      they fall through to triage → think → rag_search so internal runbooks are searched
+      first; act_node escalates to IT Helpdesk only when RAG finds no relevant docs.
 
     USER_PROFILE_PLACEHOLDER is returned for user-identity questions — shortcut_node
     replaces it with the actual user profile from state.
@@ -274,9 +277,6 @@ def classify_shortcut(question: str) -> tuple[str, str] | None:
     # Cross-user data request: asking for another person's salary / leave info → REFUSE.
     if _phrase_match(normalized, CROSS_USER_PHRASES):
         return CROSS_USER_ANSWER, "REFUSE"
-
-    if _phrase_match(normalized, IT_SUPPORT_PHRASES):
-        return IT_SUPPORT_ANSWER, "SUCCESS"
 
     if _phrase_match(normalized, OFFTOPIC_PHRASES):
         return next_offtopic_answer(), "OFF_TOPIC"

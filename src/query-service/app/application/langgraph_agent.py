@@ -1,30 +1,20 @@
 """
 LangGraph agent compiler for VinSmartFuture.
 
-Factory function that builds and compiles the Plan-and-Execute graph with a
-triage node and a plan node.
+Factory function that builds and compiles the ReAct graph with a triage node.
+This is the single function called by FastAPI dependency injection.
 
 Graph topology:
   START
     → route_entry
-      → "shortcut" → shortcut_node → answer_node(canned) → END
+      → "shortcut" → shortcut_node → answer_node → END
       → "triage"   → triage_node
                       → route_after_triage
-                        → "answer" (refuse/clarify/safety/meta, canned) → END
-                        → "plan"   (allow)
-                            → plan_node   [structured output — silent]
-                              → route_after_plan
-                                → "answer" (direct_answer / empty steps)  → END
-                                → "act"
-                                    → act_node → observe_node
-                                                  → route_after_observe
-                                                       → "act"   (more plan steps)
-                                                       → "think" (all steps done)
-                                                           → think_node  [structured — silent]
-                                                             → route_after_think
-                                                                  → "answer" (enough / replan budget exhausted)
-                                                                  → "plan"   (replan, max 1 time)
-                        → "answer" → answer_node(streaming synthesis) → END
+                        → "answer" (off_topic/clarify) → answer_node → END
+                        → "think"  (in_scope)
+                            → route_after_think
+                              → "act" → act_node → route_after_act → ...
+                              → "answer" → answer_node → END
 """
 
 from functools import partial
@@ -34,14 +24,11 @@ from app.application.langgraph_state import AgentState
 from app.application.langgraph_edges import (
     route_entry,
     route_after_triage,
-    route_after_plan,
-    route_after_observe,
     route_after_think,
 )
 from app.application.langgraph_nodes import (
     shortcut_node,
     triage_node,
-    plan_node,
     think_node,
     act_node,
     observe_node,
@@ -58,16 +45,15 @@ def build_langgraph_agent(
     checkpointer=None,
 ) -> "CompiledGraph":
     """
-    Build and compile the LangGraph Plan-and-Execute agent with triage + plan nodes.
+    Build and compile the LangGraph agent with triage + ReAct loop.
 
     Args:
-        model: LangChain-compatible chat model (OpenAIResponsesChatModel).
-               Used for: triage (prompt-JSON), plan (with_structured_output),
-               think (with_structured_output), answer (streaming ainvoke).
-        mcp_client: MCP tool client for rag_search and hr_query (used by act_node).
-        tools_loader: retained for API compat; not used in plan architecture
-                      (plan_node uses ToolPlan schema instead of dynamic tool list).
-        checkpointer: Optional LangGraph checkpointer for multi-turn conversations.
+        model: LangChain-compatible chat model (e.g. OpenAIResponsesChatModel)
+        mcp_client: MCP tool client for rag_search and hr_query (used by act_node
+            and as fallback when tools_loader is None)
+        tools_loader: optional LangChainMCPToolsLoader; when provided, think_node
+            uses auto-discovered MCP tool descriptions instead of hardcoded schemas
+        checkpointer: Optional LangGraph checkpointer for multi-turn conversations
 
     Returns:
         A compiled LangGraph that can be invoked or streamed.
@@ -77,11 +63,13 @@ def build_langgraph_agent(
     # ---- Nodes ----
     workflow.add_node("shortcut", shortcut_node)
     workflow.add_node("triage", partial(triage_node, model=model))
-    workflow.add_node("plan", partial(plan_node, model=model))
-    workflow.add_node("think", partial(think_node, model=model))
+    workflow.add_node(
+        "think",
+        partial(think_node, model=model, mcp_client=mcp_client, tools_loader=tools_loader),
+    )
     workflow.add_node("act", partial(act_node, mcp_client=mcp_client))
     workflow.add_node("observe", observe_node)
-    workflow.add_node("answer", partial(answer_node, model=model))
+    workflow.add_node("answer", answer_node)
 
     # ---- Entry point ----
     # Conditional entry: check shortcuts before triage/LLM
@@ -94,48 +82,31 @@ def build_langgraph_agent(
     )
 
     # ---- Edges ----
-    # triage_node → answer_node (refuse/clarify/safety/meta) or plan_node (allow)
+    # triage_node → answer_node (off_topic/clarify) or think_node (in_scope)
     workflow.add_conditional_edges(
         source="triage",
         path=route_after_triage,
         path_map={
             "answer": "answer",
-            "plan": "plan",
-        },
-    )
-
-    # plan_node → answer_node (direct / empty plan) or act_node (execute first step)
-    workflow.add_conditional_edges(
-        source="plan",
-        path=route_after_plan,
-        path_map={
-            "answer": "answer",
-            "act": "act",
-        },
-    )
-
-    # act_node → observe_node (always; observe decides next step via routing)
-    workflow.add_edge("act", "observe")
-
-    # observe_node → act_node (more plan steps) or think_node (all steps done)
-    workflow.add_conditional_edges(
-        source="observe",
-        path=route_after_observe,
-        path_map={
-            "act": "act",
             "think": "think",
         },
     )
 
-    # think_node → answer_node (enough / budget exhausted) or plan_node (replan)
+    # think_node → act_node (tool call) or answer_node (final answer)
     workflow.add_conditional_edges(
         source="think",
         path=route_after_think,
         path_map={
+            "act": "act",
             "answer": "answer",
-            "plan": "plan",
         },
     )
+
+    # act_node → observe_node (always); observe_node → think_node (always loop back).
+    # The iteration cap + force_answer flag (set in observe_node / act_node) cause
+    # think_node to produce a final text answer, which route_after_think routes to answer.
+    workflow.add_edge("act", "observe")
+    workflow.add_edge("observe", "think")
 
     # Terminal edges
     workflow.add_edge("shortcut", "answer")

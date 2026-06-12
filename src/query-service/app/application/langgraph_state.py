@@ -4,10 +4,9 @@ from enum import Enum
 
 
 class AgentPhase(str, Enum):
-    PLANNING = "planning"   # plan_node: choosing tool steps (maps to "thinking" in SSE)
-    THINKING = "thinking"   # think_node: checking sufficiency
-    ACTING = "acting"       # act_node: executing a tool step
-    OBSERVING = "observing" # observe_node: recording results
+    THINKING = "thinking"
+    ACTING = "acting"
+    OBSERVING = "observing"
     GENERATING = "generating"
     DONE = "done"
 
@@ -52,16 +51,11 @@ class AgentState(TypedDict):
     phase: AgentPhase
     previous_phase: AgentPhase
 
-    # --- Plan-and-Execute scratch pad ---
+    # --- ReAct scratch pad ---
     shortcut_response: str | None
     shortcut_outcome: str | None
     tool_results: list[ToolCallResult]
     sources: list[SourceDoc]
-    # Plan-and-Execute plan state
-    tool_plan: list[dict]    # serialized PlanStep list (ordered tool steps)
-    plan_cursor: int         # index of the next step to execute in tool_plan
-    replan_count: int        # number of times plan_node has been invoked for a replan
-    sufficiency: dict | None # last Sufficiency verdict from think_node
 
     # --- ACL context (injected at entry, never modified by LLM) ---
     user_id: str
@@ -72,6 +66,14 @@ class AgentState(TypedDict):
     rag_score_threshold: float
     # Số chunk tối đa lấy từ rag-service mỗi lần gọi (config-driven).
     rag_top_k: int
+
+    # --- Loop termination guards ---
+    # force_answer: set True by observe_node (iteration cap) or act_node (duplicate tool call)
+    # to tell think_node to produce a final text answer without calling any tool.
+    force_answer: bool
+    # tool_call_signatures: tracks (tool_name, args) pairs already executed so
+    # act_node can detect duplicate calls and set force_answer before the loop repeats.
+    tool_call_signatures: list[str]
 
     # --- Observability accumulator ---
     # rag_search_events: list of JSON-safe dicts written by act_node per rag_search call.
@@ -105,16 +107,14 @@ def create_initial_state(
         messages=recent_messages or [],
         iteration=0,
         max_iterations=max_iterations,
-        phase=AgentPhase.PLANNING,
-        previous_phase=AgentPhase.PLANNING,
+        phase=AgentPhase.THINKING,
+        previous_phase=AgentPhase.THINKING,
         shortcut_response=None,
         shortcut_outcome=None,
         tool_results=[],
         sources=[],
-        tool_plan=[],
-        plan_cursor=0,
-        replan_count=0,
-        sufficiency=None,
+        force_answer=False,
+        tool_call_signatures=[],
         rag_search_events=[],
         user_id=user_id,
         user_role=user_role,

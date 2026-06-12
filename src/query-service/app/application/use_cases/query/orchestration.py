@@ -322,18 +322,17 @@ class QueryOrchestrationUseCase:
         _llm_runs: dict[str, dict] = {}   # run_id → {node, start_dt, input_text}
         _tool_runs: dict[str, dict] = {}  # run_id → {name, input_args, start_dt}
         _active_spans: dict[str, Any] = {}  # run_id → span for node lifecycle
-        _SPAN_NODES = {"triage", "plan", "think", "act", "observe", "answer", "shortcut"}
+        _SPAN_NODES = {"triage", "think", "act", "observe", "answer", "shortcut"}
         _tracer = self._tracer  # LangfuseTracer | None
         # Status text per node — emitted as SSE so the UI can show "AI thinking" indicator
         _NODE_STATUS: dict[str, str] = {
             "triage": "Đang phân tích câu hỏi...",
-            "plan": "Đang lập kế hoạch...",
-            "think": "Đang đánh giá kết quả...",
+            "think": "Đang suy nghĩ...",
             "answer": "Đang soạn câu trả lời...",
         }
 
-        # recursion_limit is a defence-in-depth net; the Plan-and-Execute wiring
-        # (bounded replan_count + finite plan steps) provides the logical hard cap.  Set to 3 * max_iterations + overhead.
+        # recursion_limit is a defence-in-depth net; Part 1 (force_answer + act→observe→think
+        # wiring) provides the logical hard cap.  Set to 3 * max_iterations + overhead.
         # NOTE: langfuse enriched tracing dùng low-level client gọi per event (KHÔNG
         # dùng callback — callback v2 xung đột langchain-core 1.x).
         _recursion_limit = max(12, self._settings.agent_max_iterations * 4 + 4)
@@ -425,18 +424,25 @@ class QueryOrchestrationUseCase:
                             except Exception:  # noqa: BLE001 — tracing never breaks stream
                                 pass
 
-                # Token stream from LLM — filter internal structured-output nodes
+                # Token stream from LLM — filter triage (JSON) to avoid leaking to SSE
                 elif event_type == "on_chat_model_stream":
                     node = (event.get("metadata") or {}).get("langgraph_node")
-                    if node in ("triage", "plan", "think"):
-                        # JSON nội bộ (classification / plan / sufficiency) — KHÔNG đẩy ra SSE
+                    if node == "triage":
+                        # JSON phân loại nội bộ — KHÔNG đẩy ra SSE/frontend
                         continue
                     token = event["data"]["chunk"].content
                     if token:
                         answer_accumulator.append(token)
+                        # Detect phase from content (ReAct markers)
+                        current_phase = "generating"
+                        stripped = token.lstrip()
+                        if stripped.startswith("THOUGHT:"):
+                            current_phase = "thinking"
+                        elif stripped.startswith("ACTION:") or stripped.startswith("OBSERVATION:"):
+                            current_phase = "observing"
                         yield {
                             "token": token,
-                            "phase": "generating",
+                            "phase": current_phase,
                             "agent_mode": "langgraph",
                             "session_id": session_id,
                             "iterations": last_iteration,
