@@ -80,6 +80,12 @@ jobs:
             user-service: 'src/user-service/**'
             document-service: 'src/document-service/**'
             query-service: 'src/query-service/**'
+            query-service-integration:
+              - 'src/query-service/app/application/langgraph_nodes.py'
+              - 'src/query-service/app/application/langgraph_agent.py'
+              - 'src/query-service/app/application/langgraph_edges.py'
+              - 'src/query-service/app/application/use_cases/**'
+              - 'src/query-service/app/infrastructure/**'
             frontend: 'src/frontend/**'
             nginx: 'nginx/**'
             base:
@@ -108,7 +114,7 @@ jobs:
           else
             rrag=$(has '.=="rag-worker" or .=="mcp-service"')
             rhr=$(has '.=="hr-service" or .=="mcp-hr"')
-            rec=$(has '.=="rag-worker" or .=="mcp-service" or .=="document-service" or .=="e2e-extra"')
+            rec=$(has '.=="rag-worker" or .=="mcp-service" or .=="document-service" or .=="query-service-integration" or .=="e2e-extra"')
             rfe=$(has '.=="frontend"')
             rlf=$(has '.=="langfuse"')
             rls=$(has '.=="langsmith"')
@@ -204,7 +210,7 @@ jobs:
   # exit 1. GCS + Qdrant = CLOUD THẬT; Postgres/NATS = container.
   e2e:
     needs: detect
-    if: needs.detect.outputs.run_deploy == 'true'
+    if: needs.detect.outputs.run_e2e_cloud == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
