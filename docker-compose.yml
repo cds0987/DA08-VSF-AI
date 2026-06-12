@@ -106,6 +106,21 @@ services:
 
   # Image kéo từ Docker Hub (KHÔNG build trên VM). CI build+push ở Phase 2; VM chỉ pull.
   # DOCKERHUB_USERNAME + IMAGE_TAG do deploy workflow truyền qua SSH env (mặc định: develop).
+  # Migration one-shot user_db (alembic upgrade head). Cùng pattern hr-migrate: dùng CHUNG
+  # image user-service; env.py đọc USER_SERVICE_DATABASE_URL (fallback DATABASE_URL) — CÙNG
+  # biến runtime. Thay cho runner tự chế scripts/migrate.py (đã bỏ). DevOps phải CREATE
+  # DATABASE user_db trên Cloud SQL trước. LƯU Ý chuyển DB cũ đang có data: chạy
+  # `alembic stamp 0001_baseline` MỘT LẦN trên VM trước khi bật service này (xem
+  # docs/nguyenworking/05-db-migration-va-dong-bo.md §1.4).
+  user-migrate:
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/user-service:${IMAGE_TAG:-develop}
+    command: ["alembic", "upgrade", "head"]
+    working_dir: /app
+    env_file:
+      - ./deploy/env/common.env
+      - ./deploy/env/user-service.env
+    restart: "no"
+
   user-service:
     image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/user-service:${IMAGE_TAG:-develop}
     ports:
@@ -116,7 +131,25 @@ services:
     environment:
       <<: *newrelic
       NEW_RELIC_APP_NAME: vsf-user-service
+    depends_on:
+      user-migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
+
+  # Migration one-shot doc_db (alembic upgrade head). Cùng pattern hr-migrate/rag-migrate:
+  # dùng CHUNG image document-service; env.py đọc DOCUMENT_SERVICE_DATABASE_URL (fallback
+  # DATABASE_URL) — CÙNG biến runtime -> migrate + runtime cùng 1 DB. DevOps phải CREATE
+  # DATABASE doc_db trên Cloud SQL trước. LƯU Ý chuyển DB cũ đang có data: chạy
+  # `alembic stamp 0001_baseline` MỘT LẦN trên VM trước khi bật service này (xem
+  # docs/nguyenworking/05-db-migration-va-dong-bo.md §1.4).
+  doc-migrate:
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/document-service:${IMAGE_TAG:-develop}
+    command: ["alembic", "upgrade", "head"]
+    working_dir: /app
+    env_file:
+      - ./deploy/env/common.env
+      - ./deploy/env/document-service.env
+    restart: "no"
 
   document-service:
     image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/document-service:${IMAGE_TAG:-develop}
@@ -132,6 +165,8 @@ services:
       nats:
         condition: service_started
       nats-bootstrap:
+        condition: service_completed_successfully
+      doc-migrate:
         condition: service_completed_successfully
     restart: unless-stopped
     volumes:

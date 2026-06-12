@@ -8,9 +8,13 @@ WORKDIR /app
 ARG MODEL_PRICE_DATASET_REPO=gunnybd01/openrouter-models-cache
 COPY requirements-build.txt ./
 RUN pip install --no-cache-dir -r requirements-build.txt
-# Cần module price_catalog + seed json (fallback) -> copy app trước khi build.
-COPY app ./app
-COPY scripts ./scripts
+# CHỈ copy phần script cần (price_catalog dùng stdlib thuần + seed json) thay vì cả
+# app/ -> layer fetch HF KHÔNG bị bust khi code app khác đổi (cache build nhanh hơn
+# nhiều; trước đây COPY app làm fetch chạy lại mỗi lần đổi bất kỳ file app nào).
+COPY app/__init__.py ./app/__init__.py
+COPY app/infrastructure/__init__.py ./app/infrastructure/__init__.py
+COPY app/infrastructure/observability ./app/infrastructure/observability
+COPY scripts/build_price_catalog.py ./scripts/build_price_catalog.py
 RUN python scripts/build_price_catalog.py \
         app/infrastructure/observability/data/model_prices.json \
         "$MODEL_PRICE_DATASET_REPO"
@@ -31,13 +35,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
-# torch CPU-only cài TRƯỚC requirements: VM không GPU nên CUDA wheels (vài GB, do
-# llm-guard kéo theo) là lãng phí thuần. Cài sẵn torch CPU -> pip thấy đã thoả khi
-# cài llm-guard, KHÔNG pull bản +cuXXX. Giảm image vài GB, build ~9'->~2', pull ~5'->~30s.
-# llm-guard vẫn chạy được trên CPU nếu GUARDRAILS_MODE=llm_guard (hiện off -> không nạp).
+COPY requirements-guard.txt ./
+# MẶC ĐỊNH (INSTALL_LLM_GUARD=0): KHÔNG cài torch + llm-guard (prod GUARDRAILS_MODE=off)
+# -> build nhanh + image nhẹ vài GB. Bật bằng `--build-arg INSTALL_LLM_GUARD=1` khi cần
+# guardrails: lúc đó cài torch CPU-only TRƯỚC (chặn pip kéo CUDA wheels vài GB do llm-guard)
+# rồi mới cài requirements-guard. Code import llm_guard đã lazy nên image mặc định vẫn boot.
+ARG INSTALL_LLM_GUARD=0
 RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
- && pip install --no-cache-dir -r requirements.txt
+ && pip install --no-cache-dir -r requirements.txt \
+ && if [ "$INSTALL_LLM_GUARD" = "1" ]; then \
+        pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+        && pip install --no-cache-dir -r requirements-guard.txt ; \
+    fi
 
 COPY app ./app
 COPY migrations ./migrations

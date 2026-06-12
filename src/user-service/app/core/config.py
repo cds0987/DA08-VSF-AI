@@ -18,6 +18,21 @@ class Settings(BaseModel):
         ),
     )
     jwt_secret_key: str = getenv("JWT_SECRET_KEY", "change-me-in-env")
+    nats_url: str = getenv("NATS_URL", "nats://localhost:4222")
+    nats_jetstream_enabled: bool = getenv("NATS_JETSTREAM_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    # Phát event vòng đời user (user.created/updated/deactivated) cho hr-service đồng bộ.
+    # Best-effort: lỗi publish không làm hỏng nghiệp vụ. Bật mặc định.
+    user_events_enabled: bool = getenv("USER_EVENTS_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     access_token_ttl_minutes: int = int(getenv("ACCESS_TOKEN_TTL_MINUTES", "15"))
     refresh_token_ttl_days: int = int(getenv("REFRESH_TOKEN_TTL_DAYS", "7"))
     failed_login_threshold: int = int(getenv("FAILED_LOGIN_THRESHOLD", "5"))

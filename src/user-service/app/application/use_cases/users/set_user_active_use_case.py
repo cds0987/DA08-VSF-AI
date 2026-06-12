@@ -26,14 +26,21 @@ class AuditLogger(Protocol):
         ...
 
 
+class UserEventEmitter(Protocol):
+    async def emit(self, subject: str, user: User) -> None:
+        ...
+
+
 class SetUserActiveUseCase:
     def __init__(
         self,
         user_repository: UserRepository,
         audit_logger: AuditLogger,
+        event_emitter: UserEventEmitter | None = None,
     ) -> None:
         self.user_repository = user_repository
         self.audit_logger = audit_logger
+        self.event_emitter = event_emitter
 
     async def execute(
         self,
@@ -58,6 +65,9 @@ class SetUserActiveUseCase:
             detail={"is_active": is_active},
             ip_address=ip_address,
         )
+        if self.event_emitter is not None:
+            subject = "user.updated" if is_active else "user.deactivated"
+            await self.event_emitter.emit(subject, user)
         return SetUserActiveResult(id=user.id, is_active=user.is_active)
 
 

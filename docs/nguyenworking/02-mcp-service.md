@@ -1,6 +1,6 @@
 # MCP Service — Tiến độ & việc cần làm
 
-**Trạng thái:** 🟢 Production, verified `CallToolRequest` thật · **Mức hoàn thiện:** ~85% · **Cập nhật:** 2026-06-11
+**Trạng thái:** 🟢 Production, verified `CallToolRequest` thật · **Mức hoàn thiện:** ~85% · **Cập nhật:** 2026-06-12
 **Vai trò:** MCP server — tool `rag_search` (search Qdrant) + `hr_query` (proxy HR). Service **độc lập**, tự dựng hạ tầng riêng, ghép với RAG chỉ qua Qdrant URL. **KHÔNG dùng chung `core_engine`.**
 
 ## Đã ổn định (căn bản XONG)
@@ -20,6 +20,7 @@
 
 ## Lưu ý vận hành / bẫy đã biết
 - MCP là service độc lập — đừng cố ghép chung engine với rag-worker; chỉ ghép qua **Qdrant URL**.
+- ✅ **`top_k` đã đủ headroom (06-12):** query-service nâng `rag_top_k=8` (trần 10); mcp `top_k_candidates=20`, `final_k=min(requested, 20)` → trả đủ 8, KHÔNG cắt. Chỉ rơi về `rerank_top_k=3` khi query-service không truyền `top_k`. Không cần nới thêm. (xem `src/query-service/Docs/bug.md` #4)
 - `hr_query` mặc định TẮT — khi bật phải đảm bảo hr-service đã có seed data (xem [03-hr-service.md](03-hr-service.md)) nếu không trả 404 → NO_INFO.
 - Tool WRITE phải: backward-compatible, feature-flag OFF, NATS best-effort (không fail-closed).
 
