@@ -306,6 +306,34 @@ class QueryOrchestrationUseCase:
             rag_top_k=self._settings.rag_top_k,
         )
 
+        # Semantic cache — check TRƯỚC astream_events để tránh gọi LLM/tool lãng phí.
+        # Namespace = hash(sorted allowed_doc_ids) → user khác permissions = cache khác.
+        # Chỉ check khi user có ít nhất 1 doc được phép (cache empty-set namespace vô nghĩa).
+        cache_namespace = _rag_cache_namespace(list(allowed_doc_ids) if allowed_doc_ids else [])
+        _cache_hit = await self._semantic_cache.get(cache_namespace, question) if allowed_doc_ids else None
+        if _cache_hit is not None:
+            _ca, _cs = _cache_hit
+            for token in _word_chunks(_ca):
+                yield {
+                    "token": token,
+                    "phase": "generating",
+                    "agent_mode": "langgraph",
+                    "session_id": session_id,
+                    "iterations": 0,
+                }
+                await asyncio.sleep(0)
+            await self._save_assistant(user.id, session_id, _ca, _cs, started)
+            yield {
+                "done": True,
+                "sources": _cs,
+                "session_id": session_id,
+                "outcome": Outcome.SUCCESS.value,
+                "agent_mode": "langgraph",
+                "iterations": 0,
+                "cached": True,
+            }
+            return
+
         answer_accumulator: list[str] = []
         # Track which node/name the last iteration was in, to derive a stable iteration count
         last_iteration = 0
@@ -638,6 +666,9 @@ class QueryOrchestrationUseCase:
                         answer = await self._output_guardrail.redact(answer)
 
                         await self._save_assistant(user.id, session_id, answer, sources, started)
+                        # Cache: chỉ lưu khi SUCCESS + có sources (RAG path), không cache shortcut/HR.
+                        if shortcut_outcome == "SUCCESS" and not shortcut_response and sources:
+                            await self._semantic_cache.put(cache_namespace, question, answer, sources)
                         done_event = {
                             "done": True,
                             "sources": sources,
