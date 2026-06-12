@@ -35,13 +35,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
-# torch CPU-only cài TRƯỚC requirements: VM không GPU nên CUDA wheels (vài GB, do
-# llm-guard kéo theo) là lãng phí thuần. Cài sẵn torch CPU -> pip thấy đã thoả khi
-# cài llm-guard, KHÔNG pull bản +cuXXX. Giảm image vài GB, build ~9'->~2', pull ~5'->~30s.
-# llm-guard vẫn chạy được trên CPU nếu GUARDRAILS_MODE=llm_guard (hiện off -> không nạp).
+COPY requirements-guard.txt ./
+# MẶC ĐỊNH (INSTALL_LLM_GUARD=0): KHÔNG cài torch + llm-guard (prod GUARDRAILS_MODE=off)
+# -> build nhanh + image nhẹ vài GB. Bật bằng `--build-arg INSTALL_LLM_GUARD=1` khi cần
+# guardrails: lúc đó cài torch CPU-only TRƯỚC (chặn pip kéo CUDA wheels vài GB do llm-guard)
+# rồi mới cài requirements-guard. Code import llm_guard đã lazy nên image mặc định vẫn boot.
+ARG INSTALL_LLM_GUARD=0
 RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
- && pip install --no-cache-dir -r requirements.txt
+ && pip install --no-cache-dir -r requirements.txt \
+ && if [ "$INSTALL_LLM_GUARD" = "1" ]; then \
+        pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+        && pip install --no-cache-dir -r requirements-guard.txt ; \
+    fi
 
 COPY app ./app
 COPY migrations ./migrations

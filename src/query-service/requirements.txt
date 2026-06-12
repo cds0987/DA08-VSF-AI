@@ -16,7 +16,9 @@ langgraph>=0.2.0
 langgraph-checkpoint>=0.2.0
 langchain-openai>=0.3.0
 langchain-mcp-adapters>=0.1.0
-llm-guard>=0.3.0
+# llm-guard (kéo torch + transformers, ~GB) TÁCH sang requirements-guard.txt: prod
+# GUARDRAILS_MODE=off -> KHÔNG cài mặc định (build nhanh, image nhẹ). Bật qua build-arg
+# INSTALL_LLM_GUARD=1 khi cần GUARDRAILS_MODE=llm_guard. Code import llm_guard đã lazy.
 # Langfuse self-host server = v2 -> GHIM SDK v2 (>=3 dùng OTLP, server v2 không nhận).
 # Dùng LOW-LEVEL client (langfuse.Langfuse), KHÔNG dùng CallbackHandler -> KHÔNG cần
 # `langchain` (thêm langchain sẽ hạ cấp langchain-core 1.x -> vỡ langgraph).
