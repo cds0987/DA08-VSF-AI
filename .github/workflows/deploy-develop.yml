@@ -723,6 +723,17 @@ jobs:
               hrc=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "X-Internal-Token: $HR_TOKEN" http://localhost:8004/health)
               echo "  [HR] hr-service /health -> $hrc"
               case "$hrc" in 2*) : ;; *) echo "::error::SMOKE hr-service health FAIL ($hrc)"; docker compose logs --no-color --tail 80 hr-service || true; exit 1 ;; esac
+
+              # T1: VERIFY ĐỒNG BỘ user->hr (bug #1) — KHÔNG tin smoke LLM phía trên vì
+              # 404/NO_INFO vẫn ra outcome=SUCCESS (pass giả). Hỏi THẲNG hr-service
+              # leave_balance cho chính user vừa login -> PHẢI 200 + annual_remaining là SỐ.
+              # Bắt: hr-service mất DB / migrate lỗi / user chưa sync (event miss + auto-provision tắt).
+              [ -n "$SMOKE_UID" ] || { echo "::error::SMOKE HR sync: thiếu user_id từ token (login/JWT lỗi?)"; exit 1; }
+              HR_BAL=$(curl -s --max-time 15 -H "X-Internal-Token: $HR_TOKEN" -H 'Content-Type: application/json' \
+                         -X POST http://localhost:8004/hr/query \
+                         -d "{\"user_id\":\"$SMOKE_UID\",\"intent\":\"leave_balance\"}")
+              echo "$HR_BAL" | python3 -c 'import sys,json; d=json.load(sys.stdin); v=d.get("data",{}).get("annual_remaining"); assert isinstance(v,int), "annual_remaining khong phai so"; print("  [HR] sync user->hr OK  annual_remaining=%s" % v)' \
+                || { echo "::error::SMOKE HR sync FAIL (user->hr: 404/NO_INFO hoặc hr-service lỗi). resp=$HR_BAL"; docker compose logs --no-color --tail 100 hr-service || true; exit 1; }
             fi
             echo "  SMOKE luồng-vàng PASS (RAG=$SMOKE_RAG HR=$SMOKE_HR DOC=$SMOKE_DOC)"
             fi
