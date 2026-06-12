@@ -1,184 +1,151 @@
-# Hướng dẫn chạy Full Luồng Frontend Đầu-đến-Đầu (End-to-End)
+# Hướng dẫn chạy Full Luồng Frontend Đầu-đến-Đầu (End-to-End) - LOCAL DEV
 
-> ⚠️ **LƯU Ý (2026-06-12):** `docker-compose.localtest.yml`/`docker-compose.local.yml` đã bị xóa.
-> Stack tích hợp chuẩn giờ là **`docker-compose.e2e.yml`** (xem [`infra/e2e/README.md`](../../infra/e2e/README.md)).
-> Các lệnh `docker compose -f docker-compose.localtest.yml ...` dưới đây cần thay bằng
-> `docker-compose.e2e.yml` (e2e KHÔNG build frontend/nginx — dựng FE riêng để dev UI).
+> **Mục tiêu:** Cung cấp tài liệu tổng hợp, chi tiết từng bước để một lập trình viên có thể tự cấu hình, khởi động và kiểm thử toàn bộ luồng hoạt động từ Frontend (Admin, Chat) đi qua toàn bộ các service Backend (User, Document, Query, MCP, RAG Worker) và hạ tầng (Postgres, NATS, Redis, Qdrant/GCS).
 
-> **Mục tiêu:** Cung cấp tài liệu tổng hợp, chi tiết từng bước để một lập trình viên có thể tự cấu hình, khởi động và kiểm thử toàn bộ luồng hoạt động từ Frontend (Admin, Chat) đi qua toàn bộ các service Backend (User, Document, Query, MCP, RAG Worker) và hạ tầng (Qdrant Cloud, GCS, PostgreSQL, NATS).
-
-Tài liệu này được tổng hợp từ các file integration contract hiện có (`document-service`, `query-service`, `mcp-service`, `rag-worker`) và các báo cáo kiến trúc của Nuxt Frontend.
+Tài liệu này tối ưu cho việc **phát triển Frontend** (Hot-reload) kết hợp với **Backend chạy qua Docker Compose** để nhanh chóng có môi trường tích hợp chuẩn production.
 
 ---
 
 ## 1. Yêu cầu Hệ thống (Prerequisites)
 
-Để chạy được toàn bộ luồng này ở máy local, bạn cần chuẩn bị:
-
-1. **Môi trường:**
-   - Docker & Docker Compose.
-   - Node.js 20+ và `npm`.
-   - Python 3.11+.
-2. **Khóa API (Secrets):**
-   - OpenAI API Key.
-   - Thông tin xác thực GCS (HMAC Access Key & Secret).
-   - Qdrant Cloud URL (`http://34.87.176.141:80`) và Basic Auth (`***REDACTED-QDRANT-AUTH***`).
-   - Một chuỗi JWT Secret ngẫu nhiên dùng chung cho tất cả các service nội bộ.
+1. **Môi trường:** Docker, Node.js 20+, Python 3.11+.
+2. **Khóa API (Secrets):** OpenAI API Key, GCS HMAC (hoặc SA JSON), Qdrant URL.
+3. **JWT Secret:** Dùng chung `JWT_SECRET_KEY` cho các service. Nếu dùng stack E2E, mặc định là:
+   `***REDACTED-JWT-SECRET***`
 
 ---
 
-## 2. Luồng Dữ liệu Tổng thể (The End-to-End Flow)
+## 2. Cấu hình Môi trường (Environment Setup)
 
-Quá trình hoạt động của hệ thống chia làm 2 pha chính (Ingestion và Retrieval):
+### 2.1. Copy các file .env
+```bash
+# Root .env (Dành cho Docker Compose E2E - Chứa API Keys)
+cp .env.example .env
 
-**Pha 1: Tải tài liệu (Ingestion)**
-1. **Admin Frontend (Port 3001)**: Admin đăng nhập và tải tài liệu (kèm metadata phân quyền ACL) thông qua API của **Document Service**.
-2. **Document Service (Port 8002)**: Lưu file gốc lên **GCS**, lưu record vào database và bắn event `doc.ingest` qua **NATS**.
-3. **RAG Worker (Port 8010)**: Bắt event, tải file từ GCS, chia nhỏ (chunk), nhúng (embed qua OpenAI) và lưu vector lên **Qdrant Cloud**. Cuối cùng bắn event `doc.status (indexed)`.
-4. **Document Service**: Nhận status `indexed`, cập nhật DB và bắn event `doc.access` (phân quyền) & `notify.doc_new`.
-
-**Pha 2: Truy vấn & Hội thoại (Retrieval)**
-5. **Query Service (Port 8001)**: Nhận event phân quyền, cập nhật DB nội bộ. Nhận thông báo và đẩy qua kênh **SSE** cho User.
-6. **Chat Frontend (Port 3000)**: Người dùng thường đăng nhập. Giao diện nhận thông báo tài liệu mới qua SSE. Người dùng đặt câu hỏi.
-7. **Query Service**: Xác thực JWT, lấy danh sách ID tài liệu được phép (ACL) và gọi **MCP Service**.
-8. **MCP Service (Port 8003)**: Tìm kiếm trên **Qdrant Cloud** (có filter theo ID tài liệu) và trả về các đoạn text liên quan (chunks).
-9. **Query Service**: Gọi LLM (OpenAI) để tổng hợp câu trả lời dựa trên chunks, sau đó stream (truyền) kết quả từng phần (token) về Chat Frontend qua **SSE**, kết thúc bằng event `done` chứa thông tin trích dẫn (Citations).
-
----
-
-## 3. Cấu hình Môi trường (Environment Setup)
-
-### 3.1. Các Service Python Backend
-Tạo một file `.env` chung ở thư mục gốc của project (DA08-VSF) để chứa các secret:
-
-```env
-# .env (Gốc)
-OPENAI_API_KEY=sk-proj-...
-GCS_HMAC_KEY=GOOG1...
-GCS_HMAC_SECRET=TaUs...
-JWT_SECRET_KEY=***REDACTED-JWT-SECRET***
-QDRANT_URL=http://34.87.176.141:80
-VECTOR_DB_BASIC_AUTH=***REDACTED-QDRANT-AUTH***
-S3_ENDPOINT_URL=https://storage.googleapis.com
-S3_BUCKET=vsf-rag-chatbot-docs-dev
+# Frontend .env.local
+cp src/frontend/chat/.env.local.example   src/frontend/chat/.env.local
+cp src/frontend/admin/.env.local.example  src/frontend/admin/.env.local
 ```
 
-Mỗi service trong `src/` đã được cấu hình trỏ tới các biến này trong docker compose hoặc bạn có thể chạy bash script để export chúng ra terminal nếu chạy chay.
+### 2.2. Cấu hình Frontend .env.local
+Để giả lập chuẩn Production (tránh lỗi CORS và test đúng routing), nên trỏ Frontend về **Nginx Gateway (Port 80)** thay vì trỏ trực tiếp vào port của từng service.
 
-### 3.2. Cấu hình Frontend
-Tạo file `.env` cho hai ứng dụng Frontend.
+**File `src/frontend/admin/.env.local` & `src/frontend/chat/.env.local`:**
+```ini
+NUXT_PUBLIC_API_GATEWAY_URL=http://localhost
+VITE_API_GATEWAY_URL=http://localhost
 
-**Tại `src/frontend/admin/.env`**:
-```env
-NUXT_PUBLIC_USER_SERVICE_URL=http://localhost:8000
-NUXT_PUBLIC_DOCUMENT_SERVICE_URL=http://localhost:8002
-NUXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8001
-```
-
-**Tại `src/frontend/chat/.env`**:
-```env
-NUXT_PUBLIC_USER_SERVICE_URL=http://localhost:8000
-NUXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8001
+NUXT_PUBLIC_USER_SERVICE_PATH=/api/user
+NUXT_PUBLIC_DOCUMENT_SERVICE_PATH=/api/documents
+NUXT_PUBLIC_QUERY_SERVICE_PATH=/api/query
+NUXT_PUBLIC_HR_SERVICE_PATH=/api/hr
+NUXT_PUBLIC_MCP_SERVICE_PATH=/api/mcp
 ```
 
 ---
 
-## 4. Khởi động Hệ thống (Startup Sequence)
+## 3. Khởi động Backend Stack
 
-### Bước 1: Khởi động Hạ tầng Local
-Bật PostgreSQL và NATS:
+Sử dụng Docker Compose để dựng toàn bộ Infra và Backend Services:
+
 ```bash
-# Trong thư mục gốc DA08-VSF
-docker compose -f docker-compose.localtest.yml up -d postgres nats
+docker compose -f docker-compose.e2e.yml up -d --build
 ```
-*Đợi khoảng 10 giây để DB và Queue sẵn sàng.*
+*Lưu ý:*
+- Lệnh này tự động chạy: Migrations, NATS Bootstrap, và **Seed Admin User**.
+- Account mặc định: `admin@company.com` / `***REDACTED-SEED-ADMIN-PW***` (Xem `infra/e2e/seed_user.py`).
+- Nếu dùng Qdrant Cloud, hãy đảm bảo `QDRANT_URL` trong `.env` có port (vd: `:80` hoặc `:443`) để tránh timeout.
 
-### Bước 2: Chạy các Backend Services
-Vì hệ thống khá nặng, tốt nhất nên dùng tính năng auto-build của Docker Compose để gom các dịch vụ:
-```bash
-docker compose -f docker-compose.localtest.yml up -d --build
+---
+
+## 4. Cấu hình & Chạy Frontend (Host)
+
+Thực hiện trên máy host để có Hot-reload.
+
+### 4.1. Admin App (Quan trọng: BaseURL)
+Vì Admin chạy dưới path `/admin/` qua Nginx, bạn **PHẢI** cấu hình `baseURL` trong `src/frontend/admin/nuxt.config.ts`:
+
+```typescript
+export default defineNuxtConfig({
+  app: {
+    baseURL: '/admin/',
+  },
+  // ... rest of config
+})
 ```
-Kiểm tra xem `rag-worker` đã chạy chưa:
-```bash
-curl -fsS http://localhost:8000/readyz
-```
 
-**LƯU Ý QUAN TRỌNG VỀ MCP SERVICE:**
-MCP Service áp dụng nguyên tắc "fail-closed" - Nó sẽ crash ngay lúc khởi động nếu Qdrant chưa có bất kỳ Collection nào.
-=> Do đó, bạn sẽ phải thực hiện Bước 3 (Upload 1 file) để tạo Collection TRƯỚC, sau đó mới restart lại MCP Service.
-
-### Bước 3: Tải tài liệu qua Admin Frontend
-Bật terminal mới, chạy Admin App:
+Chạy Admin:
 ```bash
 cd src/frontend/admin
 npm install
-npm run dev
+npm run dev -- --port 3001 --host 0.0.0.0
 ```
-1. Mở trình duyệt tại: `http://localhost:3001`
-2. Đăng nhập bằng tài khoản admin.
-3. Vào trang Quản lý Tài liệu. Tải lên một tệp `.txt` hoặc `.md` và chọn phân loại `Internal` (Nội bộ).
-4. Quan sát UI: Trạng thái ban đầu sẽ là `Queued`. Frontend sẽ tự động Polling ngầm mỗi 4 giây.
-5. Sau vài giây, trạng thái sẽ đổi thành `Indexed` (Đã lập chỉ mục).
 
-Lúc này Qdrant Cloud đã có dữ liệu!
-
-### Bước 4: Khởi động lại MCP Service
-Quay lại terminal backend:
-```bash
-docker compose -f docker-compose.localtest.yml up -d mcp-service
-```
-Đảm bảo MCP Service khởi động thành công (Không bị exit code 1).
-
-### Bước 5: Truy vấn qua Chat Frontend
-Bật terminal mới, chạy Chat App:
+### 4.2. Chat App
+Chạy Chat (mặc định port 3000):
 ```bash
 cd src/frontend/chat
 npm install
-npm run dev
+npm run dev -- --host 0.0.0.0
 ```
-1. Mở trình duyệt tại: `http://localhost:3000`
-2. Đăng nhập bằng tài khoản User (không phải Admin).
-3. Đặt một câu hỏi có nội dung nằm trong file bạn vừa tải lên.
-4. Quan sát UI:
-   - Giao diện sẽ hiển thị chữ nhấp nháy theo hiệu ứng **Streaming (SSE)** do Query Service trả về.
-   - Khi hoàn tất, một dải **Citations (Trích dẫn)** sẽ hiện ra bên dưới câu trả lời, cho phép bạn click xem nguồn.
-   - Các nút **Feedback (Thumbs Up/Down)** sẽ xuất hiện. Thử click một nút.
-
-### Bước 6: Kiểm tra Thông báo (SSE Notifications)
-1. Giữ tab Chat của User mở.
-2. Quay lại tab Admin (Port 3001). Tải lên thêm 1 tệp mới (Nhớ chọn phân quyền sao cho User kia xem được, ví dụ `Internal`).
-3. Ngay khi tệp chuyển sang trạng thái `Indexed`, tab Chat của User sẽ nhận được thông báo thời gian thực thông qua cơ chế Server-Sent Events (SSE), huy hiệu (badge) thông báo sẽ tăng lên.
 
 ---
 
-## 5. Dọn dẹp (Teardown & Cleanup)
+## 5. Khởi động Local Nginx Gateway
 
-Vì bạn đang test với Qdrant Cloud và GCS thật, hãy dọn rác sau khi test xong bằng tool tích hợp sẵn trong repo:
+Để ghép luồng FE host vào Backend Docker, chạy một container Nginx tạm thời dùng host network:
+
+1. **Tạo file config tạm** (Dựa trên `nginx/nginx.conf` nhưng trỏ FE về host):
+   ```bash
+   cp nginx/nginx.conf nginx/nginx_local.conf
+   # Sửa các dòng proxy_pass sang localhost (Dùng port thật của từng service)
+   sed -i 's/frontend-admin:3001/localhost:3001/g' nginx/nginx_local.conf
+   sed -i 's/frontend-chat:3000/localhost:3000/g' nginx/nginx_local.conf
+   sed -i 's/user-service:8000/localhost:8000/g' nginx/nginx_local.conf
+   sed -i 's/document-service:8002/localhost:8002/g' nginx/nginx_local.conf
+   sed -i 's/query-service:8001/localhost:8001/g' nginx/nginx_local.conf
+   sed -i 's/hr-service:8004/localhost:8004/g' nginx/nginx_local.conf
+   sed -i 's/mcp-service:8003/localhost:8003/g' nginx/nginx_local.conf
+   ```
+
+2. **Chạy Nginx**:
+   ```bash
+   docker run -d --name rag-nginx --network host \
+     -v $(pwd)/nginx/nginx_local.conf:/etc/nginx/conf.d/default.conf:ro \
+     nginx:alpine
+   ```
+
+Bây giờ bạn có thể truy cập toàn bộ hệ thống tại:
+- **Chat**: [http://localhost/](http://localhost/)
+- **Admin**: [http://localhost/admin/](http://localhost/admin/)
+
+---
+
+## 6. Kiểm tra Luồng E2E
+
+1. **Login Admin**: Truy cập `/admin/login`, dùng `admin@company.com` / `***REDACTED-SEED-ADMIN-PW***`.
+2. **Upload**: Vào **Upload Center**, chọn file `.txt` -> Click **Upload All**.
+3. **Verify Ingest**: Đợi trạng thái đổi sang **"indexed"**. Check log `rag-worker` để xem quá trình chunk/embed.
+4. **Chat**: Sang [http://localhost/](http://localhost/), login và hỏi nội dung liên quan đến file vừa upload.
+5. **Citations**: Kiểm tra xem câu trả lời có kèm nguồn (Citations) và metadata không.
+
+---
+
+## 7. Dọn dẹp (Teardown)
 
 ```bash
-# Export các biến S3 và Qdrant
-source .env
-export S3_ACCESS_KEY_ID=$GCS_HMAC_KEY
-export S3_SECRET_ACCESS_KEY=$GCS_HMAC_SECRET
+# Xóa Backend
+docker compose -f docker-compose.e2e.yml down -v
 
-# Xoá vector trên Cloud và file trên GCS
-src/query-service/.venv/bin/python infra/localtest/ci_e2e.py cleanup
-
-# Tắt toàn bộ hệ thống local Docker
-docker compose -f docker-compose.localtest.yml down -v --remove-orphans
+# Xóa Nginx Gateway
+docker rm -f rag-nginx
 ```
 
 ---
 
-## 6. Các Điểm Thiết Kế Quan Trọng của Frontend (Design Constraints)
+## 8. Các Điểm Thiết Kế Quan Trọng (Constraints)
 
-Dành cho AI Agents và Frontend Developers khi chỉnh sửa code:
-
-1. **Bảo mật tuyệt đối ranh giới (Boundary):** Trình duyệt chỉ được gọi đến `User Service`, `Document Service` và `Query Service`. TUYỆT ĐỐI KHÔNG chứa cấu hình, token hay gọi trực tiếp tới `RAG Worker`, `MCP Service`, Qdrant, NATS hay GCS trong mã nguồn Frontend.
-2. **Không tạo URL Signed ở Client:** Giao diện xem/tải tài liệu không được lưu trữ URL cứng của GCS. Luôn phải gọi API `GET /documents/{id}/file` để lấy URL có thời hạn (Signed URL) 5 phút một lần.
-3. **Cơ chế Streaming (SSE):** Không dùng `Axios` cho API Streaming vì nó chỉ bắt dữ liệu một cục khi kết thúc. Phải sử dụng `EventSource` (hoặc thư viện tương đương như `@microsoft/fetch-event-source`) để đọc từng token chữ và hiển thị mượt mà. Đợi đến khi nhận block JSON `{"done": true}` mới được coi là kết thúc session.
-4. **Hệ thống Layer của Nuxt:** 
-   - `src/frontend/base` chứa UI shadcn, auth logic và thư viện chung. Không sửa nghiệp vụ cụ thể ở đây.
-   - Tính năng dành riêng cho quản trị chỉ code ở `src/frontend/admin`.
-   - Tính năng trò chuyện chỉ code ở `src/frontend/chat`.
-5. **Cơ chế Refresh Token:** Axios Interceptor ở Base Layer đã được cấu hình tự động. Developer không cần quan tâm token hết hạn khi gọi API, chỉ cần gọi như bình thường.
+1. **Security**: FE luôn gọi qua Gateway (Port 80). Không gọi trực tiếp port service trong code (ngoại trừ lúc dev local debug lẻ).
+2. **SSE/Streaming**: Chat UI dùng Server-Sent Events. Nginx config đã bọc `proxy_buffering off` để hỗ trợ stream token.
+3. **Shared Components**: Cả 2 app dùng chung `frontend/base`. Sửa UI tại `base` sẽ cập nhật cho cả Admin & Chat.
+4. **CORS**: Bằng cách dùng Nginx Gateway, chúng ta triệt tiêu lỗi CORS vì cả FE và API đều chung Origin (`localhost:80`).
