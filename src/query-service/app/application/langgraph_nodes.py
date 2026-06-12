@@ -535,20 +535,18 @@ async def act_node(
                 }
 
                 if qualified:
+                    start_ref = state.get("source_ref_counter", 0)
                     data = json.dumps({
                         "results": [
                             {
-                                "chunk_id": r.chunk_id,
-                                "document_id": r.document_id,
+                                "ref": start_ref + i + 1,
                                 "document_name": r.document_name,
                                 "caption": r.caption,
                                 "parent_text": r.parent_text,
                                 "heading_path": r.heading_path,
-                                "score": r.score,
-                                "source_gcs_uri": r.source_gcs_uri,
                                 "page_number": r.page_number,
                             }
-                            for r in qualified
+                            for i, r in enumerate(qualified)
                         ]
                     })
                     success = True
@@ -561,8 +559,10 @@ async def act_node(
                             source_gcs_uri=r.source_gcs_uri,
                             document_id=r.document_id,
                             page_number=r.page_number,
+                            ref=start_ref + i + 1,
+                            chunk_id=r.chunk_id,
                         )
-                        for r in qualified
+                        for i, r in enumerate(qualified)
                     ]
                 else:
                     data = json.dumps({
@@ -646,11 +646,12 @@ async def act_node(
         new_state["force_answer"] = True
 
     if tool_name == "rag_search" and success:
-        seen_docs = {s["document_name"] for s in existing_sources}
+        seen_chunks = {s["chunk_id"] for s in existing_sources}
         deduped = existing_sources + [
-            s for s in new_sources if s["document_name"] not in seen_docs
+            s for s in new_sources if s["chunk_id"] not in seen_chunks
         ]
         new_state["sources"] = deduped
+        new_state["source_ref_counter"] = state.get("source_ref_counter", 0) + len(new_sources)
 
     # Observability accumulator: append rag_search debug event if recorded above.
     if _rag_event is not None:

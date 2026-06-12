@@ -26,6 +26,8 @@ class SourceDoc(TypedDict):
     source_gcs_uri: str
     document_id: str
     page_number: int | None
+    ref: int        # citation ref number [N], 1-indexed global per turn
+    chunk_id: str   # for deduplication across multi-call iterations
 
 
 class AgentState(TypedDict):
@@ -75,6 +77,10 @@ class AgentState(TypedDict):
     # act_node can detect duplicate calls and set force_answer before the loop repeats.
     tool_call_signatures: list[str]
 
+    # --- Citation ref counter ---
+    # Incremented by act_node each rag_search call so each chunk gets a globally unique [N].
+    source_ref_counter: int
+
     # --- Observability accumulator ---
     # rag_search_events: list of JSON-safe dicts written by act_node per rag_search call.
     # Each entry: {query, top_k, allowed_count, threshold, total, qualified, scores, doc_names,
@@ -122,6 +128,7 @@ def create_initial_state(
         allowed_doc_ids=allowed_doc_ids,
         rag_score_threshold=rag_score_threshold,
         rag_top_k=rag_top_k,
+        source_ref_counter=0,
         session_id=session_id,
         question=question,
     )

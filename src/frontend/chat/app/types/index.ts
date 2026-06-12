@@ -41,6 +41,7 @@ export interface Citation {
   caption: string
   heading_path: string[]
   page_number?: number | null
+  ref?: number
 }
 
 export interface QueryRequest {
@@ -58,6 +59,7 @@ export interface QuerySource {
   score: number
   source_gcs_uri?: string
   page_number?: number | null
+  ref?: number
 }
 
 // Add File related response types
@@ -67,12 +69,25 @@ export interface DocumentFileResponse {
   expires_in: number
 }
 
+export interface TraceEntry {
+  tool: string
+  args: Record<string, unknown>
+  iteration: number
+  resultCount?: number
+  resultDocs?: string[]
+  resultRaw?: string
+  pending: boolean
+}
+
 export interface QueryTokenEvent {
   token?: string
   phase?: 'thinking' | 'acting' | 'observing' | 'generating'
   status?: string
   node?: string
   tool?: string
+  tool_args?: Record<string, unknown>
+  tool_result_summary?: { count?: number; docs?: string[]; raw?: string }
+  iterations?: number
 }
 
 export interface QueryDoneEvent {

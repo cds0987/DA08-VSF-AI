@@ -28,8 +28,25 @@ const md = new MarkdownIt({ html: true, breaks: true, linkify: true })
 const renderedContent = computed(() => {
   if (!props.data.content) return ''
   const rawHtml = md.render(props.data.content)
-  return DOMPurify.sanitize(rawHtml)
+  const withRefs = rawHtml.replace(
+    /\[(\d+)\]/g,
+    (_, n) => `<sup class="citation-ref cursor-pointer select-none rounded bg-blue-100 dark:bg-blue-900/40 px-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-800/60" data-ref="${n}">[${n}]</sup>`,
+  )
+  return DOMPurify.sanitize(withRefs, { ADD_ATTR: ['data-ref'] })
 })
+
+function handleContentClick(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  if (target.classList.contains('citation-ref')) {
+    const refN = parseInt(target.dataset.ref ?? '0')
+    const citation = props.data.citations?.find(c => c.ref === refN)
+      ?? props.data.citations?.[refN - 1]
+    if (citation) {
+      isSourcesOpen.value = true
+      selectSource(citation)
+    }
+  }
+}
 
 function copyToClipboard() {
   if (!props.data.content) return
@@ -59,6 +76,7 @@ function selectSource(citation: Citation) {
         v-if="data.content"
         class="ai-response-markdown prose prose-base prose-slate dark:prose-invert max-w-none font-medium text-slate-900 dark:text-foreground prose-p:font-medium prose-p:leading-relaxed prose-pre:bg-slate-50 dark:prose-pre:bg-background/50 prose-pre:border prose-pre:border-slate-200 dark:prose-pre:border-white/5 [overflow-wrap:anywhere]"
         v-html="renderedContent"
+        @click="handleContentClick"
       />
       <ActionableCard v-if="data.action" :action="data.action" />
     </div>
@@ -85,7 +103,7 @@ function selectSource(citation: Citation) {
           @click="selectSource(citation)"
         >
           <div class="truncate text-[13px] font-semibold text-slate-900 dark:text-foreground">
-            {{ index + 1 }}. {{ citation.caption || citation.document }}
+            {{ citation.ref ?? (index + 1) }}. {{ citation.caption || citation.document }}
           </div>
           <div class="mt-1 truncate text-[11px] font-medium text-slate-700 dark:text-muted-foreground">
             {{ citation.document }}
