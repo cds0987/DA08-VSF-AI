@@ -57,6 +57,35 @@ docker compose down
 - `GET /api/query/health`
 - `GET /health` của rag-worker nếu cần expose trực tiếp ở nội bộ
 
+### Đối soát user -> HR định kỳ
+
+`user-backfill` one-shot đã chạy mỗi deploy. Khi cần đối soát định kỳ dữ liệu cũ, cài cron trên VM:
+
+```bash
+cd ~/DA08-VSF
+bash deploy/scripts/install_user_backfill_cron.sh
+```
+
+Mặc định script cài lịch `17 3 * * *` (03:17 UTC hàng ngày). Đổi lịch:
+
+```bash
+cd ~/DA08-VSF
+CRON_SCHEDULE="0 */6 * * *" bash deploy/scripts/install_user_backfill_cron.sh
+```
+
+Chạy tay một lần:
+
+```bash
+cd ~/DA08-VSF
+bash deploy/scripts/run_user_backfill.sh
+```
+
+Ghi chú:
+- Script dùng `docker compose run --rm --no-deps user-backfill`, tức là tận dụng đúng image/env đang deploy.
+- Có `flock` để chống job chồng nhau.
+- Log nằm ở `.tmp/user-backfill/*.log`.
+- An toàn chạy lại vì HR consumer upsert idempotent, không nhân đôi dữ liệu.
+
 ---
 
 ## 5. Flow GitHub Actions deploy

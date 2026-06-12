@@ -6,10 +6,15 @@ ngay, không nuốt log.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 
 import pytest
 
-from app.infrastructure.user_events_subscriber import handle_user_event
+from app.infrastructure.user_events_subscriber import (
+    USER_EVENT_SUBJECTS,
+    handle_user_event,
+    start_user_events_subscriber,
+)
 
 
 class RecordingRepo:
@@ -29,29 +34,68 @@ class RecordingRepo:
         return None
 
 
+class ExplodingRepo(RecordingRepo):
+    async def upsert_employee_from_user(
+        self, user_id: str, email: str, department: str, is_active: bool
+    ) -> None:
+        raise RuntimeError("db write failed")
+
+
+class RecordingPublisher:
+    def __init__(self) -> None:
+        self.events: list[dict[str, str]] = []
+
+    async def publish_profile_updated(self, payload: dict[str, str]) -> None:
+        self.events.append(payload)
+
+
+class ExplodingPublisher:
+    async def publish_profile_updated(self, payload: dict[str, str]) -> None:
+        raise RuntimeError("nats publish failed")
+
+
 def _run(coro):
     return asyncio.run(coro)
 
 
 def test_user_created_provisions_employee_and_leave_balance() -> None:
     repo = RecordingRepo()
+    publisher = RecordingPublisher()
     payload = {
         "user_id": "u-1",
         "email": "a@b.c",
         "department": "HR",
+        "account_type": "internal",
         "is_active": True,
     }
-    _run(handle_user_event("user.created", payload, repo))
+    _run(handle_user_event("user.created", payload, repo, publisher))
     assert repo.upserts == [("u-1", "a@b.c", "HR", True)]
     assert repo.ensured == ["u-1"]
+    assert publisher.events == [
+        {
+            "user_id": "u-1",
+            "account_type": "internal",
+            "department": "HR",
+            "employment_status": "active",
+        }
+    ]
 
 
 def test_user_deactivated_sets_inactive_no_leave_balance() -> None:
     repo = RecordingRepo()
+    publisher = RecordingPublisher()
     payload = {"user_id": "u-2", "email": "x@y.z", "department": "Fin", "is_active": False}
-    _run(handle_user_event("user.deactivated", payload, repo))
+    _run(handle_user_event("user.deactivated", payload, repo, publisher))
     assert repo.upserts == [("u-2", "x@y.z", "Fin", False)]
     assert repo.ensured == []  # không tạo phép cho user nghỉ việc
+    assert publisher.events == [
+        {
+            "user_id": "u-2",
+            "account_type": "internal",
+            "department": "Fin",
+            "employment_status": "inactive",
+        }
+    ]
 
 
 def test_user_deactivated_defaults_inactive_when_flag_missing() -> None:
@@ -66,3 +110,83 @@ def test_missing_user_id_raises_fast() -> None:
     with pytest.raises((KeyError, ValueError)):
         _run(handle_user_event("user.created", {"email": "a@b.c"}, repo))
     assert repo.upserts == []
+
+
+def test_publish_error_is_best_effort_and_does_not_break_db_sync() -> None:
+    repo = RecordingRepo()
+    payload = {
+        "user_id": "u-4",
+        "email": "u4@company.com",
+        "department": "Ops",
+        "account_type": "external",
+        "is_active": True,
+    }
+
+    _run(handle_user_event("user.updated", payload, repo, ExplodingPublisher()))
+
+    assert repo.upserts == [("u-4", "u4@company.com", "Ops", True)]
+    assert repo.ensured == ["u-4"]
+
+
+def test_db_error_still_raises_for_retry() -> None:
+    repo = ExplodingRepo()
+    payload = {"user_id": "u-5", "email": "u5@company.com", "department": "IT", "is_active": True}
+
+    with pytest.raises(RuntimeError, match="db write failed"):
+        _run(handle_user_event("user.created", payload, repo, RecordingPublisher()))
+
+
+@dataclass(frozen=True)
+class FakeSettings:
+    nats_url: str = "nats://nats:4222"
+    nats_jetstream_enabled: bool = True
+    user_events_enabled: bool = True
+
+
+class FakeConnection:
+    def __init__(self, jetstream) -> None:
+        self._jetstream = jetstream
+        self.drained = False
+
+    def jetstream(self):
+        return self._jetstream
+
+    async def drain(self) -> None:
+        self.drained = True
+
+
+class FakeJetStream:
+    def __init__(self) -> None:
+        self.subscriptions: list[tuple[str, str]] = []
+
+    async def subscribe(self, subject: str, durable: str, cb) -> None:
+        self.subscriptions.append((subject, durable))
+
+
+class FakeNatsModule:
+    def __init__(self, connection: FakeConnection) -> None:
+        self.connection = connection
+
+    async def connect(self, url: str):
+        return self.connection
+
+
+def test_subscriber_only_registers_user_subjects() -> None:
+    jetstream = FakeJetStream()
+    connection = FakeConnection(jetstream)
+    settings = FakeSettings()
+
+    handle = _run(
+        start_user_events_subscriber(
+            settings,  # type: ignore[arg-type]
+            repo_factory=RecordingRepo,
+            publisher=RecordingPublisher(),
+            nats_module=FakeNatsModule(connection),
+        )
+    )
+
+    try:
+        assert [subject for subject, _ in jetstream.subscriptions] == list(USER_EVENT_SUBJECTS)
+        assert all(not subject.startswith("hr.") for subject, _ in jetstream.subscriptions)
+    finally:
+        _run(handle.close())
