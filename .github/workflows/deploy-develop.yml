@@ -423,14 +423,52 @@ jobs:
             git fetch "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" develop
             git reset --hard FETCH_HEAD
 
-            echo "==> 2) Env đến TỪ git (đã reset --hard ở bước 1) — deploy/env/*.env commit thẳng."
+            echo "==> 2) CONFIG đến TỪ git (deploy/env/*.env commit thẳng — KHÔNG secret)."
             miss=0
             for f in common rag-worker mcp-service hr-service query-service user-service document-service; do
               [ -s "deploy/env/$f.env" ] || { echo "::error::deploy/env/$f.env THIẾU/RỖNG trong git"; miss=1; }
             done
-            # KEYLESS GCS: VM gắn SA vsf-storage -> document-service dùng ADC, KHÔNG cần
-            # gcp-sa.json (org policy chặn tạo SA key). Bỏ check file SA.
-            [ "$miss" = 0 ] || { echo "::error::Thiếu cấu hình -> DỪNG deploy"; exit 1; }
+
+            echo "==> 2a) Sinh SECRET từ GitHub Secrets (public repo -> secret KHÔNG nằm trong git)."
+            umask 077
+            # secret.env: secret app-service (load CUỐI trong env_file -> override placeholder).
+            cat > deploy/env/secret.env <<EOF
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+            JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }}
+            MCP_INTERNAL_TOKEN=${{ secrets.MCP_INTERNAL_TOKEN }}
+            HR_INTERNAL_TOKEN=${{ secrets.HR_INTERNAL_TOKEN }}
+            HR_SERVICE_INTERNAL_TOKEN=${{ secrets.HR_INTERNAL_TOKEN }}
+            S3_ACCESS_KEY_ID=${{ secrets.GCS_HMAC_KEY }}
+            S3_SECRET_ACCESS_KEY=${{ secrets.GCS_HMAC_SECRET }}
+            LANGFUSE_PUBLIC_KEY=${{ secrets.LANGFUSE_PUBLIC_KEY }}
+            LANGFUSE_SECRET_KEY=${{ secrets.LANGFUSE_SECRET_KEY }}
+            EOF
+            # .env (root): biến cho docker-compose ${VAR} substitution (chỉ block environment + postgres/langfuse).
+            cat > .env <<EOF
+            DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
+            IMAGE_TAG=develop
+            POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+            NEW_RELIC_LICENSE_KEY=${{ secrets.NEW_RELIC_LICENSE_KEY }}
+            SEED_ADMIN_PASSWORD=${{ secrets.SEED_ADMIN_PASSWORD }}
+            LANGFUSE_DB_PASSWORD=${{ secrets.LANGFUSE_DB_PASSWORD }}
+            NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}
+            LANGFUSE_SALT=${{ secrets.LANGFUSE_SALT }}
+            LANGFUSE_ENCRYPTION_KEY=${{ secrets.LANGFUSE_ENCRYPTION_KEY }}
+            LANGFUSE_INIT_USER_PASSWORD=${{ secrets.LANGFUSE_INIT_USER_PASSWORD }}
+            LANGFUSE_PUBLIC_KEY=${{ secrets.LANGFUSE_PUBLIC_KEY }}
+            LANGFUSE_SECRET_KEY=${{ secrets.LANGFUSE_SECRET_KEY }}
+            EOF
+
+            echo "==> 2b) FAIL-CLOSED: secret bắt buộc phải có giá trị (thiếu GitHub Secret -> DỪNG)."
+            req_secret() { v=$(grep -E "^$1=" "$2" | cut -d= -f2-); [ -n "$v" ] || { echo "::error::Thiếu secret $1 (set trong GitHub Secrets)"; miss=1; }; }
+            for k in OPENAI_API_KEY JWT_SECRET_KEY MCP_INTERNAL_TOKEN HR_INTERNAL_TOKEN S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY; do
+              req_secret "$k" deploy/env/secret.env
+            done
+            for k in POSTGRES_PASSWORD NEW_RELIC_LICENSE_KEY SEED_ADMIN_PASSWORD LANGFUSE_DB_PASSWORD NEXTAUTH_SECRET LANGFUSE_SALT LANGFUSE_ENCRYPTION_KEY LANGFUSE_INIT_USER_PASSWORD; do
+              req_secret "$k" .env
+            done
+            # KEYLESS GCS: VM gắn SA vsf-storage -> document-service dùng ADC, KHÔNG cần gcp-sa.json.
+            [ "$miss" = 0 ] || { echo "::error::Thiếu cấu hình/secret -> DỪNG deploy"; exit 1; }
 
             echo "==> 2b) Ghi ĐIỂM ROLLBACK = image ID đang chạy (trước khi pull bản mới)"
             : > /tmp/rollback_images.txt
@@ -459,9 +497,9 @@ jobs:
               done
               [ "$ok" = 1 ] || { lf_warn "health chưa sẵn sàng sau ~60s"; return 0; }
 
-              PK=$(grep -E '^LANGFUSE_PUBLIC_KEY=' deploy/env/common.env | cut -d= -f2-)
-              SK=$(grep -E '^LANGFUSE_SECRET_KEY=' deploy/env/common.env | cut -d= -f2-)
-              [ -n "$PK" ] && [ -n "$SK" ] || { lf_warn "thiếu LANGFUSE_PUBLIC_KEY/SECRET_KEY trong common.env"; return 0; }
+              PK=$(grep -E '^LANGFUSE_PUBLIC_KEY=' deploy/env/secret.env | cut -d= -f2-)
+              SK=$(grep -E '^LANGFUSE_SECRET_KEY=' deploy/env/secret.env | cut -d= -f2-)
+              [ -n "$PK" ] && [ -n "$SK" ] || { lf_warn "thiếu LANGFUSE_PUBLIC_KEY/SECRET_KEY trong secret.env"; return 0; }
               TID="prod-readiness-$(date +%s)-$RANDOM"
 
               code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -u "$PK:$SK" \
@@ -713,7 +751,7 @@ jobs:
                 -d "{\"question\":\"Tôi còn bao nhiêu ngày phép?\",\"user_id\":\"$SMOKE_UID\"}" \
                 | python3 /tmp/smoke_parse.py "HR query->mcp->hr_query" 0 \
                 || { echo "::error::SMOKE HR query FAIL"; docker compose logs --no-color --tail 100 query-service mcp-service hr-service || true; exit 1; }
-              HR_TOKEN=$(grep -E '^HR_INTERNAL_TOKEN=' deploy/env/hr-service.env | cut -d= -f2-)
+              HR_TOKEN=$(grep -E '^HR_INTERNAL_TOKEN=' deploy/env/secret.env | cut -d= -f2-)
               hrc=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "X-Internal-Token: $HR_TOKEN" http://localhost:8004/health)
               echo "  [HR] hr-service /health -> $hrc"
               case "$hrc" in 2*) : ;; *) echo "::error::SMOKE hr-service health FAIL ($hrc)"; docker compose logs --no-color --tail 80 hr-service || true; exit 1 ;; esac

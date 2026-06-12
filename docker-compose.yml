@@ -2,7 +2,7 @@
 # agent tự detect collector EU, không cần set NEW_RELIC_HOST. Mỗi service tự đặt
 # NEW_RELIC_APP_NAME riêng (merge anchor này + override app name).
 x-newrelic: &newrelic
-  NEW_RELIC_LICENSE_KEY: "***REDACTED-NEWRELIC-KEY***"
+  NEW_RELIC_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY}"
   NEW_RELIC_DISTRIBUTED_TRACING_ENABLED: "true"
   NEW_RELIC_APPLICATION_LOGGING_ENABLED: "true"
   NEW_RELIC_LOG: stderr
@@ -46,13 +46,14 @@ services:
 
   # Postgres APP in-compose (thay Cloud SQL — nguyên tắc 1-VM: không host DB ngoài VM).
   # Tạo 5 DB (user/doc/query/rag/hr) qua init-db.sql lần đầu. Data bền qua volume
-  # app_pg_data. User/pass KHỚP DATABASE_URL trong deploy/env/*.env (postgres/***REDACTED-DB-PW***).
+  # app_pg_data. Password = ${POSTGRES_PASSWORD} (root .env, sinh từ GitHub Secrets lúc deploy);
+  # CÙNG biến dùng để build DATABASE_URL ở mỗi service -> không lệch.
   # ⚠ Mất VM = mất DB -> nên cron pg_dump đẩy GCS để backup.
   app-postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ***REDACTED-DB-PW***
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: postgres
     volumes:
       - app_pg_data:/var/lib/postgresql/data
@@ -89,7 +90,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: langfuse
-      POSTGRES_PASSWORD: ***REDACTED-LANGFUSE-DB-PW***
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD}
       POSTGRES_DB: langfuse
     volumes:
       - langfuse_pg_data:/var/lib/postgresql/data
@@ -103,10 +104,10 @@ services:
       - "127.0.0.1:3100:3000"   # CHỈ loopback VM -> không lộ Internet; xem dashboard qua SSH tunnel.
                                  # Service nội bộ compose dùng http://langfuse:3000 (không qua cổng này).
     environment:
-      DATABASE_URL: postgresql://langfuse:***REDACTED-LANGFUSE-DB-PW***@langfuse-db:5432/langfuse
-      NEXTAUTH_SECRET: "***REDACTED-NEXTAUTH-SECRET***"
-      SALT: "***REDACTED-LANGFUSE-SALT***"
-      ENCRYPTION_KEY: ***REDACTED-ENCRYPTION-KEY***
+      DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD}@langfuse-db:5432/langfuse
+      NEXTAUTH_SECRET: "${NEXTAUTH_SECRET}"
+      SALT: "${LANGFUSE_SALT}"
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY}
       # Truy cập dashboard qua: ssh -L 3100:localhost:3100 <vm> rồi mở http://localhost:3100
       NEXTAUTH_URL: http://localhost:3100
       TELEMETRY_ENABLED: "true"
@@ -117,11 +118,11 @@ services:
       LANGFUSE_INIT_ORG_NAME: VSF
       LANGFUSE_INIT_PROJECT_ID: rag-chatbot
       LANGFUSE_INIT_PROJECT_NAME: VSF RAG Chatbot
-      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ***REDACTED-LANGFUSE-PUBLIC***
-      LANGFUSE_INIT_PROJECT_SECRET_KEY: ***REDACTED-LANGFUSE-SECRET***
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
       LANGFUSE_INIT_USER_EMAIL: admin@company.com
       LANGFUSE_INIT_USER_NAME: VSF Admin
-      LANGFUSE_INIT_USER_PASSWORD: ***REDACTED-LANGFUSE-DB-PW***
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD}
     restart: unless-stopped
 
   # Image kéo từ Docker Hub (KHÔNG build trên VM). CI build+push ở Phase 2; VM chỉ pull.
@@ -139,6 +140,9 @@ services:
     env_file:
       - ./deploy/env/common.env
       - ./deploy/env/user-service.env
+      - ./deploy/env/secret.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/user_db
     depends_on:
       app-postgres:
         condition: service_healthy
@@ -151,6 +155,9 @@ services:
     env_file:
       - ./deploy/env/common.env
       - ./deploy/env/user-service.env
+      - ./deploy/env/secret.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/user_db
     depends_on:
       user-migrate:
         condition: service_completed_successfully
@@ -165,9 +172,11 @@ services:
     env_file:
       - ./deploy/env/common.env
       - ./deploy/env/user-service.env
+      - ./deploy/env/secret.env
     environment:
       <<: *newrelic
       NEW_RELIC_APP_NAME: vsf-user-service
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/user_db
     depends_on:
       user-migrate:
         condition: service_completed_successfully
@@ -185,9 +194,9 @@ services:
     working_dir: /app
     environment:
       PYTHONPATH: /app
-      USER_SERVICE_DATABASE_URL: postgresql+asyncpg://postgres:***REDACTED-DB-PW***@app-postgres:5432/user_db
+      USER_SERVICE_DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/user_db
       SEED_ADMIN_EMAIL: admin@company.com
-      SEED_ADMIN_PASSWORD: "***REDACTED-SEED-ADMIN-PW***"
+      SEED_ADMIN_PASSWORD: "${SEED_ADMIN_PASSWORD}"
     volumes:
       - ./infra/e2e/seed_user.py:/seed/seed_user.py:ro
     depends_on:
@@ -210,6 +219,9 @@ services:
     env_file:
       - ./deploy/env/common.env
       - ./deploy/env/document-service.env
+      - ./deploy/env/secret.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/doc_db
     depends_on:
       app-postgres:
         condition: service_healthy
@@ -222,9 +234,11 @@ services:
     env_file:
       - ./deploy/env/common.env
       - ./deploy/env/document-service.env
+      - ./deploy/env/secret.env
     environment:
       <<: *newrelic
       NEW_RELIC_APP_NAME: vsf-document-service
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/doc_db
     depends_on:
       nats:
         condition: service_started
@@ -241,9 +255,11 @@ services:
     env_file:
       - ./deploy/env/common.env
       - ./deploy/env/query-service.env
+      - ./deploy/env/secret.env
     environment:
       <<: *newrelic
       NEW_RELIC_APP_NAME: vsf-query-service
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/query_db
     depends_on:
       app-postgres:
         condition: service_healthy
@@ -268,8 +284,11 @@ services:
     env_file:
       - ./deploy/env/common.env
       - ./deploy/env/rag-worker.env
-    # DATABASE_URL đến TỪ rag-worker.env (nguồn DUY NHẤT). KHÔNG override ở đây:
-    # khối `environment` của compose ĐÈ env_file, từng gây "sửa .env không ăn".
+      - ./deploy/env/secret.env
+    # DATABASE_URL = nguồn DUY NHẤT ở đây (password từ ${POSTGRES_PASSWORD} root .env;
+    # db-name literal = config trong git). KHÔNG còn trong env_file -> không split-brain.
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/rag_db
     depends_on:
       app-postgres:
         condition: service_healthy
@@ -280,9 +299,11 @@ services:
     env_file:
       - ./deploy/env/common.env
       - ./deploy/env/rag-worker.env
+      - ./deploy/env/secret.env
     environment:
       <<: *newrelic
       NEW_RELIC_APP_NAME: vsf-rag-worker
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/rag_db
     depends_on:
       nats:
         condition: service_started
@@ -301,6 +322,7 @@ services:
     env_file:
       - ./deploy/env/common.env
       - ./deploy/env/mcp-service.env
+      - ./deploy/env/secret.env
     environment:
       <<: *newrelic
       NEW_RELIC_APP_NAME: vsf-mcp-service
@@ -327,6 +349,9 @@ services:
     env_file:
       - ./deploy/env/common.env
       - ./deploy/env/hr-service.env
+      - ./deploy/env/secret.env
+    environment:
+      HR_DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/hr_db
     depends_on:
       app-postgres:
         condition: service_healthy
@@ -339,9 +364,11 @@ services:
     env_file:
       - ./deploy/env/common.env
       - ./deploy/env/hr-service.env
+      - ./deploy/env/secret.env
     environment:
       <<: *newrelic
       NEW_RELIC_APP_NAME: vsf-hr-service
+      HR_DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/hr_db
     depends_on:
       nats:
         condition: service_started

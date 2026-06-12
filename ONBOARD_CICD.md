@@ -22,9 +22,9 @@ Hai khối thay đổi (đã code xong, đã verify cục bộ, **commit trên `
 
 - `deploy/env/common.env` = biến dùng chung + **contract-critical** (rag-worker producer == mcp-service consumer): `AI_PROVIDER/OPENAI_API_KEY/EMBED_BASE_URL/EMBED_MODEL/EMBED_DIMENSION/VECTOR_DB_*/QDRANT_*`, cộng `JWT_SECRET_KEY/JWT_ALGORITHM/NATS_URL/REDIS_URL/Langfuse`.
 - `deploy/env/<service>.env` = chỉ biến riêng. **`DATABASE_URL` per-service** (db name khác nhau; **driver `postgresql+psycopg`** cho TẤT CẢ — KHÔNG asyncpg, vì VM đang chạy psycopg3). hr dùng `HR_DATABASE_URL`.
-- compose `env_file: [common.env, <svc>.env]` — common nạp trước, file service override khi trùng. Quy tắc thêm key: **mặc định để ở service; chỉ nâng lên common khi service thứ 2 cần**; nhóm contract-critical bắt buộc ở common.
-- **Commit thẳng vào git** (repo private). `git reset --hard` lúc deploy đồng bộ env cùng code → hết drift. `.gitignore` KHÔNG còn ignore `deploy/env`.
-- Giá trị thật đã điền từ container đang chạy trên VM (login/token/key khớp 100%): `JWT_SECRET_KEY`, `OPENAI_API_KEY` (OpenAI direct sk-proj), `MCP_INTERNAL_TOKEN` (mcp==query), `HR_INTERNAL_TOKEN` (hr==mcp), GCS HMAC (rag-worker S3_*), Cloud SQL `***REDACTED-DB-PW***@app-postgres`.
+- compose `env_file: [common.env, <svc>.env, secret.env]` — common→service→secret, file sau override file trước. Quy tắc thêm key: **mặc định để ở service; chỉ nâng lên common khi service thứ 2 cần**; nhóm contract-critical bắt buộc ở common.
+- **CONFIG commit thẳng vào git (public repo OK)**; **SECRET ở `deploy/env/secret.env` (gitignored)** — deploy sinh từ GitHub Secrets. `git reset --hard` đồng bộ config cùng code → hết drift.
+- Secret quản qua GitHub Secrets (xem `deploy/env/secret.env.example`): `JWT_SECRET_KEY`, `OPENAI_API_KEY`, `MCP_INTERNAL_TOKEN` (mcp==query), `HR_INTERNAL_TOKEN` (hr==mcp), GCS HMAC (rag-worker S3_*); DB password = `${POSTGRES_PASSWORD}` (root `.env`, build DATABASE_URL trong compose).
 - **Bỏ bẫy cũ**: compose không còn `environment: DATABASE_URL` override (từng đè env_file); hr alembic `migrations/env.py` đọc `HR_DATABASE_URL` (hết split-brain migrate vs runtime); bind-mount SA đổi `/home/<user>/...` → `./deploy/secrets/gcp-sa.json`.
 
 ### Việc thủ công đã làm trên VM (KHÔNG trong git)

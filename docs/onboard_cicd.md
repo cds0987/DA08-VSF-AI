@@ -195,7 +195,7 @@ sudo ls -la deploy/env/                     # các file env thật (secret)
 # trên VM — vào psql trong container app-postgres
 cd ~/DA08-VSF
 docker compose exec app-postgres psql -U postgres -d query_db
-# 5 DB: user_db / doc_db / query_db / rag_db / hr_db (pass: ***REDACTED-DB-PW***)
+# 5 DB: user_db / doc_db / query_db / rag_db / hr_db (pass: $POSTGRES_PASSWORD, xem root .env)
 ```
 
 > ⚠️ `app-postgres` data nằm trong volume `app_pg_data` trên VM → **mất VM = mất DB**.
@@ -291,7 +291,7 @@ gcloud auth application-default revoke
 | Thành phần | Chi tiết |
 |---|---|
 | Project | `vintravel-chatbot`, **number `289299478169`** |
-| Postgres | **in-compose** `app-postgres` (KHÔNG Cloud SQL) — 5 DB, superuser `postgres` / pass `***REDACTED-DB-PW***` (URL-encode `%401`), host nội bộ `app-postgres:5432`, volume `app_pg_data` |
+| Postgres | **in-compose** `app-postgres` (KHÔNG Cloud SQL) — 5 DB, superuser `postgres` / pass `${POSTGRES_PASSWORD}` (root `.env`, sinh từ GitHub Secrets), host nội bộ `app-postgres:5432`, volume `app_pg_data` |
 | VM app (TẤT CẢ in-compose) | `vsf-rag-demo-vm` — asia-southeast1-a, e2-standard-4, ext `35.240.193.13` |
 | Qdrant | **in-compose** `qdrant:6333` (KHÔNG VM `qdrant-base`, KHÔNG Qdrant Cloud) |
 | GCS | `gs://vintravel-chatbot-docs-dev/` — SA `vsf-storage` gắn VM (keyless ADC); HMAC cho rag-worker S3 |
