@@ -1,5 +1,5 @@
-# Build-time ONLY deps (KHÔNG nằm trong image runtime). Dùng ở builder stage để tải
-# dataset giá model từ HuggingFace + parse parquet -> model_prices.json (bundle vào image).
-# Xem scripts/build_price_catalog.py và Dockerfile (stage price-builder).
-huggingface-hub>=0.23.0
-pyarrow>=15.0.0
+# Build-time ONLY deps cho stage price-builder.
+# Trước đây cần huggingface-hub + pyarrow để tải + parse parquet (pyarrow ~40-60MB ->
+# build chậm). Nay fetch qua HF datasets-server REST (JSON) bằng urllib THUẦN STDLIB
+# -> KHÔNG còn dep build nào. Giữ file để Dockerfile `pip install -r` chạy no-op.
+# Xem app/infrastructure/observability/price_catalog.py::fetch_prices_from_hf.

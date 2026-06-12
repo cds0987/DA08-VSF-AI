@@ -126,16 +126,57 @@ def load_price_catalog(path: str, override_path: str | None = None) -> PriceCata
 
 
 # ---------------------------------------------------------------------------
-# Build-time ONLY: fetch parquet HF -> dict (cần huggingface_hub + pyarrow).
-# KHÔNG gọi ở runtime — chỉ scripts/build_price_catalog.py dùng.
+# Build-time ONLY: fetch giá qua HF datasets-server REST (JSON) -> dict.
+# CHỈ dùng stdlib urllib (KHÔNG pyarrow/huggingface-hub) -> image build nhẹ & nhanh.
+# KHÔNG gọi ở runtime — chỉ scripts/build_price_catalog.py dùng. Lỗi -> raise (build
+# script bắt + giữ seed json đã commit làm fallback).
 # ---------------------------------------------------------------------------
-def _parse_parquet_files(paths: list[str]) -> dict[str, dict[str, float]]:
-    import pyarrow.parquet as pq  # import cục bộ: runtime không cần pyarrow
+_DATASETS_SERVER = "https://datasets-server.huggingface.co"
+_ROWS_PAGE = 100  # giới hạn datasets-server /rows
 
+
+def _http_get_json(url: str, timeout: float = 30.0) -> dict:
+    import json as _json
+    import urllib.request
+
+    with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 (URL nội bộ HF)
+        return _json.loads(resp.read().decode("utf-8"))
+
+
+def _first_config_split(repo_id: str) -> tuple[str, str]:
+    from urllib.parse import quote
+
+    data = _http_get_json(f"{_DATASETS_SERVER}/splits?dataset={quote(repo_id)}")
+    splits = data.get("splits") or []
+    if not splits:
+        raise RuntimeError(f"datasets-server: no splits for {repo_id}")
+    first = splits[0]
+    return str(first["config"]), str(first["split"])
+
+
+def fetch_prices_from_hf(repo_id: str, cache_dir: str | None = None) -> dict[str, dict[str, float]]:
+    """Fetch giá model qua HF datasets-server /rows (JSON, phân trang). Raise nếu lỗi.
+
+    Tên hàm giữ nguyên cho tương thích scripts/build_price_catalog.py. `cache_dir` không
+    còn dùng (giữ chữ ký cũ)."""
+    from urllib.parse import quote
+
+    config, split = _first_config_split(repo_id)
+    base = (
+        f"{_DATASETS_SERVER}/rows?dataset={quote(repo_id)}"
+        f"&config={quote(config)}&split={quote(split)}"
+    )
     prices: dict[str, dict[str, float]] = {}
-    for path in paths:
-        table = pq.read_table(path, columns=["id", "pricing"])
-        for row in table.to_pylist():
+    offset = 0
+    total = None
+    while total is None or offset < total:
+        page = _http_get_json(f"{base}&offset={offset}&length={_ROWS_PAGE}")
+        total = page.get("num_rows_total", total or 0)
+        rows = page.get("rows") or []
+        if not rows:
+            break
+        for entry in rows:
+            row = entry.get("row") or {}
             model_id = _normalize_model(row.get("id"))
             if not model_id:
                 continue
@@ -145,22 +186,7 @@ def _parse_parquet_files(paths: list[str]) -> dict[str, dict[str, float]]:
                 "completion": _to_float(pricing.get("completion")),
                 "cache_read": _to_float(pricing.get("input_cache_read")),
             }
-    return prices
-
-
-def fetch_prices_from_hf(repo_id: str, cache_dir: str | None = None) -> dict[str, dict[str, float]]:
-    """Tải mọi shard parquet của dataset HF rồi parse -> dict giá. Raise nếu lỗi."""
-    from huggingface_hub import HfApi, hf_hub_download  # type: ignore[import]
-
-    files = HfApi().list_repo_files(repo_id, repo_type="dataset")
-    parquet_files = sorted(f for f in files if f.endswith(".parquet"))
-    if not parquet_files:
-        raise RuntimeError(f"no parquet files in dataset {repo_id}")
-    downloaded = [
-        hf_hub_download(repo_id, f, repo_type="dataset", cache_dir=cache_dir)
-        for f in parquet_files
-    ]
-    prices = _parse_parquet_files(downloaded)
+        offset += len(rows)
     if not prices:
-        raise RuntimeError("parsed price catalog is empty")
+        raise RuntimeError("fetched price catalog is empty")
     return prices

@@ -8,9 +8,13 @@ WORKDIR /app
 ARG MODEL_PRICE_DATASET_REPO=gunnybd01/openrouter-models-cache
 COPY requirements-build.txt ./
 RUN pip install --no-cache-dir -r requirements-build.txt
-# Cần module price_catalog + seed json (fallback) -> copy app trước khi build.
-COPY app ./app
-COPY scripts ./scripts
+# CHỈ copy phần script cần (price_catalog dùng stdlib thuần + seed json) thay vì cả
+# app/ -> layer fetch HF KHÔNG bị bust khi code app khác đổi (cache build nhanh hơn
+# nhiều; trước đây COPY app làm fetch chạy lại mỗi lần đổi bất kỳ file app nào).
+COPY app/__init__.py ./app/__init__.py
+COPY app/infrastructure/__init__.py ./app/infrastructure/__init__.py
+COPY app/infrastructure/observability ./app/infrastructure/observability
+COPY scripts/build_price_catalog.py ./scripts/build_price_catalog.py
 RUN python scripts/build_price_catalog.py \
         app/infrastructure/observability/data/model_prices.json \
         "$MODEL_PRICE_DATASET_REPO"
