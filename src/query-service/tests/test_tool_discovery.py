@@ -164,16 +164,17 @@ async def test_build_langgraph_tools_rag_still_bespoke():
 
 @pytest.mark.asyncio
 async def test_act_node_dispatches_generic_tool():
-    """act_node must call call_tool() for an unknown tool and extract summary."""
-    import json as _json
+    """act_node must call call_tool() for a generic tool step in tool_plan and extract summary.
+
+    Plan-and-Execute architecture: act_node reads the current step from
+    state["tool_plan"][state["plan_cursor"]] — NOT from AIMessage.tool_calls.
+    """
     from app.application.langgraph_nodes import act_node
-    from app.application.langgraph_state import create_initial_state, AgentPhase
-    from langchain_core.messages import AIMessage
+    from app.application.langgraph_state import create_initial_state
 
     _register_it_ticket()
     mcp = _get_mcp()
 
-    # Build a minimal AgentState with an AIMessage that has a tool_call to it_ticket.
     initial = create_initial_state(
         question="Tôi cần tạo IT ticket cho laptop mới",
         user_id="u-test",
@@ -184,26 +185,27 @@ async def test_act_node_dispatches_generic_tool():
         max_iterations=3,
         recent_messages=[],
     )
-    # Inject an AIMessage with a tool_call to it_ticket.
-    ai_msg = AIMessage(
-        content="",
-        tool_calls=[{
-            "name": "it_ticket",
-            "args": {"request": "Need new laptop"},
-            "id": "call_it_123",
-            "type": "tool_call",
-        }],
-    )
-    state = {**initial, "messages": [ai_msg]}
+    # Drive act_node via tool_plan (Plan-and-Execute): one generic step at cursor 0.
+    state = {
+        **initial,
+        "tool_plan": [{"tool": "it_ticket", "query": "Need new laptop", "reason": "User requested IT ticket"}],
+        "plan_cursor": 0,
+    }
     result = await act_node(state, mcp_client=mcp)
 
-    # The tool must have been executed and the summary returned.
+    # act_node must execute the step and return a ToolMessage with the summary.
     assert result.get("phase") is not None
     tool_messages = [m for m in result.get("messages", []) if hasattr(m, "content")]
-    assert len(tool_messages) >= 1
+    assert len(tool_messages) >= 1, (
+        f"Expected at least 1 ToolMessage from act_node, got: {result.get('messages', [])}"
+    )
     content = tool_messages[0].content
     assert _GENERIC_TOOL_SUMMARY in content, (
         f"Expected summary in tool message content, got: {content!r}"
+    )
+    # plan_cursor must advance to 1 after executing step 0.
+    assert result.get("plan_cursor") == 1, (
+        f"Expected plan_cursor=1 after executing step, got {result.get('plan_cursor')}"
     )
 
 
