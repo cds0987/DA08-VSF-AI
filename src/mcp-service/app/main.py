@@ -11,6 +11,7 @@ from app.core.contract import VectorstoreContractError
 from app.interfaces.mcp_server import (
     InternalTokenAuthMiddleware,
     build_mcp,
+    enforce_production_auth,
     mcp_endpoint_url,
 )
 
@@ -42,6 +43,9 @@ def main() -> int:
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    # Fail-closed: ở production phải có auth app-layer, không được fail-open.
+    enforce_production_auth(settings)
+
     mcp, tools = build_mcp(settings)
     tool_names = [tool.name for tool in tools]
 

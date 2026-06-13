@@ -117,25 +117,26 @@ async def test_acl_top_secret_doc_only_for_admin(hr_client: AsyncClient, admin_c
 @pytest.mark.asyncio
 async def test_acl_hr_query_injects_correct_user_id(hr_client: AsyncClient):
     """
-    hr_query must always use the authenticated user_id.
-    Spy on mcp_client.hr_query to verify the injected user_id.
+    hr_query (profile) phải LUÔN dùng user_id đã xác thực, KHÔNG do LLM điền.
+    act_node gọi call_tool("hr_query", {"user_id": ...}); spy call_tool để kiểm.
     """
     from app.interfaces.api.dependencies import get_mcp_client
     mcp = get_mcp_client()
-    original_hr = mcp.hr_query
+    original_call = mcp.call_tool
     calls = []
 
-    async def spy_hr(user_id, intent):
-        calls.append({"user_id": user_id, "intent": intent})
-        return await original_hr(user_id=user_id, intent=intent)
+    async def spy_call(name, arguments):
+        if name == "hr_query":
+            calls.append(dict(arguments))
+        return await original_call(name, arguments)
 
-    with patch.object(mcp, "hr_query", side_effect=spy_hr):
+    with patch.object(mcp, "call_tool", side_effect=spy_call):
         await _do_query(hr_client, "Số ngày nghỉ phép còn lại của tôi?", HR_USER_ID)
 
     if calls:
         for call in calls:
-            assert call["user_id"] == HR_USER_ID, (
-                f"hr_query received wrong user_id: {call['user_id']}"
+            assert call.get("user_id") == HR_USER_ID, (
+                f"hr_query received wrong user_id: {call.get('user_id')}"
             )
 
 

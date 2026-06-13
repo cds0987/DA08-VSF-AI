@@ -14,7 +14,7 @@ connection — it only needs a transient connection for schema discovery.
 import json
 import logging
 from dataclasses import asdict
-from typing import Any, Literal
+from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -30,11 +30,11 @@ _DEFAULT_RAG_DESC = (
     "Returns relevant text chunks ranked by relevance score."
 )
 _DEFAULT_HR_DESC = (
-    "Query the authenticated user's personal HR data: "
-    "remaining leave balance, leave request history, or payroll information. "
+    "Query the authenticated user's personal HR data: remaining leave balance, "
+    "leave request history, attendance (work days / late / absent), onboarding "
+    "progress, payroll, benefits, or performance review. "
     "NOTE: user identity is injected automatically — do not pass user_id."
 )
-
 
 class _RagSearchInput(BaseModel):
     query: str = Field(description="Search query in Vietnamese or English")
@@ -42,9 +42,9 @@ class _RagSearchInput(BaseModel):
 
 
 class _HrQueryInput(BaseModel):
-    intent: Literal["leave_balance", "leave_requests", "payroll"] = Field(
-        description="HR data type: leave_balance | leave_requests | payroll"
-    )
+    # KHÔNG field: hr_query trả toàn bộ hồ sơ HR, model không cần (và không được) điền gì.
+    # user_id tiêm server-side ở act_node.
+    pass
 
 
 def _build_client_config(settings: Settings) -> dict[str, Any]:
@@ -127,6 +127,8 @@ class LangChainMCPToolsLoader:
                     )
                 )
             elif spec.name == "hr_query":
+                # hr_query no-arg: trả toàn bộ hồ sơ HR (user_id tiêm ở act_node).
+                # Model gọi hr_query() rỗng = hợp lệ -> hết bug "intent rỗng".
                 tools.append(
                     self._make_hr_query(
                         description=spec.description or _DEFAULT_HR_DESC,
@@ -134,12 +136,14 @@ class LangChainMCPToolsLoader:
                     )
                 )
             else:
+                # Tool khác: discover động từ spec mcp (dict schema).
                 tools.append(self._make_generic_tool(spec))
 
-        # Fallback: if mcp-service returned nothing, provide hardcoded defaults so
-        # the agent is never left with an empty tool list.
+        # Fallback: mcp-service không trả spec nào (mcp down) -> ít nhất giữ rag_search
+        # để agent không rỗng tool. hr_query bỏ qua: không có spec từ mcp thì không
+        # hardcode schema intent ở đây (mcp down thì hr_query cũng không gọi được).
         if not tools:
-            logger.warning("mcp_tools_empty_fallback: no specs returned, using hardcoded defaults")
+            logger.warning("mcp_tools_empty_fallback: no specs returned, dùng rag_search + hr_query mặc định")
             tools.append(self._make_rag_search(_DEFAULT_RAG_DESC, allowed_doc_ids))
             tools.append(self._make_hr_query(_DEFAULT_HR_DESC, user_id))
 
@@ -213,11 +217,12 @@ class LangChainMCPToolsLoader:
         client = self._mcp_client
         _uid = user_id
 
-        async def _hr_query(
-            intent: Literal["leave_balance", "leave_requests", "payroll"],
-        ) -> str:
-            result = await client.hr_query(user_id=_uid, intent=intent)
-            return result.summary
+        # KHÔNG tham số: model gọi hr_query() -> lấy toàn bộ profile (user_id tiêm
+        # server-side). Hết failure mode "intent rỗng".
+        async def _hr_query() -> str:
+            raw = await client.call_tool("hr_query", {"user_id": _uid})
+            payload = raw.get("data", raw) if isinstance(raw, dict) else raw
+            return json.dumps(payload, ensure_ascii=False)
 
         return StructuredTool.from_function(
             coroutine=_hr_query,
@@ -225,3 +230,4 @@ class LangChainMCPToolsLoader:
             description=description,
             args_schema=_HrQueryInput,
         )
+

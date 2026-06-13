@@ -686,7 +686,7 @@ jobs:
             if need and src < 1:
                 print("  [%s] FAIL: can sources>0 (query->mcp->rag->qdrant tra rong)" % label); sys.exit(1)
             PYEOF
-            SMOKE_EMAIL="admin@company.com"; SMOKE_PW="***REDACTED-SEED-ADMIN-PW***"
+            SMOKE_EMAIL="admin@company.com"; SMOKE_PW="${{ secrets.SEED_ADMIN_PASSWORD }}"
             TOK=$(curl -s --max-time 25 -X POST http://localhost/api/user/auth/login \
                     -H 'Content-Type: application/json' \
                     -d "{\"email\":\"$SMOKE_EMAIL\",\"password\":\"$SMOKE_PW\"}" \

@@ -14,6 +14,7 @@ from app.interfaces.mcp_server import (
     InternalTokenAuthMiddleware,
     build_mcp,
     build_mcp_middleware,
+    enforce_production_auth,
     mcp_endpoint_url,
 )
 
@@ -310,17 +311,15 @@ def test_build_mcp_registers_hr_query_tool(monkeypatch) -> None:
     assert "hr_query" in mcp.tools
     assert "rag_search" not in mcp.tools
 
-    result = asyncio.run(mcp.tools["hr_query"](USER_HR, "leave_balance"))
+    # Tool LLM-facing chỉ nhận user_id -> POST /hr/profile (passthrough fake payload).
+    result = asyncio.run(mcp.tools["hr_query"](USER_HR))
 
-    assert result["intent"] == "leave_balance"
     assert result["data"]["annual_remaining"] == 8
-    assert result["data"]["sick_remaining"] == 9
-    assert "ban con 8 ngay phep nam" in result["summary"].lower()
     assert set(result.keys()) == {"intent", "data", "summary"}
     assert fake_client.calls[0] == (
         "POST",
-        "/hr/query",
-        {"user_id": USER_HR, "intent": "leave_balance"},
+        "/hr/profile",
+        {"user_id": USER_HR},
         {"X-Internal-Token": "test-token"},
     )
 
@@ -397,8 +396,7 @@ def test_build_mcp_registers_both_tools_simultaneously(monkeypatch) -> None:
     assert "rag_search" in mcp.tools
     assert "hr_query" in mcp.tools
 
-    hr_result = asyncio.run(mcp.tools["hr_query"](USER_HR, "leave_balance"))
-    assert hr_result["intent"] == "leave_balance"
+    hr_result = asyncio.run(mcp.tools["hr_query"](USER_HR))
     assert hr_result["data"]["annual_remaining"] == 8
 
     rag_result = asyncio.run(mcp.tools["rag_search"]("leave policy", None, None))
@@ -434,4 +432,33 @@ def test_internal_token_auth_middleware_accepts_valid_header() -> None:
 
     assert messages[0]["status"] == 200
     assert messages[1]["body"] == b"ok"
+
+
+# ─────────────────────── T6: fail-closed production auth ───────────────────────
+
+import dataclasses  # noqa: E402
+
+import pytest  # noqa: E402
+
+
+def test_enforce_production_auth_raises_when_token_missing_in_prod() -> None:
+    settings = dataclasses.replace(_settings(), app_env="production", internal_token="")
+    with pytest.raises(RuntimeError, match="fail-open"):
+        enforce_production_auth(settings)
+
+
+def test_enforce_production_auth_ok_when_token_set_in_prod() -> None:
+    settings = dataclasses.replace(_settings(), app_env="production", internal_token="secret")
+    enforce_production_auth(settings)  # không raise
+
+
+def test_enforce_production_auth_allows_fail_open_in_dev() -> None:
+    settings = dataclasses.replace(_settings(), app_env="development", internal_token="")
+    enforce_production_auth(settings)  # dev được phép tắt auth
+
+
+def test_enforce_production_auth_prod_alias() -> None:
+    settings = dataclasses.replace(_settings(), app_env="prod", internal_token="")
+    with pytest.raises(RuntimeError):
+        enforce_production_auth(settings)
 

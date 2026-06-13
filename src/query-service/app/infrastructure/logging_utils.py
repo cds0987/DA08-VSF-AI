@@ -24,6 +24,12 @@ correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="-")
 
 _EVENT_FIELDS_ATTR = "event_fields"
 
+# Thuộc tính chuẩn của LogRecord — phần còn lại là `extra` trần (vd langgraph_act
+# truyền extra={"tool":..., "intent":...} mà KHÔNG qua log_event) -> formatter tự gom.
+_STD_ATTRS = frozenset(
+    logging.LogRecord("", 0, "", 0, "", (), None).__dict__.keys()
+) | {"taskName", "event", _EVENT_FIELDS_ATTR}
+
 
 class Stopwatch:
     """Đồng hồ wall-clock đơn giản dùng perf_counter.
@@ -68,6 +74,10 @@ class JsonLogFormatter(logging.Formatter):
         }
         for field in getattr(record, _EVENT_FIELDS_ATTR, ()):
             payload[field] = getattr(record, field, None)
+        # Gom các field `extra={}` trần (langgraph nodes dùng extra trực tiếp).
+        for key, value in record.__dict__.items():
+            if key not in _STD_ATTRS and not key.startswith("_") and key not in payload:
+                payload[key] = value
         if record.exc_info:
             payload["exc_info"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=False, default=str)

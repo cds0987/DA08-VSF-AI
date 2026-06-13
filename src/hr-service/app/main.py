@@ -7,14 +7,13 @@ from fastapi import FastAPI
 
 from app.api.routes import router
 from app.core.config import load_settings
+from app.core.logging_utils import configure_logging
 
 
 def create_app() -> FastAPI:
     settings = load_settings()
-    logging.basicConfig(
-        level=getattr(logging, settings.log_level.upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    # JSON logging ra stdout (đồng nhất rag-worker) thay cho basicConfig text (T3).
+    configure_logging(getattr(logging, settings.log_level.upper(), logging.INFO))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

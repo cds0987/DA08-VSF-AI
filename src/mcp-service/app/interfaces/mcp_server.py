@@ -60,6 +60,23 @@ class InternalTokenAuthMiddleware:
         await self.app(scope, receive, send)
 
 
+_PRODUCTION_ENVS = {"production", "prod"}
+
+
+def enforce_production_auth(settings: McpSettings) -> None:
+    """Fail-closed ở production: từ chối khởi động nếu auth app-layer bị TẮT.
+
+    Auth chỉ bật khi có `internal_token` (xem McpSettings.auth_enabled). Ở dev được
+    phép TẮT cho tiện, nhưng ở production endpoint /mcp internal-only KHÔNG được
+    để fail-open → raise để CD bắt lỗi ngay thay vì lộ tool ra ngoài.
+    """
+    if settings.app_env in _PRODUCTION_ENVS and not settings.auth_enabled:
+        raise RuntimeError(
+            "MCP auth fail-open bị cấm ở production: set MCP_INTERNAL_TOKEN "
+            f"(app_env={settings.app_env!r})."
+        )
+
+
 def build_mcp_middleware(token: str) -> list[Any]:
     token = (token or "").strip()
     if not token:

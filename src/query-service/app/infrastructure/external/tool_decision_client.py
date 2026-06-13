@@ -52,6 +52,14 @@ class MockToolDecisionClient:
                 arguments={"intent": "leave_balance"},
                 reason="mock leave balance match",
             )
+        if any(token in normalized for token in ["cham cong", "di muon", "di tre", "ngay cong", "attendance"]):
+            return ToolDecision(tool_name="hr_query", arguments={"intent": "attendance"}, reason="mock attendance match")
+        if any(token in normalized for token in ["phuc loi", "bao hiem", "phu cap", "benefits", "allowance"]):
+            return ToolDecision(tool_name="hr_query", arguments={"intent": "benefits"}, reason="mock benefits match")
+        if any(token in normalized for token in ["hieu suat", "danh gia", "kpi", "performance"]):
+            return ToolDecision(tool_name="hr_query", arguments={"intent": "performance"}, reason="mock performance match")
+        if any(token in normalized for token in ["onboarding cua toi", "tien do onboarding", "my onboarding"]):
+            return ToolDecision(tool_name="hr_query", arguments={"intent": "onboarding"}, reason="mock onboarding match")
         return ToolDecision(tool_name="rag_search", arguments={}, reason="mock default rag")
 
     def reset(self) -> None:
@@ -88,8 +96,9 @@ class OpenAIToolDecisionClient:
                     "Return only JSON: {\"tool_name\": \"<name>\", \"arguments\": {<args>}}. "
                     f"Available tools: {tool_list_str}. "
                     "Rules: use hr_query only for the current user's personal HR data "
-                    "(leave balance / leave requests / payroll) with argument "
-                    "{\"intent\": \"leave_balance|leave_requests|payroll\"}. "
+                    "(leave balance / leave requests / attendance / personal onboarding / "
+                    "payroll / benefits / performance) with argument {\"intent\": "
+                    "\"leave_balance|leave_requests|attendance|onboarding|payroll|benefits|performance\"}. "
                     "Use rag_search for policies, procedures, internal documents, or unclear questions "
                     "(argument: {\"query\": \"<search query>\"}). "
                     "For any other listed tool, use its name and pass only the arguments it needs. "

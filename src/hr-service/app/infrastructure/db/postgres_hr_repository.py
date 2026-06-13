@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
+import hashlib
+import json
+import uuid
 from typing import List, Optional
+
+# Namespace cố định để sinh id mock DETERMINISTIC (uuid5) — luôn 36 ký tự, vừa cột
+# VARCHAR(36), idempotent theo (intent,user_id). KHÔNG hardcode prefix+user_id (vượt 36).
+_MOCK_NS = uuid.UUID("00000000-0000-5000-8000-000000000abc")
 
 import sqlalchemy as sa
 from sqlalchemy import create_engine
@@ -239,6 +247,119 @@ class PostgresHrRepository(HrRepository):
                 )
 
         return await asyncio.to_thread(_query)
+
+    async def provision_mock(self, intent: str, user_id: str) -> None:
+        """Dev-only (APP_STAGE=develop): sinh 1 bản ghi mock idempotent cho intent của
+        user chưa có hồ sơ. Giá trị DETERMINISTIC theo user_id (gọi lại ra y nhau).
+        ON CONFLICT DO NOTHING -> an toàn race + không đè data thật. Read path only;
+        leave_balance đã có ensure_leave_balance riêng nên KHÔNG xử ở đây."""
+        seed = int(hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:8], 16)
+        period = datetime.date.today().strftime("%Y-%m")
+
+        def _provision() -> None:
+            with self._session() as session:
+                if intent == "attendance":
+                    session.execute(
+                        sa.text(
+                            "INSERT INTO hr_svc.attendance "
+                            "(user_id, period, work_days, late_count, absent_count) "
+                            "VALUES (:uid, :period, :wd, :late, :absent) "
+                            "ON CONFLICT (user_id) DO NOTHING"
+                        ),
+                        {
+                            "uid": user_id,
+                            "period": period,
+                            "wd": 18 + seed % 5,
+                            "late": seed % 3,
+                            "absent": seed % 2,
+                        },
+                    )
+                elif intent == "onboarding":
+                    checklist = [
+                        {"task": "Nhan laptop va the", "done": True},
+                        {"task": "Hoan thanh dao tao bao mat", "done": True},
+                        {"task": "Gap go team", "done": True},
+                    ]
+                    session.execute(
+                        sa.text(
+                            "INSERT INTO hr_svc.onboarding (user_id, status, checklist) "
+                            "VALUES (:uid, 'completed', CAST(:cl AS jsonb)) "
+                            "ON CONFLICT (user_id) DO NOTHING"
+                        ),
+                        {"uid": user_id, "cl": json.dumps(checklist)},
+                    )
+                elif intent == "benefits":
+                    items = [
+                        {"name": "Bao hiem suc khoe", "value": "Goi A"},
+                        {"name": "Phu cap an trua", "value": "30 USD/thang"},
+                    ]
+                    session.execute(
+                        sa.text(
+                            "INSERT INTO hr_svc.benefits (user_id, items) "
+                            "VALUES (:uid, CAST(:items AS jsonb)) "
+                            "ON CONFLICT (user_id) DO NOTHING"
+                        ),
+                        {"uid": user_id, "items": json.dumps(items)},
+                    )
+                elif intent == "payroll":
+                    gross = 1000 + seed % 1000
+                    deductions = round(gross * 0.15, 2)
+                    session.execute(
+                        sa.text(
+                            "INSERT INTO hr_svc.payroll_summary "
+                            "(id, user_id, period, gross_salary, deductions, net_salary) "
+                            "VALUES (:id, :uid, :period, :gross, :ded, :net) "
+                            "ON CONFLICT (user_id, period) DO NOTHING"
+                        ),
+                        {
+                            "id": str(uuid.uuid5(_MOCK_NS, f"pay-{user_id}")),
+                            "uid": user_id,
+                            "period": period,
+                            "gross": gross,
+                            "ded": deductions,
+                            "net": round(gross - deductions, 2),
+                        },
+                    )
+                elif intent == "performance":
+                    kpi = [{"name": "Hoan thanh cong viec", "score": 80 + seed % 20}]
+                    session.execute(
+                        sa.text(
+                            "INSERT INTO hr_svc.performance_reviews "
+                            "(id, user_id, period, rating, kpi, reviewer_user_id) "
+                            "VALUES (:id, :uid, :period, :rating, CAST(:kpi AS jsonb), NULL) "
+                            "ON CONFLICT (user_id, period) DO NOTHING"
+                        ),
+                        {
+                            "id": str(uuid.uuid5(_MOCK_NS, f"perf-{user_id}")),
+                            "uid": user_id,
+                            "period": period,
+                            "rating": "Dat",
+                            "kpi": json.dumps(kpi),
+                        },
+                    )
+                elif intent == "leave_requests":
+                    # Chỉ seed dữ liệu ĐỌC (1 đơn mẫu đã duyệt); tạo đơn thật vẫn là T4.
+                    session.execute(
+                        sa.text(
+                            "INSERT INTO hr_svc.leave_requests "
+                            "(id, user_id, employee_id, leave_type, start_date, end_date, "
+                            " days_count, status, reason, approver_user_id, approved_at) "
+                            "VALUES (:id, :uid, NULL, 'annual', :start, :end, 1, 'approved', "
+                            " NULL, :uid, now()) "
+                            "ON CONFLICT (id) DO NOTHING"
+                        ),
+                        {
+                            "id": str(uuid.uuid5(_MOCK_NS, f"leave-{user_id}")),
+                            "uid": user_id,
+                            "start": f"{period}-10",
+                            "end": f"{period}-10",
+                        },
+                    )
+                else:
+                    return
+                session.commit()
+
+        await asyncio.to_thread(_provision)
 
     async def aclose(self) -> None:
         def _dispose() -> None:

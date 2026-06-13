@@ -28,7 +28,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # Khai báo dependency giả lập trường để Swagger UI tự vẽ ô nhập liệu phẳng (username/password)
 async def swagger_login_fields(
     username: str = Form(default="admin@company.com", description="Email đăng nhập"),
-    password: str = Form(default="your-password", description="Mật khẩu")
+    password: str = Form(default="***REDACTED-SEED-ADMIN-PW***", description="Mật khẩu")
 ):
     return None
 

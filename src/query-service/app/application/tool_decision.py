@@ -1,9 +1,11 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.application.hr_intents import HR_INTENTS
+
 
 VALID_TOOL_NAMES = {"rag_search", "hr_query"}
-VALID_HR_INTENTS = {"leave_balance", "leave_requests", "payroll"}
+VALID_HR_INTENTS = HR_INTENTS
 
 
 @dataclass(frozen=True)

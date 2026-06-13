@@ -41,6 +41,15 @@ def get_settings() -> HrSettings:
     return load_hr_settings()
 
 
+async def _maybe_mock(
+    repo: HrRepository, settings: HrSettings, intent: str, user_id: str
+) -> None:
+    """Stage develop: user đồng bộ chưa có hồ sơ -> tự sinh mock (idempotent) rồi để
+    caller đọc lại. Production: no-op -> giữ 404/NO_INFO."""
+    if settings.is_develop:
+        await repo.provision_mock(intent, user_id)
+
+
 def get_repo(settings: HrSettings = Depends(get_settings)) -> HrRepository:
     from app.infrastructure.db.postgres_hr_repository import PostgresHrRepository
 
@@ -58,6 +67,10 @@ class HrQueryRequest(BaseModel):
         "benefits",
         "performance",
     ]
+
+
+class HrProfileRequest(BaseModel):
+    user_id: str
 
 
 def _leave_balance_summary(annual_remaining: int, sick_remaining: int) -> str:
@@ -136,6 +149,9 @@ async def hr_query(
 
     if body.intent == "leave_requests":
         dtos = await repo.get_leave_requests(body.user_id)
+        if not dtos:
+            await _maybe_mock(repo, settings, body.intent, body.user_id)
+            dtos = await repo.get_leave_requests(body.user_id)
         requests = [
             {
                 "leave_type": item.leave_type,
@@ -155,6 +171,9 @@ async def hr_query(
     if body.intent == "attendance":
         dto = await repo.get_attendance(body.user_id)
         if dto is None:
+            await _maybe_mock(repo, settings, body.intent, body.user_id)
+            dto = await repo.get_attendance(body.user_id)
+        if dto is None:
             raise HTTPException(status_code=404, detail="no HR data for this user")
         data = {
             "period": dto.period,
@@ -171,6 +190,9 @@ async def hr_query(
     if body.intent == "onboarding":
         dto = await repo.get_onboarding(body.user_id)
         if dto is None:
+            await _maybe_mock(repo, settings, body.intent, body.user_id)
+            dto = await repo.get_onboarding(body.user_id)
+        if dto is None:
             raise HTTPException(status_code=404, detail="no HR data for this user")
         data = {
             "status": dto.status,
@@ -186,6 +208,9 @@ async def hr_query(
 
     if body.intent == "payroll":
         dtos = await repo.get_payroll(body.user_id)
+        if not dtos:
+            await _maybe_mock(repo, settings, body.intent, body.user_id)
+            dtos = await repo.get_payroll(body.user_id)
         _audit(body.intent, body.user_id, bool(dtos))
         if not dtos:
             raise HTTPException(status_code=404, detail="no HR data for this user")
@@ -211,6 +236,9 @@ async def hr_query(
 
     if body.intent == "benefits":
         dto = await repo.get_benefits(body.user_id)
+        if dto is None:
+            await _maybe_mock(repo, settings, body.intent, body.user_id)
+            dto = await repo.get_benefits(body.user_id)
         _audit(body.intent, body.user_id, dto is not None)
         if dto is None:
             raise HTTPException(status_code=404, detail="no HR data for this user")
@@ -222,6 +250,9 @@ async def hr_query(
         }
 
     dto = await repo.get_performance(body.user_id)
+    if dto is None:
+        await _maybe_mock(repo, settings, body.intent, body.user_id)
+        dto = await repo.get_performance(body.user_id)
     _audit(body.intent, body.user_id, dto is not None)
     if dto is None:
         raise HTTPException(status_code=404, detail="no HR data for this user")
@@ -236,6 +267,79 @@ async def hr_query(
         "data": data,
         "summary": _performance_summary(dto.period, dto.rating),
     }
+
+
+@router.post("/hr/profile")
+async def hr_profile(
+    body: HrProfileRequest,
+    repo: HrRepository = Depends(get_repo),
+    settings: HrSettings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Trả TOÀN BỘ hồ sơ HR của user trong 1 lần gọi (gộp 7 section) để LLM tự nhặt
+    phần liên quan — thay vì bắt LLM chọn `intent` rời rạc (model hay bỏ trống/sai).
+    Tự cấp leave_balance + dev-mock các section khi develop (như /hr/query). Self-access:
+    user_id đến từ token (mcp tiêm), audit 1 lần dạng 'profile'."""
+    uid = body.user_id
+
+    # leave_balance: auto-provision như intent leave_balance.
+    lb = await repo.get_leave_balance(uid)
+    if lb is None and settings.auto_provision_leave_balance:
+        await repo.ensure_leave_balance(uid, settings.default_annual_leave, settings.default_sick_leave)
+        lb = await repo.get_leave_balance(uid)
+
+    async def _get(intent: str, getter):
+        dto = await getter(uid)
+        empty = dto is None or (isinstance(dto, list) and not dto)
+        if empty and settings.is_develop:
+            await repo.provision_mock(intent, uid)
+            dto = await getter(uid)
+        return dto
+
+    lrs = await _get("leave_requests", repo.get_leave_requests)
+    att = await _get("attendance", repo.get_attendance)
+    onb = await _get("onboarding", repo.get_onboarding)
+    pay = await _get("payroll", repo.get_payroll)
+    ben = await _get("benefits", repo.get_benefits)
+    perf = await _get("performance", repo.get_performance)
+
+    data: dict[str, Any] = {
+        "leave_balance": None if lb is None else {
+            "annual_total": lb.annual_total, "annual_used": lb.annual_used,
+            "annual_remaining": lb.annual_remaining, "sick_total": lb.sick_total,
+            "sick_used": lb.sick_used, "sick_remaining": lb.sick_remaining,
+        },
+        "leave_requests": [
+            {"leave_type": r.leave_type, "start_date": r.start_date, "end_date": r.end_date,
+             "days_count": r.days_count, "status": r.status}
+            for r in (lrs or [])
+        ],
+        "attendance": None if att is None else {
+            "period": att.period, "work_days": att.work_days,
+            "late_count": att.late_count, "absent_count": att.absent_count,
+        },
+        "onboarding": None if onb is None else {
+            "status": onb.status,
+            "checklist": [{"task": i.task, "done": i.done} for i in onb.checklist],
+            "completed_count": onb.completed_count, "total_count": onb.total_count,
+        },
+        "payroll": [
+            {"period": p.period, "gross_salary": p.gross_salary,
+             "deductions": p.deductions, "net_salary": p.net_salary}
+            for p in (pay or [])
+        ],
+        "benefits": None if ben is None else {
+            "items": [{"name": i.name, "value": i.value} for i in ben.items]
+        },
+        "performance": None if perf is None else {
+            "period": perf.period, "rating": perf.rating,
+            "kpi": perf.kpi, "reviewer_user_id": perf.reviewer_user_id,
+        },
+    }
+    # Audit 1 lần (profile chạm cả intent nhạy cảm payroll/benefits/performance — self-access).
+    logger.info("hr_audit intent=profile user=%s result=%s", _mask_user_id(uid),
+                "found" if any(v for v in data.values()) else "empty")
+    return {"intent": "profile", "data": data,
+            "summary": "Hồ sơ HR cá nhân (phép, đơn nghỉ, chấm công, onboarding, lương, phúc lợi, hiệu suất)."}
 
 
 @router.get("/health")

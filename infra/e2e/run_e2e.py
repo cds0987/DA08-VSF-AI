@@ -146,7 +146,23 @@ def _distinct_doc_ids() -> set[str]:
 
 
 # ─────────────────────────────── 3. VERIFY INGEST ──────────────────────────
-def verify_ingest(records: list[dict]) -> None:
+def _doc_statuses(token: str, doc_ids: set[str]) -> dict[str, tuple[str, str]]:
+    """{doc_id: (status, error_message)} từ document-service. Mù lỗi -> bỏ qua doc đó."""
+    import requests
+    out: dict[str, tuple[str, str]] = {}
+    hdr = {"Authorization": "Bearer " + token}
+    for did in doc_ids:
+        try:
+            r = requests.get(f"{DOC_URL}/documents/{did}", headers=hdr, timeout=15)
+            if r.status_code == 200:
+                d = r.json()
+                out[did] = (str(d.get("status", "")), str(d.get("error_message") or ""))
+        except Exception:  # noqa: BLE001
+            pass
+    return out
+
+
+def verify_ingest(records: list[dict], token: str) -> None:
     expected = {d["doc_id"] for d in records}
     timeout = int(os.environ.get("VERIFY_TIMEOUT", "420"))
     deadline = time.time() + timeout
@@ -162,6 +178,18 @@ def verify_ingest(records: list[dict]) -> None:
         if expected <= ids:
             print(f"  INGEST OK: {len(expected)} doc có vector")
             return
+        # FAST-FAIL: hỏi document-service trạng thái doc. Nếu KHÔNG còn doc nào đang
+        # chạy (mọi doc chưa-index đều đã 'failed') -> ingest hỏng, abort NGAY thay vì
+        # chờ hết 420s. In error_message để lộ nguyên nhân thật (vd 401 OpenAI).
+        statuses = _doc_statuses(token, expected - ids)
+        pending = {d for d, (st, _) in statuses.items() if st in ("queued", "processing")}
+        failed = {d: msg for d, (st, msg) in statuses.items() if st == "failed"}
+        if statuses and not pending and failed:
+            lines = "\n".join(f"    - {d}: {msg[:200]}" for d, msg in list(failed.items())[:5])
+            raise SystemExit(
+                f"[3] INGEST FAILED sớm: {len(ids)}/{len(expected)} indexed, "
+                f"{len(failed)} doc status=failed:\n{lines}"
+            )
         time.sleep(5)
     raise SystemExit(f"[3] VERIFY TIMEOUT {timeout}s: {last}/{len(expected)} doc")
 
@@ -265,7 +293,7 @@ def main() -> int:
             lf0 = _lf_trace_count()
         except Exception:  # noqa: BLE001
             pass
-        print("==> 3) verify ingest (Qdrant)"); verify_ingest(records)
+        print("==> 3) verify ingest (Qdrant)"); verify_ingest(records, token)
         print("==> 4) verify rag-worker trace (Langfuse)"); lf1 = verify_trace("ingest", lf0)
         print("==> 5) query RAG"); query("RAG", token, uid, "công ty có chính sách nghỉ phép thế nào", True)
         print("==> 6) query HR"); query("HR", token, uid, "Tôi còn bao nhiêu ngày phép?", False)

@@ -13,7 +13,6 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
-from typing import Literal
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, ToolMessage
@@ -85,35 +84,24 @@ async def build_langgraph_tools(
         return json.dumps({"results": []})
 
     @tool
-    async def hr_query(intent: Literal["leave_balance", "leave_requests", "attendance", "onboarding", "payroll", "benefits", "performance"]) -> str:
+    async def hr_query() -> str:
         """
-        Query the authenticated user's personal HR data (read-only, filtered by user_id).
-
-        NOTE: user_id is automatically injected — the LLM cannot override this.
-
-        Args:
-            intent: HR data type to query:
-                - leave_balance: remaining leave days (annual/sick)
-                - leave_requests: leave request history and status
-                - attendance: attendance records
-                - onboarding: personal onboarding info
-                - payroll: salary, deductions, net pay
-                - benefits: personal benefits
-                - performance: performance reviews
-        Do NOT use for general policy questions — use rag_search for those.
+        Lấy TOÀN BỘ hồ sơ HR cá nhân của user hiện tại (chỉ đọc, tự lọc theo user_id).
+        KHÔNG cần tham số — trả về: số phép còn lại, lịch sử đơn nghỉ, chấm công,
+        tiến độ onboarding, bảng lương, phúc lợi, đánh giá hiệu suất.
+        Dùng cho MỌI câu hỏi HR cá nhân (lương/phép/chấm công/phúc lợi/đánh giá/onboarding).
+        Đừng dùng cho câu hỏi chính sách chung — dùng rag_search.
         """
-        result = await mcp_client.hr_query(
-            user_id=user_id,  # ACL enforced — LLM cannot override
-            intent=intent,
-        )
-        return result.summary
+        # Stub schema: act_node là điểm thực thi duy nhất (gọi profile + trả full data).
+        _ = (mcp_client, user_id)
+        return "{}"
 
+    # hr_query KHÔNG tham số -> model gọi hr_query() (rỗng = HỢP LỆ) -> hết failure mode
+    # "intent rỗng". act_node lấy full profile từ mcp (user_id tiêm server-side), LLM tự
+    # nhặt phần liên quan. rag_search giữ bespoke (ACL/score/sources).
     tools: list = [rag_search, hr_query]
 
-    # Dynamic discovery: any additional tools from mcp-service are exposed as
-    # generic dict schemas so the model can call them; act_node executes them
-    # via mcp_client.call_tool() (summary-style). No code change needed when
-    # new tools are added to mcp-service.
+    # Tool KHÁC (ngoài rag_search/hr_query): vẫn discover ĐỘNG từ mcp -> dict schema.
     try:
         specs = await mcp_client.list_tool_specs()
         for spec in specs:
@@ -573,12 +561,17 @@ async def act_node(
                     new_sources = []
 
         elif tool_name == "hr_query":
-            result = await mcp_client.hr_query(
-                user_id=user_id,  # ACL enforced — LLM cannot override
-                intent=tool_args.get("intent", "leave_balance"),
-            )
-            data = result.summary
-            success = True
+            # KHÔNG cần intent từ LLM: lấy TOÀN BỘ hồ sơ HR (mcp -> /hr/profile),
+            # user_id tiêm server-side (ACL). Trả full data JSON cho LLM tự nhặt phần
+            # liên quan -> hết failure mode "intent rỗng". call_tool đi qua breaker.
+            raw = await mcp_client.call_tool("hr_query", {"user_id": user_id})
+            if isinstance(raw, dict) and raw.get("error"):
+                data = json.dumps(raw, ensure_ascii=False)
+                success = False
+            else:
+                payload = raw.get("data", raw) if isinstance(raw, dict) else raw
+                data = json.dumps(payload, ensure_ascii=False)
+                success = bool(payload) and data not in ("{}", "null", "")
             new_sources = []
 
         else:

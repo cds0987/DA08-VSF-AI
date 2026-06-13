@@ -7,6 +7,7 @@ import re
 import unicodedata
 from typing import Protocol
 
+from app.application.hr_intents import HR_CLASSIFIER_INTENTS
 from app.infrastructure.config import Settings
 
 
@@ -15,10 +16,9 @@ VALID_INTENTS = {
     "clarification",
     "out_of_scope",
     "off_topic",
-    "hr:payroll",
-    "hr:leave_requests",
-    "hr:leave_balance",
     "rag",
+    *HR_CLASSIFIER_INTENTS,  # hr:leave_balance | hr:leave_requests | hr:attendance |
+                             # hr:onboarding | hr:payroll | hr:benefits | hr:performance
 }
 
 
@@ -165,6 +165,56 @@ RULE_PATTERNS = (
         ),
     ),
     RulePattern(
+        intent="hr:attendance",
+        phrases=(
+            "cham cong",
+            "di muon",
+            "di tre",
+            "ngay cong",
+            "vang mat",
+            "attendance",
+            "work days",
+            "late count",
+        ),
+    ),
+    RulePattern(
+        intent="hr:benefits",
+        phrases=(
+            "phuc loi",
+            "bao hiem",
+            "phu cap",
+            "benefits",
+            "insurance",
+            "allowance",
+        ),
+    ),
+    RulePattern(
+        intent="hr:performance",
+        phrases=(
+            "danh gia hieu suat",
+            "danh gia cua toi",
+            "ket qua danh gia",
+            "hieu suat",
+            "kpi cua toi",
+            "performance review",
+            "my performance",
+            "my rating",
+        ),
+    ),
+    RulePattern(
+        # CHỈ onboarding CÁ NHÂN của user; câu hỏi quy trình/chính sách onboarding
+        # chung vẫn rơi vào "rag" bên dưới (cụm "onboarding" trần).
+        intent="hr:onboarding",
+        phrases=(
+            "onboarding cua toi",
+            "tien do onboarding",
+            "checklist onboarding",
+            "my onboarding",
+            "onboarding progress",
+            "onboarding status",
+        ),
+    ),
+    RulePattern(
         intent="rag",
         phrases=(
             "chinh sach",
@@ -211,6 +261,22 @@ EMBEDDING_PROTOTYPES: dict[str, tuple[str, ...]] = {
     "hr:leave_balance": (
         "remaining leave balance",
         "vacation days left",
+    ),
+    "hr:attendance": (
+        "my attendance record this month",
+        "how many times was i late",
+    ),
+    "hr:benefits": (
+        "my personal benefits and insurance",
+        "what allowances do i have",
+    ),
+    "hr:performance": (
+        "my performance review rating",
+        "my kpi evaluation result",
+    ),
+    "hr:onboarding": (
+        "my onboarding progress and checklist",
+        "status of my personal onboarding",
     ),
     "rag": (
         "leave policy and company handbook",

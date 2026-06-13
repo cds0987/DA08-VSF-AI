@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.application.hr_intents import HR_INTENTS
 from app.application.tool_decision import ToolDecision
 from app.domain.outcome import Outcome
 
@@ -16,7 +17,8 @@ VALID_ROUTE_DECISIONS = {
 # Decisions that are handled by shortcut / LLM-generated responses (not tools).
 _NON_TOOL_DECISIONS = {"clarification", "identity_shortcut", "out_of_scope", "off_topic"}
 
-VALID_HR_INTENTS = {"leave_balance", "leave_requests", "payroll"}
+# Single source of truth (app/application/hr_intents.py) — đủ 7 intent.
+VALID_HR_INTENTS = HR_INTENTS
 
 
 @dataclass(frozen=True)

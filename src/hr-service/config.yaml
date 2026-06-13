@@ -1,6 +1,9 @@
 host: ${HR_HOST:-0.0.0.0}
 port: ${HR_PORT:-8004}
 log_level: ${LOG_LEVEL:-INFO}
+# Stage theo branch (develop=tự sinh mock data cho mọi user đồng bộ ở read path;
+# production=trả 404/NO_INFO như cũ). Default an toàn = production khi thiếu biến.
+app_stage: ${APP_STAGE:-production}
 database_url: ${HR_DATABASE_URL:-}
 internal_token: ${HR_INTERNAL_TOKEN:-}
 # Lazy auto-provision: hỏi leave_balance mà user chưa có hồ sơ -> tự tạo bản ghi mặc

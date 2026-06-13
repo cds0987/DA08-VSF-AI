@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import re
 import unicodedata
 
+from app.application.hr_intents import HR_INTENTS
 from app.application.intent_classifier import HybridIntentClassifier, IntentClassification
 from app.application.route_decision import RouteDecision, coerce_route_decision
 from app.application.tool_decision import ToolDecision
@@ -389,27 +390,15 @@ class QueryRouter:
             return self._security_response(question, confidence=confidence, reason=reason)
         if intent == "off_topic":
             return self._off_topic_response(question, confidence=confidence, reason=reason)
-        if intent == "hr:leave_balance":
-            return RouteDecision(
-                decision="hr_query",
-                tool_arguments={"intent": "leave_balance"},
-                reason=reason,
-                confidence=confidence,
-            )
-        if intent == "hr:leave_requests":
-            return RouteDecision(
-                decision="hr_query",
-                tool_arguments={"intent": "leave_requests"},
-                reason=reason,
-                confidence=confidence,
-            )
-        if intent == "hr:payroll":
-            return RouteDecision(
-                decision="hr_query",
-                tool_arguments={"intent": "payroll"},
-                reason=reason,
-                confidence=confidence,
-            )
+        if intent.startswith("hr:"):
+            hr_intent = intent.split(":", 1)[1]
+            if hr_intent in HR_INTENTS:
+                return RouteDecision(
+                    decision="hr_query",
+                    tool_arguments={"intent": hr_intent},
+                    reason=reason,
+                    confidence=confidence,
+                )
         return RouteDecision(
             decision="rag_search",
             tool_arguments={"query": question},

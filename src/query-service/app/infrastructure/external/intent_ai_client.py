@@ -106,8 +106,10 @@ class OpenAIIntentLLMClient:
                 "Use identity for questions about who the assistant is or who created it. "
                 "Use clarification for greetings, vague chat, or low-context follow-ups that should ask the user to clarify. "
                 "Use out_of_scope for passwords, credentials, internal secrets, or unsafe requests. "
-                "Use hr:leave_balance, hr:leave_requests, or hr:payroll only for the current user's personal HR data. "
-                "Use rag for policies, procedures, onboarding, guidelines, and internal document lookup. "
+                "Use hr:leave_balance, hr:leave_requests, hr:attendance, hr:onboarding, hr:payroll, "
+                "hr:benefits, or hr:performance only for the current user's personal HR data "
+                "(leave, attendance/late, personal onboarding progress, salary, personal benefits, performance review). "
+                "Use rag for general policies, procedures, onboarding guidelines, and internal document lookup. "
                 "Do not include user_id, document_ids, tool arguments, or direct responses."
             ),
             input=(

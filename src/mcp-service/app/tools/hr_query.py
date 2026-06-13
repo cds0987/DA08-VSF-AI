@@ -79,11 +79,11 @@ class HrQueryTool:
         }
 
     async def _call(self, user_id: str, intent: str) -> dict[str, Any]:
+        """Granular 1-intent (giữ cho backward-compat + test; tool LLM dùng _call_profile)."""
         masked_user = _mask_user_id(user_id)
         if intent not in MVP_INTENTS:
             logger.warning("hr_query intent=%s user=%s status=unsupported_intent", intent, masked_user)
             return self._unsupported_intent_response(intent)
-
         client = self._get_client()
         response = await client.post(
             "/hr/query",
@@ -93,8 +93,28 @@ class HrQueryTool:
         if response.status_code == 404:
             logger.info("hr_query intent=%s user=%s status=404", intent, masked_user)
             return self._not_found_response(intent)
-
         logger.info("hr_query intent=%s user=%s status=%s", intent, masked_user, response.status_code)
+        response.raise_for_status()
+        body = response.json()
+        if not isinstance(body, dict):
+            raise ValueError("hr_query: invalid response payload")
+        return body
+
+    async def _call_profile(self, user_id: str) -> dict[str, Any]:
+        """Gọi hr-service /hr/profile -> TRẢ TOÀN BỘ hồ sơ HR (gộp 7 section). LLM tự
+        nhặt phần liên quan bằng khả năng hiểu ngôn ngữ -> không bắt model chọn intent
+        rời rạc (model hay bỏ trống/sai)."""
+        masked_user = _mask_user_id(user_id)
+        client = self._get_client()
+        response = await client.post(
+            "/hr/profile",
+            json={"user_id": user_id},
+            headers=self._headers(),
+        )
+        if response.status_code == 404:
+            logger.info("hr_query profile user=%s status=404", masked_user)
+            return self._not_found_response("profile")
+        logger.info("hr_query profile user=%s status=%s", masked_user, response.status_code)
         response.raise_for_status()
         body = response.json()
         if not isinstance(body, dict):
@@ -103,13 +123,14 @@ class HrQueryTool:
 
     def register(self, mcp: Any) -> None:
         @mcp.tool()
-        async def hr_query(user_id: str, intent: HrIntent) -> dict[str, Any]:
+        async def hr_query(user_id: str) -> dict[str, Any]:
             """Truy vấn dữ liệu HR cá nhân của user hiện tại (chỉ đọc, luôn lọc theo user_id).
 
-            intent: leave_balance | leave_requests | attendance | onboarding
-                    | payroll | benefits | performance.
+            KHÔNG cần tham số nào khác — trả về TOÀN BỘ hồ sơ HR (số ngày phép còn lại,
+            lịch sử đơn nghỉ, chấm công, tiến độ onboarding, bảng lương, phúc lợi, đánh
+            giá hiệu suất). Dùng cho MỌI câu hỏi HR cá nhân; tự đọc phần liên quan để trả lời.
             """
-            return await self._call(user_id, intent)
+            return await self._call_profile(user_id)
 
     async def verify(self) -> None:
         # Best-effort: hr-service tạm down KHÔNG được làm sập mcp-service (và kéo

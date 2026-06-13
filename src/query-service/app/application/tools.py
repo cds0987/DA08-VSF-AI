@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
-from typing import Literal
+
+from app.application.hr_intents import HrIntentLiteral
 
 
 class RagSearchArgs(BaseModel):
@@ -8,7 +9,7 @@ class RagSearchArgs(BaseModel):
 
 
 class HrQueryArgs(BaseModel):
-    intent: Literal["leave_balance", "leave_requests", "payroll"] = Field(
+    intent: HrIntentLiteral = Field(
         description="HR data type to query"
     )
 

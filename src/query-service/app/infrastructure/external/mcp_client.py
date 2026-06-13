@@ -8,6 +8,7 @@ import unicodedata
 import httpx
 
 from app.application.ports import ToolSpec
+from app.application.hr_intents import HR_INTENTS
 from app.infrastructure.db.mock_data import MOCK_DOCUMENTS, MOCK_HR_DATA
 from app.infrastructure.config import Settings
 
@@ -40,7 +41,7 @@ _MOCK_TOOL_SPECS: list[ToolSpec] = [
             "properties": {
                 "intent": {
                     "type": "string",
-                    "enum": ["leave_balance", "leave_requests", "payroll"],
+                    "enum": sorted(HR_INTENTS),
                     "description": "Loại thông tin HR cần truy vấn",
                 },
             },

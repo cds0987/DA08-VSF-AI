@@ -118,99 +118,78 @@ def _tool(monkeypatch, *, post_response: FakeResponse | None = None, get_respons
     return tool, mcp.tools["hr_query"], fake_client
 
 
-def test_proxy_leave_balance_shape_and_headers(monkeypatch) -> None:
+def test_tool_returns_full_profile(monkeypatch) -> None:
+    # Tool LLM-facing: CHỈ nhận user_id -> POST /hr/profile -> trả toàn bộ hồ sơ.
     payload = {
-        "intent": "leave_balance",
+        "intent": "profile",
         "data": {
-            "annual_total": 12,
-            "annual_used": 4,
-            "annual_remaining": 8,
-            "sick_total": 10,
-            "sick_used": 1,
-            "sick_remaining": 9,
+            "leave_balance": {"annual_remaining": 8, "sick_remaining": 9},
+            "payroll": [{"period": "2026-06", "net_salary": 1000.0}],
+            "attendance": {"period": "2026-06", "work_days": 20, "late_count": 1},
         },
-        "summary": "Bạn còn 8 ngày phép năm và 9 ngày phép ốm.",
+        "summary": "Hồ sơ HR cá nhân.",
     }
     _, fn, client = _tool(monkeypatch, post_response=FakeResponse(200, payload))
 
-    result = asyncio.run(fn(USER_HR, "leave_balance"))
+    result = asyncio.run(fn(USER_HR))
 
     assert result == payload
     assert client.calls[0][0] == "POST"
-    assert client.calls[0][1] == "/hr/query"
-    assert client.calls[0][2] == {"user_id": USER_HR, "intent": "leave_balance"}
+    assert client.calls[0][1] == "/hr/profile"
+    assert client.calls[0][2] == {"user_id": USER_HR}
     assert client.calls[0][3] == {"X-Internal-Token": "test-token"}
 
 
-def test_proxy_leave_requests(monkeypatch) -> None:
-    payload = {
-        "intent": "leave_requests",
-        "data": {
-            "requests": [
-                {
-                    "leave_type": "annual",
-                    "start_date": "2026-06-10",
-                    "end_date": "2026-06-11",
-                    "days_count": 2,
-                    "status": "approved",
-                }
-            ]
-        },
-        "summary": "Đơn nghỉ gần nhất là annual từ 2026-06-10 đến 2026-06-11, trạng thái approved.",
-    }
-    _, fn, _ = _tool(monkeypatch, post_response=FakeResponse(200, payload))
+def test_profile_soft_404(monkeypatch) -> None:
+    _, fn, _ = _tool(monkeypatch, post_response=FakeResponse(404, {"detail": "no HR data"}))
 
-    result = asyncio.run(fn(USER_HR, "leave_requests"))
+    result = asyncio.run(fn(USER_HR))
 
-    assert result["intent"] == "leave_requests"
-    assert result["data"]["requests"][0]["leave_type"] == "annual"
-    assert set(result.keys()) == {"intent", "data", "summary"}
+    assert result["intent"] == "profile"
+    assert result["data"] == {}
 
 
-def test_proxy_attendance(monkeypatch) -> None:
-    payload = {
-        "intent": "attendance",
-        "data": {"period": "2026-06", "work_days": 20, "late_count": 1, "absent_count": 0},
-        "summary": "Tháng này bạn có 20 ngày công, đi muộn 1 lần và vắng 0 ngày.",
-    }
-    _, fn, _ = _tool(monkeypatch, post_response=FakeResponse(200, payload))
-
-    result = asyncio.run(fn(USER_HR, "attendance"))
-
-    assert result["data"]["work_days"] == 20
-    assert set(result.keys()) == {"intent", "data", "summary"}
-
-
-def test_proxy_onboarding(monkeypatch) -> None:
-    payload = {
-        "intent": "onboarding",
-        "data": {
-            "status": "completed",
-            "checklist": [{"task": "Nhat laptop va the", "done": True}],
-            "completed_count": 1,
-            "total_count": 1,
-        },
-        "summary": "Trạng thái onboarding: completed, đã hoàn thành 1/1 mục.",
-    }
-    _, fn, _ = _tool(monkeypatch, post_response=FakeResponse(200, payload))
-
-    result = asyncio.run(fn(USER_HR, "onboarding"))
-
-    assert result["data"]["status"] == "completed"
-    assert set(result.keys()) == {"intent", "data", "summary"}
-
-
-def test_proxy_raises_on_http_error(monkeypatch) -> None:
+def test_profile_raises_on_http_error(monkeypatch) -> None:
     _, fn, _ = _tool(monkeypatch, post_response=FakeResponse(503, {"detail": "down"}))
 
     with pytest.raises(httpx.HTTPStatusError):
-        asyncio.run(fn(USER_HR, "leave_balance"))
+        asyncio.run(fn(USER_HR))
 
 
-def test_proxy_rejects_unknown_intent(monkeypatch) -> None:
-    _, fn, client = _tool(monkeypatch)
+def test_profile_logs_masked_user_id(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+    import app.tools.hr_query as hr_module
 
-    result = asyncio.run(fn(USER_HR, "recruitment"))
+    _, fn, _ = _tool(monkeypatch, post_response=FakeResponse(200, {"intent": "profile", "data": {}, "summary": "ok"}))
+    masked_user = hr_module._mask_user_id(USER_HR)
+
+    with caplog.at_level("INFO", logger="mcp-service"):
+        asyncio.run(fn(USER_HR))
+
+    assert "hr_query profile" in caplog.text
+    assert masked_user in caplog.text
+    assert USER_HR not in caplog.text
+
+
+# ── Granular _call (giữ backward-compat; tool LLM dùng profile) ──────────────
+def test_call_leave_balance_shape_and_headers(monkeypatch) -> None:
+    payload = {
+        "intent": "leave_balance",
+        "data": {"annual_remaining": 8, "sick_remaining": 9},
+        "summary": "Bạn còn 8 ngày phép năm và 9 ngày phép ốm.",
+    }
+    tool, _, client = _tool(monkeypatch, post_response=FakeResponse(200, payload))
+
+    result = asyncio.run(tool._call(USER_HR, "leave_balance"))
+
+    assert result == payload
+    assert client.calls[0][1] == "/hr/query"
+    assert client.calls[0][2] == {"user_id": USER_HR, "intent": "leave_balance"}
+
+
+def test_call_rejects_unknown_intent(monkeypatch) -> None:
+    tool, _, client = _tool(monkeypatch)
+
+    result = asyncio.run(tool._call(USER_HR, "recruitment"))
 
     assert result == {
         "intent": "recruitment",
@@ -220,28 +199,14 @@ def test_proxy_rejects_unknown_intent(monkeypatch) -> None:
     assert client.calls == []
 
 
-def test_proxy_soft_404(monkeypatch) -> None:
-    _, fn, _ = _tool(monkeypatch, post_response=FakeResponse(404, {"detail": "no HR data"}))
+def test_call_soft_404(monkeypatch) -> None:
+    tool, _, _ = _tool(monkeypatch, post_response=FakeResponse(404, {"detail": "no HR data"}))
 
-    result = asyncio.run(fn(USER_HR, "leave_balance"))
+    result = asyncio.run(tool._call(USER_HR, "leave_balance"))
 
     assert result["intent"] == "leave_balance"
     assert result["data"] == {}
     assert result["summary"] == "Bạn chưa có dữ liệu HR cho mục này."
-
-
-def test_proxy_logs_masked_user_id(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
-    import app.tools.hr_query as hr_module
-
-    _, fn, _ = _tool(monkeypatch, post_response=FakeResponse(200, {"intent": "attendance", "data": {}, "summary": "ok"}))
-    masked_user = hr_module._mask_user_id(USER_HR)
-
-    with caplog.at_level("INFO", logger="mcp-service"):
-        asyncio.run(fn(USER_HR, "attendance"))
-
-    assert "hr_query intent=attendance" in caplog.text
-    assert masked_user in caplog.text
-    assert USER_HR not in caplog.text
 
 
 def test_verify_hits_health_endpoint(monkeypatch) -> None:

@@ -43,6 +43,14 @@ class HrSettings:
     nats_url: str
     nats_jetstream_enabled: bool
     user_events_enabled: bool
+    # Default = production (fail-safe) + đặt cuối -> không vỡ constructor test cũ
+    # (truyền keyword, bỏ qua app_stage là OK).
+    app_stage: str = "production"
+
+    @property
+    def is_develop(self) -> bool:
+        """Stage develop -> bật lazy mock data cho mọi intent (xem routes)."""
+        return self.app_stage == "develop"
 
 
 def load_settings(path: str | os.PathLike[str] | None = None) -> HrSettings:
@@ -52,6 +60,7 @@ def load_settings(path: str | os.PathLike[str] | None = None) -> HrSettings:
         host=str(raw.get("host") or "0.0.0.0").strip() or "0.0.0.0",
         port=int(str(raw.get("port") or 8004).strip() or 8004),
         log_level=str(raw.get("log_level") or "INFO").strip() or "INFO",
+        app_stage=(str(raw.get("app_stage") or "production").strip().lower() or "production"),
         database_url=str(raw.get("database_url") or "").strip(),
         internal_token=str(raw.get("internal_token") or "").strip(),
         auto_provision_leave_balance=_as_bool(raw.get("auto_provision_leave_balance"), True),

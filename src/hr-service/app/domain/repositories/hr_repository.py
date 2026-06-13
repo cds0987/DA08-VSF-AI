@@ -64,6 +64,12 @@ class HrRepository(ABC):
     async def get_performance(self, user_id: str) -> Optional[PerformanceReviewDTO]:
         raise NotImplementedError
 
+    async def provision_mock(self, intent: str, user_id: str) -> None:
+        """Dev-only: tự sinh 1 bản ghi mock (idempotent) cho `intent` của user chưa có
+        hồ sơ — phục vụ test end-to-end khi APP_STAGE=develop. Mặc định NO-OP (CHỈ
+        Postgres impl thật) -> KHÔNG @abstractmethod để fake repo trong test không vỡ."""
+        return None
+
     @abstractmethod
     async def aclose(self) -> None:
         raise NotImplementedError

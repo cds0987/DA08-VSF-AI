@@ -26,9 +26,17 @@ from app.interfaces.api.dependencies import (
     get_document_access_repo,
 )
 from app.interfaces.api.routers import admin, conversations, feedback, notifications, query
+from app.infrastructure.logging_utils import configure_logging
 
 
 settings = get_settings()
+
+# Bật JSON logging ra stdout NGAY khi import (trước khi node nào chạy) — để
+# langgraph_act/think (intent, tool) hiện trên docker logs. Trước đây root logger
+# mặc định WARNING -> mọi INFO bị nuốt, không soi được luồng agent.
+import logging as _logging
+
+configure_logging(getattr(_logging, str(getattr(settings, "log_level", "INFO")).upper(), _logging.INFO))
 
 
 @asynccontextmanager
