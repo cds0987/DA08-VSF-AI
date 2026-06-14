@@ -1,0 +1,16 @@
+/venv
+/venv/
+.env
+.env.production
+.env.production.local
+.env.local
+.env.development.local
+pycache/
+__pycache__/
+*.pyc
+*.pyo
+/dataset/
+/output/
+/output/
+/output-vm/
+logs/
