@@ -131,9 +131,10 @@ cd ../document-service  && alembic upgrade head   # doc_db
 cd ../query-service    && alembic upgrade head   # query_db (conversations, messages, document_access, user_access_profile)
 cd ../mcp-service      && alembic upgrade head   # mcp_db (tool metadata/config nếu cần)
 cd ../hr-service       && alembic upgrade head   # hr_db (employee profile + HR mock data)
+cd ../rag-worker       && alembic upgrade head   # rag_db (ingest job/document state)
 ```
 
-> RAG Worker **không có** migration — không dùng PostgreSQL (chỉ Qdrant + Cloud Storage (GCS) + NATS).
+> RAG Worker có migration riêng cho metadata DB; Document Service vẫn quản lý document catalog, còn rag-worker chỉ giữ ingest job/document state phục vụ retry, status và vận hành.
 > Schema thay đổi → tạo migration mới (`alembic revision --autogenerate -m "..."`) thay vì sửa DDL trực tiếp.
 
 ---

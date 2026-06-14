@@ -108,7 +108,7 @@ src/document-service/               ← Container 3: Document management (Admin)
 │           └── routers/
 │               └── documents.py    # POST /documents/upload, GET /documents, DELETE
 │
-src/rag-worker/                     ← Container 4: Ingestion + Retrieval (NATS only, KHÔNG dùng DB)
+src/rag-worker/                     ← Container 4: Ingest worker (NATS + health/status API + metadata DB)
 ├── app/
 │   ├── domain/
 │   │   ├── entities/
@@ -120,7 +120,7 @@ src/rag-worker/                     ← Container 4: Ingestion + Retrieval (NATS
 │   ├── application/
 │   │   └── use_cases/
 │   │       ├── ingestion/
-│   │       │   └── ingest_document_use_case.py  # Parse → Chunk (Parent-Child) → Embed → Upsert Qdrant
+│   │       │   └── ingest_document_use_case.py  # Parse/OCR → Markdown artifact → Chunk → Embed → Upsert Qdrant
 │   │       └── query/
 │   │           └── retrieval.py    # Embed → Hybrid search (vector+BM25 RRF) → Top-K=5 → SearchResult
 │   │
@@ -129,10 +129,12 @@ src/rag-worker/                     ← Container 4: Ingestion + Retrieval (NATS
 │   │   │   └── qdrant_vector_repository.py
 │   │   └── external/
 │   │       ├── openai_embedding_client.py  # OpenAI text-embedding-3-small (1536 dims)
-│   │       ├── gemini_ocr_client.py        # Gemini Vision API — OCR PDF scan
+│   │       ├── ai_provider.py              # OCR/model gateway for image/PDF scan extraction
+│   │       ├── s3_parser.py                # Read raw source from GCS/S3-compatible object storage
+│   │       ├── s3_artifact_store.py        # Write canonical Markdown artifact to GCS
 │   │       └── langfuse_client.py          # Trace ingestion + retrieval
 │   │
-│   └── main.py                     # NATS subscriber — không có HTTP server, không có DB
+│   └── main.py                     # NATS subscriber + health/status API + metadata DB
 
 src/mcp-service/                    ← Container 5: MCP Tool Service (:8003) — search-only routing
 ├── app/
@@ -270,4 +272,4 @@ async def query(request: QueryRequest, use_case = Depends(get_orchestration_use_
 1. **Thêm field vào Entity** → báo SA trước, ảnh hưởng tất cả layer
 2. **Thêm method vào Repository interface** → SA viết, Dev Infra implement
 3. **Không import chéo** giữa `use_cases/query/` và `use_cases/ingestion/`
-4. **Mọi external call** (OpenAI GPT-4o mini, OpenAI Embeddings, Qdrant, Gemini Vision API) chỉ được gọi từ `infrastructure/`
+4. **Mọi external call** (LLM/OCR provider, OpenAI Embeddings, Qdrant, GCS/S3-compatible storage) chỉ được gọi từ `infrastructure/`
