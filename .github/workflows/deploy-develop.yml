@@ -723,7 +723,7 @@ jobs:
                 -d "{\"question\":\"Tôi còn bao nhiêu ngày phép?\",\"user_id\":\"$SMOKE_UID\"}" \
                 | python3 /tmp/smoke_parse.py "HR query->mcp->hr_query" 0 \
                 || { echo "::error::SMOKE HR query FAIL"; docker compose logs --no-color --tail 100 query-service mcp-service hr-service || true; exit 1; }
-              HR_TOKEN=$(grep -E '^HR_INTERNAL_TOKEN=' deploy/env/hr-service.env | cut -d= -f2-)
+              HR_TOKEN=$(grep -hE '^HR_INTERNAL_TOKEN=' deploy/env/secret.env deploy/env/hr-service.env 2>/dev/null | tail -n1 | cut -d= -f2- || true)
               hrc=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "X-Internal-Token: $HR_TOKEN" http://localhost:8004/health)
               echo "  [HR] hr-service /health -> $hrc"
               case "$hrc" in 2*) : ;; *) echo "::error::SMOKE hr-service health FAIL ($hrc)"; docker compose logs --no-color --tail 80 hr-service || true; exit 1 ;; esac
@@ -737,7 +737,7 @@ jobs:
 
               # APP_STAGE=develop -> mọi intent READ phải tự sinh mock cho user vừa login,
               # trả 200 + data/summary (KHÔNG 404/NO_INFO). Khoá hr_query đúng cho mọi intent.
-              APP_STAGE_VAL=$(grep -E '^APP_STAGE=' deploy/env/common.env | cut -d= -f2-)
+              APP_STAGE_VAL=$(grep -hE '^APP_STAGE=' deploy/env/common.env deploy/env/hr-service.env deploy/env/secret.env 2>/dev/null | tail -n1 | cut -d= -f2- || true)
               if [ "$APP_STAGE_VAL" = "develop" ]; then
                 for intent in attendance onboarding payroll benefits performance leave_requests; do
                   HR_RESP=$(curl -s -w '\n%{http_code}' --max-time 15 -H "X-Internal-Token: $HR_TOKEN" \
