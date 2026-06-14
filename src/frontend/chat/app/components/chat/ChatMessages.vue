@@ -34,13 +34,13 @@ const emit = defineEmits<{
       />
     </template>
     <Pipeline
-      v-if="pipeline >= 0 && pipeline < pipelineStages.length"
+      v-if="!streamingText && pipeline >= 0 && pipeline < pipelineStages.length"
       :trace-log="traceLog ?? []"
       :thinking-status="thinkingStatus"
       :is-thinking="pipeline >= 0 && pipeline < pipelineStages.length"
     />
     <StreamingBlock
-      v-if="pipeline === pipelineStages.length && streamingText"
+      v-if="streamingText"
       :text="streamingText"
     />
   </div>
