@@ -11,7 +11,8 @@ import {
   PanelLeftClose,
   Settings,
   LogOut,
-  ChevronsUpDown
+  ChevronsUpDown,
+  CalendarCheck
 } from '@lucide/vue'
 import { useSessionStore } from '~/stores/session'
 import { useChatStore } from '~/stores/chat'
@@ -236,6 +237,12 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
                 </TooltipContent>
               </Tooltip>
             </div>
+
+            <!-- Đơn nghỉ phép: trang duyệt đơn (sếp thấy hàng đợi; nhân viên thấy rỗng) -->
+            <SideLink
+              :item="{ label: 'Đơn nghỉ phép', to: '/leave-approvals', icon: CalendarCheck }"
+              :is-collapsed="isCollapsed"
+            />
 
             <ChatHistory :is-collapsed="isCollapsed" :query="searchQuery" class="w-full flex flex-col" />
           </div>

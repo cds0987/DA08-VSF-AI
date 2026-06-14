@@ -43,6 +43,10 @@ class HrSettings:
     nats_url: str
     nats_jetstream_enabled: bool
     user_events_enabled: bool
+    # Người duyệt mặc định khi nhân viên KHÔNG có manager (employees.manager_user_id NULL).
+    # Rỗng -> create_leave_request raise -> endpoint trả 422 (Leave Write flow).
+    # Có default -> không vỡ constructor test cũ.
+    default_approver: str = ""
     # Default = production (fail-safe) + đặt cuối -> không vỡ constructor test cũ
     # (truyền keyword, bỏ qua app_stage là OK).
     app_stage: str = "production"
@@ -69,6 +73,7 @@ def load_settings(path: str | os.PathLike[str] | None = None) -> HrSettings:
         nats_url=str(raw.get("nats_url") or "nats://nats:4222").strip() or "nats://nats:4222",
         nats_jetstream_enabled=_as_bool(raw.get("nats_jetstream_enabled"), True),
         user_events_enabled=_as_bool(raw.get("user_events_enabled"), True),
+        default_approver=str(raw.get("default_approver") or "").strip(),
     )
 
 

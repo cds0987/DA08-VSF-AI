@@ -61,3 +61,11 @@ profiles:
       params:
         hr_service_url: ${HR_SERVICE_URL:-http://hr-service:8004}
         internal_token: ${HR_SERVICE_INTERNAL_TOKEN:-}
+
+    # WRITE đơn nghỉ phép (create/update/cancel). TẮT mặc định — bật bằng
+    # TOOL_LEAVE_WRITE_ENABLED=1 khi query-service đã có confirmation gate.
+    leave_write:
+      enabled: ${TOOL_LEAVE_WRITE_ENABLED:-0}
+      params:
+        hr_service_url: ${HR_SERVICE_URL:-http://hr-service:8004}
+        internal_token: ${HR_SERVICE_INTERNAL_TOKEN:-}

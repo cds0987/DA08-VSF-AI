@@ -19,4 +19,7 @@ default_sick_leave: ${HR_DEFAULT_SICK_LEAVE:-10}
 nats_url: ${NATS_URL:-nats://nats:4222}
 nats_jetstream_enabled: ${NATS_JETSTREAM_ENABLED:-true}
 user_events_enabled: ${HR_USER_EVENTS_ENABLED:-true}
+# Leave Write: người duyệt mặc định khi nhân viên không có manager. Rỗng -> tạo đơn
+# trả 422 (buộc cấu hình approver trước khi bật luồng write). Mặc định rỗng = an toàn.
+default_approver: ${HR_DEFAULT_APPROVER:-}
 

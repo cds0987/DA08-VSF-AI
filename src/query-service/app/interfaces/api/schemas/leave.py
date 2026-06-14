@@ -1,0 +1,28 @@
+"""Pydantic schemas cho Leave WRITE REST (frontend <-> query-service).
+
+user_id KHÔNG có trong request — luôn lấy từ JWT server-side (chống user A thao tác
+hộ user B). approver_user_id (duyệt) = chính người đang đăng nhập.
+"""
+from __future__ import annotations
+
+from typing import Literal, Optional
+
+from pydantic import BaseModel, Field
+
+
+class LeaveCreateRequest(BaseModel):
+    leave_type: Literal["annual", "sick", "personal"]
+    start_date: str = Field(..., description="YYYY-MM-DD")
+    end_date: str = Field(..., description="YYYY-MM-DD")
+    reason: str = ""
+    # Chống tạo trùng khi double-click/retry: frontend sinh 1 key/lần mở form.
+    idempotency_key: Optional[str] = None
+
+
+class LeaveCancelRequest(BaseModel):
+    # rỗng — request_id ở path, user_id từ JWT.
+    pass
+
+
+class LeaveDecisionRequest(BaseModel):
+    reason: str = ""  # dùng khi reject

@@ -14,7 +14,7 @@ connection — it only needs a transient connection for schema discovery.
 import json
 import logging
 from dataclasses import asdict
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -45,6 +45,40 @@ class _HrQueryInput(BaseModel):
     # KHÔNG field: hr_query trả toàn bộ hồ sơ HR, model không cần (và không được) điền gì.
     # user_id tiêm server-side ở act_node.
     pass
+
+
+# WRITE tools: schema KIỂU (Pydantic) -> qua convert_to_openai_function model THẤY & ĐIỀN
+# args (dict-schema generic bị model gọi rỗng {}). user_id KHÔNG có ở đây — tiêm server-side.
+_LeaveType = Literal["annual", "sick", "personal"]
+
+
+class _CreateLeaveInput(BaseModel):
+    leave_type: _LeaveType = Field(description="Loại nghỉ: annual (phép năm), sick (ốm), personal (việc riêng)")
+    start_date: str = Field(description="Ngày bắt đầu, định dạng YYYY-MM-DD")
+    end_date: str = Field(description="Ngày kết thúc, định dạng YYYY-MM-DD")
+    reason: str = Field(default="", description="Lý do nghỉ")
+
+
+class _CancelLeaveInput(BaseModel):
+    request_id: str = Field(description="Mã (id) đơn nghỉ cần hủy")
+
+
+class _UpdateLeaveInput(BaseModel):
+    request_id: str = Field(description="Mã (id) đơn nghỉ cần sửa")
+    leave_type: _LeaveType = Field(description="Loại nghỉ: annual/sick/personal")
+    start_date: str = Field(description="Ngày bắt đầu mới, YYYY-MM-DD")
+    end_date: str = Field(description="Ngày kết thúc mới, YYYY-MM-DD")
+    reason: str = Field(default="", description="Lý do")
+
+
+# Tool WRITE cần schema KIỂU để model điền args. Vẫn discover ĐỘNG: chỉ tool nào mcp
+# thực sự expose mới xuất hiện; map này chỉ gắn schema-kiểu cho tool đã biết (như
+# rag_search/hr_query). Tool mới khác vẫn đi đường generic.
+_WRITE_TOOL_SCHEMAS: dict[str, type[BaseModel]] = {
+    "create_leave_request": _CreateLeaveInput,
+    "cancel_leave_request": _CancelLeaveInput,
+    "update_leave_request": _UpdateLeaveInput,
+}
 
 
 def _build_client_config(settings: Settings) -> dict[str, Any]:
@@ -135,6 +169,17 @@ class LangChainMCPToolsLoader:
                         user_id=user_id,
                     )
                 )
+            elif spec.name in _WRITE_TOOL_SCHEMAS:
+                # WRITE tool (create/cancel/update_leave_request): dùng StructuredTool
+                # KIỂU -> model điền được args (dict-schema generic bị gọi rỗng {}).
+                tools.append(
+                    self._make_typed_tool(
+                        name=spec.name,
+                        description=spec.description or spec.name,
+                        args_schema=_WRITE_TOOL_SCHEMAS[spec.name],
+                        user_id=user_id,
+                    )
+                )
             else:
                 # Tool khác: discover động từ spec mcp (dict schema).
                 tools.append(self._make_generic_tool(spec))
@@ -156,6 +201,33 @@ class LangChainMCPToolsLoader:
     # ------------------------------------------------------------------
     # Private factory methods
     # ------------------------------------------------------------------
+
+    def _make_typed_tool(
+        self,
+        *,
+        name: str,
+        description: str,
+        args_schema: type[BaseModel],
+        user_id: str,
+    ) -> StructuredTool:
+        """StructuredTool có args_schema KIỂU -> adapter serialize qua
+        convert_to_openai_function nên model THẤY & ĐIỀN args (khác dict-schema generic
+        bị model gọi rỗng {}). Coroutine vẫn gọi call_tool + tiêm user_id (act_node cũng
+        chạy generic; coroutine là phần execute hợp lệ nếu được gọi trực tiếp)."""
+        client = self._mcp_client
+        _uid = user_id
+        _name = name
+
+        async def _run(**kwargs: Any) -> str:
+            raw = await client.call_tool(_name, {**kwargs, "user_id": _uid})
+            return json.dumps(raw, ensure_ascii=False)
+
+        return StructuredTool.from_function(
+            coroutine=_run,
+            name=name,
+            description=description,
+            args_schema=args_schema,
+        )
 
     def _make_generic_tool(self, spec: ToolSpec) -> dict:
         """

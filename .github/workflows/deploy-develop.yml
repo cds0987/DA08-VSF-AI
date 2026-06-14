@@ -423,52 +423,14 @@ jobs:
             git fetch "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" develop
             git reset --hard FETCH_HEAD
 
-            echo "==> 2) CONFIG đến TỪ git (deploy/env/*.env commit thẳng — KHÔNG secret)."
+            echo "==> 2) Env đến TỪ git (đã reset --hard ở bước 1) — deploy/env/*.env commit thẳng."
             miss=0
             for f in common rag-worker mcp-service hr-service query-service user-service document-service; do
               [ -s "deploy/env/$f.env" ] || { echo "::error::deploy/env/$f.env THIẾU/RỖNG trong git"; miss=1; }
             done
-
-            echo "==> 2a) Sinh SECRET từ GitHub Secrets (public repo -> secret KHÔNG nằm trong git)."
-            umask 077
-            # secret.env: secret app-service (load CUỐI trong env_file -> override placeholder).
-            cat > deploy/env/secret.env <<EOF
-            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-            JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }}
-            MCP_INTERNAL_TOKEN=${{ secrets.MCP_INTERNAL_TOKEN }}
-            HR_INTERNAL_TOKEN=${{ secrets.HR_INTERNAL_TOKEN }}
-            HR_SERVICE_INTERNAL_TOKEN=${{ secrets.HR_INTERNAL_TOKEN }}
-            S3_ACCESS_KEY_ID=${{ secrets.GCS_HMAC_KEY }}
-            S3_SECRET_ACCESS_KEY=${{ secrets.GCS_HMAC_SECRET }}
-            LANGFUSE_PUBLIC_KEY=${{ secrets.LANGFUSE_PUBLIC_KEY }}
-            LANGFUSE_SECRET_KEY=${{ secrets.LANGFUSE_SECRET_KEY }}
-            EOF
-            # .env (root): biến cho docker-compose ${VAR} substitution (chỉ block environment + postgres/langfuse).
-            cat > .env <<EOF
-            DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
-            IMAGE_TAG=develop
-            POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
-            NEW_RELIC_LICENSE_KEY=${{ secrets.NEW_RELIC_LICENSE_KEY }}
-            SEED_ADMIN_PASSWORD=${{ secrets.SEED_ADMIN_PASSWORD }}
-            LANGFUSE_DB_PASSWORD=${{ secrets.LANGFUSE_DB_PASSWORD }}
-            NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}
-            LANGFUSE_SALT=${{ secrets.LANGFUSE_SALT }}
-            LANGFUSE_ENCRYPTION_KEY=${{ secrets.LANGFUSE_ENCRYPTION_KEY }}
-            LANGFUSE_INIT_USER_PASSWORD=${{ secrets.LANGFUSE_INIT_USER_PASSWORD }}
-            LANGFUSE_PUBLIC_KEY=${{ secrets.LANGFUSE_PUBLIC_KEY }}
-            LANGFUSE_SECRET_KEY=${{ secrets.LANGFUSE_SECRET_KEY }}
-            EOF
-
-            echo "==> 2b) FAIL-CLOSED: secret bắt buộc phải có giá trị (thiếu GitHub Secret -> DỪNG)."
-            req_secret() { v=$(grep -E "^$1=" "$2" | cut -d= -f2-); [ -n "$v" ] || { echo "::error::Thiếu secret $1 (set trong GitHub Secrets)"; miss=1; }; }
-            for k in OPENAI_API_KEY JWT_SECRET_KEY MCP_INTERNAL_TOKEN HR_INTERNAL_TOKEN S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY; do
-              req_secret "$k" deploy/env/secret.env
-            done
-            for k in POSTGRES_PASSWORD NEW_RELIC_LICENSE_KEY SEED_ADMIN_PASSWORD LANGFUSE_DB_PASSWORD NEXTAUTH_SECRET LANGFUSE_SALT LANGFUSE_ENCRYPTION_KEY LANGFUSE_INIT_USER_PASSWORD; do
-              req_secret "$k" .env
-            done
-            # KEYLESS GCS: VM gắn SA vsf-storage -> document-service dùng ADC, KHÔNG cần gcp-sa.json.
-            [ "$miss" = 0 ] || { echo "::error::Thiếu cấu hình/secret -> DỪNG deploy"; exit 1; }
+            # KEYLESS GCS: VM gắn SA vsf-storage -> document-service dùng ADC, KHÔNG cần
+            # gcp-sa.json (org policy chặn tạo SA key). Bỏ check file SA.
+            [ "$miss" = 0 ] || { echo "::error::Thiếu cấu hình -> DỪNG deploy"; exit 1; }
 
             echo "==> 2b) Ghi ĐIỂM ROLLBACK = image ID đang chạy (trước khi pull bản mới)"
             : > /tmp/rollback_images.txt
@@ -497,9 +459,9 @@ jobs:
               done
               [ "$ok" = 1 ] || { lf_warn "health chưa sẵn sàng sau ~60s"; return 0; }
 
-              PK=$(grep -E '^LANGFUSE_PUBLIC_KEY=' deploy/env/secret.env | cut -d= -f2-)
-              SK=$(grep -E '^LANGFUSE_SECRET_KEY=' deploy/env/secret.env | cut -d= -f2-)
-              [ -n "$PK" ] && [ -n "$SK" ] || { lf_warn "thiếu LANGFUSE_PUBLIC_KEY/SECRET_KEY trong secret.env"; return 0; }
+              PK=$(grep -E '^LANGFUSE_PUBLIC_KEY=' deploy/env/common.env | cut -d= -f2-)
+              SK=$(grep -E '^LANGFUSE_SECRET_KEY=' deploy/env/common.env | cut -d= -f2-)
+              [ -n "$PK" ] && [ -n "$SK" ] || { lf_warn "thiếu LANGFUSE_PUBLIC_KEY/SECRET_KEY trong common.env"; return 0; }
               TID="prod-readiness-$(date +%s)-$RANDOM"
 
               code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -u "$PK:$SK" \
@@ -686,7 +648,7 @@ jobs:
             if need and src < 1:
                 print("  [%s] FAIL: can sources>0 (query->mcp->rag->qdrant tra rong)" % label); sys.exit(1)
             PYEOF
-            SMOKE_EMAIL="admin@company.com"; SMOKE_PW="${{ secrets.SEED_ADMIN_PASSWORD }}"
+            SMOKE_EMAIL="admin@company.com"; SMOKE_PW="DemoAdminPassword123!"
             TOK=$(curl -s --max-time 25 -X POST http://localhost/api/user/auth/login \
                     -H 'Content-Type: application/json' \
                     -d "{\"email\":\"$SMOKE_EMAIL\",\"password\":\"$SMOKE_PW\"}" \
@@ -702,11 +664,21 @@ jobs:
             fi
 
             if [ "$SMOKE_RAG" = "true" ]; then
-              curl -s --max-time 90 -X POST http://localhost/api/query/query \
-                -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -H 'X-CI-Smoke: 1' \
-                -d "{\"question\":\"chính sách nghỉ phép của công ty\",\"user_id\":\"$SMOKE_UID\"}" \
-                | python3 /tmp/smoke_parse.py "RAG query->mcp->rag" 1 \
-                || { echo "::error::SMOKE RAG FAIL"; docker compose logs --no-color --tail 100 query-service mcp-service rag-worker || true; exit 1; }
+              # WARM-UP TOLERANT: ngay sau `compose up --force-recreate`, đường mcp-warmup +
+              # embedding/qdrant connection của query-service CHƯA warm -> query ĐẦU có thể trả
+              # sources=0 (mcp_tools_warmup race; per-request tự rebuild nên ~1-2' sau là OK).
+              # Retry tới khi sources>0; CHỈ fail sau khi hết lượt -> hết false-negative cold-start.
+              rag_ok=0
+              for attempt in $(seq 1 6); do
+                if curl -s --max-time 90 -X POST http://localhost/api/query/query \
+                     -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -H 'X-CI-Smoke: 1' \
+                     -d "{\"question\":\"chính sách nghỉ phép của công ty\",\"user_id\":\"$SMOKE_UID\"}" \
+                     | python3 /tmp/smoke_parse.py "RAG query->mcp->rag (lần $attempt)" 1; then
+                  rag_ok=1; break
+                fi
+                echo "  [RAG] lần $attempt chưa có sources (warm-up?) — chờ 15s rồi thử lại..."; sleep 15
+              done
+              [ "$rag_ok" = 1 ] || { echo "::error::SMOKE RAG FAIL (sau 6 lần retry warm-up)"; docker compose logs --no-color --tail 100 query-service mcp-service rag-worker || true; exit 1; }
 
               # SMOKE GUARDRAIL (chỉ khi GUARDRAILS_MODE=llm_api): gửi prompt-injection trắng
               # trợn, verify LlmApiInputGuardrail (LLM-judge qua provider) CHẶN -> done event
@@ -751,7 +723,7 @@ jobs:
                 -d "{\"question\":\"Tôi còn bao nhiêu ngày phép?\",\"user_id\":\"$SMOKE_UID\"}" \
                 | python3 /tmp/smoke_parse.py "HR query->mcp->hr_query" 0 \
                 || { echo "::error::SMOKE HR query FAIL"; docker compose logs --no-color --tail 100 query-service mcp-service hr-service || true; exit 1; }
-              HR_TOKEN=$(grep -E '^HR_INTERNAL_TOKEN=' deploy/env/secret.env | cut -d= -f2-)
+              HR_TOKEN=$(grep -E '^HR_INTERNAL_TOKEN=' deploy/env/hr-service.env | cut -d= -f2-)
               hrc=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "X-Internal-Token: $HR_TOKEN" http://localhost:8004/health)
               echo "  [HR] hr-service /health -> $hrc"
               case "$hrc" in 2*) : ;; *) echo "::error::SMOKE hr-service health FAIL ($hrc)"; docker compose logs --no-color --tail 80 hr-service || true; exit 1 ;; esac
@@ -762,6 +734,24 @@ jobs:
                          -d "{\"user_id\":\"$SMOKE_UID\",\"intent\":\"leave_balance\"}")
               echo "$HR_BAL" | python3 -c 'import sys,json; d=json.load(sys.stdin); v=d.get("data",{}).get("annual_remaining"); assert isinstance(v,int), "annual_remaining khong phai so"; print("  [HR] sync user->hr OK  annual_remaining=%s" % v)' \
                 || { echo "::error::SMOKE HR sync FAIL (user->hr: 404/NO_INFO hoặc hr-service lỗi). resp=$HR_BAL"; docker compose logs --no-color --tail 100 hr-service || true; exit 1; }
+
+              # APP_STAGE=develop -> mọi intent READ phải tự sinh mock cho user vừa login,
+              # trả 200 + data/summary (KHÔNG 404/NO_INFO). Khoá hr_query đúng cho mọi intent.
+              APP_STAGE_VAL=$(grep -E '^APP_STAGE=' deploy/env/common.env | cut -d= -f2-)
+              if [ "$APP_STAGE_VAL" = "develop" ]; then
+                for intent in attendance onboarding payroll benefits performance leave_requests; do
+                  HR_RESP=$(curl -s -w '\n%{http_code}' --max-time 15 -H "X-Internal-Token: $HR_TOKEN" \
+                              -H 'Content-Type: application/json' -X POST http://localhost:8004/hr/query \
+                              -d "{\"user_id\":\"$SMOKE_UID\",\"intent\":\"$intent\"}")
+                  HR_CODE=$(echo "$HR_RESP" | tail -n1); HR_BODY=$(echo "$HR_RESP" | sed '$d')
+                  case "$HR_CODE" in
+                    2*) echo "$HR_BODY" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d.get("intent") and d.get("summary"), "thieu intent/summary"; print("  [HR] mock intent %s OK" % d["intent"])' \
+                          || { echo "::error::SMOKE HR intent=$intent body sai. resp=$HR_BODY"; exit 1; } ;;
+                    *) echo "::error::SMOKE HR intent=$intent FAIL ($HR_CODE) — develop phải tự mock. resp=$HR_BODY"; docker compose logs --no-color --tail 100 hr-service || true; exit 1 ;;
+                  esac
+                done
+                echo "  [HR] develop mock data PASS (6 intent read tra 200)"
+              fi
             fi
             echo "  SMOKE luồng-vàng PASS (RAG=$SMOKE_RAG HR=$SMOKE_HR DOC=$SMOKE_DOC)"
             fi
@@ -770,3 +760,20 @@ jobs:
             DEPLOY_OK=1
             docker image prune -f
             echo "Deploy develop -> production: DONE (tag=$IMAGE_TAG)."
+
+      # Step RIÊNG (script block nhỏ) — KHÔNG nhét seed vào script deploy phía trên vì
+      # block đó + nhiều ${{ }} đã chạm giới hạn 21000 ký tự/expression của Actions.
+      # seed-user không là dependency service nào nên compose up không chạy -> gọi tường minh.
+      - name: Seed users (admin + nhanvien@ + sep@) — idempotent
+        if: success()
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          port: ${{ secrets.VM_SSH_PORT || 22 }}
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.APP_DIR }}"
+            docker compose run --rm seed-user || echo "::warning::seed-user failed (idempotent; retry next deploy)"

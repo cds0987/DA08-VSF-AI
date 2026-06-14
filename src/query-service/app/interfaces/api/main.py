@@ -25,7 +25,7 @@ from app.interfaces.api.dependencies import (
     get_rate_limiter,
     get_document_access_repo,
 )
-from app.interfaces.api.routers import admin, conversations, feedback, notifications, query
+from app.interfaces.api.routers import admin, conversations, feedback, leave, notifications, query
 from app.infrastructure.logging_utils import configure_logging
 
 
@@ -87,6 +87,7 @@ app.include_router(query.router)
 app.include_router(notifications.router)
 app.include_router(conversations.router)
 app.include_router(feedback.router)
+app.include_router(leave.router)
 app.include_router(admin.router)
 
 

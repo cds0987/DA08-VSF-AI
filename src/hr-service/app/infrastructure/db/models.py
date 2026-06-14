@@ -60,6 +60,7 @@ class LeaveRequestRecord(Base):
         Index("idx_leave_req_user", "user_id"),
         Index("idx_leave_req_status", "status"),
         Index("idx_leave_req_approver", "approver_user_id", "status"),
+        UniqueConstraint("idempotency_key", name="uq_leave_req_idempotency_key"),
         {"schema": "hr_svc"},
     )
 
@@ -78,6 +79,10 @@ class LeaveRequestRecord(Base):
     approved_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rejected_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rejected_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Leave Write: chống tạo trùng đơn khi client retry (NULL = đơn cũ/không gửi key,
+    # UNIQUE chỉ chặn các key non-NULL). cancelled_at: mốc hủy (NV tự hủy/sửa-khi-approved).
+    idempotency_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    cancelled_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

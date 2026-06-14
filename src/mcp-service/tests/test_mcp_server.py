@@ -294,6 +294,7 @@ def test_build_mcp_registers_hr_query_tool(monkeypatch) -> None:
             **_settings().__dict__,
             "tools_profile": {
                 "rag_search": {"enabled": "0"},
+                "leave_write": {"enabled": "0"},
                 "hr_query": {
                     "enabled": "1",
                     "params": {

@@ -144,7 +144,7 @@ Neu `AUTH_MODE=user_service`, khong dung mock token. Lay token bang User Service
 ```powershell
 $loginBody = @{
   email = "admin@company.com"
-  password = "***REDACTED-SEED-ADMIN-PW***"
+  password = "DemoAdminPassword123!"
 } | ConvertTo-Json -Compress
 
 $tokenResponse = Invoke-RestMethod `

@@ -22,6 +22,8 @@ def create_app() -> FastAPI:
         from app.infrastructure.user_events_subscriber import start_user_events_subscriber
 
         publisher = NatsPublisher(settings)
+        # Inject cho routes write (POST /hr/leave-requests ...) qua get_publisher.
+        app.state.publisher = publisher
         handle = await start_user_events_subscriber(
             settings,
             repo_factory=lambda: PostgresHrRepository(settings.database_url),
@@ -32,6 +34,7 @@ def create_app() -> FastAPI:
         finally:
             await handle.close()
             await publisher.aclose()
+            app.state.publisher = None
 
     app = FastAPI(title="hr-service", lifespan=lifespan)
     app.include_router(router)

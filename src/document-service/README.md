@@ -150,7 +150,7 @@ $AdminLogin = Invoke-RestMethod `
   -ContentType "application/json" `
   -Body (@{
     email = "admin@company.com"
-    password = "***REDACTED-SEED-ADMIN-PW***"
+    password = "DemoAdminPassword123!"
   } | ConvertTo-Json)
 
 $AdminToken = $AdminLogin.access_token

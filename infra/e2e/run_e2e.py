@@ -35,9 +35,16 @@ ALLOWED = {"pdf", "docx", "txt", "xlsx", "csv", "pptx", "md"}
 USER_URL = os.environ.get("USER_URL", "http://localhost:8000").rstrip("/")
 QUERY_URL = os.environ.get("QUERY_URL", "http://localhost:8001").rstrip("/")
 DOC_URL = os.environ.get("DOC_URL", "http://localhost:8002").rstrip("/")
+# hr-service expose 127.0.0.1:8004 trong docker-compose.e2e.yml; token cố định ở compose.
+HR_URL = os.environ.get("HR_URL", "http://localhost:8004").rstrip("/")
+HR_TOKEN = os.environ.get("HR_INTERNAL_TOKEN", "e2e-hr-token")
 ADMIN_EMAIL = os.environ.get("SEED_ADMIN_EMAIL", "admin@company.com")
-ADMIN_PW = os.environ.get("SEED_ADMIN_PASSWORD", "***REDACTED-SEED-ADMIN-PW***")
+ADMIN_PW = os.environ.get("SEED_ADMIN_PASSWORD", "DemoAdminPassword123!")
 RECORD = os.environ.get("CI_RECORD", "/tmp/e2e_record.json")
+# Seed UUID từ migration 0001: USER_FINANCE có manager = USER_HR -> resolve approver
+# được; USER_HR manager NULL nên KHÔNG dùng làm requester (sẽ 422 thiếu approver).
+HR_USER = "11111111-1111-4111-8111-111111111111"
+FIN_USER = "22222222-2222-4222-8222-222222222222"
 
 
 def _env(k: str, default: str | None = None) -> str:
@@ -282,6 +289,92 @@ def cleanup() -> None:
         print(f"  Qdrant cleanup warn: {str(e)[:120]}")
 
 
+# ───────────────────────── 6b. LEAVE WRITE FLOW ────────────────────────────
+def _safe_json(raw: bytes) -> dict:
+    try:
+        return json.loads(raw) if raw else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _hr(method: str, path: str, payload: dict | None = None) -> tuple[int, dict]:
+    """Gọi THẲNG hr-service (X-Internal-Token). Trả (status, body) cả khi 4xx/5xx
+    (bắt HTTPError) để assert được 403/409/422."""
+    data = json.dumps(payload).encode() if payload is not None else None
+    headers = {"X-Internal-Token": HR_TOKEN, "Content-Type": "application/json"}
+    try:
+        st, raw = _http(method, f"{HR_URL}{path}", headers=headers, data=data)
+        return st, _safe_json(raw)
+    except urllib.error.HTTPError as e:  # 4xx/5xx
+        return e.code, _safe_json(e.read())
+
+
+def _annual_used(user_id: str) -> int:
+    st, b = _hr("POST", "/hr/query", {"user_id": user_id, "intent": "leave_balance"})
+    if st != 200:
+        raise SystemExit(f"[LEAVE] FAIL đọc leave_balance st={st} {b}")
+    return b["data"]["annual_used"]
+
+
+def leave_write_flow() -> None:
+    """Mô phỏng production flow đơn nghỉ trên STACK THẬT (hr-service + Postgres thật):
+    tạo -> idempotency -> guard sai approver -> duyệt (trừ phép) -> duyệt lại 409 ->
+    hủy sai chủ đơn -> hủy (hoàn phép). Net-zero balance -> không ảnh hưởng step khác."""
+    label = "LEAVE"
+    base = _annual_used(FIN_USER)
+    key = "e2e-leave-key-001"
+    payload = {"user_id": FIN_USER, "leave_type": "annual",
+               "start_date": "2026-09-01", "end_date": "2026-09-01",
+               "reason": "e2e", "idempotency_key": key}
+
+    st, created = _hr("POST", "/hr/leave-requests", payload)
+    if st != 201:
+        raise SystemExit(f"[{label}] FAIL create st={st} {created}")
+    rid, approver = created["id"], created["approver_user_id"]
+    if approver != HR_USER:
+        raise SystemExit(f"[{label}] FAIL approver={approver} != manager {HR_USER}")
+    if created["status"] != "pending":
+        raise SystemExit(f"[{label}] FAIL status={created['status']} != pending")
+
+    # idempotency: gọi lại cùng key -> KHÔNG tạo trùng (cùng id)
+    st, again = _hr("POST", "/hr/leave-requests", payload)
+    if st != 201 or again.get("id") != rid:
+        raise SystemExit(f"[{label}] FAIL idempotency dup id={again.get('id')} != {rid}")
+
+    # guard: sai người duyệt -> 403
+    st, _ = _hr("POST", f"/hr/leave-requests/{rid}/approve", {"approver_user_id": FIN_USER})
+    if st != 403:
+        raise SystemExit(f"[{label}] FAIL wrong-approver expected 403 got {st}")
+
+    # duyệt đúng manager -> trừ 1 ngày phép (transaction thật)
+    st, appr = _hr("POST", f"/hr/leave-requests/{rid}/approve", {"approver_user_id": HR_USER})
+    if st != 200 or appr.get("status") != "approved":
+        raise SystemExit(f"[{label}] FAIL approve st={st} {appr}")
+    used = _annual_used(FIN_USER)
+    if used != base + 1:
+        raise SystemExit(f"[{label}] FAIL deduct annual_used={used} != {base + 1}")
+
+    # duyệt lại đơn đã duyệt -> 409 (không pending)
+    st, _ = _hr("POST", f"/hr/leave-requests/{rid}/approve", {"approver_user_id": HR_USER})
+    if st != 409:
+        raise SystemExit(f"[{label}] FAIL re-approve expected 409 got {st}")
+
+    # hủy bởi người KHÔNG phải chủ đơn -> 403
+    st, _ = _hr("POST", f"/hr/leave-requests/{rid}/cancel", {"user_id": HR_USER})
+    if st != 403:
+        raise SystemExit(f"[{label}] FAIL cancel non-owner expected 403 got {st}")
+
+    # hủy bởi chủ đơn -> hoàn phép
+    st, canc = _hr("POST", f"/hr/leave-requests/{rid}/cancel", {"user_id": FIN_USER})
+    if st != 200:
+        raise SystemExit(f"[{label}] FAIL cancel st={st} {canc}")
+    used = _annual_used(FIN_USER)
+    if used != base:
+        raise SystemExit(f"[{label}] FAIL refund annual_used={used} != {base}")
+
+    print(f"  [{label}] OK create+idempotency+guard+approve(deduct)+re-approve409+cancel(refund)")
+
+
 # ─────────────────────────────── main ──────────────────────────────────────
 def main() -> int:
     do_cleanup = "--no-cleanup" not in sys.argv
@@ -297,6 +390,7 @@ def main() -> int:
         print("==> 4) verify rag-worker trace (Langfuse)"); lf1 = verify_trace("ingest", lf0)
         print("==> 5) query RAG"); query("RAG", token, uid, "công ty có chính sách nghỉ phép thế nào", True)
         print("==> 6) query HR"); query("HR", token, uid, "Tôi còn bao nhiêu ngày phép?", False)
+        print("==> 6b) leave write flow (hr-service + Postgres thật)"); leave_write_flow()
         print("==> 7) verify query-service trace (Langfuse)"); verify_trace("query", lf1)
         print("E2E PASS ✓")
         return 0

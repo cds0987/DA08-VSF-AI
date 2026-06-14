@@ -2,14 +2,22 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.api.auth import require_internal_token
 from app.core.config import HrSettings, get_settings as load_hr_settings
 from app.domain.repositories.hr_repository import HrRepository
+from app.domain.repositories.leave_write_repository import (
+    ApproverNotConfigured,
+    InsufficientLeaveBalance,
+    LeaveRequestConflict,
+    LeaveRequestForbidden,
+    LeaveRequestNotFound,
+    LeaveWriteRepository,
+)
 
 logger = logging.getLogger("hr-service")
 
@@ -71,6 +79,247 @@ class HrQueryRequest(BaseModel):
 
 class HrProfileRequest(BaseModel):
     user_id: str
+
+
+# ──────────────────────────── LEAVE WRITE ────────────────────────────
+LeaveType = Literal["annual", "sick", "personal"]
+
+
+def get_write_repo(settings: HrSettings = Depends(get_settings)) -> LeaveWriteRepository:
+    """Dependency RIÊNG cho write (KHÔNG dùng get_repo) — test read override get_repo
+    với FakeHrRepository (không có method write); test write override get_write_repo
+    với fake write riêng. Tách dependency = tách interface (Bẫy 1)."""
+    from app.infrastructure.db.postgres_hr_repository import PostgresHrRepository
+
+    return PostgresHrRepository(settings.database_url)
+
+
+def get_publisher(request: Request) -> Any:
+    """NATS publisher lưu ở app.state (lifespan set). None khi chưa khởi tạo (vd
+    TestClient không chạy lifespan) -> publish bị bỏ qua (best-effort)."""
+    return getattr(request.app.state, "publisher", None)
+
+
+class LeaveCreateRequest(BaseModel):
+    user_id: str
+    leave_type: LeaveType
+    start_date: str
+    end_date: str
+    reason: str = ""
+    idempotency_key: Optional[str] = None
+
+
+class LeaveUpdateRequest(BaseModel):
+    user_id: str
+    leave_type: LeaveType
+    start_date: str
+    end_date: str
+    reason: str = ""
+    idempotency_key: Optional[str] = None
+
+
+class LeaveCancelRequest(BaseModel):
+    user_id: str
+
+
+class ApprovalActionRequest(BaseModel):
+    approver_user_id: str
+    reason: str = ""
+
+
+def _map_leave_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, ApproverNotConfigured):
+        return HTTPException(status_code=422, detail="approver chưa được cấu hình")
+    if isinstance(exc, LeaveRequestNotFound):
+        return HTTPException(status_code=404, detail="leave request not found")
+    if isinstance(exc, LeaveRequestForbidden):
+        return HTTPException(status_code=403, detail="không có quyền với đơn này")
+    if isinstance(exc, InsufficientLeaveBalance):
+        return HTTPException(status_code=409, detail="không đủ hạn mức phép")
+    if isinstance(exc, LeaveRequestConflict):
+        return HTTPException(status_code=409, detail="đơn không ở trạng thái hợp lệ")
+    return HTTPException(status_code=500, detail="leave write error")
+
+
+def _validate_dates(start_date: str, end_date: str) -> None:
+    import datetime as _dt
+
+    try:
+        start = _dt.date.fromisoformat(start_date)
+        end = _dt.date.fromisoformat(end_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="start_date/end_date phải là YYYY-MM-DD")
+    if start > end:
+        raise HTTPException(status_code=422, detail="start_date phải <= end_date")
+
+
+def _created_payload(req: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "request_id": req["id"],
+        "requester_user_id": req["user_id"],
+        "approver_user_id": req["approver_user_id"],
+        "leave_type": req["leave_type"],
+        "start_date": req["start_date"],
+        "end_date": req["end_date"],
+        "days_count": req["days_count"],
+        "status": req["status"],
+    }
+
+
+def _status_payload(req: dict[str, Any], *, include_reason: bool = False) -> dict[str, Any]:
+    payload = {
+        "request_id": req["id"],
+        "requester_user_id": req["user_id"],
+        "approver_user_id": req["approver_user_id"],
+        "status": req["status"],
+    }
+    if include_reason:
+        payload["rejected_reason"] = req.get("rejected_reason")
+    return payload
+
+
+async def _publish_event(publisher: Any, subject: str, payload: dict[str, Any]) -> None:
+    """Publish SAU commit, best-effort: NATS lỗi/None KHÔNG được làm sập write."""
+    if publisher is None:
+        return
+    try:
+        await publisher.publish(subject, payload)
+    except Exception as exc:  # noqa: BLE001 — chủ ý nuốt mọi lỗi publish (best-effort)
+        logger.warning("hr_event_publish_failed subject=%s error=%s", subject, exc)
+
+
+@router.post("/hr/leave-requests", status_code=201)
+async def create_leave_request(
+    body: LeaveCreateRequest,
+    repo: LeaveWriteRepository = Depends(get_write_repo),
+    settings: HrSettings = Depends(get_settings),
+    publisher: Any = Depends(get_publisher),
+) -> dict[str, Any]:
+    _validate_dates(body.start_date, body.end_date)
+    try:
+        result = await repo.create_leave_request(
+            user_id=body.user_id,
+            leave_type=body.leave_type,
+            start_date=body.start_date,
+            end_date=body.end_date,
+            reason=body.reason,
+            default_approver=settings.default_approver,
+            idempotency_key=body.idempotency_key,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise _map_leave_error(exc)
+    req = result["request"]
+    if result.get("created"):
+        await _publish_event(publisher, "hr.leave_request.created", _created_payload(req))
+    logger.info("hr_leave_create user=%s status=%s", _mask_user_id(body.user_id), req["status"])
+    return req
+
+
+@router.patch("/hr/leave-requests/{request_id}")
+async def update_leave_request(
+    request_id: str,
+    body: LeaveUpdateRequest,
+    repo: LeaveWriteRepository = Depends(get_write_repo),
+    settings: HrSettings = Depends(get_settings),
+    publisher: Any = Depends(get_publisher),
+) -> dict[str, Any]:
+    _validate_dates(body.start_date, body.end_date)
+    try:
+        result = await repo.update_leave_request(
+            user_id=body.user_id,
+            request_id=request_id,
+            leave_type=body.leave_type,
+            start_date=body.start_date,
+            end_date=body.end_date,
+            reason=body.reason,
+            default_approver=settings.default_approver,
+            idempotency_key=body.idempotency_key,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise _map_leave_error(exc)
+    req = result["request"]
+    if result.get("mode") == "updated":
+        await _publish_event(publisher, "hr.leave_request.updated", _created_payload(req))
+    elif result.get("mode") == "replaced":
+        old = result.get("replaced_request")
+        if old:
+            await _publish_event(publisher, "hr.leave_request.cancelled", _status_payload(old))
+        await _publish_event(publisher, "hr.leave_request.created", _created_payload(req))
+    logger.info("hr_leave_update user=%s mode=%s", _mask_user_id(body.user_id), result.get("mode"))
+    return req
+
+
+@router.post("/hr/leave-requests/{request_id}/cancel")
+async def cancel_leave_request(
+    request_id: str,
+    body: LeaveCancelRequest,
+    repo: LeaveWriteRepository = Depends(get_write_repo),
+    publisher: Any = Depends(get_publisher),
+) -> dict[str, Any]:
+    try:
+        result = await repo.cancel_leave_request(user_id=body.user_id, request_id=request_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _map_leave_error(exc)
+    req = result["request"]
+    if result.get("changed"):
+        await _publish_event(publisher, "hr.leave_request.cancelled", _status_payload(req))
+    logger.info("hr_leave_cancel user=%s changed=%s", _mask_user_id(body.user_id), result.get("changed"))
+    return req
+
+
+@router.get("/hr/leave-requests/pending-approval")
+async def pending_approval(
+    approver_user_id: str,
+    repo: LeaveWriteRepository = Depends(get_write_repo),
+) -> dict[str, Any]:
+    items = await repo.list_pending_approval(approver_user_id)
+    return {"items": items, "count": len(items)}
+
+
+async def _decide_leave(
+    request_id: str,
+    body: ApprovalActionRequest,
+    action: str,
+    repo: LeaveWriteRepository,
+    publisher: Any,
+) -> dict[str, Any]:
+    try:
+        result = await repo.update_leave_status(
+            request_id=request_id,
+            approver_user_id=body.approver_user_id,
+            action=action,
+            reason=body.reason,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise _map_leave_error(exc)
+    req = result["request"]
+    if action == "approve":
+        await _publish_event(publisher, "hr.leave_request.approved", _status_payload(req))
+    else:
+        await _publish_event(
+            publisher, "hr.leave_request.rejected", _status_payload(req, include_reason=True)
+        )
+    return req
+
+
+@router.post("/hr/leave-requests/{request_id}/approve")
+async def approve_leave_request(
+    request_id: str,
+    body: ApprovalActionRequest,
+    repo: LeaveWriteRepository = Depends(get_write_repo),
+    publisher: Any = Depends(get_publisher),
+) -> dict[str, Any]:
+    return await _decide_leave(request_id, body, "approve", repo, publisher)
+
+
+@router.post("/hr/leave-requests/{request_id}/reject")
+async def reject_leave_request(
+    request_id: str,
+    body: ApprovalActionRequest,
+    repo: LeaveWriteRepository = Depends(get_write_repo),
+    publisher: Any = Depends(get_publisher),
+) -> dict[str, Any]:
+    return await _decide_leave(request_id, body, "reject", repo, publisher)
 
 
 def _leave_balance_summary(annual_remaining: int, sick_remaining: int) -> str:

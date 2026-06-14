@@ -24,6 +24,7 @@ from app.infrastructure.db.postgres_user_access_profile_repo import PostgresUser
 from app.infrastructure.external.langchain_mcp_client import LangChainMCPToolsLoader
 from app.infrastructure.external.langchain_responses_adapter import OpenAIResponsesChatModel
 from app.infrastructure.external.mcp_client import MCPStreamableHttpClient, MockMCPClient
+from app.infrastructure.external.hr_leave_client import HRLeaveClient
 from app.infrastructure.external.intent_ai_client import (
     OpenAIIntentEmbeddingClient,
     OpenAIIntentLLMClient,
@@ -102,6 +103,11 @@ def get_mcp_client():
     if settings.mcp_mode.strip().lower() in {"real", "mcp"}:
         return MCPStreamableHttpClient(settings)
     return MockMCPClient()
+
+
+@lru_cache
+def get_hr_leave_client() -> HRLeaveClient:
+    return HRLeaveClient(get_settings())
 
 
 @lru_cache
@@ -294,6 +300,7 @@ def reset_state_for_tests() -> None:
     get_semantic_cache.cache_clear()
     get_rate_limiter.cache_clear()
     get_tool_decision_client.cache_clear()
+    get_hr_leave_client.cache_clear()
     get_intent_embedding_client.cache_clear()
     get_intent_llm_client.cache_clear()
     get_intent_classifier.cache_clear()

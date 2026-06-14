@@ -53,7 +53,7 @@ docker compose -f docker-compose.e2e.yml up -d --build
 ```
 *Lưu ý:*
 - Lệnh này tự động chạy: Migrations, NATS Bootstrap, và **Seed Admin User**.
-- Account mặc định: `admin@company.com` / `***REDACTED-SEED-ADMIN-PW***` (Xem `infra/e2e/seed_user.py`).
+- Account mặc định: `admin@company.com` / `DemoAdminPassword123!` (Xem `infra/e2e/seed_user.py`).
 - Nếu dùng Qdrant Cloud, hãy đảm bảo `QDRANT_URL` trong `.env` có port (vd: `:80` hoặc `:443`) để tránh timeout.
 
 ---
@@ -123,7 +123,7 @@ Bây giờ bạn có thể truy cập toàn bộ hệ thống tại:
 
 ## 6. Kiểm tra Luồng E2E
 
-1. **Login Admin**: Truy cập `/admin/login`, dùng `admin@company.com` / `***REDACTED-SEED-ADMIN-PW***`.
+1. **Login Admin**: Truy cập `/admin/login`, dùng `admin@company.com` / `DemoAdminPassword123!`.
 2. **Upload**: Vào **Upload Center**, chọn file `.txt` -> Click **Upload All**.
 3. **Verify Ingest**: Đợi trạng thái đổi sang **"indexed"**. Check log `rag-worker` để xem quá trình chunk/embed.
 4. **Chat**: Sang [http://localhost/](http://localhost/), login và hỏi nội dung liên quan đến file vừa upload.

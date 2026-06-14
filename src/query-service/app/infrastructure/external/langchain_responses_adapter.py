@@ -333,20 +333,34 @@ class OpenAIResponsesChatModel(BaseChatModel):
                     yielded = True
 
             elif etype == "response.output_item.added":
-                # New output item — capture function_call name + call_id for accumulation
+                # New output item — capture function_call. QUAN TRỌNG: event
+                # response.function_call_arguments.delta định danh call theo `item_id`
+                # (= item.id, "fc_..."), KHÔNG phải call_id ("call_..."). Phải key fn_calls
+                # theo item_id để gom được args; nếu key theo call_id -> delta rớt -> args
+                # rỗng {} (bug cũ: tool cần args như create_leave_request gọi rỗng -> hr 422).
                 item = getattr(event, "item", None)
                 if item and getattr(item, "type", None) == "function_call":
-                    call_id = getattr(item, "call_id", None) or getattr(item, "id", "") or ""
+                    item_id = getattr(item, "id", "") or ""
+                    call_id = getattr(item, "call_id", "") or item_id
                     name = getattr(item, "name", "") or ""
-                    if call_id:
-                        fn_calls[call_id] = {"name": name, "id": call_id, "args_buf": []}
-                        fn_call_order.append(call_id)
+                    key = item_id or call_id
+                    if key:
+                        # id giữ call_id THẬT cho tool_call (act_node map ToolMessage).
+                        fn_calls[key] = {"name": name, "id": call_id, "args_buf": []}
+                        fn_call_order.append(key)
 
             elif etype == "response.function_call_arguments.delta":
-                call_id = getattr(event, "call_id", None) or ""
+                key = getattr(event, "item_id", None) or getattr(event, "call_id", None) or ""
                 delta = getattr(event, "delta", "") or ""
-                if call_id in fn_calls and delta:
-                    fn_calls[call_id]["args_buf"].append(delta)
+                if key in fn_calls and delta:
+                    fn_calls[key]["args_buf"].append(delta)
+
+            elif etype == "response.function_call_arguments.done":
+                # Fallback: 1 số phiên bản chỉ gửi 'done' kèm full arguments (không delta).
+                key = getattr(event, "item_id", None) or getattr(event, "call_id", None) or ""
+                full = getattr(event, "arguments", "") or ""
+                if key in fn_calls and full and not fn_calls[key]["args_buf"]:
+                    fn_calls[key]["args_buf"].append(full)
 
             elif etype == "response.completed":
                 # Final event: emit tool_call_chunks (tool path) or usage chunk (text path)

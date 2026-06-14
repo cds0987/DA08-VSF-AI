@@ -12,8 +12,17 @@ from app.core.config import HrSettings
 
 logger = logging.getLogger(__name__)
 
-HR_EVENT_SUBJECTS = {"hr.employee_profile.updated"}
-JETSTREAM_STREAMS = {"HR_EVENTS": ["hr.employee_profile.updated"]}
+# Leave Write events (best-effort, publish SAU commit). JetStream lưu bền -> consumer
+# (query-service Notification Center) tắt tạm thời cũng không mất thông báo.
+LEAVE_REQUEST_SUBJECTS = [
+    "hr.leave_request.created",
+    "hr.leave_request.updated",
+    "hr.leave_request.cancelled",
+    "hr.leave_request.approved",
+    "hr.leave_request.rejected",
+]
+HR_EVENT_SUBJECTS = {"hr.employee_profile.updated", *LEAVE_REQUEST_SUBJECTS}
+JETSTREAM_STREAMS = {"HR_EVENTS": ["hr.employee_profile.updated", *LEAVE_REQUEST_SUBJECTS]}
 
 
 @dataclass
@@ -67,13 +76,30 @@ def _import_nats():
 async def ensure_jetstream_streams(js) -> None:
     for name, subjects in JETSTREAM_STREAMS.items():
         try:
-            await js.stream_info(name)
+            info = await js.stream_info(name)
         except Exception:
+            # Chưa có stream -> tạo mới đủ subject. Lỗi tạo -> raise (publish best-effort
+            # ở route sẽ nuốt) để không âm thầm publish vào hư không.
             try:
                 await js.add_stream(name=name, subjects=subjects)
             except Exception as exc:
                 logger.warning("failed to ensure NATS stream %s: %s", name, exc)
                 raise
+            continue
+        # Stream đã tồn tại (vd HR_EVENTS cũ chỉ có hr.employee_profile.updated): bổ
+        # sung subject còn THIẾU (hr.leave_request.*) thay vì bỏ qua. Best-effort: lỗi
+        # update chỉ log (stream cũ vẫn chạy cho subject cũ), KHÔNG raise.
+        try:
+            current = set(getattr(getattr(info, "config", None), "subjects", None) or [])
+            wanted = set(subjects)
+            if not wanted.issubset(current):
+                from nats.js.api import StreamConfig
+
+                merged = sorted(current | wanted)
+                await js.update_stream(StreamConfig(name=name, subjects=merged))
+                logger.info("updated NATS stream %s subjects -> %s", name, merged)
+        except Exception as exc:  # noqa: BLE001 — best-effort update
+            logger.warning("failed to update NATS stream %s subjects: %s", name, exc)
 
 
 def _with_event_metadata(subject: str, payload: dict[str, Any]) -> dict[str, Any]:

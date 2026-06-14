@@ -392,14 +392,14 @@ async def think_node(
         )
         response: AIMessage = await model.ainvoke(messages)
     else:
-        # Bind tools and invoke model. On the FIRST ReAct iteration force a tool
-        # call ("required") so a weak model (gpt-4o-mini) cannot skip retrieval and
-        # emit a premature "no info" answer — triage_node has already filtered out
-        # off-topic / clarify / greeting questions, so an in_scope question here
-        # always warrants rag_search or hr_query. Later iterations use "auto" so the
-        # model can synthesise the final answer from gathered tool results.
-        tool_choice = "required" if state["iteration"] == 0 else "auto"
-        bound_model = model.bind_tools(tools, tool_choice=tool_choice)
+        # tool_choice = "auto" (KHÔNG ép "required").
+        # Trước đây ép "required" ở iteration 0 để model yếu không bỏ qua retrieval. NHƯNG
+        # với ACTION tool (create_leave_request...) "required" gây 2 lỗi: (1) model bị ép gọi
+        # NGAY khi chưa kịp điền args -> gọi rỗng {} -> hr 422; (2) chặn bước XÁC NHẬN (model
+        # bị buộc gọi tool, không thể trả text hỏi lại). "auto" cho model: READ -> gọi
+        # rag_search/hr_query (prompt RULES bắt buộc gọi tool khi cần data nội bộ); WRITE ->
+        # hỏi xác nhận rồi mới gọi tool KÈM ĐỦ args. e2e (RAG sources>0 / HR) gác hồi quy read.
+        bound_model = model.bind_tools(tools, tool_choice="auto")
         response: AIMessage = await bound_model.ainvoke(messages)
 
     tool_names = [tc["name"] for tc in (response.tool_calls or [])]

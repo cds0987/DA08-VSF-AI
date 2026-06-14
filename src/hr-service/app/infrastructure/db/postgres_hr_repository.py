@@ -13,6 +13,7 @@ _MOCK_NS = uuid.UUID("00000000-0000-5000-8000-000000000abc")
 
 import sqlalchemy as sa
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.domain.entities.dtos import (
@@ -27,9 +28,18 @@ from app.domain.entities.dtos import (
     PerformanceReviewDTO,
 )
 from app.domain.repositories.hr_repository import HrRepository
+from app.domain.repositories.leave_write_repository import (
+    ApproverNotConfigured,
+    InsufficientLeaveBalance,
+    LeaveRequestConflict,
+    LeaveRequestForbidden,
+    LeaveRequestNotFound,
+    LeaveWriteRepository,
+)
 from app.infrastructure.db.models import (
     AttendanceRecord,
     BenefitsRecord,
+    EmployeeRecord,
     LeaveBalanceRecord,
     LeaveRequestRecord,
     OnboardingRecord,
@@ -37,8 +47,38 @@ from app.infrastructure.db.models import (
     PerformanceReviewRecord,
 )
 
+_TERMINAL_STATES = {"cancelled", "rejected"}
 
-class PostgresHrRepository(HrRepository):
+
+def _now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def _parse_date(value: object) -> datetime.date:
+    if isinstance(value, datetime.date):
+        return value
+    return datetime.date.fromisoformat(str(value))
+
+
+def _req_to_dict(rec: LeaveRequestRecord) -> dict:
+    return {
+        "id": rec.id,
+        "user_id": rec.user_id,
+        "leave_type": rec.leave_type,
+        "start_date": str(rec.start_date),
+        "end_date": str(rec.end_date),
+        "days_count": rec.days_count,
+        "status": rec.status,
+        "reason": rec.reason,
+        "approver_user_id": rec.approver_user_id,
+        "approved_at": rec.approved_at.isoformat() if rec.approved_at else None,
+        "rejected_at": rec.rejected_at.isoformat() if rec.rejected_at else None,
+        "rejected_reason": rec.rejected_reason,
+        "cancelled_at": rec.cancelled_at.isoformat() if rec.cancelled_at else None,
+    }
+
+
+class PostgresHrRepository(HrRepository, LeaveWriteRepository):
     def __init__(self, database_url: str) -> None:
         self._database_url = database_url
         self._engine = None
@@ -360,6 +400,289 @@ class PostgresHrRepository(HrRepository):
                 session.commit()
 
         await asyncio.to_thread(_provision)
+
+    # ────────────────────────── LEAVE WRITE ──────────────────────────
+    # Pattern giống read: sync SQLAlchemy bọc asyncio.to_thread, session per call.
+    # Mỗi thao tác đổi-trạng-thái = 1 transaction: SELECT ... FOR UPDATE khóa đơn
+    # (và balance khi trừ/hoàn) -> atomic, chống đua. Thứ tự khóa: leave_requests
+    # trước, leave_balance sau -> tránh deadlock.
+
+    @staticmethod
+    def _resolve_approver(session: Session, user_id: str, default_approver: str) -> str:
+        row = (
+            session.query(EmployeeRecord.manager_user_id)
+            .filter(EmployeeRecord.user_id == user_id)
+            .first()
+        )
+        manager = row[0] if row else None
+        approver = (manager or "").strip() or (default_approver or "").strip()
+        if not approver:
+            raise ApproverNotConfigured(
+                "không resolve được approver: nhân viên không có manager và "
+                "HR_DEFAULT_APPROVER rỗng"
+            )
+        return approver
+
+    @staticmethod
+    def _adjust_balance(session: Session, owner_id: str, leave_type: str, delta_days: int) -> None:
+        """delta_days > 0 = trừ (duyệt); < 0 = hoàn (hủy/sửa-approved). Chỉ annual/sick
+        đụng balance; personal bỏ qua. Trừ vượt hạn mức -> InsufficientLeaveBalance."""
+        if leave_type not in ("annual", "sick"):
+            return
+        bal = (
+            session.query(LeaveBalanceRecord)
+            .filter(LeaveBalanceRecord.user_id == owner_id)
+            .with_for_update()
+            .first()
+        )
+        if bal is None:
+            # Không có hồ sơ phép -> không thể trừ. Hoàn (delta<0) cũng vô nghĩa -> bỏ qua.
+            if delta_days > 0:
+                raise InsufficientLeaveBalance("nhân viên chưa có hồ sơ hạn mức phép")
+            return
+        if leave_type == "annual":
+            new_used = bal.annual_leave_used + delta_days
+            if new_used > bal.annual_leave_total:
+                raise InsufficientLeaveBalance("vượt hạn mức phép năm còn lại")
+            bal.annual_leave_used = max(0, new_used)
+        else:  # sick
+            new_used = bal.sick_leave_used + delta_days
+            if new_used > bal.sick_leave_total:
+                raise InsufficientLeaveBalance("vượt hạn mức phép ốm còn lại")
+            bal.sick_leave_used = max(0, new_used)
+        bal.updated_at = _now()
+
+    def _find_by_key(self, session: Session, idempotency_key: Optional[str]):
+        if not idempotency_key:
+            return None
+        return (
+            session.query(LeaveRequestRecord)
+            .filter(LeaveRequestRecord.idempotency_key == idempotency_key)
+            .first()
+        )
+
+    def _new_request(
+        self,
+        session: Session,
+        *,
+        user_id: str,
+        leave_type: str,
+        start: datetime.date,
+        end: datetime.date,
+        reason: str,
+        approver: str,
+        idempotency_key: Optional[str],
+    ) -> LeaveRequestRecord:
+        now = _now()
+        rec = LeaveRequestRecord(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            employee_id=None,
+            leave_type=leave_type,
+            start_date=start,
+            end_date=end,
+            days_count=(end - start).days + 1,
+            status="pending",
+            reason=reason or None,
+            approver_user_id=approver,
+            idempotency_key=idempotency_key or None,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(rec)
+        return rec
+
+    async def create_leave_request(
+        self,
+        *,
+        user_id: str,
+        leave_type: str,
+        start_date: str,
+        end_date: str,
+        reason: str,
+        default_approver: str,
+        idempotency_key: Optional[str] = None,
+    ) -> dict:
+        start, end = _parse_date(start_date), _parse_date(end_date)
+
+        def _create() -> dict:
+            with self._session() as session:
+                existing = self._find_by_key(session, idempotency_key)
+                if existing is not None:
+                    return {"request": _req_to_dict(existing), "created": False}
+                approver = self._resolve_approver(session, user_id, default_approver)
+                rec = self._new_request(
+                    session,
+                    user_id=user_id,
+                    leave_type=leave_type,
+                    start=start,
+                    end=end,
+                    reason=reason,
+                    approver=approver,
+                    idempotency_key=idempotency_key,
+                )
+                try:
+                    session.commit()
+                except IntegrityError:
+                    # Đua trên idempotency_key: 1 request khác đã tạo trước -> trả nó.
+                    session.rollback()
+                    existing = self._find_by_key(session, idempotency_key)
+                    if existing is not None:
+                        return {"request": _req_to_dict(existing), "created": False}
+                    raise
+                return {"request": _req_to_dict(rec), "created": True}
+
+        return await asyncio.to_thread(_create)
+
+    async def update_leave_request(
+        self,
+        *,
+        user_id: str,
+        request_id: str,
+        leave_type: str,
+        start_date: str,
+        end_date: str,
+        reason: str,
+        default_approver: str,
+        idempotency_key: Optional[str] = None,
+    ) -> dict:
+        start, end = _parse_date(start_date), _parse_date(end_date)
+
+        def _update() -> dict:
+            with self._session() as session:
+                # Retry sửa-approved đã thành công trước đó -> đơn mới mang key -> trả nó.
+                prior = self._find_by_key(session, idempotency_key)
+                if prior is not None and prior.id != request_id:
+                    return {"request": _req_to_dict(prior), "mode": "replaced",
+                            "replaced_request": None}
+                rec = (
+                    session.query(LeaveRequestRecord)
+                    .filter(LeaveRequestRecord.id == request_id)
+                    .with_for_update()
+                    .first()
+                )
+                if rec is None:
+                    raise LeaveRequestNotFound(request_id)
+                if rec.user_id != user_id:
+                    raise LeaveRequestForbidden("chỉ chủ đơn được sửa")
+                now = _now()
+                if rec.status == "pending":
+                    rec.leave_type = leave_type
+                    rec.start_date = start
+                    rec.end_date = end
+                    rec.days_count = (end - start).days + 1
+                    rec.reason = reason or None
+                    rec.updated_at = now
+                    session.commit()
+                    return {"request": _req_to_dict(rec), "mode": "updated",
+                            "replaced_request": None}
+                if rec.status == "approved":
+                    # Hủy đơn cũ + HOÀN phép + tạo đơn pending mới (quy trình duyệt lại).
+                    self._adjust_balance(session, rec.user_id, rec.leave_type, -rec.days_count)
+                    rec.status = "cancelled"
+                    rec.cancelled_at = now
+                    rec.updated_at = now
+                    old_dict = _req_to_dict(rec)
+                    approver = self._resolve_approver(session, user_id, default_approver)
+                    new = self._new_request(
+                        session,
+                        user_id=user_id,
+                        leave_type=leave_type,
+                        start=start,
+                        end=end,
+                        reason=reason,
+                        approver=approver,
+                        idempotency_key=idempotency_key,
+                    )
+                    session.commit()
+                    return {"request": _req_to_dict(new), "mode": "replaced",
+                            "replaced_request": old_dict}
+                raise LeaveRequestConflict(f"không sửa được đơn ở trạng thái {rec.status}")
+
+        return await asyncio.to_thread(_update)
+
+    async def cancel_leave_request(self, *, user_id: str, request_id: str) -> dict:
+        def _cancel() -> dict:
+            with self._session() as session:
+                rec = (
+                    session.query(LeaveRequestRecord)
+                    .filter(LeaveRequestRecord.id == request_id)
+                    .with_for_update()
+                    .first()
+                )
+                if rec is None:
+                    raise LeaveRequestNotFound(request_id)
+                if rec.user_id != user_id:
+                    raise LeaveRequestForbidden("chỉ chủ đơn được hủy")
+                if rec.status in _TERMINAL_STATES:
+                    # Đã hủy/từ chối -> no-op idempotent, không lỗi.
+                    return {"request": _req_to_dict(rec), "changed": False}
+                if rec.status == "approved":
+                    self._adjust_balance(session, rec.user_id, rec.leave_type, -rec.days_count)
+                now = _now()
+                rec.status = "cancelled"
+                rec.cancelled_at = now
+                rec.updated_at = now
+                session.commit()
+                return {"request": _req_to_dict(rec), "changed": True}
+
+        return await asyncio.to_thread(_cancel)
+
+    async def list_pending_approval(self, approver_user_id: str) -> list:
+        def _list() -> list:
+            with self._session() as session:
+                rows = (
+                    session.query(LeaveRequestRecord)
+                    .filter(
+                        LeaveRequestRecord.approver_user_id == approver_user_id,
+                        LeaveRequestRecord.status == "pending",
+                    )
+                    .order_by(LeaveRequestRecord.created_at.asc())
+                    .all()
+                )
+                return [_req_to_dict(row) for row in rows]
+
+        return await asyncio.to_thread(_list)
+
+    async def update_leave_status(
+        self,
+        *,
+        request_id: str,
+        approver_user_id: str,
+        action: str,
+        reason: Optional[str] = None,
+    ) -> dict:
+        def _decide() -> dict:
+            with self._session() as session:
+                rec = (
+                    session.query(LeaveRequestRecord)
+                    .filter(LeaveRequestRecord.id == request_id)
+                    .with_for_update()
+                    .first()
+                )
+                if rec is None:
+                    raise LeaveRequestNotFound(request_id)
+                if rec.approver_user_id != approver_user_id:
+                    raise LeaveRequestForbidden("không phải người duyệt của đơn này")
+                if rec.status != "pending":
+                    raise LeaveRequestConflict(f"đơn không ở trạng thái pending ({rec.status})")
+                now = _now()
+                if action == "approve":
+                    # Trừ balance TRƯỚC (có thể raise -> rollback, đơn giữ pending).
+                    self._adjust_balance(session, rec.user_id, rec.leave_type, rec.days_count)
+                    rec.status = "approved"
+                    rec.approved_at = now
+                elif action == "reject":
+                    rec.status = "rejected"
+                    rec.rejected_at = now
+                    rec.rejected_reason = reason or None
+                else:
+                    raise ValueError(f"action không hợp lệ: {action}")
+                rec.updated_at = now
+                session.commit()
+                return {"request": _req_to_dict(rec)}
+
+        return await asyncio.to_thread(_decide)
 
     async def aclose(self) -> None:
         def _dispose() -> None:

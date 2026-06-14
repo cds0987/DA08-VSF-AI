@@ -114,7 +114,7 @@ INSERT INTO user_svc.users (
     email, hashed_password, auth_provider, role, account_type, is_active, department
 )
 VALUES
-('admin@company.com', crypt('***REDACTED-SEED-ADMIN-PW***', gen_salt('bf')), 'local', 'admin', 'internal', true, 'IT'),
+('admin@company.com', crypt('DemoAdminPassword123!', gen_salt('bf')), 'local', 'admin', 'internal', true, 'IT'),
 ('user@company.com', crypt('DemoUserPassword123!', gen_salt('bf')), 'local', 'user', 'internal', true, 'HR'),
 ('external01@partner.com', crypt('DemoExternalPassword123!', gen_salt('bf')), 'local', 'user', 'external', true, 'Partner')
 ON CONFLICT (email) DO UPDATE SET
@@ -129,7 +129,7 @@ ON CONFLICT (email) DO UPDATE SET
 
 ## Tài khoản demo
 
-- Admin: `admin@company.com` / `***REDACTED-SEED-ADMIN-PW***`
+- Admin: `admin@company.com` / `DemoAdminPassword123!`
 - Internal user: `user@company.com` / `DemoUserPassword123!`
 - External user: `external01@partner.com` / `DemoExternalPassword123!`
 
@@ -144,7 +144,7 @@ $AdminLogin = Invoke-RestMethod `
   -ContentType "application/json" `
   -Body (@{
     email = "admin@company.com"
-    password = "***REDACTED-SEED-ADMIN-PW***"
+    password = "DemoAdminPassword123!"
   } | ConvertTo-Json)
 
 $AdminToken = $AdminLogin.access_token
