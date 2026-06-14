@@ -1,0 +1,10 @@
+httpx
+ragas
+datasets
+pandas
+langchain-community
+PyJWT
+mcp
+pytest
+boto3
+
