@@ -391,13 +391,38 @@ jobs:
     steps:
       - name: Deploy + healthcheck via SSH
         uses: appleboy/ssh-action@v1.2.0
+        # Mọi secret runtime forward sang VM qua env: + envs: (KHÔNG nội suy vào text script).
+        # Deploy tự render .env (root) + deploy/env/secret.env tại VM -> GitHub Secrets là
+        # NGUỒN DUY NHẤT, production không setup tay, không env mồ côi.
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          # root .env (compose ${VAR} substitution)
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+          SEED_ADMIN_PASSWORD: ${{ secrets.SEED_ADMIN_PASSWORD }}
+          LANGFUSE_DB_PASSWORD: ${{ secrets.LANGFUSE_DB_PASSWORD }}
+          NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+          LANGFUSE_SALT: ${{ secrets.LANGFUSE_SALT }}
+          LANGFUSE_ENCRYPTION_KEY: ${{ secrets.LANGFUSE_ENCRYPTION_KEY }}
+          LANGFUSE_INIT_USER_PASSWORD: ${{ secrets.LANGFUSE_INIT_USER_PASSWORD }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          # deploy/env/secret.env (env_file -> biến container)
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+          MCP_INTERNAL_TOKEN: ${{ secrets.MCP_INTERNAL_TOKEN }}
+          HR_INTERNAL_TOKEN: ${{ secrets.HR_INTERNAL_TOKEN }}
+          GCS_HMAC_KEY: ${{ secrets.GCS_HMAC_KEY }}
+          GCS_HMAC_SECRET: ${{ secrets.GCS_HMAC_SECRET }}
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
           port: ${{ secrets.VM_SSH_PORT || 22 }}
           command_timeout: 20m
-          envs: APP_DIR,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN
+          envs: APP_DIR,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,POSTGRES_PASSWORD,NEW_RELIC_LICENSE_KEY,SEED_ADMIN_PASSWORD,LANGFUSE_DB_PASSWORD,NEXTAUTH_SECRET,LANGFUSE_SALT,LANGFUSE_ENCRYPTION_KEY,LANGFUSE_INIT_USER_PASSWORD,LANGFUSE_PUBLIC_KEY,LANGFUSE_SECRET_KEY,OPENAI_API_KEY,JWT_SECRET_KEY,MCP_INTERNAL_TOKEN,HR_INTERNAL_TOKEN,GCS_HMAC_KEY,GCS_HMAC_SECRET,LANGSMITH_API_KEY
           script: |
             set -euo pipefail
             APP_DIR="${{ secrets.APP_DIR }}"
@@ -422,6 +447,53 @@ jobs:
             echo "==> 1) Sync code = origin/develop (production phản ánh đúng git)"
             git fetch "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" develop
             git reset --hard FETCH_HEAD
+
+            echo "==> 1b) RENDER secret tu GitHub Secrets (nguon DUY NHAT) -> .env (root) + secret.env."
+            echo "       Ghi SAU reset; .env o root + secret.env gitignored -> khong bi reset xoa."
+            # Bat buoc co mat (fail-fast neu thieu secret) — tranh render file rong gay loi am tham.
+            for v in POSTGRES_PASSWORD NEW_RELIC_LICENSE_KEY LANGFUSE_DB_PASSWORD NEXTAUTH_SECRET \
+                     LANGFUSE_SALT LANGFUSE_ENCRYPTION_KEY LANGFUSE_INIT_USER_PASSWORD \
+                     LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY OPENAI_API_KEY JWT_SECRET_KEY \
+                     MCP_INTERNAL_TOKEN HR_INTERNAL_TOKEN GCS_HMAC_KEY GCS_HMAC_SECRET; do
+              eval "val=\${$v:-}"
+              [ -n "$val" ] || { echo "::error::GitHub Secret '$v' THIEU -> dung deploy (khong render env mo coi)"; exit 1; }
+            done
+            : "${SEED_ADMIN_PASSWORD:=}"   # optional: chi dung khi re-seed admin lan dau
+            : "${LANGSMITH_API_KEY:=}"     # optional: thieu -> langsmith backend tu bo (khong crash)
+
+            umask 077
+            # root .env: bien compose ${VAR} substitution
+            cat > "$APP_DIR/.env" <<EOF
+            DOCKERHUB_USERNAME=${DOCKERHUB_USERNAME}
+            IMAGE_TAG=develop
+            POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+            NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+            SEED_ADMIN_PASSWORD=${SEED_ADMIN_PASSWORD}
+            LANGFUSE_DB_PASSWORD=${LANGFUSE_DB_PASSWORD}
+            NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+            LANGFUSE_SALT=${LANGFUSE_SALT}
+            LANGFUSE_ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY}
+            LANGFUSE_INIT_USER_PASSWORD=${LANGFUSE_INIT_USER_PASSWORD}
+            LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
+            LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+            EOF
+            # deploy/env/secret.env: env_file -> bien container (load CUOI, override).
+            # HR_SERVICE_INTERNAL_TOKEN = HR_INTERNAL_TOKEN (1 nguon, 2 ten — chong drift).
+            # S3_* = GCS HMAC (khong them secret rieng).
+            cat > "$APP_DIR/deploy/env/secret.env" <<EOF
+            OPENAI_API_KEY=${OPENAI_API_KEY}
+            JWT_SECRET_KEY=${JWT_SECRET_KEY}
+            MCP_INTERNAL_TOKEN=${MCP_INTERNAL_TOKEN}
+            HR_INTERNAL_TOKEN=${HR_INTERNAL_TOKEN}
+            HR_SERVICE_INTERNAL_TOKEN=${HR_INTERNAL_TOKEN}
+            S3_ACCESS_KEY_ID=${GCS_HMAC_KEY}
+            S3_SECRET_ACCESS_KEY=${GCS_HMAC_SECRET}
+            LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
+            LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+            LANGSMITH_API_KEY=${LANGSMITH_API_KEY}
+            EOF
+            chmod 600 "$APP_DIR/.env" "$APP_DIR/deploy/env/secret.env"
+            echo "  rendered .env ($(grep -c = "$APP_DIR/.env") keys) + secret.env ($(grep -c = "$APP_DIR/deploy/env/secret.env") keys)"
 
             echo "==> 2) Env đến TỪ git (đã reset --hard ở bước 1) — deploy/env/*.env commit thẳng."
             miss=0
