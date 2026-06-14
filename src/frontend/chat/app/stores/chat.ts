@@ -371,6 +371,7 @@ export const useChatStore = defineStore('chat', () => {
     pipeline.value = 0
     let fullContent = ''
     let completed = false
+    let hasStartedStreaming = false
     let donePayload: QueryDoneEvent | null = null
     const conversationTitle = conversations.value.find(c => c.id === currentConversationId.value)?.title
     const request: QueryRequest = {
@@ -407,6 +408,18 @@ export const useChatStore = defineStore('chat', () => {
         onmessage(message) {
           const payload: unknown = JSON.parse(message.data)
           if (isTokenEvent(payload)) {
+            if (payload.token) {
+              hasStartedStreaming = true
+              fullContent += payload.token
+              streamingText.value += payload.token
+              pipeline.value = pipelineStages.length
+              thinkingStatus.value = ''
+            }
+
+            // Once answer tokens start, late phase events must not switch the UI
+            // back from the streaming answer to the thinking pipeline.
+            if (hasStartedStreaming) return
+
             // Update thinking status for "AI thinking" display
             if (payload.status) {
               thinkingStatus.value = payload.status
@@ -432,12 +445,6 @@ export const useChatStore = defineStore('chat', () => {
             // Update pipeline stage based on phase
             if (payload.phase && PHASE_MAP[payload.phase] !== undefined) {
               pipeline.value = PHASE_MAP[payload.phase]
-            }
-            if (payload.token) {
-              fullContent += payload.token
-              streamingText.value += payload.token
-              pipeline.value = pipelineStages.length
-              thinkingStatus.value = ''
             }
             return
           }
