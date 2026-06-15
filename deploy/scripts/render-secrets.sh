@@ -20,6 +20,7 @@ for v in POSTGRES_PASSWORD NEW_RELIC_LICENSE_KEY LANGFUSE_DB_PASSWORD NEXTAUTH_S
 done
 : "${SEED_ADMIN_PASSWORD:=}"   # optional: chỉ dùng khi re-seed admin lần đầu
 : "${LANGSMITH_API_KEY:=}"     # optional: thiếu -> langsmith backend tự bỏ (không crash)
+: "${LANGFUSE_BASIC_AUTH_HTPASSWD:=}"  # optional: rỗng -> dashboard Langfuse KHÓA (fail-closed)
 
 umask 077
 
@@ -56,4 +57,15 @@ LANGSMITH_API_KEY=${LANGSMITH_API_KEY}
 EOF
 
 chmod 600 "$APP_DIR/.env" "$APP_DIR/deploy/env/secret.env"
-echo "  rendered .env ($(grep -c = "$APP_DIR/.env") keys) + secret.env ($(grep -c = "$APP_DIR/deploy/env/secret.env") keys)"
+
+# .htpasswd cho Basic Auth subdomain Langfuse (nginx mount :ro -> docker-compose.yml).
+# Render từ GitHub Secret LANGFUSE_BASIC_AUTH_HTPASSWD (1 dòng `user:$2y$bcrypt...` sinh bằng
+# `htpasswd -nbB <user> <pass>`). RỖNG/THIẾU -> file rỗng -> nginx 401 mọi request = dashboard
+# KHÓA (fail-closed, "no password -> off"). Ghi MỖI deploy từ nguồn-duy-nhất GitHub Secrets
+# -> KHÔNG env mồ côi. chmod 644 để nginx worker (uid 101 trong container) đọc được file mount;
+# nội dung chỉ là bcrypt hash (không phải plaintext) nên 644 chấp nhận được.
+mkdir -p "$APP_DIR/deploy/nginx"
+printf '%s\n' "${LANGFUSE_BASIC_AUTH_HTPASSWD}" > "$APP_DIR/deploy/nginx/.htpasswd"
+chmod 644 "$APP_DIR/deploy/nginx/.htpasswd"
+
+echo "  rendered .env ($(grep -c = "$APP_DIR/.env") keys) + secret.env ($(grep -c = "$APP_DIR/deploy/env/secret.env") keys) + nginx/.htpasswd ($([ -n "$LANGFUSE_BASIC_AUTH_HTPASSWD" ] && echo set || echo EMPTY-locked))"

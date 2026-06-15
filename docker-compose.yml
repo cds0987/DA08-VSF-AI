@@ -108,8 +108,11 @@ services:
       NEXTAUTH_SECRET: "${NEXTAUTH_SECRET}"
       SALT: "${LANGFUSE_SALT}"
       ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY}
-      # Truy cập dashboard qua: ssh -L 3100:localhost:3100 <vm> rồi mở http://localhost:3100
-      NEXTAUTH_URL: http://localhost:3100
+      # Team truy cập dashboard qua subdomain Cloudflare: https://langfuse.vsfchat.cloud
+      # (Cloudflare TLS -> origin nginx :80 -> langfuse:3000, gác Basic Auth). NEXTAUTH_URL
+      # PHẢI = URL công khai này để login redirect/callback đúng. Cổng loopback 3100 GIỮ LẠI
+      # cho deploy.sh readiness check (http://localhost:3100/api/public/*), KHÔNG dùng để vào UI.
+      NEXTAUTH_URL: https://langfuse.vsfchat.cloud
       TELEMETRY_ENABLED: "true"
       # Bootstrap headless: boot lần đầu tự tạo org + project + ĐÓNG ĐINH cặp key (= common.env).
       # ⚠ LANGFUSE_INIT_ORG_ID là CỜ KÍCH HOẠT — thiếu nó thì init KHÔNG chạy (key không tạo -> 401).
@@ -461,6 +464,11 @@ services:
       - frontend-admin
     ports:
       - "80:80"
+    volumes:
+      # .htpasswd cho Basic Auth subdomain langfuse — render từ GitHub Secret lúc deploy
+      # (render-secrets.sh), gitignored, fail-closed nếu secret rỗng. CHỈ mount file secret
+      # này; nginx.conf VẪN nướng trong image (không bind-mount config -> chống sửa tay VM).
+      - ./deploy/nginx/.htpasswd:/etc/nginx/.htpasswd:ro
     restart: unless-stopped
 
 volumes:

@@ -27,5 +27,7 @@ infra/localtest/init-db.sql
 # deploy/env/*.env: file CONFIG (không secret) commit thẳng -> env đi cùng code.
 # ⚠ NGOẠI LỆ: secret.env chứa SECRET THẬT -> KHÔNG BAO GIỜ commit (public repo).
 deploy/env/secret.env
+# .htpasswd Basic Auth subdomain Langfuse: render từ GitHub Secret mỗi deploy -> KHÔNG commit.
+deploy/nginx/.htpasswd
 .codegraph
 local-stack/
