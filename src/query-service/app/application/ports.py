@@ -22,6 +22,7 @@ class AuthenticatedUser:
     role: str
     is_active: bool = True
     account_type: str = "internal"
+    department: str = ""
 
 
 class SearchResultLike(Protocol):

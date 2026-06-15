@@ -19,7 +19,6 @@ def user_to_payload(user: User) -> dict[str, Any]:
         "user_id": user.id,
         "email": user.email,
         "role": _role_value(user.role),
-        "department": user.department,
         "account_type": user.account_type,
         "is_active": user.is_active,
     }
