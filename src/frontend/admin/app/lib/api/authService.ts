@@ -7,7 +7,6 @@ import type {
 } from '~/types'
 import {
   ACCESS_TOKEN_COOKIE,
-  REFRESH_TOKEN_COOKIE,
   SESSION_COOKIE,
   getClientCookie,
   removeClientCookie,
@@ -19,14 +18,11 @@ const authService = {
     const response = await axiosClient.post<LoginResponse>(
       '/auth/admin/login',
       credentials,
-      { service: 'user' }
+      { service: 'user', withCredentials: true }
     )
 
     if (import.meta.client && response.data.access_token) {
       setClientCookie(ACCESS_TOKEN_COOKIE, response.data.access_token)
-      if (response.data.refresh_token) {
-        setClientCookie(REFRESH_TOKEN_COOKIE, response.data.refresh_token)
-      }
     }
 
     return response.data
@@ -41,18 +37,14 @@ const authService = {
       '/auth/token',
       params,
       {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        service: 'user'
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        service: 'user',
+        withCredentials: true,
       },
     )
 
     if (import.meta.client && response.data.access_token) {
       setClientCookie(ACCESS_TOKEN_COOKIE, response.data.access_token)
-      if (response.data.refresh_token) {
-        setClientCookie(REFRESH_TOKEN_COOKIE, response.data.refresh_token)
-      }
     }
 
     return response.data
@@ -65,16 +57,12 @@ const authService = {
 
   async logout(redirect = true): Promise<void> {
     if (!import.meta.client) return
-    const refreshToken = getClientCookie(REFRESH_TOKEN_COOKIE)
-    if (refreshToken) {
-      try {
-        await axiosClient.post('/auth/logout', { refresh_token: refreshToken }, { service: 'user' })
-      } catch {
-        // best-effort — clear cookies regardless
-      }
+    try {
+      await axiosClient.post('/auth/logout', {}, { service: 'user', withCredentials: true })
+    } catch {
+      // best-effort — clear cookies regardless
     }
     removeClientCookie(ACCESS_TOKEN_COOKIE)
-    removeClientCookie(REFRESH_TOKEN_COOKIE)
     removeClientCookie(SESSION_COOKIE)
     if (redirect) window.location.href = '/login'
   },
