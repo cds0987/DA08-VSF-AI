@@ -14,3 +14,5 @@ __pycache__/
 /output/
 /output-vm/
 logs/
+output-vm/
+output/
