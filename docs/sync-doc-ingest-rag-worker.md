@@ -95,6 +95,35 @@ Năm điểm lệch cùng lúc → ráp vào gãy ngay message đầu:
 { "doc_id": "1f3c...", "status": "failed",  "error": "parse PDF lỗi: ..." }
 ```
 
+### `canonical markdown artifact` — rag-worker ghi sau parse/OCR
+
+Luồng production bắt buộc:
+
+```text
+GCS raw source -> rag-worker parse/OCR -> canonical Markdown -> GCS artifact -> chunk/caption/embed -> Qdrant
+```
+
+- File gốc vẫn nằm ở object `raw/...` do document-service upload.
+- Sau khi parse/OCR, rag-worker phải ghi Markdown chuẩn vào GCS: `gs://<S3_SOURCE_BUCKET>/artifacts/<document_id>/markdown.md`.
+- Downstream chunk/caption/embed đọc lại chính Markdown artifact này, không index trực tiếp từ buffer tạm.
+- Qdrant payload phải giữ cả `source_uri` và `artifact_uri`; mcp-service expose ra client dưới dạng `source_gcs_uri` và `markdown_gcs_uri`.
+- `/tmp/artifacts` hoặc `ARTIFACT_ROOT` chỉ là fallback local/dev. Production trên GCP không được coi đó là nguồn bền.
+
+Điều kiện runtime để dùng GCS artifact:
+
+```env
+PARSER_IMPL=s3
+S3_ENDPOINT_URL=https://storage.googleapis.com
+S3_SOURCE_BUCKET=<bucket-name>
+```
+
+Checklist khi test 1 tài liệu:
+
+- [ ] Sau `indexed`, GCS có object `artifacts/<document_id>/markdown.md`.
+- [ ] Qdrant payload của chunk có `source_uri` và `artifact_uri`.
+- [ ] Query/citation trả được URI Markdown artifact qua `markdown_gcs_uri`.
+- [ ] Khi delete document, rag-worker xóa vector và artifact Markdown tương ứng.
+
 ---
 
 ## 1. document-service — code cần sửa

@@ -207,6 +207,61 @@ async def test_act_node_dispatches_generic_tool():
     )
 
 
+@pytest.mark.asyncio
+async def test_act_node_rag_weak_results_hard_stops_no_info():
+    """Weak rag_search matches must not be passed to the LLM for guessing."""
+    from app.application.langgraph_edges import route_after_act
+    from app.application.langgraph_nodes import act_node
+    from app.application.langgraph_state import create_initial_state, AgentPhase
+    from app.infrastructure.external.mcp_client import SearchResult
+    from langchain_core.messages import AIMessage
+
+    class _WeakRagMCP:
+        async def rag_search(self, query, document_ids, top_k=5):
+            return [
+                SearchResult(
+                    chunk_id="chunk-weak",
+                    document_id="doc-1",
+                    document_name="weak.md",
+                    caption="Weak match",
+                    parent_text="This text is not relevant enough.",
+                    heading_path=[],
+                    score=0.12,
+                )
+            ]
+
+    initial = create_initial_state(
+        question="Quy định nghỉ phép năm là gì?",
+        user_id="u-test",
+        user_role="employee",
+        user_department="HR",
+        allowed_doc_ids=["doc-1"],
+        session_id="sess-test",
+        max_iterations=3,
+        recent_messages=[],
+        rag_score_threshold=0.70,
+    )
+    ai_msg = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "rag_search",
+            "args": {"top_k": 5},
+            "id": "call_rag_weak",
+            "type": "tool_call",
+        }],
+    )
+    state = {**initial, "messages": [ai_msg]}
+
+    result = await act_node(state, mcp_client=_WeakRagMCP())
+
+    assert result["phase"] == AgentPhase.DONE
+    assert result["shortcut_outcome"] == "NO_INFO"
+    assert result["sources"] == []
+    assert result["shortcut_response"]
+    assert result["tool_results"][0]["success"] is False
+    assert route_after_act({**state, **result}) == "answer"
+
+
 # ---------------------------------------------------------------------------
 # 3. Legacy path — HTTP integration test
 # ---------------------------------------------------------------------------

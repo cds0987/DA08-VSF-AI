@@ -151,7 +151,7 @@ CREATE INDEX idx_notifications_unread ON query_svc.notifications(user_id) WHERE 
 
 ## Document Service — Database `doc_db`
 
-> RAG Worker **không dùng PostgreSQL** — chỉ Qdrant + GCS + NATS, ingestion log đẩy qua Langfuse.
+> RAG Worker có metadata DB riêng (`rag_db`) cho ingest job/document state. Document Service vẫn là owner của document catalog trong `doc_db`; Qdrant + GCS giữ vector/artifact.
 
 ```sql
 CREATE TABLE doc_svc.documents (
@@ -330,8 +330,8 @@ Collection name: `rag_chatbot`
   "page_number": 1,
   "section_title": "string",
   "heading_path": ["Chính sách công tác", "Hoàn tiền vé máy bay"],
-  "source_gcs_uri": "gs://bucket/raw/{doc_id}.pdf",
-  "markdown_gcs_uri": "gs://bucket/processed/{doc_id}.md",
+  "source_uri": "gs://bucket/raw/{doc_id}/file.pdf",
+  "artifact_uri": "gs://bucket/artifacts/{doc_id}/markdown.md",
   "classification": "public | internal | secret | top_secret",
   "allowed_departments": ["HR", "Finance"],
   "allowed_user_ids": ["uuid"],
@@ -340,7 +340,7 @@ Collection name: `rag_chatbot`
 }
 ```
 
-> Vector dimension: 1536 (text-embedding-3-small). Chỉ embed `child_text`. `parent_text` lưu trong payload để đưa vào LLM context. `source_gcs_uri` (file gốc) + `markdown_gcs_uri` (full Markdown) lưu trong payload để **mcp-service đọc trực tiếp từ Qdrant** dựng `SearchHit` khi search (KHÔNG qua NATS) — **không cần tra DB**. `section_title` → map sang `caption`, `heading_path` (breadcrumb) → map thẳng sang SearchResult. `ocr_confidence` chỉ có với PDF scan, dùng để flag low-quality chunks. Chunk size: Parent-Child (LlamaIndex HierarchicalNodeParser) — config TBD sau khi implement.
+> Vector dimension: 1536 (text-embedding-3-small). Chỉ embed `child_text`. `parent_text` lưu trong payload để đưa vào LLM context. `source_uri` trỏ tới file gốc; `artifact_uri` trỏ tới canonical Markdown artifact do rag-worker ghi sau parse/OCR. Production path của artifact là `gs://<bucket>/artifacts/{document_id}/markdown.md`; không dùng `/tmp/artifacts` làm storage bền. mcp-service đọc payload trực tiếp từ Qdrant để dựng `SearchHit` (KHÔNG qua NATS, KHÔNG cần tra DB) và map `source_uri` → `source_gcs_uri`, `artifact_uri` → `markdown_gcs_uri` ở response tool. `section_title` → map sang `caption`, `heading_path` (breadcrumb) → map thẳng sang SearchResult. `ocr_confidence` chỉ có với PDF scan, dùng để flag low-quality chunks. Chunk size: Parent-Child (LlamaIndex HierarchicalNodeParser) — config TBD sau khi implement.
 
 ---
 

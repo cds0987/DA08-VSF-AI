@@ -45,7 +45,9 @@ _Auth_
 _Upload & Ingestion_
 - [ ] Admin upload file (PDF, DOCX, TXT, XLSX, CSV, PPTX, MD — tối đa 50MB)
 - [ ] Upload xong → status `queued` ngay, trigger ingestion pipeline tự động (không cần duyệt)
-- [ ] PDF scan → OCR bằng Gemini Vision API, trích xuất được text tiếng Việt
+- [ ] PDF scan → OCR bằng model OCR đã cấu hình (`OCR_MODEL`), trích xuất được text tiếng Việt
+- [ ] OCR/parse xong phải ghi canonical Markdown artifact vào GCS (`artifacts/{document_id}/markdown.md`); downstream chunk/caption/embed đọc lại artifact này, không index trực tiếp từ buffer tạm
+- [ ] Qdrant payload lưu cả URI file gốc (`source_uri`) và URI Markdown artifact (`artifact_uri`; mcp-service expose ra `source_gcs_uri`/`markdown_gcs_uri`) để debug, citation, eval và re-index
 - [ ] Excel/XLSX → convert từng row thành text có header đúng
 - [ ] Upload có chọn classification (Public / Internal / Secret / Top Secret), field lưu vào DB
 - [ ] Classification được enforce khi query — Top Secret chỉ uploader xem được, Internal chỉ nhân viên active, Public cho tất cả account

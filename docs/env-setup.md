@@ -130,15 +130,15 @@ LANGFUSE_HOST=http://langfuse:3100
 ## RAG Worker — `src/rag-worker/.env.example`
 
 ```env
-# RAG Worker KHÔNG dùng PostgreSQL (no DATABASE_URL) — chỉ Qdrant + Cloud Storage (GCS) + NATS.
-# Không expose HTTP nên không verify JWT.
+# RAG Worker chạy ingest async qua NATS, đọc/ghi GCS qua S3-compatible API, index Qdrant.
+# Không verify JWT; ACL được đưa vào payload/chunk để query-service/mcp-service enforce lúc search.
 
 # OpenAI Embedding — 1536 dims
 OPENAI_API_KEY=...
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 
-# Gemini Vision API — OCR cho PDF scan
-GEMINI_API_KEY=...
+# Metadata DB cho ingest job/document state
+DATABASE_URL=postgresql+psycopg://user:password@postgres:5432/rag_db
 
 # NATS (subscribe doc.ingest, publish doc.status)
 NATS_URL=nats://nats:4222
@@ -148,10 +148,23 @@ NATS_JETSTREAM_ENABLED=true
 QDRANT_URL=http://qdrant:6333
 QDRANT_COLLECTION=rag_chatbot
 
-# GCP Cloud Storage
-GCS_BUCKET=rag-chatbot-docs
-GCP_PROJECT_ID=vsf-rag-chatbot
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json  # local dev only; GCE dùng instance service account
+# Parser + GCP Cloud Storage qua S3-compatible API
+PIPELINE_CONFIG=config.yaml
+PARSER_IMPL=s3
+S3_ENDPOINT_URL=https://storage.googleapis.com
+S3_SOURCE_BUCKET=rag-chatbot-docs
+S3_REGION=auto
+S3_ACCESS_KEY_ID=...
+S3_SECRET_ACCESS_KEY=...
+
+# Local fallback only. Production artifact phải nằm ở GCS, không dựa vào /tmp.
+SOURCE_ROOT=/tmp
+ARTIFACT_ROOT=/tmp/artifacts
+
+# OCR / parse
+OCR_MODEL=gpt-4o-mini
+MAX_OCR_PAGES=25
+PDF_OCR_SCALE=2.0
 
 # Langfuse
 LANGFUSE_PUBLIC_KEY=...
@@ -163,13 +176,27 @@ LANGFUSE_HOST=http://langfuse:3100
 |------|-------|-----------|
 | `OPENAI_API_KEY` | Key gọi OpenAI Embedding API | platform.openai.com → API keys |
 | `OPENAI_EMBEDDING_MODEL` | Model embedding 1536 dims | `text-embedding-3-small` |
-| `GEMINI_API_KEY` | Key gọi Gemini Vision API — OCR PDF scan tiếng Việt | console.cloud.google.com → APIs & Services → Credentials |
+| `DATABASE_URL` | Metadata DB cho ingest job/document state của rag-worker | Cloud SQL/Postgres, driver `postgresql+psycopg://` |
 | `NATS_URL` | URL kết nối NATS broker | `nats://nats:4222` |
 | `QDRANT_URL` | Vector DB endpoint | `http://qdrant:6333` (Docker) hoặc `http://localhost:6333` (local) |
 | `QDRANT_COLLECTION` | Tên collection Qdrant | Giữ nguyên `rag_chatbot` |
-| `GCS_BUCKET` | Tên GCS bucket chứa file gốc | GCP Console → Cloud Storage → Create bucket |
-| `GCP_PROJECT_ID` | GCP project ID | GCP Console → Project selector |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Path tới service account JSON (local dev) | GCP Console → IAM → Service Accounts → Keys |
+| `PIPELINE_CONFIG` | File config pipeline của rag-worker | Thường là `config.yaml` |
+| `PARSER_IMPL` | Parser nguồn file; production GCP dùng `s3` | `s3` |
+| `S3_ENDPOINT_URL` | Endpoint S3-compatible để trỏ tới GCS | `https://storage.googleapis.com` |
+| `S3_SOURCE_BUCKET` | Bucket chứa file raw và Markdown artifact | GCP Cloud Storage bucket |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | HMAC key để boto3 đọc/ghi GCS | GCP Storage HMAC key hoặc secret manager |
+| `OCR_MODEL` | Model OCR ảnh/PDF scan | `gpt-4o-mini` theo config hiện tại |
+| `MAX_OCR_PAGES` | Giới hạn số trang OCR để tránh runaway cost | Theo budget ingestion |
+| `PDF_OCR_SCALE` | Scale render PDF page trước OCR | `2.0` mặc định hợp lý |
+| `ARTIFACT_ROOT` | Thư mục artifact local fallback | Chỉ dùng dev/local; production phải ghi GCS |
+
+Production invariant của ingest:
+
+```text
+raw object in GCS -> parse/OCR -> gs://<S3_SOURCE_BUCKET>/artifacts/<document_id>/markdown.md -> chunk/embed -> Qdrant
+```
+
+Nếu `PARSER_IMPL=s3` và `S3_SOURCE_BUCKET` được cấu hình, rag-worker dùng GCS/S3 artifact store. Nếu thiếu một trong hai, service có thể rơi về local artifact store (`ARTIFACT_ROOT`), chỉ phù hợp dev/offline và không đạt chuẩn production trên GCP.
 
 ---
 
