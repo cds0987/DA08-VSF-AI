@@ -1,28 +1,32 @@
 from __future__ import annotations
 
-import ast
+import json
 from pathlib import Path
 
-from app.infrastructure.external.local_parser import _DEFAULT_READER_IMPL
+from app.infrastructure.external.local_parser import (
+    _DEFAULT_READER_IMPL,
+    supported_suffixes,
+)
+
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_MANIFEST_PATH = (
+    _REPO_ROOT / "src" / "document-service" / "app" / "supported_formats.json"
+)
 
 
-def _load_document_service_allowed_extensions() -> set[str]:
-    repo_root = Path(__file__).resolve().parents[4]
-    common_path = repo_root / "src" / "document-service" / "app" / "application" / "use_cases" / "documents" / "common.py"
-    module = ast.parse(common_path.read_text(encoding="utf-8"), filename=str(common_path))
-    for node in module.body:
-        if not isinstance(node, ast.Assign):
-            continue
-        for target in node.targets:
-            if isinstance(target, ast.Name) and target.id == "ALLOWED_EXTENSIONS":
-                return set(ast.literal_eval(node.value))
-    raise AssertionError(f"cannot find ALLOWED_EXTENSIONS in {common_path}")
+def _load_manifest_suffixes() -> dict[str, str]:
+    data = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))
+    return data["suffixes"]
 
 
-def test_all_document_service_extensions_have_reader() -> None:
-    allowed_extensions = _load_document_service_allowed_extensions()
-    missing = allowed_extensions - set(_DEFAULT_READER_IMPL)
-    assert not missing, (
-        f"Extensions allowed by document-service but missing reader in rag-worker: {sorted(missing)}. "
-        "Add a reader in local_parser or remove the extension from ALLOWED_EXTENSIONS."
+def test_supported_suffixes_match_default_reader_impl() -> None:
+    # supported_suffixes() phải phủ đúng _DEFAULT_READER_IMPL (mỗi impl có reader).
+    assert set(supported_suffixes()) == set(_DEFAULT_READER_IMPL)
+
+
+def test_manifest_in_sync_with_registry() -> None:
+    # Manifest mà document-service đối chiếu phải khớp nguồn chân lý (rag-worker).
+    assert _load_manifest_suffixes() == supported_suffixes(), (
+        "supported_formats.json lệch với reader registry của rag-worker. "
+        "Chạy: python src/rag-worker/scripts/gen_supported_formats.py"
     )

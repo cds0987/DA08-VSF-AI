@@ -1,0 +1,25 @@
+{
+  "note": "Auto-generated. Run rag-worker/scripts/gen_supported_formats.py to update.",
+  "schema_version": 1,
+  "source": "rag-worker/app/infrastructure/external/local_parser.py::supported_suffixes",
+  "suffixes": {
+    "bmp": "image",
+    "csv": "csv",
+    "docx": "docx_xml",
+    "gif": "image",
+    "htm": "html_strip",
+    "html": "html_strip",
+    "jpeg": "image",
+    "jpg": "image",
+    "md": "text",
+    "pdf": "pymupdf",
+    "png": "image",
+    "pptx": "markitdown",
+    "tif": "image",
+    "tiff": "image",
+    "txt": "text",
+    "webp": "image",
+    "xls": "markitdown",
+    "xlsx": "markitdown"
+  }
+}

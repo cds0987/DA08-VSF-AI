@@ -360,6 +360,27 @@ def register_reader(
     _READER_REGISTRY.register(name, factory, override=override)
 
 
+def supported_suffixes() -> dict[str, str]:
+    """Bản đồ suffix -> reader-impl mà local parser giải mã được — NGUỒN CHÂN LÝ.
+
+    Một suffix CHỈ được tính là supported khi impl của nó thực sự tồn tại trong
+    reader registry (gồm cả reader cắm thêm qua entry-point `rag_worker.reader`),
+    nên hàm phản ánh đúng cơ chế đăng ký linh hoạt của rag-worker. Document-service
+    đối chiếu allow_list của nó với manifest sinh từ hàm này — xem
+    scripts/gen_supported_formats.py và test_parser_parity.py.
+    """
+    available = set(_READER_REGISTRY.available())
+    resolved: dict[str, str] = {}
+    for suffix, impl in _DEFAULT_READER_IMPL.items():
+        if impl not in available:
+            raise RuntimeError(
+                f"reader impl {impl!r} cho suffix {suffix!r} chưa đăng ký trong registry; "
+                f"có: {sorted(available)}"
+            )
+        resolved[suffix] = impl
+    return dict(sorted(resolved.items()))
+
+
 class LocalFileParser(Parser):
     """Đọc nguồn cục bộ → markdown qua I/O có guard.
 

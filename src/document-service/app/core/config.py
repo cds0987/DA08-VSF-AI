@@ -31,12 +31,22 @@ class Settings(BaseModel):
     allowed_origins: str = getenv(
         "CORS_ORIGINS", "http://localhost:3000,http://localhost:3001"
     )
+    # Allow_list chính sách (linh hoạt). Rỗng = cho phép TẤT CẢ loại rag-worker
+    # parse được (theo supported_formats.json). Khai báo subset để siết, vd
+    # DOC_ALLOWED_EXTENSIONS="pdf,docx,txt". Loại ngoài manifest -> fail-fast.
+    allowed_extensions_raw: str = getenv("DOC_ALLOWED_EXTENSIONS", "")
 
     @property
     def cors_origins(self) -> list[str]:
         return [
             origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()
         ]
+
+    @property
+    def allowed_extensions(self) -> set[str]:
+        return {
+            ext.strip() for ext in self.allowed_extensions_raw.split(",") if ext.strip()
+        }
 
     # storage_backend: gcs (prod) | s3 (local/e2e qua MinIO, R2, GCS S3-interop, AWS)
     storage_backend: str = getenv("STORAGE_BACKEND", "gcs").strip().lower()
