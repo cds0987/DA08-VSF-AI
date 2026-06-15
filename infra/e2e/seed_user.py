@@ -44,7 +44,7 @@ def _db_url() -> str:
     return url
 
 
-async def _seed_one(session, hasher, *, uid, email, password, role, department) -> None:
+async def _seed_one(session, hasher, *, uid, email, password, role) -> None:
     existing = await session.scalar(select(UserModel).where(UserModel.email == email))
     if existing:
         print(f"seed_user: {email} đã tồn tại -> giữ nguyên", flush=True)
@@ -57,7 +57,6 @@ async def _seed_one(session, hasher, *, uid, email, password, role, department) 
         role=role,
         account_type="internal",
         is_active=True,
-        department=department,
     ))
     await session.commit()
     print(f"seed_user: đã seed {email} (role={role}, id={uid})", flush=True)
@@ -81,12 +80,12 @@ async def _main() -> int:
         async with Session() as s:
             # admin: id ngẫu nhiên (giữ hành vi cũ).
             await _seed_one(s, hasher, uid=uuid.uuid4(), email=admin_email,
-                            password=admin_password, role="admin", department="hr")
+                            password=admin_password, role="admin")
             # nhân viên + sếp: id TẤT ĐỊNH (uuid5) cho test luồng nghỉ phép.
             await _seed_one(s, hasher, uid=test_user_id(emp_email), email=emp_email,
-                            password=emp_password, role="user", department="engineering")
+                            password=emp_password, role="user")
             await _seed_one(s, hasher, uid=test_user_id(boss_email), email=boss_email,
-                            password=boss_password, role="user", department="engineering")
+                            password=boss_password, role="user")
         return 0
     finally:
         await engine.dispose()
