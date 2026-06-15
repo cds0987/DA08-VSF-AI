@@ -76,10 +76,28 @@ class IngestDocumentUseCase:
         )
 
     def _trace_start(self, document_id: str, job_meta: dict) -> object | None:
+        # DIAG: lộ rõ service có tracer hay None khi ingest THẬT (so với manual).
+        log_event(
+            self._logger,
+            logging.INFO,
+            "ingest_trace_diag",
+            stage="trace",
+            document_id=document_id,
+            tracer=type(self._tracer).__name__ if self._tracer is not None else "None",
+        )
         if self._tracer is None:
             return None
         try:
-            return self._tracer.start_job(document_id, job_meta)
+            handle = self._tracer.start_job(document_id, job_meta)
+            log_event(
+                self._logger,
+                logging.INFO,
+                "ingest_trace_started",
+                stage="trace",
+                document_id=document_id,
+                has_handle=handle is not None,
+            )
+            return handle
         except Exception as exc:  # noqa: BLE001
             log_event(
                 self._logger,

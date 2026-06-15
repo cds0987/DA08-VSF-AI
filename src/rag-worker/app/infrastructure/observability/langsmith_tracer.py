@@ -102,9 +102,13 @@ class LangSmithIngestTracer:
             )
             run.post()
             handle.run = run
+            logger.info(
+                "langsmith_root_posted",
+                extra={"document_id": handle.document_id, "project": self._project_name(handle), "run_id": str(getattr(run, "id", ""))},
+            )
             return run
         except Exception as exc:  # noqa: BLE001 — tracing không được phép làm vỡ ingest
-            logger.warning("langsmith_trace_start_failed", extra={"error": str(exc)[:200]})
+            logger.warning("langsmith_trace_start_failed", extra={"error": str(exc)[:300]})
             return None
 
     # ── span con (parse/chunk/caption/embed/qdrant-write) ─────────────────
@@ -230,10 +234,15 @@ class LangSmithIngestTracer:
             run.end(outputs={"status": status, **output}, end_time=datetime.now(timezone.utc))
             run.patch()
             flush = getattr(self._client, "flush", None)
-            if callable(flush):
+            flushed = callable(flush)
+            if flushed:
                 await asyncio.to_thread(flush)
+            logger.info(
+                "langsmith_finish_job",
+                extra={"document_id": trace.document_id, "status": status, "flushed": flushed},
+            )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("langsmith_trace_finish_failed", extra={"error": str(exc)[:200]})
+            logger.warning("langsmith_trace_finish_failed", extra={"error": str(exc)[:300]})
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
