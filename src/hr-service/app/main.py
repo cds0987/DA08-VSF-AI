@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.hr_admin import admin_router
 from app.api.routes import public_router, router
 from app.core.config import load_settings
 from app.core.logging_utils import configure_logging
@@ -39,6 +40,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="hr-service", lifespan=lifespan)
     app.include_router(router)
     app.include_router(public_router)
+    app.include_router(admin_router)
     return app
 
 

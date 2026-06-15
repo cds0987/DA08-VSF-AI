@@ -76,7 +76,10 @@ QUERY_DB_BACKUP_READY=1
 
 echo "==> 4) Up image đã pull (query/rag/hr migrations chạy one-shot và fail-fast)"
 docker compose up -d --no-build qdrant langfuse-db langfuse nats-bootstrap query-migrate rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin \
-  || { echo "::error::compose up FAILED — dump nats-bootstrap logs:"; docker logs da08-vsf-nats-bootstrap-1 2>&1 | tail -80 || true; exit 1; }
+  || { echo "::error::compose up FAILED — dump migration + nats-bootstrap logs:"; \
+       docker logs da08-vsf-hr-migrate-1 2>&1 | tail -80 || true; \
+       docker logs da08-vsf-user-migrate-1 2>&1 | tail -40 || true; \
+       docker logs da08-vsf-nats-bootstrap-1 2>&1 | tail -40 || true; exit 1; }
 docker compose up -d --no-build --force-recreate nginx
 
 echo "==> 4b) LANGFUSE readiness PROD bằng KEY THẬT (NON-FATAL — chỉ cảnh báo)"

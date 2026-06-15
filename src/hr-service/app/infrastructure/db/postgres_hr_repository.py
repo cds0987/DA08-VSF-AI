@@ -20,6 +20,7 @@ from app.domain.entities.dtos import (
     AttendanceDTO,
     BenefitItemDTO,
     BenefitsDTO,
+    EmployeeDTO,
     LeaveBalanceDTO,
     LeaveRequestDTO,
     OnboardingDTO,
@@ -136,6 +137,102 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
 
         return await asyncio.to_thread(_query)
 
+    async def list_employees(
+        self,
+        department: str | None,
+        employment_status: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[EmployeeDTO], int]:
+        def _query() -> tuple[list[EmployeeDTO], int]:
+            with self._session() as session:
+                filters = []
+                if department:
+                    filters.append(EmployeeRecord.department == department)
+                if employment_status:
+                    filters.append(EmployeeRecord.employment_status == employment_status)
+
+                total_stmt = sa.select(sa.func.count()).select_from(EmployeeRecord).where(*filters)
+                total = session.scalar(total_stmt) or 0
+
+                stmt = (
+                    sa.select(EmployeeRecord)
+                    .where(*filters)
+                    .order_by(EmployeeRecord.created_at.desc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                items = [self._to_employee_dto(r) for r in session.scalars(stmt).all()]
+                return items, int(total)
+
+        return await asyncio.to_thread(_query)
+
+    async def get_employee(self, employee_id: str) -> Optional[EmployeeDTO]:
+        def _query() -> Optional[EmployeeDTO]:
+            with self._session() as session:
+                record = session.get(EmployeeRecord, employee_id)
+                return self._to_employee_dto(record) if record else None
+
+        return await asyncio.to_thread(_query)
+
+    async def get_employee_by_user_id(self, user_id: str) -> Optional[EmployeeDTO]:
+        def _query() -> Optional[EmployeeDTO]:
+            with self._session() as session:
+                stmt = sa.select(EmployeeRecord).where(EmployeeRecord.user_id == user_id)
+                record = session.execute(stmt).scalar_one_or_none()
+                return self._to_employee_dto(record) if record else None
+
+        return await asyncio.to_thread(_query)
+
+    async def update_employee(
+        self,
+        employee_id: str,
+        employee_code: str | None,
+        job_title: str | None,
+        manager_user_id: str | None,
+        provided_fields: set[str],
+    ) -> Optional[EmployeeDTO]:
+        def _update() -> Optional[EmployeeDTO]:
+            with self._session() as session:
+                record = session.get(EmployeeRecord, employee_id)
+                if not record:
+                    return None
+
+                if "employee_code" in provided_fields:
+                    record.employee_code = employee_code
+                if "job_title" in provided_fields:
+                    record.job_title = job_title
+                if "manager_user_id" in provided_fields:
+                    record.manager_user_id = manager_user_id
+
+                record.updated_at = _now()
+                try:
+                    session.commit()
+                except IntegrityError as exc:
+                    session.rollback()
+                    if "employee_code" in str(exc).lower() or "hr_svc_employees_employee_code_key" in str(exc):
+                        raise ValueError("Duplicate employee_code") from exc
+                    raise
+                session.refresh(record)
+                return self._to_employee_dto(record)
+
+        return await asyncio.to_thread(_update)
+
+    @staticmethod
+    def _to_employee_dto(record: EmployeeRecord) -> EmployeeDTO:
+        return EmployeeDTO(
+            id=record.id,
+            user_id=record.user_id,
+            account_type=record.account_type,
+            employee_code=record.employee_code,
+            company_email=record.company_email,
+            department=record.department,
+            job_title=record.job_title,
+            manager_user_id=record.manager_user_id,
+            employment_status=record.employment_status,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+        )
     async def get_leave_balance(self, user_id: str) -> Optional[LeaveBalanceDTO]:
         def _query() -> Optional[LeaveBalanceDTO]:
             with self._session() as session:
@@ -174,7 +271,7 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
         await asyncio.to_thread(_ensure)
 
     async def upsert_employee_from_user(
-        self, user_id: str, email: str, department: str, is_active: bool
+        self, user_id: str, email: str, department: str, is_active: bool, account_type: str
     ) -> None:
         import uuid
 
@@ -186,12 +283,13 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
                 session.execute(
                     sa.text(
                         "INSERT INTO hr_svc.employees "
-                        "(id, user_id, company_email, department, employment_status) "
-                        "VALUES (:id, :uid, :email, :dept, :status) "
+                        "(id, user_id, company_email, department, employment_status, account_type) "
+                        "VALUES (:id, :uid, :email, :dept, :status, :acc_type) "
                         "ON CONFLICT (user_id) DO UPDATE SET "
                         "  company_email = EXCLUDED.company_email, "
                         "  department = EXCLUDED.department, "
                         "  employment_status = EXCLUDED.employment_status, "
+                        "  account_type = EXCLUDED.account_type, "
                         "  updated_at = now()"
                     ),
                     {
@@ -200,6 +298,7 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
                         "email": email or f"{user_id}@unknown.local",
                         "dept": department or "",
                         "status": status,
+                        "acc_type": account_type,
                     },
                 )
                 session.commit()

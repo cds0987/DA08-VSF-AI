@@ -13,6 +13,7 @@ from app.application.use_cases.auth.login_use_case import LoginUseCase
 from app.application.use_cases.auth.logout_use_case import LogoutUseCase
 from app.application.use_cases.auth.refresh_token_use_case import RefreshTokenUseCase
 from app.application.use_cases.auth.verify_token_use_case import VerifyTokenUseCase
+from app.application.use_cases.users.create_user_use_case import CreateUserUseCase
 from app.application.use_cases.users.list_users_use_case import ListUsersUseCase
 from app.application.use_cases.users.set_user_active_use_case import SetUserActiveUseCase
 from app.core.config import Settings, get_settings
@@ -161,6 +162,18 @@ def get_user_event_emitter(
         jetstream_enabled=settings.nats_jetstream_enabled,
     )
     return NatsUserEventEmitter(publisher)
+
+
+def get_create_user_use_case(
+    user_repository: PostgresUserRepository = Depends(get_user_repository),
+    password_hasher: BcryptPasswordHasher = Depends(get_password_hasher),
+    event_emitter: "NatsUserEventEmitter | None" = Depends(get_user_event_emitter),
+) -> CreateUserUseCase:
+    return CreateUserUseCase(
+        user_repository=user_repository,
+        password_hasher=password_hasher,
+        event_emitter=event_emitter,
+    )
 
 
 def get_set_user_active_use_case(
