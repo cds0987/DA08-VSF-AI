@@ -1,5 +1,4 @@
 export const ACCESS_TOKEN_COOKIE = 'eka.chat.access_token'
-export const REFRESH_TOKEN_COOKIE = 'eka.chat.refresh_token'
 export const SESSION_COOKIE = 'eka.chat.session.user'
 
 export function getClientCookie(name: string): string | null {

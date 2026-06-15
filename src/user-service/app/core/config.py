@@ -37,6 +37,7 @@ class Settings(BaseModel):
     refresh_token_ttl_days: int = int(getenv("REFRESH_TOKEN_TTL_DAYS", "7"))
     failed_login_threshold: int = int(getenv("FAILED_LOGIN_THRESHOLD", "5"))
     lockout_minutes: int = int(getenv("LOCKOUT_MINUTES", "15"))
+    cookie_secure: bool = getenv("COOKIE_SECURE", "false").lower() in {"1", "true", "yes", "on"}
     allowed_origins: str = getenv(
         "CORS_ORIGINS", "http://localhost:3000,http://localhost:3001"
     )

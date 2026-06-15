@@ -153,16 +153,34 @@ src/frontend/admin/
 │   │   │                              Gọi POST /auth/admin/login — chỉ nhận admin; user bị 401 generic
 │   │   ├── documents.vue           ← Upload + danh sách tài liệu + ingestion status
 │   │   ├── users.vue               ← Quản lý user: deactivate/reactivate
+│   │   ├── employees/
+│   │   │   ├── index.vue           ← Bảng danh sách nhân viên (TanStack table): filter phòng ban/status,
+│   │   │   │                          nút "Tạo nhân viên mới", pagination
+│   │   │   └── [id].vue            ← Chi tiết nhân viên: thông tin HR + form tạo tài khoản (nếu chưa có)
+│   │   │                              + chỉnh sửa HR fields (job_title, employee_code, manager)
 │   │   └── analytics.vue           ← Dashboard: charts volume / feedback rate / top questions
 │   ├── components/
 │   │   ├── FileUpload.vue          ← Drag-drop upload, chọn classification
 │   │   └── AnalyticsCharts.vue     ← charts (Chart.js / ApexCharts)
-│   └── composables/
-│       ├── useDocuments.ts         ← GET/POST/DELETE /documents (Document Service)
-│       ├── useUsers.ts             ← GET /users, deactivate/reactivate (User Service /users)
-│       └── useAnalytics.ts         ← GET /admin/metrics (Query Service)
+│   ├── composables/
+│   │   ├── useDocuments.ts         ← GET/POST/DELETE /documents (Document Service)
+│   │   ├── useUsers.ts             ← GET /users, deactivate/reactivate + createUser (User Service /users)
+│   │   └── useAnalytics.ts         ← GET /admin/metrics (Query Service)
+│   └── lib/
+│       └── api/
+│           └── hrService.ts        ← (mới) GET /hr/admin/employees (list + filter phòng ban/status),
+│                                      GET /hr/admin/employees/{id}, PATCH /hr/admin/employees/{id}
 ```
-→ Gọi **Document Service** (tài liệu) + **User Service `/users`** (quản lý user) + **Query Service `/admin/metrics`**.
+
+**Cập nhật `app/types/index.ts`:** thêm `EmployeeItem`, `EmployeeDetail`, `CreateUserRequest`, `EmployeeListResponse`.
+
+**Flow tạo nhân viên mới (pattern: admin tạo thẳng):**
+1. Admin điền form: tên, email, mật khẩu tạm, role, phòng ban, chức danh
+2. `POST /users` (User Service, admin only) → tạo account → publish `user.created` event
+3. HR Service subscriber tự nhận event → auto-create employee record *(logic đã có sẵn trong `user_events_subscriber.py`)*
+4. Redirect `/employees/[id]` → admin điền thêm HR fields (employee_code, manager)
+
+→ Gọi **Document Service** (tài liệu) + **User Service `/users`** (quản lý user) + **Query Service `/admin/metrics`** + **HR Service `/hr/admin/employees`** (quản lý nhân viên).
 
 **Phân chia theo persona (chuẩn microservice):**
 - **Chat app** (End User) ↔ Query Service · **Admin app** (Admin) ↔ Document + User `/users` + metrics.
@@ -189,7 +207,10 @@ src/user-service/app/
 │       │   └── verify_token_use_case.py   ← Decode + validate JWT, trả về User
 │       └── users/                         ← Quản lý user (Admin)
 │           ├── list_users_use_case.py     ← Liệt kê user (phân trang)
-│           └── set_user_active_use_case.py← Deactivate / reactivate user
+│           ├── set_user_active_use_case.py← Deactivate / reactivate user
+│           └── create_user_use_case.py    ← Tạo user mới (admin only): validate email unique,
+│                                             bcrypt hash password, lưu DB,
+│                                             publish user.created event → HR Service tự sync employee record
 │
 ├── infrastructure/
 │   └── db/
@@ -205,6 +226,9 @@ src/user-service/app/
             │                                 POST /auth/admin/login (admin only → admin app; user trả 401 generic)
             │                                 GET /auth/me, POST /auth/refresh
             └── users.py                   ← GET /users, PATCH /users/{id}/deactivate, /reactivate (admin only)
+                                              POST /users (admin only) — tạo account mới
+                                              Body: { name, email, password, role, department }
+                                              Returns: UserItem (id, name, email, role, department, is_active)
 ```
 
 **Key logic — user-service:**
@@ -331,8 +355,13 @@ src/rag-worker/app/
 ```
 src/hr-service/app/
 ├── application/
-│   └── services/
-│       └── employee_profile_service.py     ← CRUD employee profile + publish hr.employee_profile.updated
+│   ├── services/
+│   │   └── employee_profile_service.py     ← CRUD employee profile + publish hr.employee_profile.updated
+│   └── use_cases/
+│       ├── list_employees_use_case.py      ← (mới) Admin: list tất cả employee, filter phòng ban/status, pagination
+│       ├── get_employee_use_case.py        ← (mới) Admin: chi tiết 1 employee by id hoặc user_id
+│       └── update_employee_use_case.py     ← (mới) Admin: sửa job_title, employee_code, manager_user_id
+│                                              → publish hr.employee_profile.updated
 ├── infrastructure/
 │   ├── db/
 │   │   ├── models.py                       ← SQLAlchemy model hr_svc.* (hr_db)
@@ -342,8 +371,15 @@ src/hr-service/app/
 └── interfaces/
     └── api/
         ├── main.py                         ← FastAPI :8004 internal only
+        ├── auth.py                         ← (cập nhật) thêm require_admin_jwt: validate Bearer JWT
+        │                                      từ gateway, kiểm tra role == "admin" (shared JWT secret)
         └── routers/
-            └── hr.py                       ← Employee profile + leave/payroll internal endpoints
+            ├── hr.py                       ← Employee profile + leave/payroll internal endpoints
+            │                                  (giữ nguyên, dùng require_internal_token)
+            └── hr_admin.py                 ← (mới) Router riêng cho admin, dùng require_admin_jwt:
+                                               GET  /hr/admin/employees       — list + filter + pagination
+                                               GET  /hr/admin/employees/{id}  — chi tiết employee
+                                               PATCH /hr/admin/employees/{id} — sửa HR fields
 ```
 
 **Key logic — hr-service:**
@@ -353,6 +389,7 @@ src/hr-service/app/
 - MVP leave request: tạo đơn trong `hr_svc.leave_requests` sau khi user confirm draft; set `status='pending'`, `approver_user_id = employees.manager_user_id`. DB record là đơn chính thức, không tạo Word/PDF.
 - Approve/reject: chỉ user có `leave_requests.approver_user_id = current_user_id AND status='pending'` được duyệt. Không dùng `user-service.role` làm quyền duyệt nghiệp vụ.
 - MCP Service gọi HR Service qua internal HTTP/gRPC cho tool `hr_query`; Query Service không đọc trực tiếp `hr_db`.
+- **Admin CRUD employee:** `hr_admin.py` dùng `require_admin_jwt` (tách riêng với `require_internal_token` của các endpoint nội bộ). Khi admin `PATCH /hr/admin/employees/{id}`, service cập nhật DB và publish `hr.employee_profile.updated`. **Không expose DELETE** — deactivate employee qua `PATCH /users/{id}/deactivate` ở User Service (sẽ trigger event `user.deactivated` → HR Service subscriber tự cập nhật `employment_status`).
 
 #### MCP Tool Service (RAG Engineer cũng phụ trách)
 
@@ -647,6 +684,8 @@ feature branches:
 | Reranker (`app/core/rerank.py`) | **RAG Engineer** owns trong **mcp-service** — `Reranker` Protocol, impl `none`/`lexical`/`llm` (không phải `RerankService` ABC, không BGE self-host) | Sửa → báo SA |
 | MCP tool contract (`rag_search`, `hr_query`, `create_leave_request` I/O) | SA define; **RAG Engineer** implement (mcp-service), AI Engineer consume (Query Service MCP client) | Đổi tên/tham số tool → báo cả RAG Eng + AI Eng |
 | HR Service implementation | SA define schema/contract; **RAG Engineer** implement `src/hr-service/`; AI Engineer consume qua MCP tool, không gọi DB trực tiếp | Đổi HR schema/API/event → báo SA + AI Eng |
+| `POST /users` (User Service) | **Backend Dev** owns | Admin-only: tạo account mới → **bắt buộc** publish `user.created` event để HR Service tự sync employee record qua `user_events_subscriber.py` |
+| `/hr/admin/employees` (HR Service) | **RAG Engineer** owns | Dùng `require_admin_jwt` (tách riêng với `require_internal_token`) — Frontend Admin gọi qua axiosClient với `service: 'hr'`; **không được** dùng internal token cho endpoint này |
 | API schemas (Pydantic) | SA define, Backend Dev + RAG Engineer + AI/Agent Engineer implement, Frontend Dev consume | Sửa → báo SA |
 | `requirements.txt` | Tất cả | Thêm package → mở PR, không tự pip install rồi push |
 | `docker-compose.yml` | DevOps owns | Thêm env var mới → báo DevOps |

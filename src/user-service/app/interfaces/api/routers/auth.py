@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from json import JSONDecodeError
 
 from app.application.exceptions import (
@@ -10,6 +10,7 @@ from app.application.exceptions import (
 from app.application.use_cases.auth.login_use_case import LoginUseCase
 from app.application.use_cases.auth.logout_use_case import LogoutUseCase
 from app.application.use_cases.auth.refresh_token_use_case import RefreshTokenUseCase
+from app.core.config import get_settings
 from app.domain.entities.user import User
 from app.interfaces.api.dependencies import (
     get_current_user,
@@ -17,12 +18,40 @@ from app.interfaces.api.dependencies import (
     get_logout_use_case,
     get_refresh_token_use_case,
 )
-from app.interfaces.api.schemas.auth import MeResponse, RefreshTokenRequest, TokenResponse
-# Import Form để map trường phẳng lên Swagger UI
+from app.interfaces.api.schemas.auth import MeResponse, TokenResponse
 from fastapi.param_functions import Form
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+_REFRESH_COOKIE = "refresh_token"
+_REFRESH_COOKIE_MAX_AGE = get_settings().refresh_token_ttl_days * 24 * 3600
+
+
+def _set_refresh_cookie(response: Response, token: str) -> None:
+    settings = get_settings()
+    response.set_cookie(
+        key=_REFRESH_COOKIE,
+        value=token,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        max_age=_REFRESH_COOKIE_MAX_AGE,
+        path="/",
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    settings = get_settings()
+    response.set_cookie(
+        key=_REFRESH_COOKIE,
+        value="",
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        max_age=0,
+        path="/",
+    )
 
 
 # Khai báo dependency giả lập trường để Swagger UI tự vẽ ô nhập liệu phẳng (username/password)
@@ -36,23 +65,26 @@ async def swagger_login_fields(
 @router.post("/login", response_model=TokenResponse)
 async def login(
     request: Request,
-    _swagger_ui: None = Depends(swagger_login_fields), # Chỉ dùng để vẽ giao diện Swagger, không chạm vào request logic
+    response: Response,
+    _swagger_ui: None = Depends(swagger_login_fields),
     use_case: LoginUseCase = Depends(get_login_use_case),
 ) -> TokenResponse:
-    return await _login(request, use_case)
+    return await _login(request, response, use_case)
 
 
 @router.post("/admin/login", response_model=TokenResponse)
 async def admin_login(
     request: Request,
-    _swagger_ui: None = Depends(swagger_login_fields), # Chỉ dùng để vẽ giao diện Swagger, không chạm vào request logic
+    response: Response,
+    _swagger_ui: None = Depends(swagger_login_fields),
     use_case: LoginUseCase = Depends(get_login_use_case),
 ) -> TokenResponse:
-    return await _login(request, use_case, required_role="admin")
+    return await _login(request, response, use_case, required_role="admin")
 
 
 async def _login(
     request: Request,
+    response: Response,
     use_case: LoginUseCase,
     required_role: str | None = None,
 ) -> TokenResponse:
@@ -80,22 +112,22 @@ async def _login(
             detail="Invalid credentials",
         ) from exc
 
-    return TokenResponse(
-        access_token=result.access_token,
-        refresh_token=result.refresh_token,
-        token_type=result.token_type,
-    )
+    _set_refresh_cookie(response, result.refresh_token)
+    return TokenResponse(access_token=result.access_token, token_type=result.token_type)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
-    payload: RefreshTokenRequest,
+    response: Response,
+    refresh_token: str | None = Cookie(default=None, alias=_REFRESH_COOKIE),
     use_case: LogoutUseCase = Depends(get_logout_use_case),
 ) -> None:
-    try:
-        await use_case.execute(payload.refresh_token)
-    except InvalidTokenError:
-        pass  # Idempotent — already revoked or invalid tokens are fine
+    if refresh_token:
+        try:
+            await use_case.execute(refresh_token)
+        except InvalidTokenError:
+            pass  # Idempotent — already revoked or invalid tokens are fine
+    _clear_refresh_cookie(response)
 
 
 @router.get("/me", response_model=MeResponse)
@@ -111,21 +143,26 @@ async def me(current_user: User = Depends(get_current_user)) -> MeResponse:
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh(
-    payload: RefreshTokenRequest,
+    response: Response,
+    refresh_token: str | None = Cookie(default=None, alias=_REFRESH_COOKIE),
     use_case: RefreshTokenUseCase = Depends(get_refresh_token_use_case),
 ) -> TokenResponse:
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token missing",
+        )
     try:
-        result = await use_case.execute(payload.refresh_token)
+        result = await use_case.execute(refresh_token)
     except (InactiveUserError, InvalidTokenError) as exc:
+        _clear_refresh_cookie(response)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",
         ) from exc
-    return TokenResponse(
-        access_token=result.access_token,
-        refresh_token=result.refresh_token,
-        token_type=result.token_type,
-    )
+
+    _set_refresh_cookie(response, result.refresh_token)
+    return TokenResponse(access_token=result.access_token, token_type=result.token_type)
 
 
 def _role_value(role: object) -> str:
