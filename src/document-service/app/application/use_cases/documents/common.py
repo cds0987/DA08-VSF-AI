@@ -3,12 +3,18 @@ from typing import Iterable
 
 from app.application.auth import CurrentUser
 from app.application.exceptions import PermissionDeniedError, ValidationError
+from app.application.use_cases.documents.supported_formats import (
+    resolve_allowed_extensions,
+)
+from app.core.config import get_settings
 
 
 ALLOWED_CLASSIFICATIONS = {"public", "internal", "secret", "top_secret"}
-# Keep this whitelist in sync with rag-worker local parser suffix support.
-# Parity check lives in rag-worker/tests/infrastructure/test_parser_parity.py.
-ALLOWED_EXTENSIONS = {"pdf", "docx", "txt", "xlsx", "csv", "pptx", "md"}
+# Loại file được chấp nhận = (rag-worker parse được, từ supported_formats.json)
+# ∩ (allow_list chính sách qua DOC_ALLOWED_EXTENSIONS). rag-worker là nguồn chân lý;
+# manifest sinh từ scripts/gen_supported_formats.py, parity check ở
+# rag-worker/tests/infrastructure/test_parser_parity.py.
+ALLOWED_EXTENSIONS = resolve_allowed_extensions(get_settings().allowed_extensions)
 MAX_FILE_BYTES = 50 * 1024 * 1024
 
 
