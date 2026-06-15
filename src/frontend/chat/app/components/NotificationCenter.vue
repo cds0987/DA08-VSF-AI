@@ -102,7 +102,7 @@ async function handleNotificationClick(item: NotificationItem) {
         <DropdownMenuItem
           v-for="item in notifications.items"
           :key="item.id"
-          class="items-start gap-3 rounded-lg px-3 py-3 focus:bg-slate-50 dark:focus:bg-accent"
+          class="items-start gap-3 cursor-pointer rounded-lg px-3 py-3 focus:bg-slate-50 dark:focus:bg-accent"
           @select="handleNotificationClick(item)"
         >
           <span
