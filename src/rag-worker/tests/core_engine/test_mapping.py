@@ -39,6 +39,45 @@ def test_register_and_resolve_override() -> None:
     )
 
 
+def test_to_settings_omits_langsmith_so_bootstrap_applies_env() -> None:
+    """Regression: to_settings() (nhánh có config.yaml) KHÔNG mang langsmith_*.
+
+    langsmith là ENV-driven, không nằm trong pipeline config schema -> to_settings để
+    nó về default (enabled=False). Bootstrap PHẢI áp langsmith từ env sau to_settings,
+    nếu không tracer tắt âm thầm ở production (có config.yaml). Xem runtime.bootstrap.
+    """
+    from dataclasses import replace
+
+    from core_engine.config import HaystackSettings
+    from core_engine.mapping import to_settings
+
+    cfg = PipelineConfig.model_validate(
+        {
+            "common": {"ai_mode": "offline"},
+            "embedder": {"model": "text-embedding-3-small", "dimension": 256},
+            "captioner": {"impl": "none", "model": "gpt-4o-mini", "params": {}},
+            "parser": {"impl": "local", "params": {"max_workers": 2}},
+            "chunker": {"impl": "heading_sections", "params": {}},
+            "vector_store": {"impl": "qdrant", "params": {"collection": "rag_chatbot"}},
+        }
+    )
+    settings = to_settings(cfg, dim=256)
+    # to_settings KHÔNG set langsmith -> default tắt.
+    assert settings.langsmith_enabled is False
+
+    # Bootstrap áp env: replace giữ mọi field config + bật langsmith.
+    env = HaystackSettings(langsmith_enabled=True, langsmith_api_key="k", langsmith_project="vsf-rag-ingest")
+    applied = replace(
+        settings,
+        langsmith_enabled=env.langsmith_enabled,
+        langsmith_api_key=env.langsmith_api_key,
+        langsmith_project=env.langsmith_project,
+    )
+    assert applied.langsmith_enabled is True
+    assert applied.langsmith_project == "vsf-rag-ingest"
+    assert applied.embed_dimension == 256  # field config vẫn giữ
+
+
 def test_build_engine_from_config_wires_builtin_components() -> None:
     cfg = PipelineConfig.model_validate(
         {

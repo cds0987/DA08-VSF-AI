@@ -654,6 +654,20 @@ def bootstrap_runtime() -> RuntimeState:
 
     reasons: list[str] = []
     startup_reasons: list[str] = []
+    # langsmith_* là ENV-driven (không nằm trong pipeline config schema). Nhánh có
+    # config.yaml dùng to_settings() -> chỉ map langfuse, langsmith rơi về default
+    # (enabled=False) -> tracer tắt âm thầm dù LANGSMITH_ENABLED=1. Áp langsmith từ env
+    # cho CẢ 2 nhánh để tracer không phụ thuộc việc có config.yaml hay không.
+    _env_settings = load_settings()
+    settings = replace(
+        settings,
+        langsmith_enabled=_env_settings.langsmith_enabled,
+        langsmith_api_key=_env_settings.langsmith_api_key,
+        langsmith_endpoint=_env_settings.langsmith_endpoint,
+        langsmith_project=_env_settings.langsmith_project,
+        langsmith_sample_rate=_env_settings.langsmith_sample_rate,
+        langsmith_trace_on_error=_env_settings.langsmith_trace_on_error,
+    )
     tracer = build_ingest_tracer(settings)
     if provider.name == "offline":
         reasons.append("AI provider is offline.")
