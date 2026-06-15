@@ -207,31 +207,12 @@ async def test_act_node_dispatches_generic_tool():
     )
 
 
-@pytest.mark.asyncio
-async def test_act_node_rag_weak_results_hard_stops_no_info():
-    """Weak rag_search matches must not be passed to the LLM for guessing."""
-    from app.application.langgraph_edges import route_after_act
-    from app.application.langgraph_nodes import act_node
-    from app.application.langgraph_state import create_initial_state, AgentPhase
-    from app.infrastructure.external.mcp_client import SearchResult
+def _rag_tool_state(question: str = "Quy định nghỉ phép năm là gì?"):
+    from app.application.langgraph_state import create_initial_state
     from langchain_core.messages import AIMessage
 
-    class _WeakRagMCP:
-        async def rag_search(self, query, document_ids, top_k=5):
-            return [
-                SearchResult(
-                    chunk_id="chunk-weak",
-                    document_id="doc-1",
-                    document_name="weak.md",
-                    caption="Weak match",
-                    parent_text="This text is not relevant enough.",
-                    heading_path=[],
-                    score=0.12,
-                )
-            ]
-
     initial = create_initial_state(
-        question="Quy định nghỉ phép năm là gì?",
+        question=question,
         user_id="u-test",
         user_role="employee",
         user_department="HR",
@@ -246,13 +227,58 @@ async def test_act_node_rag_weak_results_hard_stops_no_info():
         tool_calls=[{
             "name": "rag_search",
             "args": {"top_k": 5},
-            "id": "call_rag_weak",
+            "id": "call_rag",
             "type": "tool_call",
         }],
     )
-    state = {**initial, "messages": [ai_msg]}
+    return {**initial, "messages": [ai_msg]}
 
+
+@pytest.mark.asyncio
+async def test_act_node_rag_weak_results_adaptive_fallback():
+    """Chunk dưới ngưỡng nhưng qdrant CÓ kết quả -> fallback top-3 cho LLM, KHÔNG hard-stop."""
+    from app.application.langgraph_nodes import act_node
+    from app.infrastructure.external.mcp_client import SearchResult
+
+    class _WeakRagMCP:
+        async def rag_search(self, query, document_ids, top_k=5):
+            return [
+                SearchResult(
+                    chunk_id="chunk-weak",
+                    document_id="doc-1",
+                    document_name="leave_policy.md",
+                    caption="Chính sách nghỉ phép",
+                    parent_text="Nhân viên được 12 ngày phép năm.",
+                    heading_path=[],
+                    score=0.28,  # < ngưỡng 0.70 nhưng vẫn có kết quả
+                )
+            ]
+
+    state = _rag_tool_state()
     result = await act_node(state, mcp_client=_WeakRagMCP())
+
+    # Fallback: kết quả weak được đưa vào sources, success, KHÔNG shortcut NO_INFO.
+    assert result.get("shortcut_outcome") != "NO_INFO"
+    assert len(result["sources"]) == 1
+    source = result["sources"][0]
+    name = source["document_name"] if isinstance(source, dict) else source.document_name
+    assert name == "leave_policy.md"
+    assert result["tool_results"][0]["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_act_node_rag_no_results_hard_stops_no_info():
+    """Chỉ khi qdrant trả RỖNG mới hard-stop NO_INFO (không có gì để fallback)."""
+    from app.application.langgraph_edges import route_after_act
+    from app.application.langgraph_nodes import act_node
+    from app.application.langgraph_state import AgentPhase
+
+    class _EmptyRagMCP:
+        async def rag_search(self, query, document_ids, top_k=5):
+            return []
+
+    state = _rag_tool_state()
+    result = await act_node(state, mcp_client=_EmptyRagMCP())
 
     assert result["phase"] == AgentPhase.DONE
     assert result["shortcut_outcome"] == "NO_INFO"

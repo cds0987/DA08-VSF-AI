@@ -503,9 +503,17 @@ async def act_node(
                 threshold = state.get("rag_score_threshold", 0.70)
                 qualified = [r for r in results if r.score >= threshold]
 
-                # Hard relevance gate: nếu không có chunk nào đạt ngưỡng thì dừng với
-                # NO_INFO, không đưa weak context cho LLM đoán.
+                # Adaptive threshold fallback: nếu KHÔNG chunk nào đạt ngưỡng nhưng
+                # rag-service VẪN trả kết quả -> lấy top-3 điểm cao nhất làm ngữ cảnh,
+                # thay vì hard-stop "không tìm thấy" do lọc quá chặt (te3-small cho điểm
+                # chunk liên quan ~0.3-0.6, query ngắn/đa ngữ có thể < ngưỡng). Grounding
+                # vẫn an toàn: prompt buộc trả lời CHỈ từ context + tự nói "không tìm thấy"
+                # nếu context không trả lời được -> weak context KHÔNG ép LLM bịa. CHỈ khi
+                # qdrant trả RỖNG mới hard-stop NO_INFO (nhánh else phía dưới).
                 adaptive_fallback = False
+                if not qualified and results:
+                    qualified = sorted(results, key=lambda r: r.score, reverse=True)[:min(3, len(results))]
+                    adaptive_fallback = True
 
                 # Ghi debug event (JSON-safe) vào state để orchestration dựng Langfuse span.
                 # Tất cả giá trị là scalar/list[str/float] — an toàn với checkpointer.
