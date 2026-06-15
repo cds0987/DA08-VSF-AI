@@ -66,6 +66,8 @@ class QueryOrchestrationUseCase:
         langgraph_agent=None,
         langfuse_tracer=None,
         guardrails=None,
+        user_access_profile_repo=None,
+        access_cache=None,
     ) -> None:
         self._settings = settings
         self._conversation_repo = conversation_repo
@@ -75,6 +77,8 @@ class QueryOrchestrationUseCase:
         self._openai_client = openai_client
         self._langgraph_agent = langgraph_agent
         self._tracer = langfuse_tracer
+        self._user_access_profile_repo = user_access_profile_repo
+        self._access_cache = access_cache
         # guardrails is a (InputGuardrail, OutputGuardrail) tuple or None
         if guardrails is not None:
             self._input_guardrail, self._output_guardrail = guardrails
@@ -87,6 +91,37 @@ class QueryOrchestrationUseCase:
         if route_decision_provider is None and tool_decision_client is None:
             raise ValueError("A route decision provider is required")
         self._route_decision_provider = route_decision_provider or tool_decision_client
+
+    async def _get_allowed_doc_ids(self, user: "AuthenticatedUser") -> list[str]:
+        if self._access_cache:
+            try:
+                cached = await self._access_cache.get(user.id)
+                if cached is not None:
+                    return cached
+            except Exception:
+                pass
+
+        profile = None
+        if self._user_access_profile_repo:
+            try:
+                profile = await self._user_access_profile_repo.get_profile(user.id)
+            except Exception:
+                pass
+        effective_department = profile.department if profile else ""
+        effective_account_type = profile.account_type if profile else user.account_type
+
+        doc_ids = await self._document_access_repo.get_allowed_doc_ids(
+            user_id=user.id,
+            role=user.role,
+            department=effective_department,
+            account_type=effective_account_type,
+        )
+        if self._access_cache:
+            try:
+                await self._access_cache.set(user.id, doc_ids)
+            except Exception:
+                pass
+        return doc_ids
 
     async def stream(
         self,
@@ -281,12 +316,7 @@ class QueryOrchestrationUseCase:
         """
         from langchain_core.messages import HumanMessage, AIMessage as LCAIMessage
 
-        allowed_doc_ids = await self._document_access_repo.get_allowed_doc_ids(
-            user_id=user.id,
-            role=user.role,
-            department=user.department,
-            account_type=user.account_type,
-        )
+        allowed_doc_ids = await self._get_allowed_doc_ids(user)
 
         # Fetch recent conversation turns for context (follow-up queries like "Ngày mai").
         # IMPORTANT: fetch history BEFORE saving the current question so that
@@ -804,12 +834,7 @@ class QueryOrchestrationUseCase:
         started: float,
         outcome: Outcome,
     ) -> AsyncIterator[dict]:
-        allowed_doc_ids = await self._document_access_repo.get_allowed_doc_ids(
-            user_id=user.id,
-            role=user.role,
-            department=user.department,
-            account_type=user.account_type,
-        )
+        allowed_doc_ids = await self._get_allowed_doc_ids(user)
         if not allowed_doc_ids:
             async for event in self._fallback(
                 user.id, session_id, started, Outcome.NO_INFO,

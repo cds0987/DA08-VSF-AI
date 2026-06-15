@@ -48,7 +48,6 @@ async def backfill_users(users: Iterable[Any], publisher: UserEventPublisher) ->
                 "user_id": str(u.id),
                 "email": u.email,
                 "role": _role_value(u.role),
-                "department": u.department,
                 "account_type": u.account_type,
                 "is_active": u.is_active,
             },

@@ -43,7 +43,6 @@ async def list_users(
                 email=user.email,
                 role=_role_value(user.role),
                 account_type=user.account_type,
-                department=user.department,
                 is_active=user.is_active,
             )
             for user in result.items

@@ -41,7 +41,6 @@ class FakeUserRepo:
             role=self._user.role,
             is_active=is_active,
             account_type=self._user.account_type,
-            department=self._user.department,
         )
 
 
@@ -58,8 +57,8 @@ class RecordingEmitter:
         self.events.append((subject, user.id))
 
 
-ADMIN = User(id="admin-1", email="admin@c.com", role=UserRole.ADMIN, department="HR")
-TARGET = User(id="u-9", email="u9@c.com", role=UserRole.USER, department="Fin")
+ADMIN = User(id="admin-1", email="admin@c.com", role=UserRole.ADMIN)
+TARGET = User(id="u-9", email="u9@c.com", role=UserRole.USER)
 
 
 def test_deactivate_emits_user_deactivated() -> None:
@@ -95,7 +94,7 @@ def test_emitter_is_best_effort_swallows_publish_error() -> None:
 
 def test_build_user_event_has_required_fields() -> None:
     payload = build_user_event(
-        {"user_id": "u-9", "email": "u9@c.com", "role": "user", "department": "Fin"}
+        {"user_id": "u-9", "email": "u9@c.com", "role": "user"}
     )
     for key in (
         "event_id",
@@ -104,11 +103,11 @@ def test_build_user_event_has_required_fields() -> None:
         "user_id",
         "email",
         "role",
-        "department",
         "account_type",
         "is_active",
     ):
         assert key in payload
+    assert "department" not in payload
     assert payload["occurred_at"].endswith("Z")
 
 
@@ -138,7 +137,6 @@ def test_backfill_publishes_user_created_for_every_user() -> None:
             id="u-1",
             email="u1@company.com",
             role=UserRole.ADMIN,
-            department="HR",
             account_type="internal",
             is_active=True,
         ),
@@ -146,7 +144,6 @@ def test_backfill_publishes_user_created_for_every_user() -> None:
             id="u-2",
             email="u2@company.com",
             role=UserRole.USER,
-            department="Fin",
             account_type="external",
             is_active=False,
         ),
@@ -154,7 +151,6 @@ def test_backfill_publishes_user_created_for_every_user() -> None:
             id="u-3",
             email="u3@company.com",
             role=UserRole.USER,
-            department="IT",
             account_type="internal",
             is_active=True,
         ),
@@ -165,8 +161,9 @@ def test_backfill_publishes_user_created_for_every_user() -> None:
     assert sent == 3
     assert [subject for subject, _ in publisher.calls] == ["user.created", "user.created", "user.created"]
     for _, payload in publisher.calls:
-        for key in ("user_id", "email", "role", "department", "account_type", "is_active"):
+        for key in ("user_id", "email", "role", "account_type", "is_active"):
             assert key in payload
+        assert "department" not in payload
 
 
 def test_backfill_fails_fast_when_publish_raises() -> None:

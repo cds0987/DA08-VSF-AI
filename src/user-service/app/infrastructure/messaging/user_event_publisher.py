@@ -23,7 +23,6 @@ def build_user_event(user: dict[str, Any]) -> dict[str, Any]:
         "user_id": str(user["user_id"]),
         "email": str(user.get("email", "")),
         "role": str(user.get("role", "")),
-        "department": str(user.get("department", "")),
         "account_type": str(user.get("account_type", "internal")),
         "is_active": bool(user.get("is_active", True)),
     }

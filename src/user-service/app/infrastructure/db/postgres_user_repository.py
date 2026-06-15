@@ -35,7 +35,6 @@ class PostgresUserRepository(UserRepository):
             role=_role_value(user.role),
             account_type=user.account_type,
             is_active=user.is_active,
-            department=user.department,
         )
         self.session.add(model)
         await self.session.commit()
@@ -137,7 +136,6 @@ def _to_entity(model: UserModel | None) -> User | None:
         role=model.role,
         is_active=model.is_active,
         account_type=model.account_type,
-        department=model.department,
         hashed_password=model.hashed_password,
         auth_provider=model.auth_provider,
     )

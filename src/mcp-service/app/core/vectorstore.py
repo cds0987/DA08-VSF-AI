@@ -137,10 +137,17 @@ class QdrantReader:
 
     @staticmethod
     def _build_filter(document_ids: Sequence[str] | None):
-        if not document_ids:
-            return None
         from qdrant_client import models
 
+        if not document_ids:
+            return models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="document_id",
+                        match=models.MatchAny(any=["__no_access__"]),
+                    )
+                ]
+            )
         return models.Filter(
             must=[
                 models.FieldCondition(

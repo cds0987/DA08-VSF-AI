@@ -157,3 +157,15 @@ async def test_remote_search_passes_document_filter_and_reuses_client(monkeypatc
     assert len(recorded_filters) == 2
     assert recorded_filters[0] is not None
     assert recorded_filters[1] is not None
+
+
+def test_build_filter_empty_list_blocks_all_docs() -> None:
+    f = QdrantReader._build_filter([])
+    assert f is not None
+    assert list(f.must[0].match.any) == ["__no_access__"]
+
+
+def test_build_filter_none_blocks_all_docs() -> None:
+    f = QdrantReader._build_filter(None)
+    assert f is not None
+    assert list(f.must[0].match.any) == ["__no_access__"]

@@ -27,6 +27,10 @@ SENSITIVE_INTENTS = {"payroll", "benefits", "performance"}
 
 router = APIRouter(dependencies=[Depends(require_internal_token)])
 
+# Endpoints không yêu cầu internal token (department names không nhạy cảm, cần thiết
+# cho admin frontend chọn ACL khi upload document).
+public_router = APIRouter()
+
 
 def _mask_user_id(user_id: str) -> str:
     value = user_id.strip()
@@ -594,3 +598,11 @@ async def hr_profile(
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@public_router.get("/hr/departments")
+async def list_departments(
+    repo: HrRepository = Depends(get_repo),
+) -> dict[str, list[str]]:
+    departments = await repo.get_distinct_departments()
+    return {"departments": departments}

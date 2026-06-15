@@ -15,7 +15,6 @@ class User:
     role: UserRole | str
     is_active: bool = True
     account_type: Literal["internal", "external"] = "internal"
-    department: str = ""
     hashed_password: Optional[str] = None
     auth_provider: str = "local"
 
