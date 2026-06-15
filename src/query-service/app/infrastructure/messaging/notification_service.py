@@ -51,7 +51,7 @@ class NotificationService:
             if can_access_document(
                 user_id=user.id,
                 role=user.role,
-                department=user.department,
+                department=getattr(user, "department", "") or "",
                 classification=event.classification,
                 allowed_departments=event.allowed_departments,
                 allowed_user_ids=event.allowed_user_ids,

@@ -123,6 +123,20 @@ class QueryOrchestrationUseCase:
                 pass
         return doc_ids
 
+    async def _get_effective_department(self, user: "AuthenticatedUser") -> str:
+        """Department giờ thuộc HR Service — propagate sang query-service qua
+        user_access_profile_repo (populate từ HR events). AuthenticatedUser KHÔNG
+        còn mang department (token/`/auth/me` đã bỏ trường này), nên lấy từ profile.
+        getattr fallback: an toàn kể cả khi AuthenticatedUser chưa có attr department."""
+        if self._user_access_profile_repo:
+            try:
+                profile = await self._user_access_profile_repo.get_profile(user.id)
+                if profile:
+                    return profile.department
+            except Exception:
+                pass
+        return getattr(user, "department", "") or ""
+
     async def stream(
         self,
         question: str,
@@ -317,6 +331,7 @@ class QueryOrchestrationUseCase:
         from langchain_core.messages import HumanMessage, AIMessage as LCAIMessage
 
         allowed_doc_ids = await self._get_allowed_doc_ids(user)
+        effective_department = await self._get_effective_department(user)
 
         # Fetch recent conversation turns for context (follow-up queries like "Ngày mai").
         # IMPORTANT: fetch history BEFORE saving the current question so that
@@ -339,7 +354,7 @@ class QueryOrchestrationUseCase:
             question=question,
             user_id=user.id,
             user_role=user.role,
-            user_department=user.department,
+            user_department=effective_department,
             allowed_doc_ids=list(allowed_doc_ids) if allowed_doc_ids else [],
             session_id=session_id,
             max_iterations=self._settings.agent_max_iterations,

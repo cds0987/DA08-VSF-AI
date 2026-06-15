@@ -264,6 +264,49 @@ async def test_allowed_doc_ids_no_profile_empty_department():
 
 
 # ---------------------------------------------------------------------------
+# Unit tests: _get_effective_department
+# department giờ thuộc HR Service — query-service lấy từ user_access_profile_repo,
+# KHÔNG từ AuthenticatedUser (token/`/auth/me` đã bỏ trường này).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_effective_department_from_profile():
+    """Profile có department → trả về department của HR (qua access profile)."""
+    profile_repo = _FakeProfileRepo(_FakeProfile(dept="Finance", acct="internal"))
+    orch = _make_orch(profile_repo=profile_repo)
+    assert await orch._get_effective_department(_make_user()) == "Finance"
+
+
+@pytest.mark.asyncio
+async def test_effective_department_no_profile_returns_empty():
+    """Không có profile → '' (không crash)."""
+    orch = _make_orch(profile_repo=_FakeProfileRepo(profile=None))
+    assert await orch._get_effective_department(_make_user()) == ""
+
+
+@pytest.mark.asyncio
+async def test_effective_department_no_repo_returns_empty():
+    """Không có user_access_profile_repo → '' (không crash)."""
+    orch = _make_orch(profile_repo=None)
+    assert await orch._get_effective_department(_make_user()) == ""
+
+
+@pytest.mark.asyncio
+async def test_effective_department_user_without_department_attr():
+    """AuthenticatedUser KHÔNG có attr department (image cũ / token mới) → getattr
+    fallback trả '' thay vì AttributeError — đây chính là bug làm SMOKE /query fail."""
+    profile_repo = _FakeProfileRepo(profile=None)
+    orch = _make_orch(profile_repo=profile_repo)
+
+    class _NoDeptUser:
+        id = "u-1"
+        role = "user"
+        account_type = "internal"
+
+    assert await orch._get_effective_department(_NoDeptUser()) == ""
+
+
+# ---------------------------------------------------------------------------
 # Unit tests: NoOpAccessCache + RedisAccessCache
 # ---------------------------------------------------------------------------
 
