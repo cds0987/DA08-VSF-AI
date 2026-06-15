@@ -187,6 +187,12 @@ services:
 
   user-backfill:
     image: user-service:e2e
+    build:
+      context: ./src/user-service
+      cache_from:
+        - type=gha,scope=e2e-user-service
+      cache_to:
+        - type=gha,scope=e2e-user-service,mode=max
     command: ["python", "scripts/backfill_user_events.py"]
     working_dir: /app
     environment:
@@ -242,6 +248,12 @@ services:
 
   rag-migrate:
     image: rag-worker:e2e
+    build:
+      context: ./src/rag-worker
+      cache_from:
+        - type=gha,scope=e2e-rag-worker
+      cache_to:
+        - type=gha,scope=e2e-rag-worker,mode=max
     command: ["alembic", "upgrade", "head"]
     working_dir: /app
     environment:
@@ -272,6 +284,12 @@ services:
   # ──────────────────────────── Backend services ─────────────────────────
   user-service:
     image: user-service:e2e
+    build:
+      context: ./src/user-service
+      cache_from:
+        - type=gha,scope=e2e-user-service
+      cache_to:
+        - type=gha,scope=e2e-user-service,mode=max
     ports:
       - "127.0.0.1:8000:8000"
     environment:
@@ -322,6 +340,12 @@ services:
 
   rag-worker:
     image: rag-worker:e2e
+    build:
+      context: ./src/rag-worker
+      cache_from:
+        - type=gha,scope=e2e-rag-worker
+      cache_to:
+        - type=gha,scope=e2e-rag-worker,mode=max
     environment:
       <<: [*openai, *gcs-s3, *qdrant, *newrelic-off, *langfuse]
       APP_ENV: production
@@ -360,6 +384,12 @@ services:
 
   hr-service:
     image: hr-service:e2e
+    build:
+      context: ./src/hr-service
+      cache_from:
+        - type=gha,scope=e2e-hr-service
+      cache_to:
+        - type=gha,scope=e2e-hr-service,mode=max
     ports:
       - "127.0.0.1:8004:8004"
     environment:
