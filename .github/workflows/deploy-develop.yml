@@ -410,12 +410,24 @@ jobs:
       && (needs.build-push-frontend.result == 'success' || needs.build-push-frontend.result == 'skipped')
       && needs.build-push-nginx.result == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write          # WIF (OIDC) — auth GCP không cần key tĩnh
     steps:
-      - name: Deploy + healthcheck via SSH
-        uses: appleboy/ssh-action@v1.2.0
-        # Mọi secret runtime forward sang VM qua env: + envs: (KHÔNG nội suy vào text script).
-        # Deploy tự render .env (root) + deploy/env/secret.env tại VM -> GitHub Secrets là
-        # NGUỒN DUY NHẤT, production không setup tay, không env mồ côi.
+      # Auth GCP qua Workload Identity Federation -> impersonate github-deploy@ (keyless).
+      - name: Auth GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: vintravel-chatbot
+          workload_identity_provider: projects/289299478169/locations/global/workloadIdentityPools/github-actions/providers/github
+          service_account: github-deploy@vintravel-chatbot.iam.gserviceaccount.com
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+      # Deploy qua IAP tunnel (port 22 KHÔNG mở ra internet). Secrets forward qua env: ->
+      # serialize bằng printf %q -> stdin (mã hóa qua IAP) -> sudo -u TOMAP chạy remote-entry.sh.
+      # GitHub Secrets vẫn là NGUỒN DUY NHẤT (remote-entry -> render-secrets.sh tại VM).
+      - name: Deploy + healthcheck via IAP SSH (as TOMAP)
+        shell: bash
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -453,42 +465,30 @@ jobs:
           OPENROUTER_API_KEY_3: ${{ secrets.OPENROUTER_API_KEY_3 }}
           OPENROUTER_API_KEY_4: ${{ secrets.OPENROUTER_API_KEY_4 }}
           OPENROUTER_API_KEY_5: ${{ secrets.OPENROUTER_API_KEY_5 }}
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
-          port: ${{ secrets.VM_SSH_PORT || 22 }}
-          command_timeout: 20m
-          envs: APP_DIR,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,POSTGRES_PASSWORD,NEW_RELIC_LICENSE_KEY,SEED_ADMIN_PASSWORD,LANGFUSE_DB_PASSWORD,NEXTAUTH_SECRET,LANGFUSE_SALT,LANGFUSE_ENCRYPTION_KEY,LANGFUSE_INIT_USER_PASSWORD,LANGFUSE_PUBLIC_KEY,LANGFUSE_SECRET_KEY,LANGFUSE_BASIC_AUTH_HTPASSWD,OPENAI_API_KEY,JWT_SECRET_KEY,MCP_INTERNAL_TOKEN,HR_INTERNAL_TOKEN,GCS_HMAC_KEY,GCS_HMAC_SECRET,LANGSMITH_API_KEY,AIROUTER_INTERNAL_TOKEN,OPENAI_API_KEY_1,OPENAI_API_KEY_2,OPENAI_API_KEY_3,OPENAI_API_KEY_4,OPENAI_API_KEY_5,OPENROUTER_API_KEY_1,OPENROUTER_API_KEY_2,OPENROUTER_API_KEY_3,OPENROUTER_API_KEY_4,OPENROUTER_API_KEY_5
-          script: |
-            set -euo pipefail
-            export APP_DIR="${{ secrets.APP_DIR }}"
-            export IMAGE_TAG="develop"
-            cd "$APP_DIR"
-
-            echo "==> 1) Sync code = origin/develop (production phản ánh đúng git)"
-            git fetch "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" develop
-            git reset --hard FETCH_HEAD
-
-            echo "==> 1b) RENDER secret tu GitHub Secrets (nguon DUY NHAT) -> .env + secret.env"
-            bash deploy/scripts/render-secrets.sh "$APP_DIR"
-
-            echo "==> 2..6) Deploy + healthcheck + smoke (logic o deploy/scripts/deploy.sh)"
-            RUN_RAG="${{ needs.detect.outputs.run_rag }}"             RUN_HR="${{ needs.detect.outputs.run_hr }}"             SVCS='${{ needs.detect.outputs.services }}'               bash deploy/scripts/deploy.sh
-
-      # Step RIÊNG (script block nhỏ) — KHÔNG nhét seed vào script deploy phía trên vì
-      # block đó + nhiều ${{ }} đã chạm giới hạn 21000 ký tự/expression của Actions.
-      # seed-user không là dependency service nào nên compose up không chạy -> gọi tường minh.
-      - name: Seed users (admin + nhanvien@ + sep@) — idempotent
-        if: success()
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
-          port: ${{ secrets.VM_SSH_PORT || 22 }}
-          command_timeout: 5m
-          script: |
-            set -euo pipefail
-            cd "${{ secrets.APP_DIR }}"
-            docker compose run --rm seed-user || echo "::warning::seed-user failed (idempotent; retry next deploy)"
+          # Không phải secret — context cho remote-entry.sh
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_RAG: ${{ needs.detect.outputs.run_rag }}
+          RUN_HR: ${{ needs.detect.outputs.run_hr }}
+          SVCS: ${{ needs.detect.outputs.services }}
+        run: |
+          set -euo pipefail
+          # Serialize secrets an toàn (printf %q) -> stdin (mã hóa qua IAP), KHÔNG lên command-line.
+          # GitHub mask giá trị secret trong log. Cuối payload: exec remote-entry.sh trên VM.
+          PAYLOAD="$(mktemp)"
+          for v in DOCKERHUB_USERNAME DOCKERHUB_TOKEN POSTGRES_PASSWORD NEW_RELIC_LICENSE_KEY \
+                   SEED_ADMIN_PASSWORD LANGFUSE_DB_PASSWORD NEXTAUTH_SECRET LANGFUSE_SALT \
+                   LANGFUSE_ENCRYPTION_KEY LANGFUSE_INIT_USER_PASSWORD LANGFUSE_PUBLIC_KEY \
+                   LANGFUSE_SECRET_KEY LANGFUSE_BASIC_AUTH_HTPASSWD OPENAI_API_KEY JWT_SECRET_KEY \
+                   MCP_INTERNAL_TOKEN HR_INTERNAL_TOKEN GCS_HMAC_KEY GCS_HMAC_SECRET LANGSMITH_API_KEY \
+                   AIROUTER_INTERNAL_TOKEN OPENAI_API_KEY_1 OPENAI_API_KEY_2 OPENAI_API_KEY_3 \
+                   OPENAI_API_KEY_4 OPENAI_API_KEY_5 OPENROUTER_API_KEY_1 OPENROUTER_API_KEY_2 \
+                   OPENROUTER_API_KEY_3 OPENROUTER_API_KEY_4 OPENROUTER_API_KEY_5 \
+                   GH_TOKEN REPO RUN_RAG RUN_HR SVCS; do
+            printf 'export %s=%q\n' "$v" "${!v:-}" >> "$PAYLOAD"
+          done
+          echo 'exec bash /home/TOMAP/DA08-VSF/deploy/scripts/remote-entry.sh' >> "$PAYLOAD"
+          timeout 1500 gcloud compute ssh vsf-rag-demo-vm \
+            --zone=asia-southeast1-a --tunnel-through-iap --quiet \
+            --command="sudo -u TOMAP bash -s" < "$PAYLOAD"
+          rm -f "$PAYLOAD"
