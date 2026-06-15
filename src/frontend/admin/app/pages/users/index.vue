@@ -5,18 +5,22 @@ import { toast } from 'vue-sonner'
 import PageHeader from '~/components/admin-ui/PageHeader.vue'
 import StatusBadge from '~/components/admin-ui/StatusBadge.vue'
 import userService from '~/lib/api/userService'
+import hrService from '~/lib/api/hrService'
 import type { User } from '~/types'
 
-const users = ref<User[]>([])
+const users = ref<(User & { department?: string })[]>([])
 const isLoading = ref(true)
 const total = ref(0)
 
 const fetchUsers = async () => {
   isLoading.value = true
   try {
-    const response = await userService.listUsers()
-    users.value = response.items
-    total.value = response.total
+    const [usersRes, deptMap] = await Promise.all([
+      userService.listUsers(),
+      hrService.getEmployeeDepartments().catch(() => ({} as Record<string, string>)),
+    ])
+    users.value = usersRes.items.map(u => ({ ...u, department: deptMap[u.id] }))
+    total.value = usersRes.total
   } catch (error) {
     toast.error('Failed to fetch users')
   } finally {

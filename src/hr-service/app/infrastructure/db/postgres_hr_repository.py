@@ -40,6 +40,7 @@ from app.domain.repositories.leave_write_repository import (
 from app.infrastructure.db.models import (
     AttendanceRecord,
     BenefitsRecord,
+    DepartmentRecord,
     EmployeeRecord,
     LeaveBalanceRecord,
     LeaveRequestRecord,
@@ -109,12 +110,30 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
         def _query() -> list[str]:
             with self._session() as session:
                 rows = session.execute(
+                    sa.select(DepartmentRecord.name)
+                    .order_by(DepartmentRecord.name)
+                ).scalars().all()
+                if rows:
+                    return list(rows)
+                # Fallback: bảng departments chưa được seed → đọc từ employees
+                rows = session.execute(
                     sa.select(EmployeeRecord.department)
                     .where(EmployeeRecord.department != "")
                     .distinct()
                     .order_by(EmployeeRecord.department)
                 ).scalars().all()
                 return list(rows)
+
+        return await asyncio.to_thread(_query)
+
+    async def get_employee_departments(self) -> list[dict]:
+        def _query() -> list[dict]:
+            with self._session() as session:
+                rows = session.execute(
+                    sa.select(EmployeeRecord.user_id, EmployeeRecord.department)
+                    .where(EmployeeRecord.employment_status == "active")
+                ).all()
+                return [{"user_id": r.user_id, "department": r.department} for r in rows]
 
         return await asyncio.to_thread(_query)
 
@@ -214,7 +233,6 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
             created_at=record.created_at,
             updated_at=record.updated_at,
         )
-
     async def get_leave_balance(self, user_id: str) -> Optional[LeaveBalanceDTO]:
         def _query() -> Optional[LeaveBalanceDTO]:
             with self._session() as session:

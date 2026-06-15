@@ -105,6 +105,11 @@ class HrRepository(ABC):
         Mặc định [] — override trong PostgresHrRepository."""
         return []
 
+    async def get_employee_departments(self) -> list[dict]:
+        """Trả danh sách {user_id, department} cho tất cả nhân viên active.
+        Mặc định [] — override trong PostgresHrRepository."""
+        return []
+
     @abstractmethod
     async def aclose(self) -> None:
         raise NotImplementedError

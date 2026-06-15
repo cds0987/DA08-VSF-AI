@@ -619,3 +619,12 @@ async def list_departments(
 ) -> dict[str, list[str]]:
     departments = await repo.get_distinct_departments()
     return {"departments": departments}
+
+
+@public_router.get("/hr/employees/departments")
+async def list_employee_departments(
+    repo: HrRepository = Depends(get_repo),
+) -> dict[str, list[dict]]:
+    """Trả danh sách {user_id, department} cho admin frontend (User Management page)."""
+    items = await repo.get_employee_departments()
+    return {"items": items}
