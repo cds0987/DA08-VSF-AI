@@ -105,7 +105,7 @@ Các bước script trên VM:
 
 ## 7. Hạ tầng & quy ước môi trường (ghi nhớ vận hành)
 
-- **VM**: `vsf-rag-demo-vm` (34.158.47.236). SSH qua gcloud IAP tunnel, cần `sudo docker`. Project GCP `vsf-rag-chatbot-dev` chạy trên **VM (KHÔNG Cloud Run)**, Cloud SQL postgres-18, GCS bucket.
+- **VM**: `vsf-rag-demo-vm` (35.240.193.13). SSH qua gcloud IAP tunnel, cần `sudo docker`. Project GCP `vsf-rag-chatbot-dev` chạy trên **VM (KHÔNG Cloud Run)**, Cloud SQL postgres-18, GCS bucket.
 - **Container naming trên VM**: prefix `da08-vsf-<service>-1` (ví dụ `da08-vsf-rag-worker-1`).
 - **Env Qdrant nội bộ**: trên VM phải trỏ `qdrant:6333` (nội bộ compose), KHÔNG phải Qdrant cloud — trỏ cloud gây 404 crash. (e2e-cloud trong CI mới dùng Qdrant Cloud thật.)
 - **Đổi cấu hình vận hành** (model LLM, threshold, mode, key...) = sửa `deploy/env/*.env` (hoặc `common.env`) + commit + deploy. KHÔNG sửa code (default trong code chỉ phục vụ local). Git là nguồn duy nhất.

@@ -66,7 +66,7 @@ Luồng làm việc khuyến nghị: code trên feature branch → CI feature br
 - **Registry**: Docker Hub, namespace **`dadlks08`** → image `dadlks08/<service>` (6 service:
   `rag-worker`, `mcp-service`, `hr-service`, `user-service`, `document-service`, `query-service`).
 - **VM**: GCP `vsf-rag-demo-vm` (project `vintravel-chatbot`, zone `asia-southeast1-a`),
-  IP ngoài `34.158.47.236`. App dir: `/home/TOMAP/DA08-VSF`.
+  IP ngoài `35.240.193.13`. App dir: `/home/TOMAP/DA08-VSF`.
 - **Compose**: `docker-compose.yml` — 6 service dùng `image: ${DOCKERHUB_USERNAME}/<svc>:${IMAGE_TAG:-develop}`
   (KHÔNG còn `build:`). Hạ tầng kèm: NATS, Redis, **Qdrant nội bộ** (`qdrant:6333`), nginx.
 - **DB**: Cloud SQL Postgres `app-postgres` — `rag_db` (rag-worker), `hr_db` (hr-service).

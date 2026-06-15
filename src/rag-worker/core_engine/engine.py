@@ -69,6 +69,21 @@ class HaystackRagEngine:
             max(0.0, float(os.getenv("CAPTION_FALLBACK_THRESHOLD", "0.3"))),
         )
 
+    def _embed_text_for(self, caption: str | None, child: str) -> str:
+        """Text đưa vào embedding dense, theo settings.embed_target.
+
+        captioner tắt -> chỉ raw. Bật -> caption_raw (mặc định, caption + raw để
+        giữ literal cho retrieve), caption (cũ), hoặc raw.
+        """
+        if caption is None:
+            return child
+        target = getattr(self.settings, "embed_target", "caption_raw")
+        if target == "caption":
+            return caption
+        if target == "raw":
+            return child
+        return f"{caption}\n\n{child}"
+
     def _span_start(self, trace: object | None, name: str, payload: dict) -> object | None:
         if self._tracer is None:
             return None
@@ -243,25 +258,23 @@ class HaystackRagEngine:
             parent_id = f"{doc.document_id}::p{parent_index}"
             heading_path = [section.section_title] if section.section_title else []
 
-            if self.captioner is not None:
-                caption = captions_by_index[parent_index]
-                units = [
-                    (f"{parent_id}::c{child_index}", caption, caption, child)
-                    for child_index, child in enumerate(section.children)
-                ]
-            else:
-                units = [
-                    (f"{parent_id}::c{child_index}", child, child, child)
-                    for child_index, child in enumerate(section.children)
-                ]
+            caption = (
+                captions_by_index[parent_index] if self.captioner is not None else None
+            )
 
-            for chunk_id, to_embed, caption, bm25_text in units:
+            for child_index, child in enumerate(section.children):
+                chunk_id = f"{parent_id}::c{child_index}"
+                # caption hiển thị: có captioner -> caption AI; không -> chính raw child.
+                display_caption = caption if caption is not None else child
                 chunk_ids.append(chunk_id)
-                embed_texts.append(to_embed)
+                # Vector dense embed THEO embed_target (caption_raw mặc định -> giữ literal).
+                embed_texts.append(self._embed_text_for(caption, child))
                 payloads.append(
                     {
-                        "child_text": caption,
-                        "bm25_text": bm25_text,
+                        # child_text LUÔN = raw child (trước đây nhầm = caption -> chunk
+                        # text bị thay bằng tóm tắt AI). caption giữ riêng ở field "caption".
+                        "child_text": child,
+                        "bm25_text": child,
                         "parent_id": parent_id,
                         "parent_text": section.parent_text,
                         "document_id": doc.document_id,
@@ -270,7 +283,7 @@ class HaystackRagEngine:
                         "page_number": section.section_index,
                         "section_title": section.section_title,
                         "heading_path": heading_path,
-                        "caption": caption,
+                        "caption": display_caption,
                         "source_uri": source_uri,
                         "artifact_uri": artifact_uri,
                     }

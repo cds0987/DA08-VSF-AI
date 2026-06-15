@@ -24,6 +24,12 @@ class HaystackSettings:
     parent_max_words: int = 220
     child_max_words: int = 90
     child_overlap_words: int = 15
+    # Cái gì được EMBED (vector dense) khi captioner bật:
+    #   caption_raw (mặc định) = caption + raw child -> giữ literal (IP/mã/số) cho retrieve
+    #   caption                = chỉ caption (hành vi cũ, dễ trượt câu hỏi tra-cứu-giá-trị)
+    #   raw                    = chỉ raw child (bỏ cầu nối ngữ nghĩa của caption)
+    # child_text (payload) LUÔN = raw child. Xem core_engine/engine.py build units.
+    embed_target: str = "caption_raw"
     langfuse_enabled: bool = False
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
@@ -58,6 +64,14 @@ def _bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+_EMBED_TARGETS = {"caption", "caption_raw", "raw"}
+
+
+def _embed_target(raw: str | None) -> str:
+    value = (raw or "").strip().lower()
+    return value if value in _EMBED_TARGETS else "caption_raw"
+
+
 def load_settings() -> HaystackSettings:
     provider_mode = os.getenv("AI_PROVIDER", "auto").strip().lower()
     has_real_provider = bool(_env("EMBED_API_KEY", "OPENAI_API_KEY") or _env("EMBED_BASE_URL"))
@@ -73,6 +87,7 @@ def load_settings() -> HaystackSettings:
         parent_max_words=_int("SECTION_MAX_WORDS", 220),
         child_max_words=_int("CHILD_MAX_WORDS", 90),
         child_overlap_words=_int("CHILD_OVERLAP_WORDS", 15),
+        embed_target=_embed_target(os.getenv("EMBED_TARGET")),
         langfuse_enabled=_bool("LANGFUSE_ENABLED", False),
         langfuse_public_key=os.getenv("LANGFUSE_PUBLIC_KEY", ""),
         langfuse_secret_key=os.getenv("LANGFUSE_SECRET_KEY", ""),

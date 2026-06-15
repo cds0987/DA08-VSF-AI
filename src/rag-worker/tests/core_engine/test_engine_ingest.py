@@ -52,17 +52,20 @@ class _FallbackCaptioner:
         return type("CaptionResult", (), {"text": text[:10], "used_fallback": True})()
 
 
-@pytest.mark.asyncio
-async def test_engine_keeps_child_windows_when_captioner_enabled() -> None:
+async def _ingest_with(embed_target: str | None):
+    """Ingest 1 doc có captioner; trả (embedder, vectors) để assert embed-text + payload."""
+    embedder = _StubEmbedder()
     vectors = _StubVectors()
+    kwargs = dict(embed_dimension=3, parent_max_words=100, child_max_words=4, child_overlap_words=1)
+    if embed_target is not None:
+        kwargs["embed_target"] = embed_target
     engine = HaystackRagEngine(
-        HaystackSettings(embed_dimension=3, parent_max_words=100, child_max_words=4, child_overlap_words=1),
-        _StubEmbedder(),
+        HaystackSettings(**kwargs),
+        embedder,
         vectors,
         captioner=_StubCaptioner(),
     )
-
-    chunk_count = await engine.ingest(
+    count = await engine.ingest(
         IngestInput(
             document_id="doc-1",
             document_name="Doc",
@@ -70,11 +73,43 @@ async def test_engine_keeps_child_windows_when_captioner_enabled() -> None:
             markdown="# Title\none two three four five six seven eight nine ten",
         )
     )
+    return embedder, vectors, count
 
-    assert chunk_count > 1
-    assert len(vectors.upserted) == chunk_count
-    assert all(record.payload["child_text"].startswith("caption:") for record in vectors.upserted)
-    assert all(record.payload["bm25_text"] != record.payload["child_text"] for record in vectors.upserted)
+
+@pytest.mark.asyncio
+async def test_engine_payload_child_text_is_raw_not_caption() -> None:
+    # child_text PHẢI = raw child (không phải caption AI); caption giữ riêng; bm25 = raw.
+    _embedder, vectors, count = await _ingest_with(None)  # default caption_raw
+    assert count > 1 and len(vectors.upserted) == count
+    for r in vectors.upserted:
+        assert not r.payload["child_text"].startswith("caption:")  # raw, không phải caption
+        assert r.payload["caption"].startswith("caption:")
+        assert r.payload["bm25_text"] == r.payload["child_text"]   # cả hai = raw
+
+
+@pytest.mark.asyncio
+async def test_embed_target_caption_raw_embeds_both() -> None:
+    embedder, vectors, _ = await _ingest_with("caption_raw")
+    embedded = embedder.calls[0]  # list text đưa vào embed
+    for text, record in zip(embedded, vectors.upserted):
+        assert text.startswith("caption:")                 # có cầu nối caption
+        assert record.payload["child_text"] in text        # VÀ giữ raw literal
+
+
+@pytest.mark.asyncio
+async def test_embed_target_caption_only_embeds_caption() -> None:
+    embedder, vectors, _ = await _ingest_with("caption")
+    for text, record in zip(embedder.calls[0], vectors.upserted):
+        assert text.startswith("caption:")
+        assert record.payload["child_text"] not in text    # raw KHÔNG nằm trong embed
+
+
+@pytest.mark.asyncio
+async def test_embed_target_raw_embeds_raw_only() -> None:
+    embedder, vectors, _ = await _ingest_with("raw")
+    for text, record in zip(embedder.calls[0], vectors.upserted):
+        assert not text.startswith("caption:")             # không có caption
+        assert text == record.payload["child_text"]        # embed == raw
 
 
 @pytest.mark.asyncio

@@ -3,7 +3,7 @@
 **Cập nhật:** 2026-06-10. **Branch:** `nguyendev` (push lên `develop` để deploy). **Commit gần nhất:** xem `git log`.
 
 ## 1. Bối cảnh hạ tầng (QUAN TRỌNG — đọc trước)
-- **VM production:** `vsf-rag-demo-vm` (project `vsf-rag-chatbot-dev`, zone `asia-southeast1-a`), IP công khai **34.158.47.236**. App dir trên VM: `/home/tranhuugiahuynb/DA08-VSF`. Container prefix `da08-vsf-*-1`.
+- **VM production:** `vsf-rag-demo-vm` (project `vsf-rag-chatbot-dev`, zone `asia-southeast1-a`), IP công khai **35.240.193.13**. App dir trên VM: `/home/tranhuugiahuynb/DA08-VSF`. Container prefix `da08-vsf-*-1`.
 - **Truy cập VM:** SSH cổng 22 bị chặn. Dùng IAP + chạy dưới root (user thường không có quyền docker/cd):
   ```
   gcloud compute ssh vsf-rag-demo-vm --project vsf-rag-chatbot-dev --zone asia-southeast1-a --tunnel-through-iap --quiet --command "..."
@@ -13,7 +13,7 @@
 - **nginx config nướng vào image** (`nginx/Dockerfile`), KHÔNG bind-mount → sửa tay nginx.conf trên VM vô tác dụng. Đổi nginx phải qua git→CI.
 - **Theo dõi CI (không có gh CLI):** lấy PAT qua `git credential fill`, curl `api.github.com/repos/lehuuhung2001/DA08-VSF/actions/runs`.
 - **Login demo (admin):** `admin@company.com` / `***REDACTED-SEED-ADMIN-PW***` (role admin, có ở `src/user-service/README.md`).
-- **FE:** chat ở `/` (http://34.158.47.236/), admin ở `/admin/`. Cùng origin nginx :80 → không CORS.
+- **FE:** chat ở `/` (http://35.240.193.13/), admin ở `/admin/`. Cùng origin nginx :80 → không CORS.
 
 ## 2. Công cụ test UI tự động (Playwright Python — đã cài)
 - `python tmp-ui-check/ui_check.py` → tự login admin + chat, duyệt mọi trang, upload, hỏi RAG, **bắt console/page/network error + chụp ảnh** vào `tmp-ui-check/*.png`. Chạy với `PYTHONUTF8=1` (Windows console cp1252 vỡ tiếng Việt).

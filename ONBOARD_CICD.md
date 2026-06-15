@@ -62,7 +62,7 @@ Trigger: push `develop` (bỏ qua docs/**, **.md) | `workflow_dispatch`. Concurr
 ## 4. Hạ tầng (ghi nhớ vận hành)
 
 - gcloud máy dev mặc định trỏ SAI project → luôn `gcloud config set project vintravel-chatbot` trước.
-- VM `vsf-rag-demo-vm` (asia-southeast1-a, 34.158.47.236), SSH qua IAP: `gcloud compute ssh vsf-rag-demo-vm --zone asia-southeast1-a --tunnel-through-iap --command "..."`, cần `sudo docker`. Container prefix `da08-vsf-<svc>-1`. APP_DIR=`/home/TOMAP/DA08-VSF`.
+- VM `vsf-rag-demo-vm` (asia-southeast1-a, 35.240.193.13), SSH qua IAP: `gcloud compute ssh vsf-rag-demo-vm --zone asia-southeast1-a --tunnel-through-iap --command "..."`, cần `sudo docker`. Container prefix `da08-vsf-<svc>-1`. APP_DIR=`/home/TOMAP/DA08-VSF`.
 - Cloud SQL `app-postgres` (postgres-18), GCS `vintravel-chatbot-docs-dev`. Qdrant chạy NỘI BỘ compose (`qdrant:6333`) — KHÔNG Qdrant Cloud trên VM.
 - Đổi cấu hình vận hành (model/threshold/mode/key) = sửa `deploy/env/*.env` + commit + deploy. KHÔNG sửa code.
 

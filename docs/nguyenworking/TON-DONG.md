@@ -13,7 +13,7 @@
 | **MCP Service** | 🟢 Production, verified `CallToolRequest` | ~88% | Tool WRITE (T4) + network hardening (fail-closed auth đã xong T6) |
 | **HR Service** | 🟡 READ chạy; WRITE chưa code | ~80% | Verify sync trên VM (T1) + WRITE flow (T4); log JSON + test coverage đã xong |
 
-"Production thật" = chạy ổn định trên VM `vsf-rag-demo-vm` (34.158.47.236), phục vụ `https://vsfchat.cloud`, đủ tin cậy + quan sát được (New Relic/Langfuse) + xử lý dữ liệu thật, không chỉ demo.
+"Production thật" = chạy ổn định trên VM `vsf-rag-demo-vm` (35.240.193.13), phục vụ `https://vsfchat.cloud`, đủ tin cậy + quan sát được (New Relic/Langfuse) + xử lý dữ liệu thật, không chỉ demo.
 
 ### Đã XONG (không lặp ở dưới — ghi để khỏi làm lại)
 - ✅ Cả 4 service (rag/hr/document/user) dùng **Alembic**, baseline idempotent (`7d7c6e3` — hết cần `stamp` tay), mỗi service có `*-migrate` one-shot trong compose.

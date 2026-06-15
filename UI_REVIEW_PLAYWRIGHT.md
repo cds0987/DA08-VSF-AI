@@ -8,7 +8,7 @@
 
 ## 1. Mục đích
 
-- Mở Chromium headless qua **Playwright** vào FE thật trên VM (`http://34.158.47.236`).
+- Mở Chromium headless qua **Playwright** vào FE thật trên VM (`http://35.240.193.13`).
 - Đăng nhập admin + chat, đi qua mọi route, **chụp screenshot full-page** từng trang.
 - Thu thập tự động 3 nhóm lỗi gắn theo trang đang xem:
   - **PAGE ERRORS** — uncaught JS (`pageerror`).
@@ -33,7 +33,7 @@ Output đổ vào `tmp-ui-check/`:
 
 | Biến | Giá trị |
 |---|---|
-| `BASE` | `http://34.158.47.236` (VM production) |
+| `BASE` | `http://35.240.193.13` (VM production) |
 | `EMAIL` / `PASSWORD` | `admin@company.com` / demo admin password |
 | `UPLOAD_FILE` | `src/rag-worker/eval/validation/leave_policy.md` |
 | Viewport | 1366×900, `ignore_https_errors=True`, headless |

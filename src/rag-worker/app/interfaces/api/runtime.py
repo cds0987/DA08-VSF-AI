@@ -667,6 +667,9 @@ def bootstrap_runtime() -> RuntimeState:
         langsmith_project=_env_settings.langsmith_project,
         langsmith_sample_rate=_env_settings.langsmith_sample_rate,
         langsmith_trace_on_error=_env_settings.langsmith_trace_on_error,
+        # embed_target env-driven (EMBED_TARGET) -> áp cho CẢ 2 nhánh bootstrap
+        # (config.yaml dùng to_settings không map field này). Xem [[rag-worker-bootstrap-two-branches]].
+        embed_target=_env_settings.embed_target,
     )
     tracer = build_ingest_tracer(settings)
     if provider.name == "offline":
