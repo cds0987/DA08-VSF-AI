@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     mcp_internal_token: str | None = None
     mcp_circuit_fail_max: int = 5
     mcp_circuit_reset_timeout_seconds: int = 30
-    mcp_tool_cache_ttl_seconds: int = 0  # 0 = off; seconds to cache list_tool_specs() response
+    mcp_tool_cache_ttl_seconds: int = 300  # cache MCP tool list 5 min; 0 = off
     tool_routing_mode: str = "legacy"  # "legacy" = typed methods; "native" = generic call_tool
 
     # hr-service (Leave WRITE REST path): query-service xác thực JWT -> inject user_id ->
@@ -77,8 +77,8 @@ class Settings(BaseSettings):
     )
 
     semantic_cache_ttl_seconds: int = 3600
-    semantic_cache_threshold: float = 0.95
-    rag_score_threshold: float = 0.35  # hạ từ 0.70: quá cao cho text-embedding-3-small
+    semantic_cache_threshold: float = 0.90
+    rag_score_threshold: float = 0.45  # 0.35–0.44 là weak context gây hallucination
     rag_result_limit: int = 3
     rag_top_k: int = 8  # số chunk tối đa mỗi lần gọi rag_search (LangGraph path)
     llm_max_output_tokens: int = 1500

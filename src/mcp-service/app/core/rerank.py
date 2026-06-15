@@ -43,10 +43,9 @@ class LexicalReranker:
     ) -> List[SearchHit]:
         scored: list[tuple[float, SearchHit]] = []
         for hit in hits:
-            score = overlap_score(query, f"{hit.caption}\n{hit.parent_text}")
-            if score >= threshold:
-                hit.score = score
-                scored.append((score, hit))
+            lex = overlap_score(query, f"{hit.caption}\n{hit.parent_text}")
+            if lex >= threshold:
+                scored.append((lex, hit))  # sort by lex, keep original vector score
         scored.sort(key=lambda pair: pair[0], reverse=True)
         return [hit for _, hit in scored[:top_k]]
 

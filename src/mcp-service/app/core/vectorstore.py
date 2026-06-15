@@ -68,7 +68,7 @@ def _bm25_rrf(hits: List[SearchHit], query_text: str, k: int = 60) -> List[Searc
     except ImportError:
         return hits
 
-    corpus = [h.caption.lower().split() for h in hits]
+    corpus = [(h.caption + " " + h.parent_text).lower().split() for h in hits]
     bm25 = BM25Okapi(corpus)
     bm25_scores = bm25.get_scores(q_tokens)  # numpy array, same length as hits
 
@@ -85,21 +85,9 @@ def _bm25_rrf(hits: List[SearchHit], query_text: str, k: int = 60) -> List[Searc
         for i in range(len(hits))
     ]
     order = sorted(range(len(hits)), key=lambda i: rrf_scores[i], reverse=True)
-    return [
-        SearchHit(
-            chunk_id=hits[i].chunk_id,
-            document_id=hits[i].document_id,
-            document_name=hits[i].document_name,
-            caption=hits[i].caption,
-            parent_text=hits[i].parent_text,
-            heading_path=hits[i].heading_path,
-            score=rrf_scores[i],
-            page_number=hits[i].page_number,
-            source_gcs_uri=hits[i].source_gcs_uri,
-            markdown_gcs_uri=hits[i].markdown_gcs_uri,
-        )
-        for i in order
-    ]
+    # Keep original vector scores; RRF scores (~0.015–0.033) would fail a 0.35+
+    # rag_score_threshold in query-service and silently break the RAG path.
+    return [hits[i] for i in order]
 
 
 def _vector_size(info: object) -> int | None:
