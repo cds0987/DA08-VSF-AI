@@ -34,7 +34,11 @@ def settings() -> Settings:
         question_timeout_seconds=30,
         concurrency=1,
         limit=1,
+        limit_is_explicit=True,
         question_offset=0,
+        include_doc_ids=(),
+        exclude_doc_ids=(),
+        questions_per_doc=None,
         dry_run=False,
     )
 
@@ -100,7 +104,11 @@ def test_validate_settings_rejects_placeholder_base_url() -> None:
         question_timeout_seconds=30,
         concurrency=1,
         limit=1,
+        limit_is_explicit=True,
         question_offset=0,
+        include_doc_ids=(),
+        exclude_doc_ids=(),
+        questions_per_doc=None,
         dry_run=False,
     )
     with pytest.raises(SystemExit, match="placeholder"):
@@ -134,7 +142,11 @@ async def test_bootstrap_from_access_token() -> None:
         question_timeout_seconds=30,
         concurrency=1,
         limit=1,
+        limit_is_explicit=True,
         question_offset=0,
+        include_doc_ids=(),
+        exclude_doc_ids=(),
+        questions_per_doc=None,
         dry_run=False,
     )
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:

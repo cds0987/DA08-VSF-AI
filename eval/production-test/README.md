@@ -70,6 +70,23 @@ Normal run:
 python eval/production-test/run.py --dataset dataset_new --limit 30 --concurrency 5
 ```
 
+Select questions by document. This example asks 10 questions from each listed
+document and excludes the Labor Code document:
+
+```powershell
+python eval/production-test/run.py --dataset dataset_new --questions-per-doc 10 --concurrency 2 `
+  --include-doc-id "PCI_Employee_Handbook.pdf" `
+  --include-doc-id "Mau-noi-quy-lao-dong-2024.docx" `
+  --include-doc-id "Employee-Handbook-for-Nonprofits-and-Small-Businesses.pdf" `
+  --include-doc-id "DKT-Employee-Handbook-12.23.pdf" `
+  --include-doc-id "CNHC_Employee_Handbook.pdf" `
+  --exclude-doc-id "Bộ luật lao động 2019.pdf"
+```
+
+Use `--dry-run` with the same selector first to inspect `golden_qa_used.jsonl`
+without calling production. When document selectors are used, the default
+`LIMIT=30` is ignored unless `--limit` is explicitly passed.
+
 Each question has a hard timeout. The default is 30 seconds:
 
 ```powershell

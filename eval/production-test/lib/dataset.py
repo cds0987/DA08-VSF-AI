@@ -21,9 +21,24 @@ GoldenQA = _MODULE.GoldenQA
 load_dataset = _MODULE.load_dataset
 
 
-def load_questions(dataset_root: Path, dataset: str, *, limit: int | None, offset: int) -> tuple[Any, list[GoldenQA]]:
+def load_questions(
+    dataset_root: Path,
+    dataset: str,
+    *,
+    limit: int | None,
+    offset: int,
+    include_doc_ids: tuple[str, ...] = (),
+    exclude_doc_ids: tuple[str, ...] = (),
+    questions_per_doc: int | None = None,
+) -> tuple[Any, list[GoldenQA]]:
     bundle = load_dataset(dataset_root / dataset)
-    candidates = list(bundle.questions[max(0, offset):])
+    candidates = _select_by_doc(
+        bundle.questions,
+        include_doc_ids=include_doc_ids,
+        exclude_doc_ids=exclude_doc_ids,
+        questions_per_doc=questions_per_doc,
+    )
+    candidates = list(candidates[max(0, offset):])
     questions = candidates[:limit] if limit else candidates
     return bundle, questions
 
@@ -44,3 +59,57 @@ def golden_row(qa: GoldenQA) -> dict[str, Any]:
         "question_type": qa.question_type,
         "difficulty": qa.difficulty,
     }
+
+
+def _select_by_doc(
+    questions: list[GoldenQA],
+    *,
+    include_doc_ids: tuple[str, ...],
+    exclude_doc_ids: tuple[str, ...],
+    questions_per_doc: int | None,
+) -> list[GoldenQA]:
+    excluded = {_norm_doc_id(value) for value in exclude_doc_ids}
+    if include_doc_ids:
+        selected: list[GoldenQA] = []
+        seen_ids: set[str] = set()
+        for include in include_doc_ids:
+            include_key = _norm_doc_id(include)
+            matches = [
+                qa for qa in questions
+                if _doc_matches(qa.doc_id, include_key) and _norm_doc_id(qa.doc_id) not in excluded
+            ]
+            if questions_per_doc:
+                matches = matches[:questions_per_doc]
+            for qa in matches:
+                if qa.question_id not in seen_ids:
+                    selected.append(qa)
+                    seen_ids.add(qa.question_id)
+        return selected
+
+    selected = [
+        qa for qa in questions
+        if _norm_doc_id(qa.doc_id) not in excluded
+    ]
+    if not questions_per_doc:
+        return selected
+
+    counts: dict[str, int] = {}
+    limited: list[GoldenQA] = []
+    for qa in selected:
+        key = _norm_doc_id(qa.doc_id)
+        count = counts.get(key, 0)
+        if count >= questions_per_doc:
+            continue
+        limited.append(qa)
+        counts[key] = count + 1
+    return limited
+
+
+def _doc_matches(doc_id: str, expected_normalized: str) -> bool:
+    doc_key = _norm_doc_id(doc_id)
+    doc_name = _norm_doc_id(Path(doc_id).name)
+    return doc_key == expected_normalized or doc_name == expected_normalized
+
+
+def _norm_doc_id(value: str) -> str:
+    return value.replace("\\", "/").strip().lower()
