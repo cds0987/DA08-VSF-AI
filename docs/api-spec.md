@@ -193,7 +193,7 @@ Streaming câu trả lời qua **Server-Sent Events (SSE)** — request-scoped: 
 ```
 Request:
   Authorization: Bearer <token>
-  Body: { "question": "string (max 500 ký tự)", "user_id": "uuid" }
+  Body: { "question": "string (max 500 ký tự)", "user_id": "uuid", "conversation_id": "uuid (optional)", "conversation_title": "string (optional)" }
 
 Response 200 (SSE):
   data: {"token": "Theo "}
@@ -250,28 +250,71 @@ Response 200:  { "id": "uuid", "is_read": true }
 
 ### `GET /conversations`
 
+Trả danh sách các cuộc trò chuyện của user, mới nhất trước.
+
 ```
-Query params: ?limit=20&offset=0
+Query params: ?limit=20&offset=0&include_legacy_messages=true (`limit` từ 1 đến 500)
 Response 200:
   {
+    "conversations": [
+      {
+        "id": "uuid",
+        "title": "string",
+        "created_at": "iso8601",
+        "updated_at": "iso8601"
+      }
+    ],
+    "messages": []
+  }
+```
+
+`messages` là compatibility field tạm thời cho frontend phiên bản cũ và chứa tối đa 500 tin gần nhất của conversation mới nhất. Frontend mới gửi `include_legacy_messages=false` và dùng endpoint detail bên dưới để tránh truy vấn thừa.
+
+### `GET /conversations/{conversation_id}`
+
+```
+Query params: ?limit=500&offset=0 (`limit` tối đa 500; `offset` tính từ tin mới nhất). Response luôn sắp xếp tăng dần theo thời gian và mặc định trả 500 tin gần nhất.
+Response 200:
+  {
+    "id": "uuid",
+    "title": "string",
+    "created_at": "iso8601",
+    "updated_at": "iso8601",
     "messages": [
       {
+        "id": "uuid",
         "role": "user" | "assistant",
         "content": "string",
-        "sources": [{"document_id": "uuid", "document_name": "string", "caption": "string", "heading_path": ["string"], "score": 0.85, "source_gcs_uri": "gs://..."}],
+        "session_id": "string | null",
+        "sources": [],
+        "feedback": 1 | -1 | null,
         "created_at": "iso8601"
       }
     ]
   }
 ```
 
-> `sources` chỉ có ý nghĩa với assistant message. User message hoặc câu trả lời không dùng tài liệu nội bộ có thể trả `sources: []`.
+### `PATCH /conversations/{conversation_id}`
+
+```
+Request Body: { "title": "string (1-120 ký tự)" }
+Response 200: { "message": "Conversation renamed" }
+```
+
+### `DELETE /conversations/{conversation_id}`
+
+```
+Response 200: { "message": "Conversation deleted" }
+```
 
 ### `DELETE /conversations`
 
 ```
-Response 200:  { "message": "Conversation history cleared" }
+Response 200: { "message": "Conversation history cleared" }
 ```
+
+`conversation_id` nhận diện một chat gồm nhiều lượt hỏi. `session_id` nhận diện riêng
+một câu trả lời assistant để feedback và tracing.
 
 ### `POST /feedback`
 

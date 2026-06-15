@@ -1,34 +1,134 @@
-from fastapi import APIRouter, Depends
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.application.ports import AuthenticatedUser
 from app.interfaces.api.dependencies import get_conversation_repo, get_current_user
 from app.interfaces.api.schemas.conversation import (
     ClearConversationResponse,
-    ConversationHistory,
+    ConversationDetail,
+    ConversationList,
     ConversationMessage,
+    ConversationMutationResponse,
+    ConversationSummary,
+    RenameConversationRequest,
 )
 
 router = APIRouter(tags=["conversations"])
 
 
-@router.get("/conversations", response_model=ConversationHistory)
+@router.get("/conversations", response_model=ConversationList)
 async def get_conversations(
-    limit: int = 20,
-    offset: int = 0,
+    limit: int = Query(default=20, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    include_legacy_messages: bool = Query(default=True),
     user: AuthenticatedUser = Depends(get_current_user),
     repo=Depends(get_conversation_repo),
-) -> ConversationHistory:
-    messages = await repo.list_messages(user.id, limit=limit, offset=offset)
-    return ConversationHistory(
+) -> ConversationList:
+    conversations = await repo.list_conversations(user.id, limit=limit, offset=offset)
+    legacy_messages = []
+    if include_legacy_messages and offset == 0 and conversations:
+        legacy_messages = await repo.list_messages(
+            user.id,
+            conversation_id=conversations[0].id,
+            limit=500,
+            offset=0,
+        )
+    return ConversationList(
+        conversations=[
+            ConversationSummary(
+                id=conversation.id,
+                title=conversation.title,
+                created_at=conversation.created_at,
+                updated_at=conversation.updated_at,
+            )
+            for conversation in conversations
+        ],
         messages=[
             ConversationMessage(
+                id=message.id,
                 role=message.role,
                 content=message.content,
                 created_at=message.created_at,
+                session_id=message.session_id,
+                sources=message.sources,
+                feedback=message.feedback,
+            )
+            for message in legacy_messages
+        ],
+    )
+
+
+@router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
+async def get_conversation(
+    conversation_id: UUID,
+    limit: int = Query(default=500, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    user: AuthenticatedUser = Depends(get_current_user),
+    repo=Depends(get_conversation_repo),
+) -> ConversationDetail:
+    conversation = await repo.get_conversation(user.id, str(conversation_id))
+    if conversation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    messages = await repo.list_messages(
+        user.id,
+        conversation_id=str(conversation_id),
+        limit=limit,
+        offset=offset,
+    )
+    return ConversationDetail(
+        id=conversation.id,
+        title=conversation.title,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+        messages=[
+            ConversationMessage(
+                id=message.id,
+                role=message.role,
+                content=message.content,
+                created_at=message.created_at,
+                session_id=message.session_id,
+                sources=message.sources,
+                feedback=message.feedback,
             )
             for message in messages
-        ]
+        ],
     )
+
+
+@router.patch(
+    "/conversations/{conversation_id}",
+    response_model=ConversationMutationResponse,
+)
+async def rename_conversation(
+    conversation_id: UUID,
+    request: RenameConversationRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+    repo=Depends(get_conversation_repo),
+) -> ConversationMutationResponse:
+    renamed = await repo.rename_conversation(
+        user.id,
+        str(conversation_id),
+        request.title.strip(),
+    )
+    if not renamed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    return ConversationMutationResponse(message="Conversation renamed")
+
+
+@router.delete(
+    "/conversations/{conversation_id}",
+    response_model=ConversationMutationResponse,
+)
+async def delete_conversation(
+    conversation_id: UUID,
+    user: AuthenticatedUser = Depends(get_current_user),
+    repo=Depends(get_conversation_repo),
+) -> ConversationMutationResponse:
+    deleted = await repo.delete_conversation(user.id, str(conversation_id))
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    return ConversationMutationResponse(message="Conversation deleted")
 
 
 @router.delete("/conversations", response_model=ClearConversationResponse)

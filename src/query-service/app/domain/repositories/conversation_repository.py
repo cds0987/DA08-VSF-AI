@@ -5,15 +5,31 @@ from app.domain.entities.conversation import ConversationContext
 
 class ConversationRepository(ABC):
     @abstractmethod
-    async def get_context(self, user_id: str, recent_k: int = 5) -> ConversationContext:
+    async def get_context(
+        self,
+        user_id: str,
+        recent_k: int = 5,
+        conversation_id: str | None = None,
+    ) -> ConversationContext:
         """Return the summary plus recent messages for LLM context."""
 
     @abstractmethod
-    async def save_message(self, user_id: str, role: str, content: str) -> None:
+    async def save_message(
+        self,
+        user_id: str,
+        role: str,
+        content: str,
+        conversation_id: str | None = None,
+    ) -> None:
         """Persist one message in the user's conversation history."""
 
     @abstractmethod
-    async def update_summary(self, user_id: str, summary: str) -> None:
+    async def update_summary(
+        self,
+        user_id: str,
+        summary: str,
+        conversation_id: str | None = None,
+    ) -> None:
         """Update the compressed summary for older turns."""
 
     @abstractmethod

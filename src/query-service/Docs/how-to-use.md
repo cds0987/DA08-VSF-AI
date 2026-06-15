@@ -43,7 +43,7 @@ docker compose -f docker-compose.local.yml up -d --build
 
 **Thứ tự khởi động tự động:**
 1. Infra: `postgres`, `redis`, `qdrant`, `nats`, `minio`
-2. Init: `minio-init` (tạo bucket), `rag-migrate` + `hr-migrate` (Alembic)
+2. Init: `minio-init` (tạo bucket), `query-migrate` (versioned SQL), `rag-migrate` + `hr-migrate` (Alembic)
 3. Backend: `user-service`, `document-service`, `hr-service`, `rag-worker`
 4. `mcp-service` (xem lưu ý bên dưới), `query-service`
 5. Frontend: `frontend-chat`, `frontend-admin`, `nginx`
@@ -64,7 +64,7 @@ docker compose -f docker-compose.local.yml logs -f rag-worker
 docker compose -f docker-compose.local.yml logs -f mcp-service
 ```
 
-Khi ổn định: các one-shot (`rag-migrate`, `hr-migrate`, `minio-init`) ở `Exited (0)`, các service khác `Up`.
+Khi ổn định: các one-shot (`query-migrate`, `rag-migrate`, `hr-migrate`, `minio-init`) ở `Exited (0)`, các service khác `Up`. Migration lỗi sẽ chặn query-service khởi động.
 
 ---
 

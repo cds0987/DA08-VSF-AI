@@ -78,11 +78,11 @@ API docs (local): http://localhost:8000/docs | http://localhost:8001/docs | http
 
 Query Service lưu lịch sử hội thoại trong `query_db`:
 
-- `query_svc.conversations`: phiên/cuộc trò chuyện, summary buffer.
+- `query_svc.conversations`: nhiều cuộc trò chuyện cho mỗi user, gồm title và summary buffer riêng.
 - `query_svc.messages`: từng user/assistant message.
 - `query_svc.messages.sources`: JSONB citation metadata, chỉ set cho assistant message có source từ `rag_search`.
 
-`sources` lưu theo từng assistant message để khi reload conversation, frontend vẫn render lại citation/source đúng câu trả lời.
+Frontend gửi `conversation_id` cho mỗi New Chat; context AI và summary chỉ đọc trong conversation đó. `sources` lưu theo từng assistant message để khi reload conversation, frontend vẫn render lại citation/source đúng câu trả lời. Schema được cập nhật bởi one-shot service `query-migrate`; migration lỗi sẽ chặn query-service khởi động và deploy rollback phục hồi snapshot `query_db`.
 
 ---
 
