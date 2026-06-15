@@ -75,7 +75,6 @@ class FakeListUsersUseCase:
                         role=UserRole.USER,
                         is_active=True,
                         account_type="external",
-                        department="HR",
                     ),
                 ],
                 "total": 1,
@@ -107,7 +106,6 @@ def admin_user() -> User:
         role=UserRole.ADMIN,
         is_active=True,
         account_type="internal",
-        department="IT",
     )
 
 
@@ -118,7 +116,6 @@ def normal_user() -> User:
         role=UserRole.USER,
         is_active=True,
         account_type="external",
-        department="HR",
     )
 
 
@@ -211,7 +208,6 @@ def test_me_returns_current_user_shape() -> None:
         "email",
         "role",
         "account_type",
-        "department",
     }
 
 

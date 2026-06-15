@@ -161,3 +161,142 @@ async def test_acl_users_have_different_doc_access():
     # At minimum they should each return a non-None set.
     assert isinstance(hr_docs, (set, list, frozenset))
     assert isinstance(finance_docs, (set, list, frozenset))
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _get_allowed_doc_ids
+# ---------------------------------------------------------------------------
+
+class _FakeProfile:
+    def __init__(self, dept: str, acct: str) -> None:
+        self.department = dept
+        self.account_type = acct
+
+
+class _FakeProfileRepo:
+    def __init__(self, profile=None) -> None:
+        self._profile = profile
+
+    async def get_profile(self, user_id: str):
+        return self._profile
+
+
+class _FakeDocAccessRepo:
+    def __init__(self, doc_ids: list) -> None:
+        self._doc_ids = doc_ids
+        self.calls: list[dict] = []
+
+    async def get_allowed_doc_ids(self, *, user_id, role, department, account_type):
+        self.calls.append({"department": department, "account_type": account_type})
+        return self._doc_ids
+
+
+class _FakeCache:
+    def __init__(self, preloaded=None) -> None:
+        self._preloaded = preloaded
+        self._stored: dict = {}
+
+    async def get(self, user_id: str):
+        if user_id in self._stored:
+            return self._stored[user_id]
+        return self._preloaded
+
+    async def set(self, user_id: str, doc_ids: list) -> None:
+        self._stored[user_id] = doc_ids
+
+
+def _make_user(user_id: str = "u-1", account_type: str = "internal"):
+    from app.application.ports import AuthenticatedUser
+    return AuthenticatedUser(id=user_id, email="u@c.com", role="user",
+                             is_active=True, account_type=account_type)
+
+
+def _make_orch(*, profile_repo=None, doc_repo=None, cache=None):
+    from app.application.use_cases.query.orchestration import QueryOrchestrationUseCase
+    orch = QueryOrchestrationUseCase.__new__(QueryOrchestrationUseCase)
+    orch._user_access_profile_repo = profile_repo
+    orch._document_access_repo = doc_repo or _FakeDocAccessRepo(["doc-1"])
+    orch._access_cache = cache
+    return orch
+
+
+@pytest.mark.asyncio
+async def test_allowed_doc_ids_cache_hit():
+    """Cache hit → doc repo not called, returns cached list."""
+    doc_repo = _FakeDocAccessRepo(["doc-X"])
+    cache = _FakeCache(preloaded=["cached-1", "cached-2"])
+    orch = _make_orch(doc_repo=doc_repo, cache=cache)
+    result = await orch._get_allowed_doc_ids(_make_user())
+    assert result == ["cached-1", "cached-2"]
+    assert doc_repo.calls == []
+
+
+@pytest.mark.asyncio
+async def test_allowed_doc_ids_cache_miss_stores_result():
+    """Cache miss → DB called → result stored in cache for next call."""
+    doc_repo = _FakeDocAccessRepo(["doc-1", "doc-2"])
+    cache = _FakeCache()
+    orch = _make_orch(doc_repo=doc_repo, cache=cache)
+    result = await orch._get_allowed_doc_ids(_make_user("u-1"))
+    assert result == ["doc-1", "doc-2"]
+    assert await cache.get("u-1") == ["doc-1", "doc-2"]
+
+
+@pytest.mark.asyncio
+async def test_allowed_doc_ids_uses_profile_department():
+    """Profile found → doc repo receives profile.department, not JWT value."""
+    profile_repo = _FakeProfileRepo(_FakeProfile(dept="HR", acct="internal"))
+    doc_repo = _FakeDocAccessRepo(["doc-hr"])
+    orch = _make_orch(profile_repo=profile_repo, doc_repo=doc_repo)
+    await orch._get_allowed_doc_ids(_make_user())
+    assert doc_repo.calls[0]["department"] == "HR"
+
+
+@pytest.mark.asyncio
+async def test_allowed_doc_ids_no_profile_empty_department():
+    """No profile in user_access_profile → department falls back to '' (NOT from JWT)."""
+    profile_repo = _FakeProfileRepo(profile=None)
+    doc_repo = _FakeDocAccessRepo([])
+    orch = _make_orch(profile_repo=profile_repo, doc_repo=doc_repo)
+    await orch._get_allowed_doc_ids(_make_user(account_type="external"))
+    assert doc_repo.calls[0]["department"] == ""
+    assert doc_repo.calls[0]["account_type"] == "external"
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: NoOpAccessCache + RedisAccessCache
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_noop_cache_always_miss():
+    from app.infrastructure.cache.redis_access_cache import NoOpAccessCache
+    cache = NoOpAccessCache()
+    assert await cache.get("any") is None
+    await cache.set("any", ["doc-1"])
+    assert await cache.get("any") is None
+
+
+@pytest.mark.asyncio
+async def test_redis_cache_miss_returns_none():
+    from unittest.mock import AsyncMock, MagicMock
+    from app.infrastructure.cache.redis_access_cache import RedisAccessCache
+    mock_module = MagicMock()
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=None)
+    mock_module.from_url.return_value = mock_client
+    cache = RedisAccessCache("redis://fake", redis_module=mock_module)
+    assert await cache.get("u-1") is None
+
+
+@pytest.mark.asyncio
+async def test_redis_cache_hit_returns_list():
+    import json
+    from unittest.mock import AsyncMock, MagicMock
+    from app.infrastructure.cache.redis_access_cache import RedisAccessCache
+    mock_module = MagicMock()
+    mock_client = AsyncMock()
+    doc_ids = ["doc-1", "doc-2"]
+    mock_client.get = AsyncMock(return_value=json.dumps(doc_ids))
+    mock_module.from_url.return_value = mock_client
+    cache = RedisAccessCache("redis://fake", redis_module=mock_module)
+    assert await cache.get("u-1") == doc_ids

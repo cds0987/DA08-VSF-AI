@@ -20,7 +20,6 @@ class AuthenticatedUser:
     id: str
     email: str
     role: str
-    department: str
     is_active: bool = True
     account_type: str = "internal"
 

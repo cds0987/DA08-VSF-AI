@@ -8,7 +8,6 @@ class UserItem(BaseModel):
     email: str
     role: str
     account_type: Literal["internal", "external"]
-    department: str
     is_active: bool
 
 

@@ -206,7 +206,28 @@ CREATE TABLE hr_svc.departments (
     name        VARCHAR(255) NOT NULL,
     created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
+```
 
+**Danh sách phòng ban chuẩn (seed data):**
+
+| Code | Tên tiếng Anh | Mô tả |
+|------|--------------|-------|
+| `Engineering` | Engineering | Kỹ thuật / Dev |
+| `Product` | Product | Sản phẩm |
+| `Design` | Design | UI/UX |
+| `QA` | QA | Kiểm thử |
+| `Data` | Data | Data / AI |
+| `DevOps` | DevOps | Hạ tầng / Cloud |
+| `Sales` | Sales | Kinh doanh |
+| `Marketing` | Marketing | Tiếp thị |
+| `HR` | HR | Nhân sự |
+| `Finance` | Finance | Tài chính |
+| `Legal` | Legal | Pháp lý |
+| `Customer` | Customer | Hỗ trợ khách hàng |
+
+> `department` là chuỗi tự do (VARCHAR 100) — giá trị trên là quy ước, admin có thể thêm phòng ban mới. Dùng đúng `code` khi tạo user và gán quyền tài liệu (`allowed_departments`) để ACL khớp nhau.
+
+```sql
 CREATE TABLE hr_svc.employees (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id           UUID UNIQUE NOT NULL,       -- logical reference to user_db.user_svc.users.id

@@ -79,7 +79,6 @@ class InMemoryUsers:
             role=user.role,
             is_active=is_active,
             account_type=user.account_type,
-            department=user.department,
             hashed_password=user.hashed_password,
             auth_provider=user.auth_provider,
         )
@@ -174,7 +173,6 @@ def make_user(active: bool = True) -> User:
         role=UserRole.USER,
         is_active=active,
         account_type="internal",
-        department="HR",
         hashed_password="hashed:secret",
     )
 
@@ -298,35 +296,8 @@ def test_jwt_payload_includes_account_type() -> None:
     assert payload["user_id"] == user.id
     assert payload["role"] == "user"
     assert payload["account_type"] == "internal"
-    assert payload["department"] == "HR"
+    assert "department" not in payload
     assert payload["jti"] == access_token.jti
-
-
-def test_jwt_payload_includes_empty_department_claim() -> None:
-    from jose import jwt
-
-    from app.infrastructure.security.jwt_token_service import JwtTokenService
-
-    secret = "strong-test-secret"
-    user = User(
-        id=str(uuid4()),
-        email="user@company.com",
-        role=UserRole.USER,
-        is_active=True,
-        account_type="external",
-        department="",
-        hashed_password="hashed:secret",
-    )
-    token_service = JwtTokenService(secret_key=secret)
-
-    access_token = token_service.create_access_token(user)
-    payload = jwt.decode(access_token.token, secret, algorithms=["HS256"])
-
-    assert payload["sub"] == user.id
-    assert payload["role"] == "user"
-    assert payload["account_type"] == "external"
-    assert "department" in payload
-    assert payload["department"] == ""
 
 
 @pytest.mark.asyncio
@@ -367,7 +338,6 @@ async def test_refresh_access_token_preserves_document_acl_claims() -> None:
         role=UserRole.USER,
         is_active=True,
         account_type="external",
-        department="Partner",
         hashed_password="hashed:secret",
     )
     users = InMemoryUsers([user])
@@ -390,7 +360,7 @@ async def test_refresh_access_token_preserves_document_acl_claims() -> None:
     assert payload["sub"] == user.id
     assert payload["role"] == "user"
     assert payload["account_type"] == "external"
-    assert payload["department"] == "Partner"
+    assert "department" not in payload
 
 
 @pytest.mark.asyncio

@@ -18,4 +18,3 @@ class MeResponse(BaseModel):
     email: str
     role: str
     account_type: Literal["internal", "external"]
-    department: str

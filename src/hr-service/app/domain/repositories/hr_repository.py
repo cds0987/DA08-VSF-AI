@@ -70,6 +70,11 @@ class HrRepository(ABC):
         Postgres impl thật) -> KHÔNG @abstractmethod để fake repo trong test không vỡ."""
         return None
 
+    async def get_distinct_departments(self) -> list[str]:
+        """Trả danh sách department duy nhất đang tồn tại trong employees (sorted).
+        Mặc định [] — override trong PostgresHrRepository."""
+        return []
+
     @abstractmethod
     async def aclose(self) -> None:
         raise NotImplementedError

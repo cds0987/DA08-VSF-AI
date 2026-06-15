@@ -21,7 +21,6 @@ class JwtTokenService:
             "user_id": str(user.id),
             "role": _role_value(user.role),
             "account_type": user.account_type,
-            "department": user.department,
             "jti": jti,
             "iat": int(now.timestamp()),
             "exp": expires_at,

@@ -11,6 +11,7 @@ from app.application.query_router import QueryRouter
 from app.application.use_cases.query.orchestration import QueryOrchestrationUseCase
 from app.infrastructure.auth.auth_service import AuthService
 from app.infrastructure.cache.rate_limiter import InMemoryRateLimiter, RedisRateLimiter
+from app.infrastructure.cache.redis_access_cache import NoOpAccessCache, RedisAccessCache
 from app.infrastructure.cache.semantic_cache import InMemorySemanticCache
 from app.infrastructure.config import Settings, get_settings
 from app.infrastructure.db.mock_conversation_repo import InMemoryConversationRepository
@@ -175,6 +176,14 @@ def get_rate_limiter():
 
 
 @lru_cache
+def get_access_cache():
+    settings = get_settings()
+    if settings.redis_url:
+        return RedisAccessCache(settings.redis_url, ttl=300)
+    return NoOpAccessCache()
+
+
+@lru_cache
 def get_openai_client() -> OpenAIStreamingClient:
     return OpenAIStreamingClient(get_settings())
 
@@ -202,6 +211,8 @@ def get_orchestration_use_case() -> QueryOrchestrationUseCase:
         langgraph_agent=get_langgraph_agent(),
         langfuse_tracer=get_observability_tracer(),
         guardrails=get_guardrails(),
+        user_access_profile_repo=get_user_access_profile_repo(),
+        access_cache=get_access_cache(),
     )
 
 
