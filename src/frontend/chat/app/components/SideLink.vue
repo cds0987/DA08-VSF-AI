@@ -51,7 +51,7 @@ const active = computed(() => {
     <TooltipContent
       v-if="isCollapsed"
       side="right"
-      class="bg-white/90 backdrop-blur-md border-slate-200 text-slate-900 shadow-md"
+      class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
     >
       {{ item.label }}
     </TooltipContent>
