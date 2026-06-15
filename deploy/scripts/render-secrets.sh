@@ -21,6 +21,10 @@ done
 : "${SEED_ADMIN_PASSWORD:=}"   # optional: chỉ dùng khi re-seed admin lần đầu
 : "${LANGSMITH_API_KEY:=}"     # optional: thiếu -> langsmith backend tự bỏ (không crash)
 : "${LANGFUSE_BASIC_AUTH_HTPASSWD:=}"  # optional: rỗng -> dashboard Langfuse KHÓA (fail-closed)
+# AI Router: key pool + internal token. Tất cả OPTIONAL -> thiếu thì ai-router auto-discover
+# ít key hơn / tắt auth, KHÔNG chặn deploy. ai-router KHÔNG ai depends_on nên rỗng cũng an toàn.
+: "${AIROUTER_INTERNAL_TOKEN:=}"
+for n in 1 2 3 4 5; do eval ": \"\${OPENAI_API_KEY_$n:=}\""; eval ": \"\${OPENROUTER_API_KEY_$n:=}\""; done
 
 umask 077
 
@@ -54,6 +58,17 @@ S3_SECRET_ACCESS_KEY=${GCS_HMAC_SECRET}
 LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
 LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
 LANGSMITH_API_KEY=${LANGSMITH_API_KEY}
+AIROUTER_INTERNAL_TOKEN=${AIROUTER_INTERNAL_TOKEN}
+OPENAI_API_KEY_1=${OPENAI_API_KEY_1}
+OPENAI_API_KEY_2=${OPENAI_API_KEY_2}
+OPENAI_API_KEY_3=${OPENAI_API_KEY_3}
+OPENAI_API_KEY_4=${OPENAI_API_KEY_4}
+OPENAI_API_KEY_5=${OPENAI_API_KEY_5}
+OPENROUTER_API_KEY_1=${OPENROUTER_API_KEY_1}
+OPENROUTER_API_KEY_2=${OPENROUTER_API_KEY_2}
+OPENROUTER_API_KEY_3=${OPENROUTER_API_KEY_3}
+OPENROUTER_API_KEY_4=${OPENROUTER_API_KEY_4}
+OPENROUTER_API_KEY_5=${OPENROUTER_API_KEY_5}
 EOF
 
 chmod 600 "$APP_DIR/.env" "$APP_DIR/deploy/env/secret.env"

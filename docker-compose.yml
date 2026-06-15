@@ -297,6 +297,30 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  # ───────────── AI Router (gateway OpenAI-compatible, stateless) ─────────────
+  # Đứng GIỮA AI-logic service và provider (OpenAI/OpenRouter). Service trỏ base_url
+  # http://ai-router:8010/v1 + dùng OpenAI SDK như cũ (MOSA, zero dependency).
+  # ⚠ AN TOÀN: KHÔNG service nào depends_on ai-router -> ai-router chết KHÔNG kéo sập app.
+  # Key auto-discover từ secret.env (OPENAI_API_KEY_{n} / OPENROUTER_API_KEY_{n}); state ở redis.
+  ai-router:
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/ai-router:${IMAGE_TAG:-develop}
+    ports:
+      - "127.0.0.1:8010:8010"   # /admin/quota qua SSH tunnel; KHÔNG ra Internet
+    env_file:
+      - ./deploy/env/secret.env
+    environment:
+      AIROUTER_REDIS_URL: redis://redis:6379/1
+    depends_on:
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+
   # Migration one-shot: alembic upgrade head lên app-postgres TRƯỚC khi rag-worker chạy.
   # Tách riêng (không nhét vào rag-worker startup) để khi scale nhiều worker không
   # chạy đua DDL trên cùng DB, và migration lỗi -> fail-fast thay vì crash-loop.

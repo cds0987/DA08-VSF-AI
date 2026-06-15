@@ -7,7 +7,7 @@
 set -euo pipefail
 cd "${APP_DIR:?thiếu APP_DIR}"
 
-ROLLBACK_SVCS="rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin nginx"
+ROLLBACK_SVCS="rag-worker mcp-service hr-service user-service document-service query-service ai-router frontend-chat frontend-admin nginx"
 QUERY_DB_BACKUP=/tmp/query_db_pre_deploy.dump
 DEPLOY_OK=0; ROLLBACK_DONE=0; QUERY_DB_BACKUP_READY=0
 restore_query_db() {
@@ -65,7 +65,7 @@ echo "  $(wc -l < /tmp/rollback_images.txt) service có điểm rollback"
 
 echo "==> 3) Login Docker Hub + PULL image (KHÔNG build trên VM)"
 echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
-docker compose pull qdrant langfuse-db langfuse nats-bootstrap rag-worker mcp-service hr-service user-service document-service query-migrate query-service frontend-chat frontend-admin nginx
+docker compose pull qdrant langfuse-db langfuse nats-bootstrap rag-worker mcp-service hr-service user-service document-service query-migrate query-service ai-router frontend-chat frontend-admin nginx
 
 echo "==> 3b) Dừng query-service và snapshot query_db ngay trước migration"
 docker compose stop query-service >/dev/null 2>&1 || true
@@ -75,7 +75,7 @@ docker exec da08-vsf-app-postgres-1 pg_dump -U postgres -d query_db -Fc > "$QUER
 QUERY_DB_BACKUP_READY=1
 
 echo "==> 4) Up image đã pull (query/rag/hr migrations chạy one-shot và fail-fast)"
-docker compose up -d --no-build qdrant langfuse-db langfuse nats-bootstrap query-migrate rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin \
+docker compose up -d --no-build qdrant langfuse-db langfuse nats-bootstrap query-migrate rag-worker mcp-service hr-service user-service document-service query-service ai-router frontend-chat frontend-admin \
   || { echo "::error::compose up FAILED — dump migration + nats-bootstrap logs:"; \
        docker logs da08-vsf-hr-migrate-1 2>&1 | tail -80 || true; \
        docker logs da08-vsf-user-migrate-1 2>&1 | tail -40 || true; \
