@@ -47,6 +47,7 @@ export interface Citation {
 export interface QueryRequest {
   question: string
   user_id: string
+  conversation_id?: string
   trace_session?: string
   conversation_title?: string
 }
@@ -164,13 +165,27 @@ export interface Conversation {
 }
 
 export interface ConversationHistoryMessage {
+  id: string
   role: 'user' | 'assistant'
   content: string
   created_at: string
+  session_id?: string | null
   sources?: QuerySource[]
+  feedback?: 1 | -1 | null
 }
 
-export interface ConversationHistoryResponse {
+export interface ConversationSummaryResponse {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ConversationListResponse {
+  conversations: ConversationSummaryResponse[]
+}
+
+export interface ConversationDetailResponse extends ConversationSummaryResponse {
   messages: ConversationHistoryMessage[]
 }
 

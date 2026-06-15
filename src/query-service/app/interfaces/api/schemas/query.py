@@ -1,4 +1,5 @@
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -14,8 +15,9 @@ class Source(BaseModel):
 class QueryRequest(BaseModel):
     question: str = Field(min_length=1, max_length=500)
     user_id: str
+    conversation_id: UUID | None = None
     trace_session: str | None = None
-    conversation_title: str | None = None
+    conversation_title: str | None = Field(default=None, max_length=120)
 
 
 class QueryResponse(BaseModel):

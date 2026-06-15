@@ -131,7 +131,12 @@ async def test_query_no_reasoning_leak(hr_client: AsyncClient):
 async def test_query_persists_to_conversation(hr_client: AsyncClient):
     """After a query the conversation history must have at least 1 message."""
     await _query(hr_client, "Onboarding có những bước nào?", HR_USER_ID)
+    history = await hr_client.get("/conversations")
+    assert history.status_code == 200
+    conversations = history.json()["conversations"]
+    assert len(conversations) == 1
 
-    hist = await hr_client.get("/conversations")
-    assert hist.status_code == 200
-    assert len(hist.json()["messages"]) >= 1
+    conversation_id = conversations[0]["id"]
+    detail = await hr_client.get(f"/conversations/{conversation_id}")
+    assert detail.status_code == 200
+    assert len(detail.json()["messages"]) >= 1

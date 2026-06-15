@@ -1,6 +1,7 @@
 import type {
   ApiError,
-  ConversationHistoryResponse,
+  ConversationDetailResponse,
+  ConversationListResponse,
   NotificationItem,
   NotificationList,
 } from '~/types'
@@ -76,11 +77,21 @@ export function useQueryService() {
     })
   }
 
-  async function fetchConversations(limit = 500, offset = 0) {
-    return await $fetch<ConversationHistoryResponse>(`${baseUrl}/conversations`, {
+  async function fetchConversations(limit = 100, offset = 0) {
+    return await $fetch<ConversationListResponse>(`${baseUrl}/conversations`, {
       headers: getQueryServiceAuthHeaders(),
-      query: { limit, offset },
+      query: { limit, offset, include_legacy_messages: false },
     })
+  }
+
+  async function fetchConversation(id: string, limit = 500, offset = 0) {
+    return await $fetch<ConversationDetailResponse>(
+      `${baseUrl}/conversations/${encodeURIComponent(id)}`,
+      {
+        headers: getQueryServiceAuthHeaders(),
+        query: { limit, offset },
+      },
+    )
   }
 
   async function clearConversations() {
@@ -90,12 +101,25 @@ export function useQueryService() {
     })
   }
 
+  async function deleteConversation(id: string) {
+    return await $fetch<{ message: string }>(
+      `${baseUrl}/conversations/${encodeURIComponent(id)}`,
+      {
+        method: 'DELETE',
+        headers: getQueryServiceAuthHeaders(),
+      },
+    )
+  }
+
   async function renameConversation(id: string, newTitle: string) {
-    return await $fetch<{ message: string }>(`${baseUrl}/conversations/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      headers: getQueryServiceAuthHeaders(),
-      body: { title: newTitle },
-    })
+    return await $fetch<{ message: string }>(
+      `${baseUrl}/conversations/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        headers: getQueryServiceAuthHeaders(),
+        body: { title: newTitle },
+      },
+    )
   }
 
   return {
@@ -105,7 +129,9 @@ export function useQueryService() {
     markNotificationRead,
     submitFeedback,
     fetchConversations,
+    fetchConversation,
     clearConversations,
+    deleteConversation,
     renameConversation,
   }
 }

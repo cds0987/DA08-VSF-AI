@@ -99,7 +99,7 @@ async function handleDelete() {
   if (!deleteTargetId.value) return
   
   try {
-    chat.deleteConversation(deleteTargetId.value)
+    await chat.deleteConversation(deleteTargetId.value)
     toast.success('Đã xóa cuộc trò chuyện.')
     closeDeleteModal()
   } catch {
