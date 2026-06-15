@@ -35,7 +35,6 @@ async def create_user(
             password=request.password,
             role=request.role,
             account_type=request.account_type,
-            department=request.department,
         )
     except PermissionDeniedError as exc:
         raise HTTPException(

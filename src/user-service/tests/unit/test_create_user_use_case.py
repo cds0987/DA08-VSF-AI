@@ -9,7 +9,7 @@ class InMemoryEventEmitter:
     def __init__(self):
         self.emitted = []
 
-    async def emit(self, subject: str, user: User, department: str | None = None) -> None:
+    async def emit(self, subject: str, user: User) -> None:
         self.emitted.append((subject, user))
 
 def user(role: UserRole = UserRole.USER, active: bool = True, email: str | None = None) -> User:
@@ -36,17 +36,16 @@ async def test_admin_can_create_user() -> None:
         password="password123",
         role="user",
         account_type="internal",
-        department="Engineering"
     )
 
     assert created.email == "new@company.com"
     assert created.hashed_password == "hashed:password123"
     assert created.role == "user"
     assert created.is_active is True
-    
+
     # Check repository
     assert await repo.get_by_email("new@company.com") == created
-    
+
     # Check event
     assert len(emitter.emitted) == 1
     assert emitter.emitted[0][0] == "user.created"
@@ -66,19 +65,18 @@ async def test_non_admin_cannot_create_user() -> None:
             password="password123",
             role="user",
             account_type="internal",
-            department="Engineering"
         )
 
 @pytest.mark.asyncio
 async def test_create_user_with_duplicate_email_raises_conflict() -> None:
     from sqlalchemy.exc import IntegrityError
-    
+
     class FakeDuplicateRepo:
         async def create(self, user: User) -> User:
             raise IntegrityError("duplicate key value violates unique constraint", params={}, orig=Exception())
         async def get_by_email(self, email: str) -> User | None:
             return None
-            
+
     admin = user(UserRole.ADMIN)
     repo = FakeDuplicateRepo()
     hasher = FakePasswordHasher()
@@ -91,7 +89,6 @@ async def test_create_user_with_duplicate_email_raises_conflict() -> None:
             password="password123",
             role="user",
             account_type="internal",
-            department="Engineering"
         )
 
 def test_role_value_helper():
@@ -121,7 +118,6 @@ async def test_repo_fail_does_not_emit_event() -> None:
             password="pass1234",
             role="user",
             account_type="internal",
-            department="Engineering",
         )
 
     assert emitter.emitted == [], "event không được emit khi repo fail"
@@ -133,7 +129,6 @@ def test_event_payload_does_not_contain_password() -> None:
     from app.infrastructure.messaging.user_event_emitter import user_to_payload
     from app.domain.entities.user import User as UserEntity
 
-    # Tạo user với hashed_password có giá trị rõ ràng để phát hiện nếu bị lọt
     u = UserEntity(
         id="test-id",
         email="emp@company.com",
