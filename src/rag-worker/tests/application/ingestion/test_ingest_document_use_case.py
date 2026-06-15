@@ -670,6 +670,40 @@ def test_enqueue_skips_completed_document_redelivery() -> None:
     asyncio.run(scenario())
 
 
+def test_enqueue_force_reingests_completed_document() -> None:
+    # force=True (re-ingest sau đổi EMBED_TARGET): KHÔNG skip doc COMPLETED, tạo job PENDING.
+    async def scenario() -> None:
+        documents = InMemoryDocumentRepository()
+        use_case = IngestDocumentUseCase(
+            StubEngine(), documents, documents, StubParser(), StubArtifactStore()
+        )
+        await documents.create(
+            Document(
+                id="doc-done",
+                name="Done",
+                file_type="md",
+                s3_key="s3://bucket/raw/doc-done/Done.md",
+                status=DocumentStatus.COMPLETED,
+                created_at=datetime.now(UTC),
+                chunk_count=4,
+            )
+        )
+
+        job = await use_case.enqueue(
+            document_id="doc-done",
+            document_name="Done",
+            file_type="md",
+            markdown=None,
+            source_uri="s3://bucket/raw/doc-done/Done.md",
+            force=True,
+        )
+
+        assert job.status is IngestJobStatus.PENDING
+        assert documents._jobs != {}
+
+    asyncio.run(scenario())
+
+
 def test_enqueue_cleans_up_document_when_job_enqueue_fails() -> None:
     async def scenario() -> None:
         documents = EnqueueFailingDocuments()

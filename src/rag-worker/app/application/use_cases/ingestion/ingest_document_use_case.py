@@ -145,6 +145,7 @@ class IngestDocumentUseCase:
         artifact_uri: str | None = None,
         correlation_id: str | None = None,
         reconcile_attempt: int = 0,
+        force: bool = False,
     ) -> IngestJob:
         if not markdown and not source_uri:
             raise ValueError("ingest requires either markdown or source_uri")
@@ -166,7 +167,13 @@ class IngestDocumentUseCase:
             )
             return existing
         existing_document = await self._documents.get_by_id(document_id)
-        if existing_document is not None and existing_document.status is DocumentStatus.COMPLETED:
+        # force=True (re-ingest, vd đổi EMBED_TARGET): bỏ qua skip-completed để embed lại.
+        # create() idempotent + worker tự set PROCESSING->COMPLETED khi claim job mới.
+        if (
+            existing_document is not None
+            and existing_document.status is DocumentStatus.COMPLETED
+            and not force
+        ):
             log_event(
                 self._logger,
                 logging.INFO,
