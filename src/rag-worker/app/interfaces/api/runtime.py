@@ -6,7 +6,7 @@ import logging
 import os
 import re
 from contextlib import asynccontextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -645,12 +645,10 @@ def bootstrap_runtime() -> RuntimeState:
                 else settings.embed_dimension
             ),
         )
-        settings = HaystackSettings(
-            embed_dimension=vector_config.dimension,
-            parent_max_words=settings.parent_max_words,
-            child_max_words=settings.child_max_words,
-            child_overlap_words=settings.child_overlap_words,
-        )
+        # CHỈ override embed_dimension; giữ NGUYÊN mọi field khác — đặc biệt là
+        # langsmith_*/langfuse_* (nếu dựng HaystackSettings mới chỉ với vài field thì
+        # các field observability rơi về default -> tracer bị tắt âm thầm dù env bật).
+        settings = replace(settings, embed_dimension=vector_config.dimension)
         validate_ai_config(ai_settings, settings)
         validate_vector_config(vector_config)
 

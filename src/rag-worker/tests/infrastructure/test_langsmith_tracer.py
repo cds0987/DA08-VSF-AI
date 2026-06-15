@@ -100,6 +100,25 @@ async def test_langsmith_tracer_error_promotes_when_unsampled(fake_runtree) -> N
     assert "end:doc-ingest:OK" in client.events  # finish ghi status trong outputs
 
 
+def test_dataclasses_replace_preserves_langsmith_config() -> None:
+    """Regression: runtime override embed_dimension qua replace() PHẢI giữ langsmith_*.
+
+    Bug cũ: runtime dựng HaystackSettings mới chỉ với vài field -> langsmith_* rơi về
+    default (enabled=False) -> tracer tắt âm thầm dù env bật.
+    """
+    from dataclasses import replace
+
+    from core_engine.config import HaystackSettings
+
+    s = HaystackSettings(langsmith_enabled=True, langsmith_api_key="lsv2_x", langsmith_project="vsf-rag-ingest")
+    rebuilt = replace(s, embed_dimension=1536)
+
+    assert rebuilt.embed_dimension == 1536
+    assert rebuilt.langsmith_enabled is True
+    assert rebuilt.langsmith_api_key == "lsv2_x"
+    assert rebuilt.langsmith_project == "vsf-rag-ingest"
+
+
 def test_build_langsmith_tracer_none_when_disabled() -> None:
     settings = type("S", (), {"langsmith_enabled": False, "langsmith_api_key": "k"})()
     assert build_langsmith_ingest_tracer(settings) is None
