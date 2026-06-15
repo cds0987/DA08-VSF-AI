@@ -76,11 +76,29 @@ gcloud services enable \
   billingbudgets.googleapis.com \
   --project="$PROJECT_ID"
 
-echo "==> 4) GUARDRAIL — Firewall tối thiểu (chỉ 22/80/443; KHÔNG mở tùm lum)"
-gcloud compute firewall-rules create allow-web-ssh \
+echo "==> 4) GUARDRAIL — Firewall: web 80/443 ra internet; SSH CHỈ qua IAP (admin-only)."
+# SSH KHÔNG mở ra 0.0.0.0/0 (lockdown 2026-06). Port 22 chỉ nhận từ dải IAP của Google
+# (35.235.240.0/20) -> chỉ ai có IAM (osAdminLogin + iap.tunnelResourceAccessor) vào được,
+# có audit, không key dùng chung. Web (Cloudflare origin) vẫn mở 80/443.
+gcloud compute firewall-rules create allow-web \
   --project="$PROJECT_ID" --network=default --direction=INGRESS --action=ALLOW \
-  --rules=tcp:22,tcp:80,tcp:443 --source-ranges=0.0.0.0/0 2>/dev/null \
-  || echo "   firewall allow-web-ssh đã có — bỏ qua."
+  --rules=tcp:80,tcp:443 --source-ranges=0.0.0.0/0 2>/dev/null \
+  || echo "   firewall allow-web đã có — bỏ qua."
+gcloud compute firewall-rules create allow-ssh-iap \
+  --project="$PROJECT_ID" --network=default --direction=INGRESS --action=ALLOW \
+  --rules=tcp:22 --source-ranges=35.235.240.0/20 2>/dev/null \
+  || echo "   firewall allow-ssh-iap đã có — bỏ qua."
+# Đảm bảo KHÔNG còn rule SSH mở ra internet (xóa các rule cũ nếu lỡ tồn tại).
+for legacy in allow-web-ssh default-allow-ssh; do
+  if gcloud compute firewall-rules describe "$legacy" --project="$PROJECT_ID" >/dev/null 2>&1; then
+    echo "   ⚠ Phát hiện rule SSH-internet cũ '$legacy' — XÓA (lockdown)."
+    gcloud compute firewall-rules delete "$legacy" --project="$PROJECT_ID" --quiet || true
+  fi
+done
+
+echo "==> 4b) GUARDRAIL — Static IP (tránh đổi IP khi restart làm gãy Cloudflare/CI)"
+gcloud compute addresses create vsf-rag-vm-ip --project="$PROJECT_ID" --region="$REGION" 2>/dev/null \
+  || echo "   static IP vsf-rag-vm-ip đã có — bỏ qua."
 
 echo "==> 5) Tạo VM $VM_NAME ($VM_MACHINE, ${VM_DISK_GB}GB, KHÔNG GPU)"
 SPOT_FLAGS=()
@@ -96,8 +114,16 @@ else
     --image-family=ubuntu-2204-lts --image-project=ubuntu-os-cloud \
     --boot-disk-size="${VM_DISK_GB}GB" --boot-disk-type="$VM_DISK_TYPE" \
     --no-restart-on-failure \
+    --address=vsf-rag-vm-ip \
+    --metadata=enable-oslogin=TRUE \
     "${SPOT_FLAGS[@]}"
 fi
+
+# Lockdown cho VM ĐÃ TỒN TẠI (idempotent): ép OS Login bật (vô hiệu key metadata, bắt
+# buộc qua IAM). Truy cập SSH = admin có osAdminLogin + iap.tunnelResourceAccessor, qua
+# `gcloud compute ssh --tunnel-through-iap`. KHÔNG dùng ssh-keys metadata dùng chung.
+gcloud compute instances add-metadata "$VM_NAME" --project="$PROJECT_ID" --zone="$ZONE" \
+  --metadata=enable-oslogin=TRUE >/dev/null 2>&1 || true
 
 echo "==> 6) GUARDRAIL — Lịch tự bật/tắt VM (T2-T6, 08:00-20:00 $SCHEDULE_TZ)"
 if gcloud compute resource-policies describe vm-dev-schedule --region="$REGION" >/dev/null 2>&1; then

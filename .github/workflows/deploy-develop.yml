@@ -202,6 +202,21 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+  # ─────────────────── Phase 1c: MIGRATION LINT ───────────────────────
+  # Chặn lỗi chuỗi Alembic TRƯỚC khi deploy: revision TRÙNG / down_revision mồ côi
+  # ("Can't locate revision") / nhiều head / cycle. Thuần tĩnh (parse file), không
+  # cần DB. Chạy MỌI lần (lỗi này từng làm sập prod 2026-06).
+  migration-lint:
+    needs: detect
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Lint Alembic migration chains (all services)
+        run: python infra/ci/migration_lint.py src
+
   # ─────────────────── Phase 1b: CONTRACT PARITY ──────────────────────
   # Guard CONTRACT giữa rag-worker (producer) và mcp-service (consumer): cùng
   # embedding model/dimension/collection. Lệch -> mcp search fail-closed. Không
@@ -287,7 +302,7 @@ jobs:
   # ───────────────────────── Phase GATE ─────────────────────────
   # Fail nếu BẤT KỲ test nào failure/cancelled. Job skipped (path không khớp) = pass.
   gate:
-    needs: [unit, frontend-test, contract, e2e]
+    needs: [unit, frontend-test, contract, e2e, migration-lint]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -297,6 +312,7 @@ jobs:
             "unit=${{ needs.unit.result }}" \
             "frontend-test=${{ needs.frontend-test.result }}" \
             "contract=${{ needs.contract.result }}" \
+            "migration-lint=${{ needs.migration-lint.result }}" \
             "e2e=${{ needs.e2e.result }}"; do
             name="${nr%%=*}"; res="${nr#*=}"
             echo "  $name = $res"
