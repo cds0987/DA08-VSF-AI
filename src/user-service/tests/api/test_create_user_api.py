@@ -7,7 +7,7 @@ from app.application.exceptions import ConflictError, PermissionDeniedError
 from uuid import uuid4
 
 class FakeCreateUserUseCase:
-    async def execute(self, actor, email, password, role, account_type, department):
+    async def execute(self, actor, email, password, role, account_type):
         if email == "conflict@company.com":
             raise ConflictError("Conflict")
         return User(
@@ -46,7 +46,6 @@ def test_admin_can_create_user():
         "password": "password123",
         "role": "user",
         "account_type": "internal",
-        "department": "Engineering"
     })
     
     assert response.status_code == 201
@@ -66,7 +65,6 @@ def test_create_user_conflict():
         "password": "password123",
         "role": "user",
         "account_type": "internal",
-        "department": "Engineering"
     })
     
     assert response.status_code == 409
@@ -96,7 +94,6 @@ def test_non_admin_cannot_create_user():
         "password": "password123",
         "role": "user",
         "account_type": "internal",
-        "department": "Engineering"
     })
     
     assert response.status_code == 403

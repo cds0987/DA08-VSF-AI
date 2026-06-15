@@ -16,7 +16,6 @@ class CreateUserRequest(BaseModel):
     password: str = Field(min_length=8)
     role: Literal["user", "admin"] = "user"
     account_type: Literal["internal", "external"] = "internal"
-    department: str
 
 
 class UserList(BaseModel):

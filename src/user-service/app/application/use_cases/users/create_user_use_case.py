@@ -28,7 +28,6 @@ class CreateUserUseCase:
         password: str,
         role: str,
         account_type: str,
-        department: str,
     ) -> User:
         # 1. Check if actor is admin
         if _role_value(actor.role) != "admin":
@@ -40,7 +39,7 @@ class CreateUserUseCase:
         # 3. Hash password
         hashed_password = self.password_hasher.hash(password)
 
-        # 4. Create User entity (department không lưu vào User — chỉ đưa vào NATS event)
+        # 4. Create User entity
         new_user = User(
             id=str(uuid4()),
             email=normalized_email,
@@ -59,9 +58,9 @@ class CreateUserUseCase:
                 raise ConflictError(f"User with email {normalized_email} already exists") from exc
             raise exc
 
-        # 6. Emit event — pass department separately so HR Service can set it on the employee record
+        # 6. Emit event (department không có trong payload — HR Service tự quản lý)
         if self.event_emitter:
-            await self.event_emitter.emit("user.created", created_user, department=department)
+            await self.event_emitter.emit("user.created", created_user)
 
         return created_user
 
