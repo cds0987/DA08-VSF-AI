@@ -179,14 +179,14 @@ async function clearHistory() {
           class="absolute right-2 top-9 w-36 bg-white dark:bg-popover rounded-lg shadow-xl border border-slate-200 dark:border-border py-1.5 z-[100] animate-in fade-in zoom-in-95 duration-100"
         >
           <button
-            class="flex items-center w-full px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-popover-foreground hover:bg-slate-100 dark:hover:bg-accent transition-colors gap-2"
+            class="flex items-center w-full px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-popover-foreground hover:bg-slate-100 dark:hover:bg-accent cursor-pointer transition-colors gap-2"
             @click.stop="openRenameModal(item.id, item.title)"
           >
             <Edit2 class="h-3.5 w-3.5 text-slate-400 dark:text-muted-foreground" />
             Đổi tên
           </button>
           <button
-            class="flex items-center w-full px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors gap-2"
+            class="flex items-center w-full px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 cursor-pointer transition-colors gap-2"
             @click.stop="confirmDelete(item.id)"
           >
             <Trash2 class="h-3.5 w-3.5 text-red-400" />
