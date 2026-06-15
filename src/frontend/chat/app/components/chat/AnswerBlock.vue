@@ -119,7 +119,7 @@ function selectSource(citation: Citation) {
       <Tooltip>
         <TooltipTrigger as-child>
           <button
-            class="rounded-md p-1.5 text-slate-500 transition-all duration-200 hover:bg-slate-100 hover:text-slate-900 dark:text-muted-foreground dark:hover:bg-white/5 dark:hover:text-foreground"
+            class="rounded-md p-1.5 text-slate-500 cursor-pointer transition-all duration-200 hover:bg-slate-100 hover:text-slate-900 dark:text-muted-foreground dark:hover:bg-white/5 dark:hover:text-foreground"
             @click="copyToClipboard"
           >
             <Check v-if="copied" class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
@@ -136,7 +136,7 @@ function selectSource(citation: Citation) {
           <button
             :disabled="!data.sessionId"
             :class="cn(
-              'rounded-md p-1.5 text-slate-500 transition-all duration-200 hover:bg-slate-100 hover:text-slate-900 dark:text-muted-foreground dark:hover:bg-white/5 dark:hover:text-foreground disabled:opacity-40',
+              'rounded-md p-1.5 text-slate-500 cursor-pointer transition-all duration-200 hover:bg-slate-100 hover:text-slate-900 dark:text-muted-foreground dark:hover:bg-white/5 dark:hover:text-foreground disabled:opacity-40',
               data.feedback === 1 && 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400',
             )"
             @click="emit('feedback', data.id, 1)"
@@ -154,7 +154,7 @@ function selectSource(citation: Citation) {
           <button
             :disabled="!data.sessionId"
             :class="cn(
-              'rounded-md p-1.5 text-slate-500 transition-all duration-200 hover:bg-slate-100 hover:text-slate-900 dark:text-muted-foreground dark:hover:bg-white/5 dark:hover:text-foreground disabled:opacity-40',
+              'rounded-md p-1.5 text-slate-500 cursor-pointer transition-all duration-200 hover:bg-slate-100 hover:text-slate-900 dark:text-muted-foreground dark:hover:bg-white/5 dark:hover:text-foreground disabled:opacity-40',
               data.feedback === -1 && 'bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400',
             )"
             @click="emit('feedback', data.id, -1)"

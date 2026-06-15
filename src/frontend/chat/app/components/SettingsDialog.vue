@@ -36,10 +36,10 @@ const themes: { value: Theme; label: string; icon: any }[] = [
           :key="item.value"
           @click="setTheme(item.value)"
           :class="[
-            'flex flex-col items-center justify-center gap-2 rounded-lg border-2 p-3 transition-all',
+            'flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 p-3 transition-all',
             theme === item.value
-              ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-              : 'border-slate-100 dark:border-border bg-white dark:bg-muted text-slate-500 dark:text-muted-foreground hover:bg-slate-50 dark:hover:bg-accent'
+              ? 'border-blue-600 bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400'
+              : 'border-slate-100 bg-white text-slate-500 hover:bg-slate-50 dark:border-border dark:bg-muted dark:text-muted-foreground dark:hover:bg-accent'
           ]"
         >
           <component :is="item.icon" class="h-5 w-5" />
