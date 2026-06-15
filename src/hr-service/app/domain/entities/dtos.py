@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -76,6 +77,21 @@ class PerformanceReviewDTO:
     rating: str
     kpi: list[Any] = field(default_factory=list)
     reviewer_user_id: str | None = None
+
+
+@dataclass(frozen=True)
+class EmployeeDTO:
+    id: str
+    user_id: str
+    account_type: str
+    employee_code: str | None
+    company_email: str
+    department: str
+    job_title: str | None
+    manager_user_id: str | None
+    employment_status: str
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
 
 
 @dataclass(frozen=True)

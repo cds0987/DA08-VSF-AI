@@ -32,6 +32,7 @@ class EmployeeRecord(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(36), unique=True, nullable=False)
+    account_type: Mapped[str] = mapped_column(String(20), nullable=False, default="internal")
     employee_code: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True)
     company_email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     department: Mapped[str] = mapped_column(String(100), nullable=False)

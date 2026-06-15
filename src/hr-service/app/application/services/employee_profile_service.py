@@ -11,8 +11,9 @@ class Publisher(Protocol):
 
 @dataclass
 class EmployeeProfileService:
-    publisher: Publisher
+    publisher: Publisher | None
 
     async def publish_profile_updated(self, payload: dict[str, Any]) -> None:
-        await self.publisher.publish("hr.employee_profile.updated", payload)
+        if self.publisher:
+            await self.publisher.publish("hr.employee_profile.updated", payload)
 

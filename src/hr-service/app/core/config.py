@@ -43,6 +43,8 @@ class HrSettings:
     nats_url: str
     nats_jetstream_enabled: bool
     user_events_enabled: bool
+    # JWT secret key for Admin API verification.
+    jwt_secret_key: str = ""
     # Người duyệt mặc định khi nhân viên KHÔNG có manager (employees.manager_user_id NULL).
     # Rỗng -> create_leave_request raise -> endpoint trả 422 (Leave Write flow).
     # Có default -> không vỡ constructor test cũ.
@@ -60,13 +62,14 @@ class HrSettings:
 def load_settings(path: str | os.PathLike[str] | None = None) -> HrSettings:
     config_path = Path(path) if path else DEFAULT_CONFIG
     raw = _resolve(yaml.safe_load(config_path.read_text(encoding="utf-8")) or {})
-    return HrSettings(
+    settings = HrSettings(
         host=str(raw.get("host") or "0.0.0.0").strip() or "0.0.0.0",
         port=int(str(raw.get("port") or 8004).strip() or 8004),
         log_level=str(raw.get("log_level") or "INFO").strip() or "INFO",
         app_stage=(str(raw.get("app_stage") or "production").strip().lower() or "production"),
         database_url=str(raw.get("database_url") or "").strip(),
         internal_token=str(raw.get("internal_token") or "").strip(),
+        jwt_secret_key=str(raw.get("jwt_secret_key") or os.getenv("JWT_SECRET_KEY") or "").strip(),
         auto_provision_leave_balance=_as_bool(raw.get("auto_provision_leave_balance"), True),
         default_annual_leave=int(str(raw.get("default_annual_leave") or 12).strip() or 12),
         default_sick_leave=int(str(raw.get("default_sick_leave") or 10).strip() or 10),
@@ -75,6 +78,11 @@ def load_settings(path: str | os.PathLike[str] | None = None) -> HrSettings:
         user_events_enabled=_as_bool(raw.get("user_events_enabled"), True),
         default_approver=str(raw.get("default_approver") or "").strip(),
     )
+
+    if not settings.jwt_secret_key:
+        raise ValueError("HR_SERVICE: JWT_SECRET_KEY must be configured")
+
+    return settings
 
 
 def _as_bool(value: Any, default: bool) -> bool:

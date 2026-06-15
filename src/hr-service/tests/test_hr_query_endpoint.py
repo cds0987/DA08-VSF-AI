@@ -41,6 +41,18 @@ class FakeHrRepository(HrRepository):
         # Fake mặc định KHÔNG provision -> giữ nguyên ngữ nghĩa 404 cho user lạ.
         return None
 
+    async def list_employees(self, department, employment_status, limit, offset):
+        return [], 0
+
+    async def get_employee(self, employee_id):
+        return None
+
+    async def get_employee_by_user_id(self, user_id):
+        return None
+
+    async def update_employee(self, employee_id, code, title, manager, fields):
+        return None
+
     async def upsert_employee_from_user(
         self, user_id: str, email: str, department: str, is_active: bool
     ) -> None:

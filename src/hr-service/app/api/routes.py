@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import AsyncGenerator
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -62,10 +63,16 @@ async def _maybe_mock(
         await repo.provision_mock(intent, user_id)
 
 
-def get_repo(settings: HrSettings = Depends(get_settings)) -> HrRepository:
+async def get_repo(
+    settings: HrSettings = Depends(get_settings),
+) -> AsyncGenerator[HrRepository, None]:
     from app.infrastructure.db.postgres_hr_repository import PostgresHrRepository
 
-    return PostgresHrRepository(settings.database_url)
+    repo = PostgresHrRepository(settings.database_url)
+    try:
+        yield repo
+    finally:
+        await repo.aclose()
 
 
 class HrQueryRequest(BaseModel):
@@ -89,13 +96,19 @@ class HrProfileRequest(BaseModel):
 LeaveType = Literal["annual", "sick", "personal"]
 
 
-def get_write_repo(settings: HrSettings = Depends(get_settings)) -> LeaveWriteRepository:
+async def get_write_repo(
+    settings: HrSettings = Depends(get_settings),
+) -> AsyncGenerator[LeaveWriteRepository, None]:
     """Dependency RIÊNG cho write (KHÔNG dùng get_repo) — test read override get_repo
     với FakeHrRepository (không có method write); test write override get_write_repo
     với fake write riêng. Tách dependency = tách interface (Bẫy 1)."""
     from app.infrastructure.db.postgres_hr_repository import PostgresHrRepository
 
-    return PostgresHrRepository(settings.database_url)
+    repo = PostgresHrRepository(settings.database_url)
+    try:
+        yield repo
+    finally:
+        await repo.aclose()
 
 
 def get_publisher(request: Request) -> Any:

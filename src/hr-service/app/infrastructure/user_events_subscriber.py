@@ -41,7 +41,7 @@ async def handle_user_event(
     is_active = bool(payload.get("is_active", subject != "user.deactivated"))
     employment_status = "active" if is_active else "inactive"
 
-    await repo.upsert_employee_from_user(user_id, email, department, is_active)
+    await repo.upsert_employee_from_user(user_id, email, department, is_active, account_type)
     if is_active:
         # User đang hoạt động -> đảm bảo có hồ sơ phép với hạn mức mặc định từ config.
         await repo.ensure_leave_balance(user_id, default_annual_leave, default_sick_leave)

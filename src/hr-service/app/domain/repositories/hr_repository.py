@@ -6,6 +6,7 @@ from typing import List, Optional
 from app.domain.entities.dtos import (
     AttendanceDTO,
     BenefitsDTO,
+    EmployeeDTO,
     LeaveBalanceDTO,
     LeaveRequestDTO,
     OnboardingDTO,
@@ -17,6 +18,35 @@ from app.domain.entities.dtos import (
 class HrRepository(ABC):
     @abstractmethod
     async def ping(self) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def list_employees(
+        self,
+        department: str | None,
+        employment_status: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[EmployeeDTO], int]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_employee(self, employee_id: str) -> Optional[EmployeeDTO]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_employee_by_user_id(self, user_id: str) -> Optional[EmployeeDTO]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def update_employee(
+        self,
+        employee_id: str,
+        employee_code: str | None,
+        job_title: str | None,
+        manager_user_id: str | None,
+        provided_fields: set[str],
+    ) -> Optional[EmployeeDTO]:
         raise NotImplementedError
 
     @abstractmethod
@@ -34,7 +64,7 @@ class HrRepository(ABC):
 
     @abstractmethod
     async def upsert_employee_from_user(
-        self, user_id: str, email: str, department: str, is_active: bool
+        self, user_id: str, email: str, department: str, is_active: bool, account_type: str
     ) -> None:
         """Upsert hồ sơ nhân viên từ event user.* (idempotent). KHÔNG đọc DB user-service;
         chỉ ghi từ payload event."""
