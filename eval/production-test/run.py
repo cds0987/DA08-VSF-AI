@@ -37,6 +37,9 @@ async def main(argv: list[str] | None = None) -> int:
         settings.dataset,
         limit=settings.limit,
         offset=settings.question_offset,
+        include_doc_ids=settings.include_doc_ids,
+        exclude_doc_ids=settings.exclude_doc_ids,
+        questions_per_doc=settings.questions_per_doc,
     )
     run_id = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
     run_dir = settings.output_root / f"{run_id}-{settings.dataset}"

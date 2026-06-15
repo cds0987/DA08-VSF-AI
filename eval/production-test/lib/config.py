@@ -53,7 +53,11 @@ class Settings:
     question_timeout_seconds: float
     concurrency: int
     limit: int | None
+    limit_is_explicit: bool
     question_offset: int
+    include_doc_ids: tuple[str, ...]
+    exclude_doc_ids: tuple[str, ...]
+    questions_per_doc: int | None
     dry_run: bool
 
     @property
@@ -82,7 +86,11 @@ class Settings:
             "question_timeout_seconds": self.question_timeout_seconds,
             "concurrency": self.concurrency,
             "limit": self.limit,
+            "limit_is_explicit": self.limit_is_explicit,
             "question_offset": self.question_offset,
+            "include_doc_ids": list(self.include_doc_ids),
+            "exclude_doc_ids": list(self.exclude_doc_ids),
+            "questions_per_doc": self.questions_per_doc,
             "dry_run": self.dry_run,
         }
 
@@ -120,6 +128,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-root", default=None)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--question-offset", type=int, default=0)
+    parser.add_argument(
+        "--include-doc-id",
+        action="append",
+        default=None,
+        help="Only select questions for this doc_id/file name. Repeat for multiple docs.",
+    )
+    parser.add_argument(
+        "--exclude-doc-id",
+        action="append",
+        default=None,
+        help="Exclude questions for this doc_id/file name. Repeat for multiple docs.",
+    )
+    parser.add_argument(
+        "--questions-per-doc",
+        type=int,
+        default=None,
+        help="Select at most N questions per included/matching document.",
+    )
     parser.add_argument("--concurrency", type=int, default=None)
     parser.add_argument("--question-timeout-seconds", type=float, default=None)
     parser.add_argument("--dry-run", action="store_true")
@@ -132,10 +158,20 @@ def settings_from_env(args: argparse.Namespace) -> Settings:
     env_file = Path(args.env_file)
     load_env_file(env_file if env_file.is_absolute() else (REPO_ROOT / env_file), override=True)
 
-    limit = args.limit if args.limit is not None else _env_int("LIMIT", 30)
+    include_doc_ids = _list_from_args_or_env(args.include_doc_id, "INCLUDE_DOC_IDS")
+    exclude_doc_ids = _list_from_args_or_env(args.exclude_doc_id, "EXCLUDE_DOC_IDS")
+    questions_per_doc = (
+        args.questions_per_doc
+        if args.questions_per_doc is not None
+        else _env_optional_int("QUESTIONS_PER_DOC")
+    )
+    limit_is_explicit = args.limit is not None
+    selector_active = bool(include_doc_ids or exclude_doc_ids or questions_per_doc)
+    limit = args.limit if args.limit is not None else (None if selector_active else _env_int("LIMIT", 30))
     concurrency = args.concurrency if args.concurrency is not None else _env_int("CONCURRENCY", 5)
     if args.smoke:
         limit = 1
+        limit_is_explicit = True
         concurrency = 1
 
     dataset_root = Path(args.dataset_root or os.getenv("DATASET_ROOT", "eval/dataset"))
@@ -163,7 +199,11 @@ def settings_from_env(args: argparse.Namespace) -> Settings:
         ),
         concurrency=max(1, int(concurrency)),
         limit=limit if limit and limit > 0 else None,
+        limit_is_explicit=limit_is_explicit,
         question_offset=max(0, int(args.question_offset or 0)),
+        include_doc_ids=tuple(include_doc_ids),
+        exclude_doc_ids=tuple(exclude_doc_ids),
+        questions_per_doc=max(1, int(questions_per_doc)) if questions_per_doc else None,
         dry_run=bool(args.dry_run),
     )
 
@@ -187,6 +227,31 @@ def _env_int(name: str, default: int) -> int:
         return int(os.getenv(name, str(default)))
     except ValueError:
         return default
+
+
+def _env_optional_int(name: str) -> int | None:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _list_from_args_or_env(values: list[str] | None, env_name: str) -> list[str]:
+    raw_values = values if values is not None else _split_list(os.getenv(env_name, ""))
+    out: list[str] = []
+    for value in raw_values:
+        for item in _split_list(value):
+            if item:
+                out.append(item)
+    return out
+
+
+def _split_list(value: str) -> list[str]:
+    normalized = value.replace("\n", ",").replace(";", ",")
+    return [item.strip().strip('"').strip("'") for item in normalized.split(",") if item.strip()]
 
 
 def _resolve_path(path: Path) -> Path:

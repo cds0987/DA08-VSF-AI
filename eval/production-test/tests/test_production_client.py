@@ -36,7 +36,11 @@ def settings(timeout: float = 30) -> Settings:
         question_timeout_seconds=timeout,
         concurrency=1,
         limit=1,
+        limit_is_explicit=True,
         question_offset=0,
+        include_doc_ids=(),
+        exclude_doc_ids=(),
+        questions_per_doc=None,
         dry_run=False,
     )
 
