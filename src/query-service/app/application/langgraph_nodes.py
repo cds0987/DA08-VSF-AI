@@ -130,6 +130,9 @@ _TRIAGE_FALLBACK_CLARIFY = (
 
 # Backward-compat alias map: old 8-label names → new 5-label canonical names.
 # Accepted on both sides so a mixed-version model output still routes correctly.
+_RAG_NO_INFO_ANSWER = "Mình không tìm thấy thông tin này trong tài liệu nội bộ hiện có."
+_RAG_NO_ACCESS_ANSWER = "Mình không tìm thấy tài liệu nội bộ mà bạn có quyền truy cập cho câu hỏi này."
+
 _ROUTE_ALIAS: dict[str, str] = {
     # old safety labels → SAFETY
     "emergency": "safety",
@@ -475,6 +478,7 @@ async def act_node(
 
     # Observability: filled by rag_search branch, None for all other tools.
     _rag_event: dict | None = None
+    hard_stop_response: str | None = None
 
     try:
         if tool_name == "rag_search":
@@ -482,6 +486,7 @@ async def act_node(
                 data = json.dumps({"error": "No document access"})
                 success = False
                 new_sources = []
+                hard_stop_response = _RAG_NO_ACCESS_ANSWER
             else:
                 # top_k ưu tiên từ LLM tool_args, fallback về giá trị config-driven trong state.
                 effective_top_k = tool_args.get("top_k", state.get("rag_top_k", 5))
@@ -498,13 +503,9 @@ async def act_node(
                 threshold = state.get("rag_score_threshold", 0.70)
                 qualified = [r for r in results if r.score >= threshold]
 
-                # Adaptive threshold fallback: nếu không có chunk nào đạt ngưỡng nhưng
-                # rag-service vẫn trả về kết quả, lấy top-3 điểm cao nhất để LLM có ngữ cảnh
-                # thay vì trả "không tìm thấy" do lọc quá chặt.
+                # Hard relevance gate: nếu không có chunk nào đạt ngưỡng thì dừng với
+                # NO_INFO, không đưa weak context cho LLM đoán.
                 adaptive_fallback = False
-                if not qualified and results:
-                    qualified = sorted(results, key=lambda r: r.score, reverse=True)[:min(3, len(results))]
-                    adaptive_fallback = True
 
                 # Ghi debug event (JSON-safe) vào state để orchestration dựng Langfuse span.
                 # Tất cả giá trị là scalar/list[str/float] — an toàn với checkpointer.
@@ -555,10 +556,11 @@ async def act_node(
                 else:
                     data = json.dumps({
                         "results": [],
-                        "message": "Khong tim thay tai lieu noi bo lien quan.",
-                    })
+                        "message": _RAG_NO_INFO_ANSWER,
+                    }, ensure_ascii=False)
                     success = False
                     new_sources = []
+                    hard_stop_response = _RAG_NO_INFO_ANSWER
 
         elif tool_name == "hr_query":
             # KHÔNG cần intent từ LLM: lấy TOÀN BỘ hồ sơ HR (mcp -> /hr/profile),
@@ -599,6 +601,8 @@ async def act_node(
         data = json.dumps({"error": "MCP service temporarily unavailable (circuit open)"})
         success = False
         new_sources = []
+        if tool_name == "rag_search":
+            hard_stop_response = _RAG_NO_INFO_ANSWER
     except Exception as exc:
         logger.error(
             "langgraph_act_error",
@@ -607,6 +611,8 @@ async def act_node(
         data = f"Loi khi thuc thi tool: {exc}"
         success = False
         new_sources = []
+        if tool_name == "rag_search":
+            hard_stop_response = _RAG_NO_INFO_ANSWER
 
     tool_message = ToolMessage(
         content=data,
@@ -645,6 +651,11 @@ async def act_node(
         ]
         new_state["sources"] = deduped
         new_state["source_ref_counter"] = state.get("source_ref_counter", 0) + len(new_sources)
+    elif tool_name == "rag_search" and not success:
+        new_state["sources"] = existing_sources
+        new_state["shortcut_response"] = hard_stop_response or _RAG_NO_INFO_ANSWER
+        new_state["shortcut_outcome"] = "NO_INFO"
+        new_state["phase"] = AgentPhase.DONE
 
     # Observability accumulator: append rag_search debug event if recorded above.
     if _rag_event is not None:

@@ -37,6 +37,19 @@ def route_after_think(state: AgentState) -> str:
     return "answer"
 
 
+def route_after_act(state: AgentState) -> str:
+    """
+    Conditional edge after act_node.
+
+    rag_search may decide the request must end with a hard NO_INFO response
+    (for example no document access or no qualified sources). In that case,
+    do not loop back into the LLM.
+    """
+    if state.get("shortcut_outcome"):
+        return "answer"
+    return "observe"
+
+
 def route_after_observe(state: AgentState) -> str:
     """
     After observing tool result, always go back to think_node.

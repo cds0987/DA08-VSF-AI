@@ -290,16 +290,18 @@ src/rag-worker/app/
 │                                                (rag-worker là INGEST-ONLY; retrieval đã chuyển sang mcp-service đọc Qdrant)
 │
 ├── infrastructure/
-│   │   # RAG Worker KHÔNG dùng PostgreSQL — không sở hữu bảng documents (Document Service quản lý),
-│   │   # ingestion/audit log đẩy qua Langfuse. Chỉ publish doc.status qua NATS.
+│   │   # RAG Worker có metadata DB riêng cho ingest job/document state; Document Service vẫn sở hữu document catalog.
+│   │   # Ingest qua NATS, ghi canonical Markdown artifact, upsert Qdrant, publish doc.status.
 │   ├── vector/
 │   │   └── qdrant_vector_repository.py       ← Implement VectorRepository (hybrid_search với document_ids filter, upsert, delete)
 │   └── external/
 │       ├── openai_embedding_client.py        ← Implement EmbeddingService — OpenAI text-embedding-3-small (1536 dims)
-│       ├── gemini_ocr_client.py              ← Gọi Gemini Vision API — OCR PDF scan tiếng Việt
+│       ├── ai_provider.py                    ← OCR/model gateway cho ảnh/PDF scan
+│       ├── s3_parser.py                      ← Tải raw source từ GCS/S3-compatible storage
+│       ├── s3_artifact_store.py              ← Ghi canonical Markdown artifact vào GCS
 │       └── langfuse_client.py               ← Ghi trace ingestion + retrieval vào Langfuse
 │
-└── main.py                                   ← NATS subscriber — không có HTTP server
+└── main.py                                   ← NATS subscriber + health/status API
 ```
 
 **Key logic cần implement:**
@@ -307,25 +309,21 @@ src/rag-worker/app/
 *Ingestion pipeline (`ingest_document_use_case.py`):*
 1. Subscribe NATS `doc.ingest` (JetStream) → nhận `doc_id`, `gcs_key`, `file_type`
 2. Tải file từ GCS → detect loại: PDF scan / PDF text / DOCX / TXT / XLSX / ...
-3. OCR (nếu PDF scan): gọi `gemini_ocr_client.py` — Gemini Vision API
-4. Parse text: PyMuPDF (PDF text layer), python-docx (DOCX), openpyxl (XLSX)
-5. Parent-Child Chunking: LlamaIndex HierarchicalNodeParser (config TBD)
-6. Embed child nodes: gọi `openai_embedding_client.embed_batch()` — 1536 dims
-7. Upsert Qdrant: `vector_repo.upsert()` với payload gồm `chunk_id`, `parent_text`, `child_text`, `document_id`, `classification`
-8. Publish NATS `doc.status` → Document Service cập nhật status → INDEXED
+3. Parse/OCR: PDF text layer dùng local parser; PDF scan/image gọi OCR model qua `ai_provider.py` / `ProviderImageTextExtractor`
+4. Ghi canonical Markdown artifact vào GCS: `artifacts/{document_id}/markdown.md`
+5. Đọc lại Markdown artifact rồi chunk/caption/embed
+6. Upsert Qdrant với payload gồm `chunk_id`, `parent_text`, `child_text`, `document_id`, `classification`, `source_uri`, `artifact_uri`
+7. Publish NATS `doc.status` → Document Service cập nhật status → INDEXED
 
-*Retrieval pipeline (`retrieval.py`):*
-1. Embed query: gọi `embedding_svc.embed(query_text)` — text-embedding-3-small
-2. Hybrid search: `vector_repo.hybrid_search(vector, query_text, top_k=5, document_ids=document_ids)`
-   - `document_ids` được mcp-service truyền vào (Query Service đã lọc ACL và inject qua MCP call) — RAG Worker không biết ACL logic
-   - `None` → chỉ search public docs (fail-secure)
-3. Score threshold filter: loại candidates dưới ngưỡng 0.5
-4. Trả về `List[SearchResult]` qua NATS reply
+*Retrieval boundary:*
+1. rag-worker là producer ingest-only: ghi Qdrant, không route query runtime.
+2. mcp-service tool `rag_search` embed query, đọc Qdrant trực tiếp, rerank và trả `SearchHit`.
+3. Query Service lọc/inject ACL trước khi gọi MCP tool; rag-worker chỉ ghi metadata ACL vào payload.
 
 *Failure Handling:*
 - **Langfuse**: Fail silently — tất cả trace call bọc trong try/except, lỗi chỉ log console
 - **OpenAI Embedding**: Nếu unreachable → ingestion fail, publish `doc.status` với status `failed`, Admin retry thủ công
-- **Gemini Vision API**: Tương tự — fail ingestion, không ảnh hưởng query flow
+- **OCR/model provider**: Tương tự — fail ingestion, không ảnh hưởng query flow
 
 #### HR Service
 
