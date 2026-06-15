@@ -1,5 +1,4 @@
 export const ACCESS_TOKEN_COOKIE = 'eka.admin.access_token'
-export const REFRESH_TOKEN_COOKIE = 'eka.admin.refresh_token'
 export const SESSION_COOKIE = 'eka.admin.session.user'
 
 export function getClientCookie(name: string): string | null {

@@ -1,11 +1,13 @@
+import axios from 'axios'
 import type {
   ApiError,
   ConversationDetailResponse,
   ConversationListResponse,
+  LoginResponse,
   NotificationItem,
   NotificationList,
 } from '~/types'
-import { ACCESS_TOKEN_COOKIE, getClientCookie } from '../cookie'
+import { ACCESS_TOKEN_COOKIE, getClientCookie, setClientCookie } from '../cookie'
 
 export class QueryServiceError extends Error {
   constructor(
@@ -46,42 +48,79 @@ export function useQueryService() {
   const queryPath = config.public.queryServicePath || '/api/query'
   const baseUrl = `${gatewayUrl}${queryPath}`
 
+  async function doRefresh(): Promise<void> {
+    const userPath = String(config.public.userServicePath || '/api/user')
+    const headers: Record<string, string> = {}
+    const gatewayAuth = config.public.gatewayBasicAuth
+    if (gatewayAuth) headers['Authorization-Gateway'] = String(gatewayAuth)
+    const res = await axios.post<LoginResponse>(
+      `${gatewayUrl}${userPath}/auth/refresh`,
+      {},
+      { headers, withCredentials: true },
+    )
+    if (res.data.access_token) {
+      setClientCookie(ACCESS_TOKEN_COOKIE, res.data.access_token)
+    }
+  }
+
+  async function withTokenRefresh<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn()
+    } catch (e: unknown) {
+      if ((e as { status?: number })?.status === 401) {
+        await doRefresh()
+        return fn()
+      }
+      throw e
+    }
+  }
+
   async function fetchHistory(limit = 20, offset = 0, unreadOnly = false, since?: string) {
-    return await $fetch<NotificationList>(`${baseUrl}/notifications/history`, {
-      headers: getQueryServiceAuthHeaders(),
-      query: { limit, offset, unread_only: unreadOnly, since },
-    })
+    return withTokenRefresh(() =>
+      $fetch<NotificationList>(`${baseUrl}/notifications/history`, {
+        headers: getQueryServiceAuthHeaders(),
+        query: { limit, offset, unread_only: unreadOnly, since },
+      })
+    )
   }
 
   async function fetchUnreadCount() {
-    return await $fetch<{ unread: number }>(`${baseUrl}/notifications/unread-count`, {
-      headers: getQueryServiceAuthHeaders(),
-    })
+    return withTokenRefresh(() =>
+      $fetch<{ unread: number }>(`${baseUrl}/notifications/unread-count`, {
+        headers: getQueryServiceAuthHeaders(),
+      })
+    )
   }
 
   async function markNotificationRead(id: string) {
-    return await $fetch<NotificationItem>(
-      `${baseUrl}/notifications/${encodeURIComponent(id)}/read`,
-      {
-        method: 'POST',
-        headers: getQueryServiceAuthHeaders(),
-      },
+    return withTokenRefresh(() =>
+      $fetch<NotificationItem>(
+        `${baseUrl}/notifications/${encodeURIComponent(id)}/read`,
+        {
+          method: 'POST',
+          headers: getQueryServiceAuthHeaders(),
+        },
+      )
     )
   }
 
   async function submitFeedback(sessionId: string, score: 1 | -1, traceId?: string) {
-    return await $fetch<{ message: string }>(`${baseUrl}/feedback`, {
-      method: 'POST',
-      headers: getQueryServiceAuthHeaders(),
-      body: { session_id: sessionId, score, trace_id: traceId },
-    })
+    return withTokenRefresh(() =>
+      $fetch<{ message: string }>(`${baseUrl}/feedback`, {
+        method: 'POST',
+        headers: getQueryServiceAuthHeaders(),
+        body: { session_id: sessionId, score, trace_id: traceId },
+      })
+    )
   }
 
   async function fetchConversations(limit = 100, offset = 0) {
-    return await $fetch<ConversationListResponse>(`${baseUrl}/conversations`, {
-      headers: getQueryServiceAuthHeaders(),
-      query: { limit, offset, include_legacy_messages: false },
-    })
+    return withTokenRefresh(() =>
+      $fetch<ConversationListResponse>(`${baseUrl}/conversations`, {
+        headers: getQueryServiceAuthHeaders(),
+        query: { limit, offset, include_legacy_messages: false },
+      })
+    )
   }
 
   async function fetchConversation(id: string, limit = 500, offset = 0) {
@@ -95,10 +134,12 @@ export function useQueryService() {
   }
 
   async function clearConversations() {
-    return await $fetch<{ message: string }>(`${baseUrl}/conversations`, {
-      method: 'DELETE',
-      headers: getQueryServiceAuthHeaders(),
-    })
+    return withTokenRefresh(() =>
+      $fetch<{ message: string }>(`${baseUrl}/conversations`, {
+        method: 'DELETE',
+        headers: getQueryServiceAuthHeaders(),
+      })
+    )
   }
 
   async function deleteConversation(id: string) {
@@ -112,13 +153,12 @@ export function useQueryService() {
   }
 
   async function renameConversation(id: string, newTitle: string) {
-    return await $fetch<{ message: string }>(
-      `${baseUrl}/conversations/${encodeURIComponent(id)}`,
-      {
+    return withTokenRefresh(() =>
+      $fetch<{ message: string }>(`${baseUrl}/conversations/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         headers: getQueryServiceAuthHeaders(),
         body: { title: newTitle },
-      },
+      })
     )
   }
 
