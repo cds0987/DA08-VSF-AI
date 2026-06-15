@@ -39,29 +39,39 @@ async function handleNotificationClick(item: NotificationItem) {
 
 <template>
   <DropdownMenu @update:open="handleOpen">
-    <DropdownMenuTrigger as-child>
-      <button
-        class="flex h-9 w-full shrink-0 cursor-pointer items-center justify-start rounded-md px-0 text-slate-600 dark:text-muted-foreground transition-all hover:bg-slate-100 dark:hover:bg-sidebar-accent hover:text-slate-900 dark:hover:text-sidebar-accent-foreground"
-        aria-label="Thông báo"
-        :title="isCollapsed ? 'Thông báo' : undefined"
-      >
-        <div class="relative flex h-9 w-[64px] shrink-0 items-center justify-center">
-          <Bell class="h-5 w-5 shrink-0" />
-          <span
-            v-if="notifications.unreadCount > 0"
-            class="absolute right-3 top-0.5 flex min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-4 text-white"
+    <Tooltip>
+      <TooltipTrigger as-child>
+        <DropdownMenuTrigger as-child>
+          <button
+            class="flex h-9 w-full shrink-0 cursor-pointer items-center justify-start rounded-md px-0 text-slate-600 transition-all hover:bg-slate-100 hover:text-slate-900 dark:text-muted-foreground dark:hover:bg-sidebar-accent dark:hover:text-sidebar-accent-foreground"
+            aria-label="Thông báo"
           >
-            {{ notifications.unreadCount > 99 ? '99+' : notifications.unreadCount }}
-          </span>
-        </div>
-        <span
-          class="whitespace-nowrap text-[13px] font-semibold transition-opacity duration-300"
-          :class="isCollapsed ? 'opacity-0' : 'opacity-100'"
-        >
-          Thông báo
-        </span>
-      </button>
-    </DropdownMenuTrigger>
+            <div class="relative flex h-9 w-[64px] shrink-0 items-center justify-center">
+              <Bell class="h-5 w-5 shrink-0" />
+              <span
+                v-if="notifications.unreadCount > 0"
+                class="absolute right-3 top-0.5 flex min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-4 text-white"
+              >
+                {{ notifications.unreadCount > 99 ? '99+' : notifications.unreadCount }}
+              </span>
+            </div>
+            <span
+              class="whitespace-nowrap text-[13px] font-semibold transition-opacity duration-300"
+              :class="isCollapsed ? 'opacity-0' : 'opacity-100'"
+            >
+              Thông báo
+            </span>
+          </button>
+        </DropdownMenuTrigger>
+      </TooltipTrigger>
+      <TooltipContent
+        v-if="isCollapsed"
+        side="right"
+        class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
+      >
+        Thông báo
+      </TooltipContent>
+    </Tooltip>
 
     <DropdownMenuContent
       side="right"

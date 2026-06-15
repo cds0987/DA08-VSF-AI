@@ -191,7 +191,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
                 <TooltipContent
                   v-if="isCollapsed"
                   side="right"
-                  class="bg-white/90 dark:bg-popover/95 backdrop-blur-md border-slate-200 dark:border-sidebar-border text-slate-900 dark:text-sidebar-foreground shadow-md"
+                  class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
                 >
                   New Chat
                 </TooltipContent>
@@ -205,8 +205,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
                   <div
                     :role="isCollapsed ? 'button' : undefined"
                     :tabindex="isCollapsed ? 0 : -1"
-                    class="relative group flex items-center overflow-hidden rounded-lg shrink-0 h-9 transition-all w-full bg-transparent shadow-none"
-                    :class="{ 'cursor-pointer': isCollapsed }"
+                    class="relative group flex items-center overflow-hidden rounded-lg shrink-0 h-9 transition-all w-full bg-transparent shadow-none cursor-pointer"
                     @click="isCollapsed && handleSearchClick()"
                   >
                     <div class="flex h-9 w-[64px] items-center justify-center shrink-0">
@@ -231,7 +230,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
                 <TooltipContent
                   v-if="isCollapsed"
                   side="right"
-                  class="bg-white/90 dark:bg-popover/95 backdrop-blur-md border-slate-200 dark:border-sidebar-border text-slate-900 dark:text-sidebar-foreground shadow-md"
+                  class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
                 >
                   Search messages
                 </TooltipContent>
@@ -286,7 +285,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
           <TooltipContent
             v-if="isCollapsed"
             side="right"
-            class="bg-white/90 dark:bg-popover/95 backdrop-blur-md border-slate-200 dark:border-sidebar-border text-slate-900 dark:text-sidebar-foreground shadow-md"
+            class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
           >
             Settings
           </TooltipContent>
