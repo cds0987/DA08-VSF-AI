@@ -473,8 +473,8 @@ jobs:
           SVCS: ${{ needs.detect.outputs.services }}
         run: |
           set -euo pipefail
-          # Serialize secrets an toàn (printf %q) -> stdin (mã hóa qua IAP), KHÔNG lên command-line.
-          # GitHub mask giá trị secret trong log. Cuối payload: exec remote-entry.sh trên VM.
+          # Build payload: export secrets an toàn (printf %q) -> sync code (fetch/reset develop
+          # ngay trong payload để bootstrap khi VM chưa có remote-entry.sh) -> exec remote-entry.sh.
           PAYLOAD="$(mktemp)"
           for v in DOCKERHUB_USERNAME DOCKERHUB_TOKEN POSTGRES_PASSWORD NEW_RELIC_LICENSE_KEY \
                    SEED_ADMIN_PASSWORD LANGFUSE_DB_PASSWORD NEXTAUTH_SECRET LANGFUSE_SALT \
@@ -487,8 +487,18 @@ jobs:
                    GH_TOKEN REPO RUN_RAG RUN_HR SVCS; do
             printf 'export %s=%q\n' "$v" "${!v:-}" >> "$PAYLOAD"
           done
-          echo 'exec bash /home/TOMAP/DA08-VSF/deploy/scripts/remote-entry.sh' >> "$PAYLOAD"
+          cat >> "$PAYLOAD" <<'BOOT'
+          set -euo pipefail
+          cd /home/TOMAP/DA08-VSF
+          git fetch "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" develop
+          git reset --hard FETCH_HEAD
+          exec bash deploy/scripts/remote-entry.sh
+          BOOT
+          # scp payload (mã hóa qua IAP) -> chown TOMAP + chạy dưới TOMAP -> xóa. KHÔNG dùng
+          # stdin-pipe (gcloud ssh forward stdin không đáng tin) và KHÔNG để secret lên cmdline.
+          RTMP="/tmp/deploy-payload-${GITHUB_RUN_ID}.sh"
+          gcloud compute scp --zone=asia-southeast1-a --tunnel-through-iap --quiet "$PAYLOAD" "vsf-rag-demo-vm:${RTMP}"
+          rm -f "$PAYLOAD"
           timeout 1500 gcloud compute ssh vsf-rag-demo-vm \
             --zone=asia-southeast1-a --tunnel-through-iap --quiet \
-            --command="sudo -u TOMAP bash -s" < "$PAYLOAD"
-          rm -f "$PAYLOAD"
+            --command="sudo chown TOMAP:TOMAP ${RTMP} && sudo chmod 600 ${RTMP} && sudo -u TOMAP bash ${RTMP}; rc=\$?; sudo rm -f ${RTMP}; exit \$rc"

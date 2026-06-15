@@ -8,15 +8,15 @@
 #
 # Vì sao chạy dưới TOMAP: OS Login cho login là sa_*/ttnguyen..., còn /home/TOMAP/DA08-VSF
 # + group docker thuộc TOMAP. sudo -u TOMAP -> giữ nguyên môi trường deploy như trước.
+#
+# LƯU Ý bootstrap: git fetch/reset develop được làm Ở PAYLOAD (CI) TRƯỚC khi gọi file
+# này — để lần cutover đầu tiên (khi VM chưa có remote-entry.sh) vẫn chạy được. Tới đây
+# code đã = origin/develop, nên file này chỉ render secret + deploy + seed.
 set -euo pipefail
 
 export APP_DIR="/home/TOMAP/DA08-VSF"
 export IMAGE_TAG="develop"
 cd "$APP_DIR"
-
-echo "==> 1) Sync code = origin/develop (production phản ánh đúng git)"
-git fetch "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" develop
-git reset --hard FETCH_HEAD
 
 echo "==> 1b) RENDER secret tu GitHub Secrets (nguon DUY NHAT) -> .env + secret.env"
 bash deploy/scripts/render-secrets.sh "$APP_DIR"
