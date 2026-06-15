@@ -1,0 +1,72 @@
+# AI Router — routing table (file hot-reload; counter ở Redis). PLAN §13.
+# Thêm capability / đổi thuật toán / tinh chỉnh ngưỡng = sửa file này, KHÔNG sửa code.
+version: 1
+
+selector:
+  impl: sticky_rotation_soft        # ❖ (b) sticky + soft overflow (PLAN §5.9)
+  params:
+    # khi key active còn dưới ngưỡng này (theo RPM) thì giữ dính; chạm thì tràn key kế
+    rpm_soft_ratio: 1.0             # 1.0 = chỉ tràn khi đã full RPM (soft overflow đúng nghĩa)
+
+tiers:
+  - { name: free_oai,  endpoint_default: chat }
+  - { name: free_or,   endpoint_default: chat }
+  - { name: paid,      endpoint_default: chat }
+  - { name: embed_oai, endpoint_default: embeddings }
+
+# alias service truyền qua field `model` -> capability
+aliases:
+  auto: answer
+  gpt-4o-mini: answer
+  default: answer
+
+# Bậc thang: OpenAI free -> OpenRouter free -> paid (PLAN §5.1). Model free_or có thể
+# đổi/biến mất (OpenRouter xoay free) -> selector tự bỏ qua tier nếu model không còn trong catalog.
+capabilities:
+  answer:                           # câu trả lời cuối + agent (cần tool)
+    tiers: [free_oai, free_or, paid]
+    models:
+      free_oai: openai/gpt-4o-mini
+      free_or: qwen/qwen3-next-80b-a3b-instruct:free
+      paid: deepseek/deepseek-v4-flash
+    require_tools: false            # bật true nếu muốn ÉP mọi answer phải tool-capable
+    quality_floor: null             # user sẽ điền model tối thiểu sau
+  triage:                           # phân loại nhanh, rẻ
+    tiers: [free_oai, free_or, paid]
+    models:
+      free_oai: openai/gpt-4o-mini
+      free_or: qwen/qwen3-next-80b-a3b-instruct:free
+      paid: deepseek/deepseek-v4-flash
+  think:
+    tiers: [free_oai, free_or, paid]
+    models:
+      free_oai: openai/gpt-4o-mini
+      free_or: qwen/qwen3-next-80b-a3b-instruct:free
+      paid: deepseek/deepseek-v4-flash
+  rerank:                           # LLM-as-reranker
+    tiers: [free_oai, free_or, paid]
+    models:
+      free_oai: openai/gpt-4o-mini
+      free_or: qwen/qwen3-next-80b-a3b-instruct:free
+      paid: deepseek/deepseek-v4-flash
+  guardrail:
+    tiers: [free_oai, free_or, paid]
+    models:
+      free_oai: openai/gpt-4o-mini
+      free_or: qwen/qwen3-next-80b-a3b-instruct:free
+      paid: deepseek/deepseek-v4-flash
+  caption:                          # ảnh -> mô tả (VISION)
+    tiers: [free_oai, free_or]
+    models:
+      free_oai: openai/gpt-4o-mini
+      free_or: google/gemma-4-31b-it:free
+    require_vision: true
+  ocr:                              # ảnh/scan -> text (VISION)
+    tiers: [free_oai, free_or]
+    models:
+      free_oai: openai/gpt-4o-mini
+      free_or: google/gemma-4-31b-it:free
+    require_vision: true
+  embed:                            # ⚠️ PIN model cố định (BẪY embedding, PLAN §4b)
+    tiers: [embed_oai]              # tách khỏi túi chat 2.5M; chỉ track cost
+    pinned_model: openai/text-embedding-3-small

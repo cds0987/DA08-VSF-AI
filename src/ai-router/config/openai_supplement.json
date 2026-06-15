@@ -1,0 +1,32 @@
+[
+  {
+    "id": "openai/text-embedding-3-small",
+    "provider": "openai",
+    "name_native": "text-embedding-3-small",
+    "name_or": "openai/text-embedding-3-small",
+    "context_length": 8191,
+    "price_in_per_mtok": 0.02,
+    "price_out_per_mtok": 0.0,
+    "price_in_with_fee": 0.02,
+    "price_out_with_fee": 0.0,
+    "is_free": false,
+    "supports_tools": false,
+    "input_modalities": ["text"],
+    "endpoint": "embeddings"
+  },
+  {
+    "id": "openai/text-embedding-3-large",
+    "provider": "openai",
+    "name_native": "text-embedding-3-large",
+    "name_or": "openai/text-embedding-3-large",
+    "context_length": 8191,
+    "price_in_per_mtok": 0.13,
+    "price_out_per_mtok": 0.0,
+    "price_in_with_fee": 0.13,
+    "price_out_with_fee": 0.0,
+    "is_free": false,
+    "supports_tools": false,
+    "input_modalities": ["text"],
+    "endpoint": "embeddings"
+  }
+]
