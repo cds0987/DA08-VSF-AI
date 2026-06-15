@@ -43,7 +43,7 @@ profiles:
         collection: ${VECTOR_COLLECTION:-rag_chatbot}
         embed_model: ${EMBED_MODEL:-text-embedding-3-small}
       reranker:
-        impl: ${RERANK_PROVIDER:-none}
+        impl: ${RERANK_PROVIDER:-lexical}
         model: ${RERANK_MODEL:-gpt-4o-mini}
         base_url: ${RERANK_BASE_URL:-}
         api_key: ${RERANK_API_KEY:-}
@@ -53,8 +53,8 @@ profiles:
           passage_chars: ${RERANK_PASSAGE_CHARS:-800}
       retrieval:
         top_k_candidates: ${SEARCH_TOP_K:-20}
-        rerank_top_k: ${RERANK_TOP_K:-3}
-        rerank_threshold: ${RERANK_THRESHOLD:-0.7}
+        rerank_top_k: ${RERANK_TOP_K:-5}
+        rerank_threshold: ${RERANK_THRESHOLD:-0.05}
 
     hr_query:
       enabled: ${TOOL_HR_QUERY_ENABLED:-0}

@@ -682,6 +682,12 @@ class QueryOrchestrationUseCase:
                         sources = final_state.get("sources", [])
                         # shortcut path: 0 iterations; think path: iterations = number of act/observe runs
                         final_iteration = 0 if shortcut_response else max(last_iteration, 1)
+                        # If think-path but no tool was called → LLM answered from general knowledge → NO_INFO.
+                        # hr_query answers have non-empty tool_results → excluded.
+                        # rag_search failures already set shortcut_response in act_node → excluded.
+                        if not shortcut_response and not sources:
+                            if not (final_state.get("tool_results") or []):
+                                shortcut_outcome = "NO_INFO"
                         # Override outcome to NO_INFO if the answer is a generic fallback
                         if answer and _is_fallback_answer(answer) and shortcut_outcome == "SUCCESS":
                             shortcut_outcome = "NO_INFO"
