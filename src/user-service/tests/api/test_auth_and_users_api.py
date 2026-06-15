@@ -141,9 +141,9 @@ def test_login_returns_refresh_token() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "access_token": "access-token",
-        "refresh_token": "refresh-token",
         "token_type": "bearer",
     }
+    assert response.cookies.get("refresh_token") == "refresh-token"
 
 
 def test_admin_login_accepts_admin_and_rejects_user_generic() -> None:
@@ -185,11 +185,15 @@ def test_refresh_returns_rotated_refresh_token() -> None:
 
     response = TestClient(app).post(
         "/auth/refresh",
-        json={"refresh_token": "old-refresh"},
+        cookies={"refresh_token": "old-refresh"},
     )
 
     assert response.status_code == 200
-    assert response.json()["refresh_token"] == "new-refresh-token"
+    assert response.json() == {
+        "access_token": "new-access-token",
+        "token_type": "bearer",
+    }
+    assert response.cookies.get("refresh_token") == "new-refresh-token"
 
 
 def test_me_returns_current_user_shape() -> None:
