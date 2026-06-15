@@ -210,14 +210,26 @@ class HaystackRagEngine:
                 captions_by_index[index] = caption
                 if used_fallback:
                     caption_fallbacks += 1
+            # Đưa NỘI DUNG THẬT vào trace để thấy "AI trả gì": input = đoạn text/ảnh
+            # đưa vào captioner, output = caption/OCR AI sinh ra. Cắt ngắn + cap số đoạn
+            # để trace không phình (vd PDF vài trăm chunk).
+            _cap_sample, _cap_chars = 8, 600
+            _n = min(_cap_sample, len(sections))
             self._generation(
                 trace,
                 name="caption",
                 model=self._safe_model(self.captioner, "caption", "caption"),
                 start_time=caption_start,
-                input_data={"sections": len(sections)},
-                output={"captions": len(caption_results), "fallback_count": caption_fallbacks},
-                metadata={"stage": "caption"},
+                input_data={
+                    "sections": len(sections),
+                    "input_texts": [sections[i].parent_text[:_cap_chars] for i in range(_n)],
+                },
+                output={
+                    "captions": len(caption_results),
+                    "fallback_count": caption_fallbacks,
+                    "caption_texts": [(captions_by_index.get(i) or "")[:_cap_chars] for i in range(_n)],
+                },
+                metadata={"stage": "caption", "sample_shown": _n, "truncated_to_chars": _cap_chars},
             )
             self._span_ok(
                 caption_span,
