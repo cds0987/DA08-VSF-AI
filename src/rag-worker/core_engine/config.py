@@ -30,6 +30,15 @@ class HaystackSettings:
     langfuse_host: str = "http://langfuse-web:3000"
     langfuse_sample_rate: float = 0.0
     langfuse_trace_on_error: bool = True
+    # LangSmith ingest tracing — ĐỘC LẬP với langfuse + TÁCH project query-service.
+    # project mặc định 'vsf-rag-ingest' (query-service dùng 'vsf-rag-chatbot') để phân biệt
+    # luồng ingest với luồng query trên LangSmith. Thiếu API key -> tự tắt (no-op).
+    langsmith_enabled: bool = False
+    langsmith_api_key: str = ""
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_project: str = "vsf-rag-ingest"
+    langsmith_sample_rate: float = 1.0
+    langsmith_trace_on_error: bool = True
 
 
 def _int(name: str, default: int) -> int:
@@ -70,4 +79,10 @@ def load_settings() -> HaystackSettings:
         langfuse_host=os.getenv("LANGFUSE_HOST", "http://langfuse-web:3000"),
         langfuse_sample_rate=_float("LANGFUSE_SAMPLE_RATE", 0.0),
         langfuse_trace_on_error=_bool("LANGFUSE_TRACE_ON_ERROR", True),
+        langsmith_enabled=_bool("LANGSMITH_ENABLED", False),
+        langsmith_api_key=os.getenv("LANGSMITH_API_KEY", ""),
+        langsmith_endpoint=os.getenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"),
+        langsmith_project=os.getenv("LANGSMITH_PROJECT", "vsf-rag-ingest"),
+        langsmith_sample_rate=_float("LANGSMITH_SAMPLE_RATE", 1.0),
+        langsmith_trace_on_error=_bool("LANGSMITH_TRACE_ON_ERROR", True),
     )
