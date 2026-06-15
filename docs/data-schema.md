@@ -78,6 +78,7 @@ CREATE INDEX idx_user_audit_actor ON user_svc.audit_logs(actor_id, created_at DE
 CREATE TABLE query_svc.conversations (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     UUID NOT NULL,
+    title       TEXT NOT NULL DEFAULT 'Untitled chat',
     summary     TEXT,                                            -- LLM-generated summary của các turns cũ (Summary Buffer)
     created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
@@ -89,13 +90,15 @@ CREATE TABLE query_svc.messages (
     user_id         UUID NOT NULL,
     role            VARCHAR(20) NOT NULL,        -- 'user' | 'assistant'
     content         TEXT NOT NULL,
+    session_id      TEXT,                         -- từng assistant answer: feedback/tracing
     sources         JSONB,                       -- assistant only: [{document_id, document_name, caption, heading_path, score, source_gcs_uri}]
     latency_ms      INTEGER,
     feedback        SMALLINT,                    -- 1 | -1 | NULL
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_messages_user_created ON query_svc.messages(user_id, created_at DESC);
+CREATE INDEX idx_conversations_user_updated ON query_svc.conversations(user_id, updated_at DESC);
+CREATE INDEX idx_messages_conversation_created ON query_svc.messages(conversation_id, created_at DESC);
 
 -- Projection ACL (event-driven, database-per-service).
 -- Bản sao quyền truy cập tài liệu, do doc_access_subscriber cập nhật từ event NATS `doc.access`

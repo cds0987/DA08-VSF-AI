@@ -420,6 +420,22 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  query-migrate:
+    image: query-service:e2e
+    build:
+      context: ./src/query-service
+      cache_from:
+        - type=gha,scope=e2e-query-service
+      cache_to:
+        - type=gha,scope=e2e-query-service,mode=max
+    command: ["python", "-m", "app.infrastructure.db.migrate"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/query_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   query-service:
     image: query-service:e2e
     build:
@@ -474,6 +490,8 @@ services:
         condition: service_completed_successfully
       mcp-service:
         condition: service_started
+      query-migrate:
+        condition: service_completed_successfully
       langfuse:
         condition: service_started
     restart: unless-stopped

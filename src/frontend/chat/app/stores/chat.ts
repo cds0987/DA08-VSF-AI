@@ -24,10 +24,13 @@ import {
 
 const HISTORY_KEY = 'eka.chat.conversations'
 const CURRENT_CONVERSATION_KEY = 'eka.chat.current-conversation'
-const BACKEND_CONVERSATION_ID = 'backend-conversation'
 
 function createConversationId() {
-  return 'conversation-' + crypto.randomUUID()
+  return crypto.randomUUID()
+}
+
+function isConversationId(value: string | null | undefined) {
+  return Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value))
 }
 
 function getBucket(date: Date): Conversation['bucket'] {
@@ -71,16 +74,18 @@ function toCitation(source: QuerySource, id: string): Citation {
   }
 }
 
-function toChatMessage(message: ConversationHistoryMessage, index: number): ChatMessage {
+function toChatMessage(message: ConversationHistoryMessage): ChatMessage {
   const createdAt = new Date(message.created_at)
   return {
-    id: 'history-' + createdAt.getTime() + '-' + index,
+    id: message.id,
     role: message.role,
     content: message.content,
-    citations: message.sources?.map((source, sIndex) => toCitation(
+    citations: message.sources?.map((source, index) => toCitation(
       source,
-      'history-' + createdAt.getTime() + '-' + index + '-source-' + sIndex,
+      message.id + '-source-' + index,
     )),
+    sessionId: message.session_id || undefined,
+    feedback: message.feedback || undefined,
     timestamp: Number.isNaN(createdAt.getTime())
       ? message.created_at
       : createdAt.toLocaleString(),
@@ -125,9 +130,13 @@ export const useChatStore = defineStore('chat', () => {
   const files = ref<File[]>([])
   const messages = ref<ChatMessage[]>([])
   const conversations = ref<Conversation[]>([])
-  const fallbackStorageKey = HISTORY_KEY + '.' + (sessionStore.user?.id || 'anonymous')
+  const storageSuffix = sessionStore.user?.id || 'anonymous'
+  const fallbackStorageKey = HISTORY_KEY + '.' + storageSuffix
   const fallbackConversations = useLocalStorage<Conversation[]>(fallbackStorageKey, [])
-  const currentConversationId = useLocalStorage<string | null>(CURRENT_CONVERSATION_KEY, null)
+  const currentConversationId = useLocalStorage<string | null>(
+    CURRENT_CONVERSATION_KEY + '.' + storageSuffix,
+    null,
+  )
   const isHistoryLoading = ref(false)
   const isHistoryClearing = ref(false)
   const isUsingHistoryFallback = ref(false)
@@ -182,7 +191,9 @@ export const useChatStore = defineStore('chat', () => {
     const existingIndex = conversations.value.findIndex((c) => c.id === currentConversationId.value)
     const conversation: Conversation = {
       id: currentConversationId.value,
-      title: createTitle(messages.value.find((m) => m.role === 'user' && m.content.trim())?.content || ''),
+      title: existingIndex >= 0
+        ? conversations.value[existingIndex].title
+        : createTitle(messages.value.find((m) => m.role === 'user' && m.content.trim())?.content || ''),
       updatedAt: updatedAt.toISOString(),
       bucket: getBucket(updatedAt),
       messages: [...messages.value],
@@ -206,13 +217,17 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function loadConversation(id: string) {
-    const conversation = conversations.value.find((c) => c.id === id)
-    if (!conversation) return
+  function persistFallbackHistory() {
+    fallbackConversations.value = conversations.value.map((item) => ({
+      ...item,
+      messages: item.messages.map((message) => ({ ...message })),
+    }))
+  }
 
+  function activateConversation(conversation: Conversation) {
     abortController?.abort()
     abortController = null
-    currentConversationId.value = id
+    currentConversationId.value = conversation.id
     messages.value = [...conversation.messages]
     pipeline.value = -1
     streamingText.value = ''
@@ -222,22 +237,66 @@ export const useChatStore = defineStore('chat', () => {
     files.value = []
   }
 
+  async function loadConversation(id: string) {
+    const conversation = conversations.value.find((item) => item.id === id)
+    if (!conversation) return false
+
+    activateConversation(conversation)
+    try {
+      const detail = await queryService.fetchConversation(id)
+      const updatedAt = detail.updated_at
+      const synced: Conversation = {
+        id: detail.id,
+        title: detail.title,
+        updatedAt,
+        bucket: getBucket(new Date(updatedAt)),
+        messages: detail.messages.map(toChatMessage),
+      }
+      const index = conversations.value.findIndex((item) => item.id === id)
+      if (index >= 0) conversations.value.splice(index, 1, synced)
+      if (currentConversationId.value === id) activateConversation(synced)
+      persistFallbackHistory()
+      isUsingHistoryFallback.value = false
+      return true
+    } catch {
+      isUsingHistoryFallback.value = true
+      return false
+    }
+  }
+
   function restoreFallbackHistory() {
-    conversations.value = fallbackConversations.value.map((item) => ({
+    const stored = fallbackConversations.value
+    const selectedIndex = currentConversationId.value
+      ? stored.findIndex((item) => item.id === currentConversationId.value)
+      : -1
+    conversations.value = stored.map((item) => ({
       ...item,
+      id: isConversationId(item.id) ? item.id : createConversationId(),
       messages: item.messages.map((message) => ({ ...message })),
     }))
 
-    const conversation = currentConversationId.value
-      ? conversations.value.find((item) => item.id === currentConversationId.value)
-      : conversations.value[0]
+    const conversation = selectedIndex >= 0
+      ? conversations.value[selectedIndex]
+      : conversations.value.find((item) => item.id === currentConversationId.value) || conversations.value[0]
 
     if (conversation) {
-      loadConversation(conversation.id)
+      activateConversation(conversation)
+      persistFallbackHistory()
       return
     }
 
     currentConversationId.value = null
+    messages.value = []
+  }
+
+  async function fetchAllConversations() {
+    const pageSize = 100
+    const items = []
+    for (let offset = 0; ; offset += pageSize) {
+      const page = await queryService.fetchConversations(pageSize, offset)
+      items.push(...page.conversations)
+      if (page.conversations.length < pageSize) return items
+    }
   }
 
   async function syncHistory() {
@@ -245,33 +304,50 @@ export const useChatStore = defineStore('chat', () => {
 
     isHistoryLoading.value = true
     try {
-      const history = await queryService.fetchConversations()
-      const syncedMessages = history.messages.map(toChatMessage)
+      const history = await fetchAllConversations()
+      const cachedById = new Map(
+        fallbackConversations.value.map((conversation) => [conversation.id, conversation]),
+      )
+      const serverIds = new Set(history.map((item) => item.id))
+      const serverConversations = history.map((item) => ({
+        id: item.id,
+        title: item.title,
+        updatedAt: item.updated_at,
+        bucket: getBucket(new Date(item.updated_at)),
+        messages: cachedById.get(item.id)?.messages.map((message) => ({ ...message })) || [],
+      }))
+      const localOnly = fallbackConversations.value
+        .filter((item) => !serverIds.has(item.id) && item.messages.length > 0)
+        .map((item) => ({
+          ...item,
+          id: isConversationId(item.id) ? item.id : createConversationId(),
+          messages: item.messages.map((message) => ({ ...message })),
+        }))
+      conversations.value = [...serverConversations, ...localOnly]
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
 
-      if (syncedMessages.length === 0) {
-        conversations.value = []
+      if (conversations.value.length === 0) {
         messages.value = []
         currentConversationId.value = null
         fallbackConversations.value = []
-      } else {
-        const updatedAt = history.messages.at(-1)?.created_at || new Date().toISOString()
-        const conversation: Conversation = {
-          id: BACKEND_CONVERSATION_ID,
-          title: createTitle(syncedMessages.find((message) => message.role === 'user')?.content || ''),
-          updatedAt,
-          bucket: getBucket(new Date(updatedAt)),
-          messages: syncedMessages,
-        }
-        conversations.value = [conversation]
-        messages.value = [...syncedMessages]
-        currentConversationId.value = BACKEND_CONVERSATION_ID
-        fallbackConversations.value = [{
-          ...conversation,
-          messages: conversation.messages.map((message) => ({ ...message })),
-        }]
+        isUsingHistoryFallback.value = false
+        return true
       }
 
-      isUsingHistoryFallback.value = false
+      const selected = (
+        currentConversationId.value
+          ? conversations.value.find((item) => item.id === currentConversationId.value)
+          : null
+      ) || conversations.value[0]
+      if (!serverIds.has(selected.id)) {
+        activateConversation(selected)
+        persistFallbackHistory()
+        isUsingHistoryFallback.value = true
+        return true
+      }
+      const loaded = await loadConversation(selected.id)
+      if (!loaded) throw new Error('Could not load selected conversation')
+      persistFallbackHistory()
       return true
     } catch {
       restoreFallbackHistory()
@@ -286,6 +362,8 @@ export const useChatStore = defineStore('chat', () => {
     if (isHistoryClearing.value) return
 
     isHistoryClearing.value = true
+    abortController?.abort()
+    abortController = null
     try {
       await queryService.clearConversations()
       clear()
@@ -297,15 +375,20 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function deleteConversation(id: string) {
-    conversations.value = conversations.value.filter((c) => c.id !== id)
-    fallbackConversations.value = conversations.value.map((item) => ({
-      ...item,
-      messages: item.messages.map((message) => ({ ...message })),
-    }))
+  async function deleteConversation(id: string) {
     if (currentConversationId.value === id) {
-      clear()
+      abortController?.abort()
+      abortController = null
     }
+    await queryService.deleteConversation(id)
+    conversations.value = conversations.value.filter((conversation) => conversation.id !== id)
+    persistFallbackHistory()
+    if (currentConversationId.value !== id) return
+
+    currentConversationId.value = null
+    messages.value = []
+    const nextConversation = conversations.value[0]
+    if (nextConversation) await loadConversation(nextConversation.id)
   }
 
   async function renameConversation(id: string, newTitle: string) {
@@ -377,6 +460,7 @@ export const useChatStore = defineStore('chat', () => {
     const request: QueryRequest = {
       question,
       user_id: String(userId),
+      conversation_id: currentConversationId.value ?? undefined,
       trace_session: currentConversationId.value ?? undefined,
       conversation_title: conversationTitle,
     }

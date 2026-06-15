@@ -41,18 +41,6 @@ configure_logging(getattr(_logging, str(getattr(settings, "log_level", "INFO")).
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Migrate schema query_svc lúc khởi động (idempotent). Non-fatal để container vẫn
-    # đứng được cho việc chẩn đoán nếu DB lỗi, thay vì crash-loop.
-    if settings.database_url:
-        import logging
-
-        from app.infrastructure.db.migrate import run_migrations
-
-        try:
-            await run_migrations(settings.database_url)
-        except Exception as exc:  # noqa: BLE001
-            logging.getLogger(__name__).error("query-service migration failed: %s", exc)
-
     manager = get_nats_subscriber_manager()
     if manager is not None:
         await manager.start()

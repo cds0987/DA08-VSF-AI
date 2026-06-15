@@ -38,6 +38,7 @@ from app.application.ports import AuthenticatedUser
 from app.application.use_cases.query.orchestration import QueryOrchestrationUseCase
 from app.infrastructure.cache.rate_limiter import RateLimiterUnavailable
 from app.interfaces.api.dependencies import (
+    get_conversation_repo,
     get_current_user,
     get_orchestration_use_case,
     get_rate_limiter,
@@ -55,6 +56,7 @@ async def query(
     user: AuthenticatedUser = Depends(get_current_user),
     use_case: QueryOrchestrationUseCase = Depends(get_orchestration_use_case),
     rate_limiter=Depends(get_rate_limiter),
+    conversation_repo=Depends(get_conversation_repo),
     x_ci_smoke: str | None = Header(default=None),
 ) -> StreamingResponse:
     if request.user_id != user.id:
@@ -62,6 +64,18 @@ async def query(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="user_id must match authenticated user",
         )
+    if request.conversation_id:
+        try:
+            await conversation_repo.get_context(
+                user.id,
+                recent_k=0,
+                conversation_id=str(request.conversation_id),
+            )
+        except PermissionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Conversation belongs to another user",
+            ) from exc
     try:
         allowed = await rate_limiter.allow(user.id)
     except RateLimiterUnavailable as exc:
@@ -80,7 +94,13 @@ async def query(
     trace_session = "ci-smoke" if x_ci_smoke else request.trace_session
 
     async def events():
-        async for event in use_case.stream(request.question, user, trace_session=trace_session, conversation_title=request.conversation_title):
+        async for event in use_case.stream(
+            request.question,
+            user,
+            conversation_id=str(request.conversation_id) if request.conversation_id else None,
+            trace_session=trace_session,
+            conversation_title=request.conversation_title,
+        ):
             yield format_sse(event)
 
     return StreamingResponse(

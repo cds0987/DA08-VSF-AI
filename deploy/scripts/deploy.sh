@@ -8,15 +8,38 @@ set -euo pipefail
 cd "${APP_DIR:?thiếu APP_DIR}"
 
 ROLLBACK_SVCS="rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin nginx"
-DEPLOY_OK=0; ROLLBACK_DONE=0
+QUERY_DB_BACKUP=/tmp/query_db_pre_deploy.dump
+DEPLOY_OK=0; ROLLBACK_DONE=0; QUERY_DB_BACKUP_READY=0
+restore_query_db() {
+  [ "$QUERY_DB_BACKUP_READY" = 1 ] || return 0
+  echo "::warning::Khôi phục query_db về snapshot trước deploy"
+  docker compose stop query-service >/dev/null 2>&1 || true
+  docker exec da08-vsf-app-postgres-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+    -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='query_db' AND pid <> pg_backend_pid();" >/dev/null
+  docker exec da08-vsf-app-postgres-1 dropdb -U postgres --if-exists query_db
+  docker exec da08-vsf-app-postgres-1 createdb -U postgres query_db
+  docker exec -i da08-vsf-app-postgres-1 pg_restore -U postgres -d query_db --no-owner --no-privileges < "$QUERY_DB_BACKUP"
+}
 rollback() {
   [ "$ROLLBACK_DONE" = 1 ] && return 0; ROLLBACK_DONE=1
   [ -s /tmp/rollback_images.txt ] || { echo "::warning::Chưa có điểm rollback (fail sớm) — prod chưa bị đổi."; return 0; }
-  echo "::warning::DEPLOY FAIL -> ROLLBACK image về bản trước khi deploy"
+  echo "::warning::DEPLOY FAIL -> ROLLBACK database + image về bản trước khi deploy"
+  restore_ok=1
+  if ! restore_query_db; then
+    restore_ok=0
+    echo "::error::Khôi phục query_db thất bại; giữ image query-service/frontend-chat mới để tránh chạy code cũ trên schema mới"
+  fi
+  rollback_svcs="$ROLLBACK_SVCS"
   while read -r svc img; do
+    if [ "$restore_ok" = 0 ] && { [ "$svc" = query-service ] || [ "$svc" = frontend-chat ]; }; then
+      continue
+    fi
     [ -n "$img" ] && docker tag "$img" "$DOCKERHUB_USERNAME/$svc:develop" || true
   done < /tmp/rollback_images.txt
-  docker compose up -d --no-build --force-recreate $ROLLBACK_SVCS || true
+  if [ "$restore_ok" = 0 ]; then
+    rollback_svcs="rag-worker mcp-service hr-service user-service document-service frontend-admin nginx"
+  fi
+  docker compose up -d --no-build --force-recreate $rollback_svcs || true
   echo "::warning::ROLLBACK xong — production giữ bản trước đó. Pipeline = FAIL."
 }
 trap '[ "$DEPLOY_OK" = 1 ] || rollback' EXIT
@@ -42,10 +65,17 @@ echo "  $(wc -l < /tmp/rollback_images.txt) service có điểm rollback"
 
 echo "==> 3) Login Docker Hub + PULL image (KHÔNG build trên VM)"
 echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
-docker compose pull qdrant langfuse-db langfuse nats-bootstrap rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin nginx
+docker compose pull qdrant langfuse-db langfuse nats-bootstrap rag-worker mcp-service hr-service user-service document-service query-migrate query-service frontend-chat frontend-admin nginx
 
-echo "==> 4) Up image đã pull (deps: nats, nats-bootstrap provision stream, rag-migrate/hr-migrate one-shot alembic)"
-docker compose up -d --no-build qdrant langfuse-db langfuse nats-bootstrap rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin \
+echo "==> 3b) Dừng query-service và snapshot query_db ngay trước migration"
+docker compose stop query-service >/dev/null 2>&1 || true
+rm -f "$QUERY_DB_BACKUP"
+docker exec da08-vsf-app-postgres-1 pg_dump -U postgres -d query_db -Fc > "$QUERY_DB_BACKUP"
+[ -s "$QUERY_DB_BACKUP" ] || { echo "::error::Không tạo được query_db backup"; exit 1; }
+QUERY_DB_BACKUP_READY=1
+
+echo "==> 4) Up image đã pull (query/rag/hr migrations chạy one-shot và fail-fast)"
+docker compose up -d --no-build qdrant langfuse-db langfuse nats-bootstrap query-migrate rag-worker mcp-service hr-service user-service document-service query-service frontend-chat frontend-admin \
   || { echo "::error::compose up FAILED — dump nats-bootstrap logs:"; docker logs da08-vsf-nats-bootstrap-1 2>&1 | tail -80 || true; exit 1; }
 docker compose up -d --no-build --force-recreate nginx
 
@@ -140,14 +170,15 @@ ok=0
 for i in $(seq 1 60); do
   rw=$(docker inspect -f '{{.State.Health.Status}}' da08-vsf-rag-worker-1 2>/dev/null || echo none)
   hr=$(docker inspect -f '{{.State.Health.Status}}' da08-vsf-hr-service-1   2>/dev/null || echo none)
+  qs=$(docker inspect -f '{{.State.Health.Status}}' da08-vsf-query-service-1 2>/dev/null || echo none)
   mc=$(docker inspect -f '{{.State.Status}}'        da08-vsf-mcp-service-1  2>/dev/null || echo none)
   mr=$(docker inspect -f '{{.RestartCount}}'        da08-vsf-mcp-service-1  2>/dev/null || echo 99)
   fc=$(docker inspect -f '{{.State.Status}}'        da08-vsf-frontend-chat-1  2>/dev/null || echo none)
   fcr=$(docker inspect -f '{{.RestartCount}}'       da08-vsf-frontend-chat-1  2>/dev/null || echo 99)
   fa=$(docker inspect -f '{{.State.Status}}'        da08-vsf-frontend-admin-1 2>/dev/null || echo none)
   far=$(docker inspect -f '{{.RestartCount}}'       da08-vsf-frontend-admin-1 2>/dev/null || echo 99)
-  echo "  [$i] rag-worker=$rw hr-service=$hr mcp-service=$mc(restarts=$mr) frontend-chat=$fc(restarts=$fcr) frontend-admin=$fa(restarts=$far)"
-  if [ "$rw" = healthy ] && [ "$hr" = healthy ] && [ "$mc" = running ] && [ "$mr" -le 2 ] \
+  echo "  [$i] rag-worker=$rw hr-service=$hr query-service=$qs mcp-service=$mc(restarts=$mr) frontend-chat=$fc(restarts=$fcr) frontend-admin=$fa(restarts=$far)"
+  if [ "$rw" = healthy ] && [ "$hr" = healthy ] && [ "$qs" = healthy ] && [ "$mc" = running ] && [ "$mr" -le 2 ] \
      && [ "$fc" = running ] && [ "$fcr" -le 2 ] && [ "$fa" = running ] && [ "$far" -le 2 ]; then
     ok=1; break
   fi
@@ -156,7 +187,7 @@ done
 
 if [ "$ok" != 1 ]; then
   echo "::error::Health gate FAILED — dump logs:"
-  for s in rag-worker mcp-service hr-service hr-migrate rag-migrate qdrant frontend-chat frontend-admin nginx; do
+  for s in query-service query-migrate rag-worker mcp-service hr-service hr-migrate rag-migrate qdrant frontend-chat frontend-admin nginx; do
     echo "----- $s -----"
     docker compose -f "$APP_DIR/docker-compose.yml" logs --no-color --tail 60 "$s" 2>/dev/null || true
   done
@@ -188,11 +219,12 @@ RUN_RAG="${RUN_RAG:-}"
 RUN_HR="${RUN_HR:-}"
 SVCS="${SVCS:-}"
 has_svc() { echo "$SVCS" | grep -q "\"$1\""; }
-SMOKE_RAG=false; SMOKE_HR=false; SMOKE_DOC=false
+SMOKE_RAG=false; SMOKE_HR=false; SMOKE_DOC=false; SMOKE_CONVERSATIONS=false
 if [ "$RUN_RAG" = "true" ] || has_svc query-service; then SMOKE_RAG=true; fi
 if [ "$RUN_HR" = "true" ] || has_svc query-service || has_svc mcp-service; then SMOKE_HR=true; fi
 if has_svc document-service || has_svc user-service; then SMOKE_DOC=true; fi
-echo "  -> smoke chọn: RAG=$SMOKE_RAG HR=$SMOKE_HR DOC=$SMOKE_DOC | services=$SVCS"
+if has_svc query-service; then SMOKE_CONVERSATIONS=true; fi
+echo "  -> smoke chọn: RAG=$SMOKE_RAG HR=$SMOKE_HR DOC=$SMOKE_DOC CONVERSATIONS=$SMOKE_CONVERSATIONS | services=$SVCS"
 
 if [ "$SMOKE_RAG" != "true" ] && [ "$SMOKE_HR" != "true" ] && [ "$SMOKE_DOC" != "true" ]; then
 echo "  Không service tầng-dưới nào đổi -> BỎ QUA smoke luồng-vàng (đã có health 5 + FE 5b)."
@@ -256,6 +288,8 @@ TOK=$(curl -s --max-time 25 -X POST http://localhost/api/user/auth/login \
 [ -n "$TOK" ] || { echo "::error::SMOKE login FAIL (user-service/Cloud SQL?)"; docker compose logs --no-color --tail 80 user-service || true; exit 1; }
 echo "  login OK"
 SMOKE_UID=$(python3 -c 'import sys,base64,json;t="'"$TOK"'".split(".")[1];t+="="*(-len(t)%4);print(json.loads(base64.urlsafe_b64decode(t)).get("user_id",""))' 2>/dev/null || echo "")
+SMOKE_CONV_RAG=$(python3 -c 'import uuid; print(uuid.uuid4())')
+SMOKE_CONV_HR=$(python3 -c 'import uuid; print(uuid.uuid4())')
 
 if [ "$SMOKE_DOC" = "true" ]; then
   dcode=$(curl -sL -o /dev/null -w '%{http_code}' --max-time 25 -H "Authorization: Bearer $TOK" http://localhost/api/documents)
@@ -272,7 +306,7 @@ if [ "$SMOKE_RAG" = "true" ]; then
   for attempt in $(seq 1 6); do
     if curl -s --max-time 90 -X POST http://localhost/api/query/query \
          -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -H 'X-CI-Smoke: 1' \
-         -d "{\"question\":\"chính sách nghỉ phép của công ty\",\"user_id\":\"$SMOKE_UID\"}" \
+         -d "{\"question\":\"chính sách nghỉ phép của công ty\",\"user_id\":\"$SMOKE_UID\",\"conversation_id\":\"$SMOKE_CONV_RAG\",\"conversation_title\":\"CI smoke RAG\"}" \
          | python3 /tmp/smoke_parse.py "RAG query->mcp->rag (lần $attempt)" 1; then
       rag_ok=1; break
     fi
@@ -320,9 +354,17 @@ fi
 if [ "$SMOKE_HR" = "true" ]; then
   curl -s --max-time 90 -X POST http://localhost/api/query/query \
     -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -H 'X-CI-Smoke: 1' \
-    -d "{\"question\":\"Tôi còn bao nhiêu ngày phép?\",\"user_id\":\"$SMOKE_UID\"}" \
+    -d "{\"question\":\"Tôi còn bao nhiêu ngày phép?\",\"user_id\":\"$SMOKE_UID\",\"conversation_id\":\"$SMOKE_CONV_HR\",\"conversation_title\":\"CI smoke HR\"}" \
     | python3 /tmp/smoke_parse.py "HR query->mcp->hr_query" 0 \
     || { echo "::error::SMOKE HR query FAIL"; docker compose logs --no-color --tail 100 query-service mcp-service hr-service || true; exit 1; }
+  if [ "$SMOKE_CONVERSATIONS" = "true" ]; then
+    HISTORY=$(curl -fsS --max-time 20 -H "Authorization: Bearer $TOK" "http://localhost/api/query/conversations?limit=100")
+    echo "$HISTORY" | python3 -c 'import json,sys; ids={item["id"] for item in json.load(sys.stdin)["conversations"]}; expected={"'"$SMOKE_CONV_RAG"'","'"$SMOKE_CONV_HR"'"}; assert expected <= ids, (expected, ids); print("  [CHAT] two independent conversations persisted")'
+    for cid in "$SMOKE_CONV_RAG" "$SMOKE_CONV_HR"; do
+      curl -fsS --max-time 20 -H "Authorization: Bearer $TOK" "http://localhost/api/query/conversations/$cid" >/dev/null
+    done
+  fi
+
   HR_TOKEN=$(grep -E '^HR_INTERNAL_TOKEN=' deploy/env/secret.env | cut -d= -f2-)
   hrc=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "X-Internal-Token: $HR_TOKEN" http://localhost:8004/health)
   echo "  [HR] hr-service /health -> $hrc"
@@ -358,6 +400,7 @@ fi
 
 echo "==> 6) OK (mọi gate pass). Dọn image rác."
 DEPLOY_OK=1
+rm -f "$QUERY_DB_BACKUP"
 docker image prune -f
 echo "Deploy develop -> production: DONE (tag=$IMAGE_TAG)."
 

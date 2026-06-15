@@ -114,7 +114,7 @@ jobs:
           else
             rrag=$(has '.=="rag-worker" or .=="mcp-service"')
             rhr=$(has '.=="hr-service" or .=="mcp-hr"')
-            rec=$(has '.=="rag-worker" or .=="mcp-service" or .=="document-service" or .=="query-service-integration" or .=="e2e-extra"')
+            rec=$(has '.=="rag-worker" or .=="mcp-service" or .=="document-service" or .=="query-service" or .=="query-service-integration" or .=="e2e-extra"')
             rfe=$(has '.=="frontend"')
             rlf=$(has '.=="langfuse"')
             rls=$(has '.=="langsmith"')
@@ -180,6 +180,27 @@ jobs:
           else
             python -m pytest tests -q -ra
           fi
+
+  frontend-test:
+    needs: detect
+    if: needs.detect.outputs.run_frontend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/frontend/chat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: src/frontend/chat/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Run frontend tests
+        run: npm test
+      - name: Build frontend
+        run: npm run build
 
   # ─────────────────── Phase 1b: CONTRACT PARITY ──────────────────────
   # Guard CONTRACT giữa rag-worker (producer) và mcp-service (consumer): cùng
@@ -266,7 +287,7 @@ jobs:
   # ───────────────────────── Phase GATE ─────────────────────────
   # Fail nếu BẤT KỲ test nào failure/cancelled. Job skipped (path không khớp) = pass.
   gate:
-    needs: [unit, contract, e2e]
+    needs: [unit, frontend-test, contract, e2e]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -274,6 +295,7 @@ jobs:
         run: |
           for nr in \
             "unit=${{ needs.unit.result }}" \
+            "frontend-test=${{ needs.frontend-test.result }}" \
             "contract=${{ needs.contract.result }}" \
             "e2e=${{ needs.e2e.result }}"; do
             name="${nr%%=*}"; res="${nr#*=}"

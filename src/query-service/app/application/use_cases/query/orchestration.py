@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator
+from contextvars import ContextVar
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -29,6 +30,9 @@ from app.infrastructure.config import Settings
 
 
 logger = logging.getLogger(__name__)
+
+_ACTIVE_CONVERSATION_ID: ContextVar[str | None] = ContextVar("active_conversation_id", default=None)
+_ACTIVE_CONVERSATION_TITLE: ContextVar[str | None] = ContextVar("active_conversation_title", default=None)
 
 
 # Numeric enum values match the reference REACT agent convention:
@@ -90,6 +94,7 @@ class QueryOrchestrationUseCase:
         user: AuthenticatedUser,
         trace_session: str | None = None,
         conversation_title: str | None = None,
+        conversation_id: str | None = None,
     ) -> AsyncIterator[dict]:
         """Wrapper mỏng: bọc luồng thật bằng 1 langfuse trace (best-effort, low-level
         client — KHÔNG callback). Tạo trace TRƯỚC _stream_inner để _stream_langgraph có
@@ -97,14 +102,17 @@ class QueryOrchestrationUseCase:
 
         trace_session: nếu set (vd "ci-smoke" do smoke CI), dùng làm session_id của TRACE
         thay cho session_id ngẫu nhiên -> gom trace smoke 1 chỗ để deploy kế tự xóa."""
+        conversation_token = _ACTIVE_CONVERSATION_ID.set(conversation_id)
+        title_token = _ACTIVE_CONVERSATION_TITLE.set(conversation_title)
         tracer = self._tracer
         # Pre-generate session_id để trace có thể tạo trước khi _stream_inner bắt đầu.
         # _stream_inner nhận session_id này thay vì tự sinh uuid4 mới.
         pre_session_id = str(uuid4())
-        trace = tracer.start(question, user, trace_session or pre_session_id) if tracer is not None else None
+        trace = None
         last_done: dict | None = None
         usage_meta: dict | None = None
         try:
+            trace = tracer.start(question, user, trace_session or pre_session_id) if tracer is not None else None
             async for event in self._stream_inner(
                 question, user,
                 _session_id=pre_session_id,
@@ -123,8 +131,12 @@ class QueryOrchestrationUseCase:
                             event["trace_id"] = tid
                 yield event
         finally:
-            if tracer is not None and trace is not None:
-                tracer.finish(trace, last_done, usage_meta)
+            try:
+                if tracer is not None and trace is not None:
+                    tracer.finish(trace, last_done, usage_meta)
+            finally:
+                _ACTIVE_CONVERSATION_TITLE.reset(title_token)
+                _ACTIVE_CONVERSATION_ID.reset(conversation_token)
 
     async def _stream_inner(
         self,
@@ -170,9 +182,9 @@ class QueryOrchestrationUseCase:
             return
 
         # Legacy path: direct orchestration without agent (mock/test mode)
-        context = await self._conversation_repo.get_context(user.id, recent_k=5)
+        context = await self._get_context(user.id, recent_k=5)
         recent_messages = [(message.role, message.content) for message in context.recent_messages]
-        await self._conversation_repo.save_message(user.id, "user", question)
+        await self._save_user_message(user.id, question)
         decision = await self._choose_route(question, recent_messages)
 
         # Handle direct responses for clarification or out of scope
@@ -281,7 +293,7 @@ class QueryOrchestrationUseCase:
         # state["messages"] contains only prior turns.
         recent_lc_messages: list = []
         try:
-            ctx = await self._conversation_repo.get_context(user.id, recent_k=4)
+            ctx = await self._get_context(user.id, recent_k=4)
             for msg in ctx.recent_messages:
                 if msg.role == "user":
                     recent_lc_messages.append(HumanMessage(content=msg.content))
@@ -291,7 +303,7 @@ class QueryOrchestrationUseCase:
             pass  # history is optional — never block the current query
 
         # Save current question NOW (after the history snapshot is taken).
-        await self._conversation_repo.save_message(user.id, "user", question)
+        await self._save_user_message(user.id, question)
 
         initial_state = create_initial_state(
             question=question,
@@ -1014,6 +1026,31 @@ class QueryOrchestrationUseCase:
         await self._save_assistant(user_id, session_id, static_message, [], started)
         yield {"done": True, "sources": [], "session_id": session_id, "fallback": True, "outcome": outcome.value}
 
+    async def _get_context(self, user_id: str, recent_k: int):
+        return await self._conversation_repo.get_context(
+            user_id,
+            conversation_id=_ACTIVE_CONVERSATION_ID.get(),
+            recent_k=recent_k,
+        )
+
+    async def _save_user_message(self, user_id: str, question: str) -> None:
+        save_message_detail = getattr(self._conversation_repo, "save_message_detail", None)
+        if save_message_detail:
+            await save_message_detail(
+                user_id=user_id,
+                role="user",
+                content=question,
+                conversation_id=_ACTIVE_CONVERSATION_ID.get(),
+                conversation_title=_ACTIVE_CONVERSATION_TITLE.get(),
+            )
+            return
+        await self._conversation_repo.save_message(
+            user_id,
+            "user",
+            question,
+            conversation_id=_ACTIVE_CONVERSATION_ID.get(),
+        )
+
     async def _save_assistant(
         self,
         user_id: str,
@@ -1029,11 +1066,14 @@ class QueryOrchestrationUseCase:
                 user_id=user_id,
                 role="assistant",
                 content=answer,
+                conversation_id=_ACTIVE_CONVERSATION_ID.get(),
+                conversation_title=_ACTIVE_CONVERSATION_TITLE.get(),
                 session_id=session_id,
                 sources=sources,
                 latency_ms=latency_ms,
+                create_if_missing=False,
             )
-            context = await self._conversation_repo.get_context(user_id, recent_k=6)
+            context = await self._get_context(user_id, recent_k=6)
             if (
                 self._settings.llm_mode.strip().lower() == "mock"
                 and len(context.recent_messages) >= 10
@@ -1043,9 +1083,18 @@ class QueryOrchestrationUseCase:
                 )
                 if not summary:
                     return
-                await self._conversation_repo.update_summary(user_id, summary)
+                await self._conversation_repo.update_summary(
+                    user_id,
+                    summary,
+                    conversation_id=_ACTIVE_CONVERSATION_ID.get(),
+                )
         else:
-            await self._conversation_repo.save_message(user_id, "assistant", answer)
+            await self._conversation_repo.save_message(
+                user_id,
+                "assistant",
+                answer,
+                conversation_id=_ACTIVE_CONVERSATION_ID.get(),
+            )
 
     @staticmethod
     def _source_payload(result: SearchResultLike) -> dict:
