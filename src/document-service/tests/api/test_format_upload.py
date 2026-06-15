@@ -87,6 +87,23 @@ def test_upload_accepts_all_supported_file_formats() -> None:
     assert not failed_formats, "Formats not uploadable: " + "; ".join(failed_formats)
 
 
+def test_supported_formats_endpoint_returns_allowed_extensions() -> None:
+    from app.application.use_cases.documents.common import ALLOWED_EXTENSIONS, MAX_FILE_BYTES
+
+    client = TestClient(app)
+    app.dependency_overrides[dependencies.get_current_user] = admin_user
+
+    response = client.get(
+        "/documents/supported-formats",
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body["extensions"]) == set(ALLOWED_EXTENSIONS)
+    assert body["max_file_bytes"] == MAX_FILE_BYTES
+
+
 def _sample_content(extension: str) -> bytes:
     if extension == "csv":
         return b"name,department\nAlice,HR\n"

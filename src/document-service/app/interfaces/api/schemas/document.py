@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -8,6 +7,13 @@ class UploadResponse(BaseModel):
     document_id: str
     status: str
     message: str
+
+
+class SupportedFormatsResponse(BaseModel):
+    # extensions = ALLOWED_EXTENSIONS (manifest rag-worker ∩ allow_list chính sách).
+    # Nguồn để frontend dựng accept filter + validation, không hardcode lệch backend.
+    extensions: list[str]
+    max_file_bytes: int
 
 
 class DocumentItem(BaseModel):
@@ -33,8 +39,11 @@ class DocumentList(BaseModel):
 
 
 class DocumentFileResponse(BaseModel):
+    # file_type không ràng Literal cố định: tập loại hợp lệ nay động theo
+    # ALLOWED_EXTENSIONS (manifest rag-worker ∩ allow_list). Validate đã làm ở
+    # use case (đối chiếu ALLOWED_EXTENSIONS) nên schema chỉ cần str.
     url: str = Field(min_length=1)
-    file_type: Literal["pdf", "docx", "txt", "xlsx", "csv", "pptx", "md"]
+    file_type: str = Field(min_length=1)
     expires_in: int = Field(default=300, gt=0)
 
 

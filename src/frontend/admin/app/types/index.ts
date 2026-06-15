@@ -73,6 +73,11 @@ export interface DocumentFileResponse {
   expires_in: number
 }
 
+export interface SupportedFormatsResponse {
+  extensions: string[]
+  max_file_bytes: number
+}
+
 export interface MessageResponse {
   message: string
 }

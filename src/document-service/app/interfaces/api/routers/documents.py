@@ -8,6 +8,7 @@ from app.application.exceptions import (
     StorageError,
     ValidationError,
 )
+from app.application.use_cases.documents.common import ALLOWED_EXTENSIONS, MAX_FILE_BYTES
 from app.application.use_cases.documents.delete_document_use_case import DeleteDocumentUseCase
 from app.application.use_cases.documents.get_document_file_use_case import GetDocumentFileUseCase
 from app.application.use_cases.documents.get_document_use_case import GetDocumentUseCase
@@ -33,6 +34,7 @@ from app.interfaces.api.schemas.document import (
     DocumentItem,
     DocumentList,
     MessageResponse,
+    SupportedFormatsResponse,
     UploadResponse,
 )
 
@@ -98,6 +100,19 @@ async def list_documents(
     return DocumentList(
         items=[_to_item(document) for document in result.items],
         total=result.total,
+    )
+
+
+@router.get("/supported-formats", response_model=SupportedFormatsResponse)
+async def supported_formats(
+    actor: CurrentUser = Depends(require_admin),
+) -> SupportedFormatsResponse:
+    # Nguồn cho frontend dựng accept/validation. = ALLOWED_EXTENSIONS (manifest
+    # rag-worker ∩ allow_list chính sách) -> FE không bao giờ lệch backend.
+    del actor
+    return SupportedFormatsResponse(
+        extensions=sorted(ALLOWED_EXTENSIONS),
+        max_file_bytes=MAX_FILE_BYTES,
     )
 
 

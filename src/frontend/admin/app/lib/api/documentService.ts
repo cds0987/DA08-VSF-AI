@@ -6,6 +6,7 @@ import type {
   DocumentListResponse,
   DocumentStatus,
   MessageResponse,
+  SupportedFormatsResponse,
   UploadResponse,
 } from '~/types'
 
@@ -55,6 +56,13 @@ const documentService = {
 
   async getFileUrl(documentId: string): Promise<DocumentFileResponse> {
     const response = await axiosClient.get<DocumentFileResponse>(`/${documentId}/file`, { service: 'document' })
+    return response.data
+  },
+
+  // Loại file backend chấp nhận (manifest rag-worker ∩ allow_list) — FE dùng để
+  // dựng accept filter + validation, không hardcode lệch backend.
+  async getSupportedFormats(): Promise<SupportedFormatsResponse> {
+    const response = await axiosClient.get<SupportedFormatsResponse>('/supported-formats', { service: 'document' })
     return response.data
   },
 

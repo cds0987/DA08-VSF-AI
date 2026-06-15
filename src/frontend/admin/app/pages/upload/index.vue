@@ -21,8 +21,25 @@ interface UploadItem {
   message?: string
 }
 
-const ALLOWED_EXTENSIONS = new Set(['pdf', 'docx', 'txt', 'xlsx', 'csv', 'pptx', 'md'])
-const MAX_FILE_BYTES = 50 * 1024 * 1024
+// Loại file hợp lệ LẤY TỪ backend (manifest rag-worker ∩ allow_list) -> FE không
+// hardcode lệch. Fallback = 7 loại tài liệu cơ bản khi API chưa kịp/ lỗi.
+const FALLBACK_EXTENSIONS = ['pdf', 'docx', 'txt', 'xlsx', 'csv', 'pptx', 'md']
+const allowedExtensions = ref<Set<string>>(new Set(FALLBACK_EXTENSIONS))
+const maxFileBytes = ref(50 * 1024 * 1024)
+
+const acceptAttr = computed(() => [...allowedExtensions.value].map(ext => `.${ext}`).join(','))
+const formatsLabel = computed(() => [...allowedExtensions.value].map(ext => ext.toUpperCase()).join(', '))
+const maxFileMb = computed(() => Math.round(maxFileBytes.value / (1024 * 1024)))
+
+const loadSupportedFormats = async () => {
+  try {
+    const res = await documentService.getSupportedFormats()
+    if (res.extensions?.length) allowedExtensions.value = new Set(res.extensions.map(ext => ext.toLowerCase()))
+    if (res.max_file_bytes) maxFileBytes.value = res.max_file_bytes
+  } catch (error) {
+    console.error('Failed to load supported formats, using fallback:', error)
+  }
+}
 
 const items = ref<UploadItem[]>([])
 const drag = ref(false)
@@ -49,12 +66,12 @@ const handleFiles = (files: FileList | null) => {
   const accepted: UploadItem[] = []
   for (const file of Array.from(files)) {
     const extension = fileExtension(file.name)
-    if (!ALLOWED_EXTENSIONS.has(extension)) {
+    if (!allowedExtensions.value.has(extension)) {
       toast.error(`${file.name}: unsupported file type`)
       continue
     }
-    if (file.size > MAX_FILE_BYTES) {
-      toast.error(`${file.name}: file exceeds 50 MiB`)
+    if (file.size > maxFileBytes.value) {
+      toast.error(`${file.name}: file exceeds ${maxFileMb.value} MiB`)
       continue
     }
 
@@ -161,6 +178,7 @@ const classificationOptions: { value: Classification; label: string }[] = [
 ]
 
 onMounted(() => {
+  void loadSupportedFormats()
   pollTimer = setInterval(() => void refreshUploadedStatuses(), 4000)
 })
 
@@ -219,7 +237,7 @@ onUnmounted(() => {
           <UploadCloud class="h-6 w-6" />
         </div>
         <h3 class="mt-3 text-[15px] font-semibold text-foreground">Drop files here, or click to browse</h3>
-        <p class="mt-1 text-[12.5px] text-muted-foreground">PDF, DOCX, TXT, XLSX, CSV, PPTX, MD - up to 50 MiB per file.</p>
+        <p class="mt-1 text-[12.5px] text-muted-foreground">{{ formatsLabel }} - up to {{ maxFileMb }} MiB per file.</p>
         <button class="mt-4 rounded-md bg-primary px-3 py-1.5 text-[12.5px] font-medium text-primary-foreground hover:bg-primary/90" @click="openFilePicker">
           Select files
         </button>
@@ -228,7 +246,7 @@ onUnmounted(() => {
           type="file"
           multiple
           class="hidden"
-          accept=".pdf,.docx,.txt,.xlsx,.csv,.pptx,.md"
+          :accept="acceptAttr"
           @change="handleFiles(($event.target as HTMLInputElement).files)"
         >
       </div>
