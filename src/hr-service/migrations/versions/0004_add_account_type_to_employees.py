@@ -17,10 +17,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        'employees',
-        sa.Column('account_type', sa.String(length=20), server_default='internal', nullable=False),
-        schema='hr_svc'
+    # IF NOT EXISTS: idempotent nếu column đã tồn tại (schema drift / rollback partial).
+    op.execute(
+        "ALTER TABLE hr_svc.employees ADD COLUMN IF NOT EXISTS "
+        "account_type VARCHAR(20) NOT NULL DEFAULT 'internal'"
     )
 
 
