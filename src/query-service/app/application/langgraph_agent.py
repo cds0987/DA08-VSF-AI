@@ -25,6 +25,7 @@ from app.application.langgraph_edges import (
     route_entry,
     route_after_triage,
     route_after_think,
+    route_after_act,
 )
 from app.application.langgraph_nodes import (
     shortcut_node,
@@ -105,7 +106,14 @@ def build_langgraph_agent(
     # act_node → observe_node (always); observe_node → think_node (always loop back).
     # The iteration cap + force_answer flag (set in observe_node / act_node) cause
     # think_node to produce a final text answer, which route_after_think routes to answer.
-    workflow.add_edge("act", "observe")
+    workflow.add_conditional_edges(
+        source="act",
+        path=route_after_act,
+        path_map={
+            "answer": "answer",
+            "observe": "observe",
+        },
+    )
     workflow.add_edge("observe", "think")
 
     # Terminal edges
