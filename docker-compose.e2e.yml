@@ -393,7 +393,9 @@ services:
     ports:
       - "127.0.0.1:8004:8004"
     environment:
-      <<: *newrelic-off
+      # *jwt: HR Admin API (require_admin_jwt) cần JWT_SECRET_KEY — config.py fail-fast
+      # nếu thiếu. Phải KHỚP secret với user-service để verify token admin chung.
+      <<: [*jwt, *newrelic-off]
       HR_DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/hr_db
       HR_HOST: "0.0.0.0"
       HR_PORT: "8004"
