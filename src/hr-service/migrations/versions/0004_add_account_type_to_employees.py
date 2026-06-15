@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '0004_add_account_type_to_employees'
+revision = '0004_add_account_type'
 down_revision = '0003_leave_request_write'
 branch_labels = None
 depends_on = None
