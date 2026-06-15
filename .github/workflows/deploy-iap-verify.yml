@@ -1,0 +1,40 @@
+name: deploy-iap-verify (manual)
+
+# Verify HARNESS cho việc khóa SSH (IAP + OS Login + WIF) — KHÔNG deploy, chỉ kiểm
+# tra đường vào mới hoạt động đầu-cuối TRƯỚC khi cutover job deploy thật.
+#   WIF (keyless) -> impersonate github-deploy@ -> gcloud ssh --tunnel-through-iap
+#   -> chứng minh: login được, có sudo, chạy được docker (điều deploy.sh cần).
+# Chạy TAY (workflow_dispatch). Chỉ PASS sau khi OS Login đã bật trên VM.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write        # bắt buộc cho WIF (OIDC token)
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Auth GCP qua Workload Identity Federation (không key tĩnh)
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: vintravel-chatbot
+          workload_identity_provider: projects/289299478169/locations/global/workloadIdentityPools/github-actions/providers/github
+          service_account: github-deploy@vintravel-chatbot.iam.gserviceaccount.com
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: IAP SSH read-only — chứng minh login + sudo + docker
+        run: |
+          gcloud compute ssh vsf-rag-demo-vm \
+            --zone=asia-southeast1-a --tunnel-through-iap --quiet \
+            --command='
+              echo "=== WHOAMI ==="; whoami; id
+              echo "=== SUDO ==="; sudo -n true && echo SUDO_OK || echo NO_SUDO
+              echo "=== DOCKER ==="; docker ps --format "{{.Names}}" | head -5 || echo DOCKER_FAIL
+              echo "=== APP_DIR ==="; ls -d /opt/da08-vsf /home/TOMAP/DA08-VSF 2>/dev/null
+              echo "=== VERIFY_DONE ==="
+            '
