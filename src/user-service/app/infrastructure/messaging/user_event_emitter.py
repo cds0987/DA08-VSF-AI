@@ -14,12 +14,12 @@ def _role_value(role: object) -> str:
     return str(value if value is not None else role)
 
 
-def user_to_payload(user: User) -> dict[str, Any]:
+def user_to_payload(user: User, department: str | None = None) -> dict[str, Any]:
     return {
         "user_id": user.id,
         "email": user.email,
         "role": _role_value(user.role),
-        "department": user.department,
+        "department": department or "",
         "account_type": user.account_type,
         "is_active": user.is_active,
     }
@@ -33,8 +33,8 @@ class NatsUserEventEmitter:
     def __init__(self, publisher: UserEventPublisher) -> None:
         self._publisher = publisher
 
-    async def emit(self, subject: str, user: User) -> None:
+    async def emit(self, subject: str, user: User, department: str | None = None) -> None:
         try:
-            await self._publisher.publish_user_event(subject, user_to_payload(user))
+            await self._publisher.publish_user_event(subject, user_to_payload(user, department))
         except Exception as exc:  # noqa: BLE001
             logger.warning("user event %s publish failed (best-effort): %s", subject, exc)

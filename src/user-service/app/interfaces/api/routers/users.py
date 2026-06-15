@@ -1,18 +1,60 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from app.application.exceptions import NotFoundError, PermissionDeniedError
+from app.application.exceptions import ConflictError, NotFoundError, PermissionDeniedError
+from app.application.use_cases.users.create_user_use_case import CreateUserUseCase
 from app.application.use_cases.users.list_users_use_case import ListUsersUseCase
 from app.application.use_cases.users.set_user_active_use_case import SetUserActiveUseCase
 from app.domain.entities.user import User
 from app.interfaces.api.dependencies import (
+    get_create_user_use_case,
     get_list_users_use_case,
     get_set_user_active_use_case,
     require_admin,
 )
-from app.interfaces.api.schemas.user import UserActiveResponse, UserItem, UserList
+from app.interfaces.api.schemas.user import (
+    CreateUserRequest,
+    UserActiveResponse,
+    UserItem,
+    UserList,
+)
 
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+@router.post("", status_code=201, response_model=UserItem)
+async def create_user(
+    request: CreateUserRequest,
+    actor: User = Depends(require_admin),
+    use_case: CreateUserUseCase = Depends(get_create_user_use_case),
+) -> UserItem:
+    try:
+        user = await use_case.execute(
+            actor=actor,
+            email=request.email,
+            password=request.password,
+            role=request.role,
+            account_type=request.account_type,
+            department=request.department,
+        )
+    except PermissionDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin only",
+        ) from exc
+    except ConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    return UserItem(
+        id=user.id,
+        email=user.email,
+        role=_role_value(user.role),
+        account_type=user.account_type,
+        is_active=user.is_active,
+    )
 
 
 @router.get("", response_model=UserList)

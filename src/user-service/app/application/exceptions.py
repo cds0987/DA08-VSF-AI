@@ -25,3 +25,7 @@ class PermissionDeniedError(ApplicationError):
 class NotFoundError(ApplicationError):
     detail = "Not found"
 
+
+class ConflictError(ApplicationError):
+    detail = "Conflict"
+

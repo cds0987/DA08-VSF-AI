@@ -20,7 +20,7 @@ from app.infrastructure.user_events_subscriber import (
 class RecordingRepo:
     def __init__(self) -> None:
         self.ensured: list[str] = []
-        self.upserts: list[tuple[str, str, str, bool]] = []
+        self.upserts: list[tuple[str, str, str, bool, str]] = []
 
     async def ensure_leave_balance(
         self, user_id: str, annual_total: int = 12, sick_total: int = 10
@@ -29,9 +29,10 @@ class RecordingRepo:
         self.ensured_totals = (annual_total, sick_total)
 
     async def upsert_employee_from_user(
-        self, user_id: str, email: str, department: str, is_active: bool
+        self, user_id: str, email: str, department: str, is_active: bool, account_type: str
     ) -> None:
-        self.upserts.append((user_id, email, department, is_active))
+        self.upserts.append((user_id, email, department, is_active, account_type))
+
 
     async def aclose(self) -> None:  # pragma: no cover - không dùng ở handler test
         return None
@@ -39,7 +40,7 @@ class RecordingRepo:
 
 class ExplodingRepo(RecordingRepo):
     async def upsert_employee_from_user(
-        self, user_id: str, email: str, department: str, is_active: bool
+        self, user_id: str, email: str, department: str, is_active: bool, account_type: str
     ) -> None:
         raise RuntimeError("db write failed")
 
@@ -72,7 +73,7 @@ def test_user_created_provisions_employee_and_leave_balance() -> None:
         "is_active": True,
     }
     _run(handle_user_event("user.created", payload, repo, publisher))
-    assert repo.upserts == [("u-1", "a@b.c", "HR", True)]
+    assert repo.upserts == [("u-1", "a@b.c", "HR", True, "internal")]
     assert repo.ensured == ["u-1"]
     assert publisher.events == [
         {
@@ -101,7 +102,7 @@ def test_user_deactivated_sets_inactive_no_leave_balance() -> None:
     publisher = RecordingPublisher()
     payload = {"user_id": "u-2", "email": "x@y.z", "department": "Fin", "is_active": False}
     _run(handle_user_event("user.deactivated", payload, repo, publisher))
-    assert repo.upserts == [("u-2", "x@y.z", "Fin", False)]
+    assert repo.upserts == [("u-2", "x@y.z", "Fin", False, "internal")]
     assert repo.ensured == []  # không tạo phép cho user nghỉ việc
     assert publisher.events == [
         {
@@ -117,7 +118,7 @@ def test_user_deactivated_defaults_inactive_when_flag_missing() -> None:
     repo = RecordingRepo()
     # is_active vắng -> suy ra từ subject deactivated.
     _run(handle_user_event("user.deactivated", {"user_id": "u-3"}, repo))
-    assert repo.upserts == [("u-3", "", "", False)]
+    assert repo.upserts == [("u-3", "", "", False, "internal")]
 
 
 def test_missing_user_id_raises_fast() -> None:
@@ -139,7 +140,7 @@ def test_publish_error_is_best_effort_and_does_not_break_db_sync() -> None:
 
     _run(handle_user_event("user.updated", payload, repo, ExplodingPublisher()))
 
-    assert repo.upserts == [("u-4", "u4@company.com", "Ops", True)]
+    assert repo.upserts == [("u-4", "u4@company.com", "Ops", True, "external")]
     assert repo.ensured == ["u-4"]
 
 
@@ -186,6 +187,27 @@ class FakeNatsModule:
 
     async def connect(self, url: str):
         return self.connection
+
+
+def test_duplicate_user_created_is_idempotent() -> None:
+    """Gọi handle_user_event hai lần cho cùng user_id không raise và cả hai lần
+    đều gọi upsert (DB xử lý ON CONFLICT). Không có exception propagate."""
+    repo = RecordingRepo()
+    publisher = RecordingPublisher()
+    payload = {
+        "user_id": "u-dup",
+        "email": "dup@company.com",
+        "department": "HR",
+        "account_type": "internal",
+        "is_active": True,
+    }
+    _run(handle_user_event("user.created", payload, repo, publisher))
+    _run(handle_user_event("user.created", payload, repo, publisher))
+
+    # Cả hai lần đều gọi upsert — ON CONFLICT ở postgres layer mới dedup
+    assert len(repo.upserts) == 2
+    for upsert in repo.upserts:
+        assert upsert[0] == "u-dup"
 
 
 def test_subscriber_only_registers_user_subjects() -> None:
