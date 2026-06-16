@@ -183,6 +183,7 @@ async def test_act_node_dispatches_generic_tool():
         session_id="sess-test",
         max_iterations=3,
         recent_messages=[],
+        rag_score_threshold=0.45,
     )
     # Inject an AIMessage with a tool_call to it_ticket.
     ai_msg = AIMessage(
@@ -220,7 +221,7 @@ def _rag_tool_state(question: str = "Quy định nghỉ phép năm là gì?"):
         session_id="sess-test",
         max_iterations=3,
         recent_messages=[],
-        rag_score_threshold=0.70,
+        rag_score_threshold=0.45,
     )
     ai_msg = AIMessage(
         content="",

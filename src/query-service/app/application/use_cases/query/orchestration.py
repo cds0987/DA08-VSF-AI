@@ -359,8 +359,8 @@ class QueryOrchestrationUseCase:
             session_id=session_id,
             max_iterations=self._settings.agent_max_iterations,
             recent_messages=recent_lc_messages,
-            rag_score_threshold=self._settings.rag_score_threshold,
             rag_top_k=self._settings.rag_top_k,
+            rag_score_threshold=self._settings.rag_score_threshold,
         )
 
         # Semantic cache — check TRƯỚC astream_events để tránh gọi LLM/tool lãng phí.
@@ -895,18 +895,7 @@ class QueryOrchestrationUseCase:
                 yield event
             return
 
-        grounded_results = [
-            result for result in acl_filtered_results if result.score >= self._settings.rag_score_threshold
-        ]
-        if not grounded_results:
-            async for event in self._fallback(
-                user.id, session_id, started, Outcome.NO_INFO,
-                question=question, recent_messages=recent_messages,
-            ):
-                yield event
-            return
-
-        sources = [self._source_payload(result) for result in grounded_results]
+        sources = [self._source_payload(result) for result in acl_filtered_results]
         context_text = "\n\n".join(
             f"[{index + 1}] {result.document_name} / {result.caption}\n{result.parent_text}"
             for index, result in enumerate(grounded_results)
@@ -917,7 +906,7 @@ class QueryOrchestrationUseCase:
                 question=question,
                 context=context_text,
                 recent_messages=recent_messages,
-                sources=grounded_results,
+                sources=acl_filtered_results,
                 is_hr_answer=False,
                 outcome=Outcome.SUCCESS,
             )

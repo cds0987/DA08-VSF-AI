@@ -16,6 +16,7 @@ from core_engine.chunking import Chunker, SectionChunker
 from core_engine.config import HaystackSettings, load_settings
 from core_engine.logging_utils import Stopwatch, log_event
 from core_engine.types import EmbeddingService, VectorRepository
+from core_engine.vectorstore.providers.qdrant.base import _sparse_encode
 from core_engine.vectorstore.types import VectorRecord
 
 
@@ -274,7 +275,7 @@ class HaystackRagEngine:
                         # child_text LUÔN = raw child (trước đây nhầm = caption -> chunk
                         # text bị thay bằng tóm tắt AI). caption giữ riêng ở field "caption".
                         "child_text": child,
-                        "bm25_text": child,
+                        "bm25_text": f"{section.section_title} {child}" if section.section_title and section.section_title != "(no heading)" else child,
                         "parent_id": parent_id,
                         "parent_text": section.parent_text,
                         "document_id": doc.document_id,
@@ -336,9 +337,16 @@ class HaystackRagEngine:
             embed_span,
             {"vectors": len(vectors), "dimension": settings.embed_dimension},
         )
+        sparse_vecs = [_sparse_encode(p["bm25_text"]) for p in payloads]
         records = [
-            VectorRecord(chunk_id=chunk_id, vector=vector, payload=payload)
-            for chunk_id, vector, payload in zip(chunk_ids, vectors, payloads)
+            VectorRecord(
+                chunk_id=chunk_id,
+                vector=vector,
+                payload=payload,
+                sparse_indices=sparse_vecs[i][0],
+                sparse_values=sparse_vecs[i][1],
+            )
+            for i, (chunk_id, vector, payload) in enumerate(zip(chunk_ids, vectors, payloads))
         ]
         write_span = self._span_start(
             trace,

@@ -41,7 +41,7 @@ class QdrantRemoteProvider(QdrantBase):
             if not await self._client.collection_exists(self._collection):
                 await self._client.create_collection(
                     collection_name=self._collection,
-                    vectors_config=self._vectors_config(),
+                    **self._collection_create_kwargs(),
                 )
                 # Filter theo document_id (dedup scroll + delete + scoped search) yêu cầu
                 # payload index keyword; Qdrant Cloud bật "indexing required for filtering"

@@ -497,23 +497,8 @@ async def act_node(
                     top_k=effective_top_k,
                 )
                 _rag_end_dt = datetime.now(timezone.utc)
-                # Only pass results that meet the relevance threshold to the LLM.
-                # Ngưỡng config-driven (state["rag_score_threshold"]) — trước hardcode 0.70
-                # quá cao cho text-embedding-3-small (chunk liên quan ~0.3-0.6) -> lọc sạch.
-                threshold = state.get("rag_score_threshold", 0.70)
-                qualified = [r for r in results if r.score >= threshold]
-
-                # Adaptive threshold fallback: nếu KHÔNG chunk nào đạt ngưỡng nhưng
-                # rag-service VẪN trả kết quả -> lấy top-3 điểm cao nhất làm ngữ cảnh,
-                # thay vì hard-stop "không tìm thấy" do lọc quá chặt (te3-small cho điểm
-                # chunk liên quan ~0.3-0.6, query ngắn/đa ngữ có thể < ngưỡng). Grounding
-                # vẫn an toàn: prompt buộc trả lời CHỈ từ context + tự nói "không tìm thấy"
-                # nếu context không trả lời được -> weak context KHÔNG ép LLM bịa. CHỈ khi
-                # qdrant trả RỖNG mới hard-stop NO_INFO (nhánh else phía dưới).
-                adaptive_fallback = False
-                if not qualified and results:
-                    qualified = sorted(results, key=lambda r: r.score, reverse=True)[:min(3, len(results))]
-                    adaptive_fallback = True
+                _threshold = state.get("rag_score_threshold", 0.45)
+                qualified = [r for r in results if r.score >= _threshold]
 
                 # Ghi debug event (JSON-safe) vào state để orchestration dựng Langfuse span.
                 # Tất cả giá trị là scalar/list[str/float] — an toàn với checkpointer.
@@ -521,10 +506,8 @@ async def act_node(
                     "query": state["question"],
                     "top_k": effective_top_k,
                     "allowed_count": len(allowed_doc_ids),
-                    "threshold": threshold,
                     "total": len(results),
                     "qualified": len(qualified),
-                    "adaptive_fallback": adaptive_fallback,
                     "scores": [round(r.score, 4) for r in results[:10]],
                     "doc_names": sorted({r.document_name for r in qualified}),
                     "start": _rag_start_dt.isoformat(),
