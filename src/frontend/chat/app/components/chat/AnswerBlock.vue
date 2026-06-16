@@ -110,9 +110,11 @@ function selectSource(citation: Citation) {
           @click="selectSource(citation)"
         >
           <div class="flex items-start gap-2">
-            <div class="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-900 dark:text-foreground">
-              {{ citation.ref ?? (index + 1) }}. {{ citation.caption || citation.document }}
-            </div>
+            <!-- Nội dung đọc chính: snippet (đoạn literal liên quan); caption chỉ là tóm
+                 tắt cho semantic search nên dùng làm fallback khi chưa có snippet. -->
+            <p class="min-w-0 flex-1 line-clamp-3 text-[13px] font-medium leading-snug text-slate-900 dark:text-foreground">
+              {{ citation.ref ?? (index + 1) }}. {{ citation.snippet || citation.caption || citation.document }}
+            </p>
             <span
               v-if="formatRelevance(citation.score)"
               class="shrink-0 rounded-full bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300"
@@ -124,12 +126,14 @@ function selectSource(citation: Citation) {
           <div class="mt-1 flex items-center gap-1 truncate text-[11px] font-medium text-slate-700 dark:text-muted-foreground">
             <FileText class="h-3 w-3 shrink-0 text-slate-400 dark:text-muted-foreground/70" />
             <span class="truncate">{{ citation.document }}</span>
+            <span v-if="citationHeadingPath(citation.heading_path, citation.document).length" class="truncate text-slate-500 dark:text-muted-foreground/70">
+              › {{ citationHeadingPath(citation.heading_path, citation.document).join(' › ') }}
+            </span>
           </div>
-          <div v-if="citationHeadingPath(citation.heading_path, citation.document).length" class="mt-1 truncate text-[11px] font-medium text-slate-600 dark:text-muted-foreground/70">
-            {{ citationHeadingPath(citation.heading_path, citation.document).join(' › ') }}
-          </div>
-          <p v-if="citation.snippet" class="mt-1.5 line-clamp-2 border-l-2 border-slate-200 dark:border-white/10 pl-2 text-[11px] italic leading-snug text-slate-500 dark:text-muted-foreground/80">
-            {{ citation.snippet }}
+          <!-- Phụ đề: caption tóm tắt, line-clamp 2 dòng + tooltip hover xem đầy đủ. Chỉ
+               hiện khi đã có snippet làm nội dung chính (tránh lặp lại caption). -->
+          <p v-if="citation.snippet && citation.caption" :title="citation.caption" class="mt-1 line-clamp-2 text-[11px] italic leading-snug text-slate-500 dark:text-muted-foreground/80">
+            {{ citation.caption }}
           </p>
         </button>
       </div>
