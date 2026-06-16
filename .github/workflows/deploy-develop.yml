@@ -461,6 +461,9 @@ jobs:
           # Basic Auth gác subdomain langfuse.vsfchat.cloud (render -> deploy/nginx/.htpasswd).
           # Optional: thiếu -> dashboard KHÓA (fail-closed), KHÔNG chặn deploy.
           LANGFUSE_BASIC_AUTH_HTPASSWD: ${{ secrets.LANGFUSE_BASIC_AUTH_HTPASSWD }}
+          # Basic Auth gác subdomain qdrant.vsfchat.cloud (render -> deploy/nginx/.htpasswd-qdrant).
+          # Optional: thiếu -> dashboard KHÓA (fail-closed), KHÔNG chặn deploy.
+          QDRANT_BASIC_AUTH_HTPASSWD: ${{ secrets.QDRANT_BASIC_AUTH_HTPASSWD }}
           # deploy/env/secret.env (env_file -> biến container)
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
@@ -495,7 +498,7 @@ jobs:
           for v in DOCKERHUB_USERNAME DOCKERHUB_TOKEN POSTGRES_PASSWORD NEW_RELIC_LICENSE_KEY \
                    SEED_ADMIN_PASSWORD LANGFUSE_DB_PASSWORD NEXTAUTH_SECRET LANGFUSE_SALT \
                    LANGFUSE_ENCRYPTION_KEY LANGFUSE_INIT_USER_PASSWORD LANGFUSE_PUBLIC_KEY \
-                   LANGFUSE_SECRET_KEY LANGFUSE_BASIC_AUTH_HTPASSWD OPENAI_API_KEY JWT_SECRET_KEY \
+                   LANGFUSE_SECRET_KEY LANGFUSE_BASIC_AUTH_HTPASSWD QDRANT_BASIC_AUTH_HTPASSWD OPENAI_API_KEY JWT_SECRET_KEY \
                    MCP_INTERNAL_TOKEN HR_INTERNAL_TOKEN GCS_HMAC_KEY GCS_HMAC_SECRET LANGSMITH_API_KEY \
                    AIROUTER_INTERNAL_TOKEN OPENAI_API_KEY_1 OPENAI_API_KEY_2 OPENAI_API_KEY_3 \
                    OPENAI_API_KEY_4 OPENAI_API_KEY_5 OPENROUTER_API_KEY_1 OPENROUTER_API_KEY_2 \

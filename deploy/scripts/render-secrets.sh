@@ -21,6 +21,7 @@ done
 : "${SEED_ADMIN_PASSWORD:=}"   # optional: chỉ dùng khi re-seed admin lần đầu
 : "${LANGSMITH_API_KEY:=}"     # optional: thiếu -> langsmith backend tự bỏ (không crash)
 : "${LANGFUSE_BASIC_AUTH_HTPASSWD:=}"  # optional: rỗng -> dashboard Langfuse KHÓA (fail-closed)
+: "${QDRANT_BASIC_AUTH_HTPASSWD:=}"    # optional: rỗng -> dashboard Qdrant KHÓA (fail-closed)
 # AI Router: key pool + internal token. Tất cả OPTIONAL -> thiếu thì ai-router auto-discover
 # ít key hơn / tắt auth, KHÔNG chặn deploy. ai-router KHÔNG ai depends_on nên rỗng cũng an toàn.
 : "${AIROUTER_INTERNAL_TOKEN:=}"
@@ -83,4 +84,9 @@ mkdir -p "$APP_DIR/deploy/nginx"
 printf '%s\n' "${LANGFUSE_BASIC_AUTH_HTPASSWD}" > "$APP_DIR/deploy/nginx/.htpasswd"
 chmod 644 "$APP_DIR/deploy/nginx/.htpasswd"
 
-echo "  rendered .env ($(grep -c = "$APP_DIR/.env") keys) + secret.env ($(grep -c = "$APP_DIR/deploy/env/secret.env") keys) + nginx/.htpasswd ($([ -n "$LANGFUSE_BASIC_AUTH_HTPASSWD" ] && echo set || echo EMPTY-locked))"
+# .htpasswd-qdrant cho Basic Auth subdomain Qdrant — file RIÊNG (Qdrant không có login nên
+# Basic Auth là lớp bảo vệ duy nhất + chắn cả REST API). Cùng cơ chế fail-closed như langfuse.
+printf '%s\n' "${QDRANT_BASIC_AUTH_HTPASSWD}" > "$APP_DIR/deploy/nginx/.htpasswd-qdrant"
+chmod 644 "$APP_DIR/deploy/nginx/.htpasswd-qdrant"
+
+echo "  rendered .env ($(grep -c = "$APP_DIR/.env") keys) + secret.env ($(grep -c = "$APP_DIR/deploy/env/secret.env") keys) + nginx/.htpasswd ($([ -n "$LANGFUSE_BASIC_AUTH_HTPASSWD" ] && echo set || echo EMPTY-locked)) + nginx/.htpasswd-qdrant ($([ -n "$QDRANT_BASIC_AUTH_HTPASSWD" ] && echo set || echo EMPTY-locked))"

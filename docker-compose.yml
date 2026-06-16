@@ -493,6 +493,9 @@ services:
       # (render-secrets.sh), gitignored, fail-closed nếu secret rỗng. CHỈ mount file secret
       # này; nginx.conf VẪN nướng trong image (không bind-mount config -> chống sửa tay VM).
       - ./deploy/nginx/.htpasswd:/etc/nginx/.htpasswd:ro
+      # Basic Auth subdomain qdrant — file RIÊNG (Qdrant không có login, Basic Auth là lớp
+      # bảo vệ duy nhất + chắn cả REST API). Cùng pattern: render từ secret, gitignored, fail-closed.
+      - ./deploy/nginx/.htpasswd-qdrant:/etc/nginx/.htpasswd-qdrant:ro
     restart: unless-stopped
 
 volumes:
