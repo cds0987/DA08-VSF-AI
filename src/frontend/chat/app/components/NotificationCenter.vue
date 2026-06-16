@@ -38,8 +38,8 @@ async function handleNotificationClick(item: NotificationItem) {
 </script>
 
 <template>
-  <DropdownMenu @update:open="handleOpen">
-    <Tooltip>
+  <Tooltip>
+    <DropdownMenu @update:open="handleOpen">
       <TooltipTrigger as-child>
         <DropdownMenuTrigger as-child>
           <button
@@ -64,77 +64,78 @@ async function handleNotificationClick(item: NotificationItem) {
           </button>
         </DropdownMenuTrigger>
       </TooltipTrigger>
-      <TooltipContent
-        v-if="isCollapsed"
+
+      <DropdownMenuContent
         side="right"
-        class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
+        align="end"
+        :side-offset="12"
+        class="w-[360px] border-slate-200 dark:border-border bg-white dark:bg-popover p-0 text-slate-900 dark:text-popover-foreground shadow-xl"
       >
-        Thông báo
-      </TooltipContent>
-    </Tooltip>
-
-    <DropdownMenuContent
-      side="right"
-      align="end"
-      :side-offset="12"
-      class="w-[360px] border-slate-200 dark:border-border bg-white dark:bg-popover p-0 text-slate-900 dark:text-popover-foreground shadow-xl"
-    >
-      <div class="flex items-center justify-between border-b border-slate-100 dark:border-border px-4 py-3">
-        <div>
-          <p class="text-sm font-bold">Thông báo</p>
-          <p class="text-xs text-slate-500 dark:text-muted-foreground">
-            {{ notifications.unreadCount }} chưa đọc
-          </p>
-        </div>
-        <span
-          class="flex items-center gap-1 text-[11px]"
-          :class="notifications.isConnected ? 'text-emerald-600' : 'text-amber-600'"
-        >
+        <div class="flex items-center justify-between border-b border-slate-100 dark:border-border px-4 py-3">
+          <div>
+            <p class="text-sm font-bold">Thông báo</p>
+            <p class="text-xs text-slate-500 dark:text-muted-foreground">
+              {{ notifications.unreadCount }} chưa đọc
+            </p>
+          </div>
           <span
-            class="h-1.5 w-1.5 rounded-full"
-            :class="notifications.isConnected ? 'bg-emerald-500' : 'bg-amber-500'"
-          />
-          {{ notifications.isConnected ? 'Realtime' : 'Đang kết nối lại' }}
-        </span>
-      </div>
-
-      <div v-if="notifications.isLoading" class="px-4 py-8 text-center text-sm text-slate-500 dark:text-muted-foreground">
-        Đang tải thông báo...
-      </div>
-      <div
-        v-else-if="notifications.items.length === 0"
-        class="flex flex-col items-center gap-2 px-4 py-8 text-center text-sm text-slate-500 dark:text-muted-foreground"
-      >
-        <WifiOff class="h-5 w-5 text-slate-400 dark:text-muted-foreground" />
-        Chưa có thông báo mới.
-      </div>
-      <div v-else class="notification-scrollbar max-h-[420px] overflow-y-auto p-1.5">
-        <DropdownMenuItem
-          v-for="item in notifications.items"
-          :key="item.id"
-          class="items-start gap-3 cursor-pointer rounded-lg px-3 py-3 focus:bg-slate-50 dark:focus:bg-accent"
-          @select="handleNotificationClick(item)"
-        >
-          <span
-            class="mt-1.5 h-2 w-2 shrink-0 rounded-full"
-            :class="item.is_read ? 'bg-slate-200 dark:bg-muted' : 'bg-blue-600'"
-          />
-          <span class="min-w-0 flex-1">
+            class="flex items-center gap-1 text-[11px]"
+            :class="notifications.isConnected ? 'text-emerald-600' : 'text-amber-600'"
+          >
             <span
-              class="block text-sm leading-5"
-              :class="item.is_read ? 'font-normal text-slate-600 dark:text-muted-foreground' : 'font-semibold text-slate-900 dark:text-foreground'"
-            >
-              {{ item.message }}
-            </span>
-            <span class="mt-1 block text-xs text-slate-400 dark:text-muted-foreground">
-              {{ formatCreatedAt(item.created_at) }}
-            </span>
+              class="h-1.5 w-1.5 rounded-full"
+              :class="notifications.isConnected ? 'bg-emerald-500' : 'bg-amber-500'"
+            />
+            {{ notifications.isConnected ? 'Realtime' : 'Đang kết nối lại' }}
           </span>
-          <Check v-if="item.is_read" class="mt-0.5 h-4 w-4 shrink-0 text-slate-300 dark:text-muted-foreground/50" />
-        </DropdownMenuItem>
-      </div>
-    </DropdownMenuContent>
-  </DropdownMenu>
+        </div>
+
+        <div v-if="notifications.isLoading" class="px-4 py-8 text-center text-sm text-slate-500 dark:text-muted-foreground">
+          Đang tải thông báo...
+        </div>
+        <div
+          v-else-if="notifications.items.length === 0"
+          class="flex flex-col items-center gap-2 px-4 py-8 text-center text-sm text-slate-500 dark:text-muted-foreground"
+        >
+          <WifiOff class="h-5 w-5 text-slate-400 dark:text-muted-foreground" />
+          Chưa có thông báo mới.
+        </div>
+        <div v-else class="notification-scrollbar max-h-[420px] overflow-y-auto p-1.5">
+          <DropdownMenuItem
+            v-for="item in notifications.items"
+            :key="item.id"
+            class="items-start gap-3 cursor-pointer rounded-lg px-3 py-3 focus:bg-slate-50 dark:focus:bg-accent"
+            @select="handleNotificationClick(item)"
+          >
+            <span
+              class="mt-1.5 h-2 w-2 shrink-0 rounded-full"
+              :class="item.is_read ? 'bg-slate-200 dark:bg-muted' : 'bg-blue-600'"
+            />
+            <span class="min-w-0 flex-1">
+              <span
+                class="block text-sm leading-5"
+                :class="item.is_read ? 'font-normal text-slate-600 dark:text-muted-foreground' : 'font-semibold text-slate-900 dark:text-foreground'"
+              >
+                {{ item.message }}
+              </span>
+              <span class="mt-1 block text-xs text-slate-400 dark:text-muted-foreground">
+                {{ formatCreatedAt(item.created_at) }}
+              </span>
+            </span>
+            <Check v-if="item.is_read" class="mt-0.5 h-4 w-4 shrink-0 text-slate-300 dark:text-muted-foreground/50" />
+          </DropdownMenuItem>
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
+
+    <TooltipContent
+      v-if="isCollapsed"
+      side="right"
+      class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
+    >
+      Thông báo
+    </TooltipContent>
+  </Tooltip>
 </template>
 
 <style scoped>
