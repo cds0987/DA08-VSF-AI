@@ -24,11 +24,19 @@ interface ExistingLeave {
 const overlapWarning = ref<{ message: string; existing: ExistingLeave[] } | null>(null)
 const isDuplicateBlocked = ref(false)
 
+// 4 rổ luật LĐ VN (khớp hr-service registry). cap = số ngày tối đa/đơn (rổ sự kiện).
 const LEAVE_TYPES = [
-  { value: 'annual', label: 'Phép năm' },
-  { value: 'sick', label: 'Nghỉ ốm' },
-  { value: 'personal', label: 'Cá nhân' },
+  { value: 'annual', label: 'Phép năm', cap: 0 },
+  { value: 'marriage', label: 'Kết hôn', cap: 3 },
+  { value: 'child_marriage', label: 'Con kết hôn', cap: 1 },
+  { value: 'bereavement', label: 'Tang lễ', cap: 3 },
+  { value: 'sick', label: 'Nghỉ ốm', cap: 0 },
+  { value: 'maternity', label: 'Thai sản', cap: 0 },
+  { value: 'unpaid', label: 'Nghỉ không lương', cap: 0 },
+  // 'personal' (đơn cũ) -> hiển thị như phép năm nếu draft trả về.
+  { value: 'personal', label: 'Việc riêng (phép năm)', cap: 0 },
 ] as const
+const VALID_TYPES = LEAVE_TYPES.map(t => t.value)
 const TYPE_LABEL: Record<string, string> = {
   annual: 'Phép năm', sick: 'Nghỉ ốm', personal: 'Cá nhân',
 }
@@ -44,10 +52,18 @@ const form = reactive({
   reason: props.action.parameters.reason || '',
 })
 
+function daysBetween(a: string, b: string): number {
+  return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000) + 1
+}
+
 const error = computed<string | null>(() => {
   if (!form.start_date || !form.end_date) return 'Vui lòng chọn ngày bắt đầu và kết thúc.'
   if (form.end_date < form.start_date) return 'Ngày kết thúc phải sau hoặc bằng ngày bắt đầu.'
-  if (!['annual', 'sick', 'personal'].includes(form.leave_type)) return 'Loại nghỉ không hợp lệ.'
+  const meta = LEAVE_TYPES.find(t => t.value === form.leave_type)
+  if (!meta) return 'Loại nghỉ không hợp lệ.'
+  if (meta.cap && daysBetween(form.start_date, form.end_date) > meta.cap) {
+    return `${meta.label} tối đa ${meta.cap} ngày/lần.`
+  }
   return null
 })
 

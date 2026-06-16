@@ -31,8 +31,13 @@ function createConversationId() {
 
 const LEAVE_TYPE_LABEL: Record<string, string> = {
   annual: 'phép năm',
+  personal: 'việc riêng',
+  marriage: 'kết hôn',
+  child_marriage: 'con kết hôn',
+  bereavement: 'tang lễ',
   sick: 'nghỉ ốm',
-  personal: 'cá nhân',
+  maternity: 'thai sản',
+  unpaid: 'không lương',
 }
 
 function newIdempotencyKey(): string {

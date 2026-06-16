@@ -31,10 +31,21 @@ const loaded = ref(false)
 // id đơn đang ở chế độ nhập lý do từ chối -> lý do tạm.
 const rejecting = reactive<Record<string, string>>({})
 
+// 4 rổ luật LĐ VN: rổ1 phép năm (xanh dương), rổ2 sự kiện (tím), rổ3 BHXH (hồng),
+// rổ4 không lương (xám).
+const _SKY = 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300'
+const _VIOLET = 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300'
+const _ROSE = 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300'
+const _SLATE = 'bg-slate-100 text-slate-600 dark:bg-accent dark:text-foreground/80'
 const TYPE_META: Record<string, { label: string; cls: string }> = {
-  annual: { label: 'Phép năm', cls: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300' },
-  sick: { label: 'Nghỉ ốm', cls: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300' },
-  personal: { label: 'Cá nhân', cls: 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300' },
+  annual: { label: 'Phép năm', cls: _SKY },
+  personal: { label: 'Việc riêng', cls: _SKY },
+  marriage: { label: 'Kết hôn', cls: _VIOLET },
+  child_marriage: { label: 'Con kết hôn', cls: _VIOLET },
+  bereavement: { label: 'Tang lễ', cls: _VIOLET },
+  sick: { label: 'Nghỉ ốm', cls: _ROSE },
+  maternity: { label: 'Thai sản', cls: _ROSE },
+  unpaid: { label: 'Không lương', cls: _SLATE },
 }
 function typeMeta(t: string) {
   return TYPE_META[t] || { label: t, cls: 'bg-slate-100 text-slate-600 dark:bg-accent dark:text-foreground/80' }
