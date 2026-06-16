@@ -25,6 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.application.use_cases.ingestion.store_reconciler import parse_object_key  # noqa: E402
+from app.infrastructure.external.s3_parser import current_storage_uri_scheme  # noqa: E402
 from app.interfaces.api.runtime import (  # noqa: E402
     bootstrap_runtime,
     build_object_store_lister,
@@ -61,7 +62,7 @@ async def _run(limit: int | None, dry_run: bool, prefix: str) -> int:
             document_name=document_name,
             file_type=file_type,
             markdown=None,
-            source_uri=f"s3://{bucket}/{obj.key}",
+            source_uri=f"{current_storage_uri_scheme()}://{bucket}/{obj.key}",
             correlation_id=f"reingest:{doc_id}",
             force=True,
         )
