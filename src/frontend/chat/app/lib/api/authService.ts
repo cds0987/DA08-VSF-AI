@@ -64,7 +64,10 @@ const authService = {
     }
     removeClientCookie(ACCESS_TOKEN_COOKIE)
     removeClientCookie(SESSION_COOKIE)
-    if (redirect) window.location.href = '/login'
+    if (redirect) {
+      const base = useRuntimeConfig().app.baseURL || '/'
+      window.location.href = `${base.replace(/\/$/, '')}/login`
+    }
   },
 
   isAuthenticated(): boolean {
