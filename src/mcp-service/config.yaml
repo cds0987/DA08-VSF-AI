@@ -56,6 +56,11 @@ profiles:
         rerank_top_k: ${RERANK_TOP_K:-5}
         rerank_threshold: ${RERANK_THRESHOLD:-0.05}
 
+    # Quy đổi ngày tương đối -> YYYY-MM-DD (giờ VN). Pure-compute, BẬT mặc định
+    # (không secret/dependency) — tắt qua TOOL_RESOLVE_DATE_ENABLED=0 nếu cần.
+    resolve_date:
+      enabled: ${TOOL_RESOLVE_DATE_ENABLED:-1}
+
     hr_query:
       enabled: ${TOOL_HR_QUERY_ENABLED:-0}
       params:

@@ -155,6 +155,11 @@ Tools are discovered from MCP at runtime. Common tools may include:
   (leave balance, salary/payroll, leave request history, attendance, benefits,
   performance review, onboarding). No arguments are needed. user_id is injected
   server-side; the assistant cannot query another person's HR data.
+- resolve_date: converts a relative date expression into an exact YYYY-MM-DD using today's
+  date (Vietnam time). ALWAYS use this for any relative day ("hôm nay", "mai", "thứ 4 tuần này",
+  "tuần sau", "3 ngày nữa") — never compute the calendar date yourself. You only extract the
+  meaning: kind (today/tomorrow/day_after_tomorrow/weekday/offset_days/absolute), and for a
+  weekday pass weekday (1=Mon..7=Sun) + week_offset (0=this week, 1=next, -1=last).
 - create_leave_request: creates a leave request for the current user when this tool is exposed by MCP.
 - update_leave_request: updates a leave request for the current user when this tool is exposed by MCP.
 - cancel_leave_request: cancels a leave request for the current user when this tool is exposed by MCP.
@@ -180,9 +185,11 @@ DRAFT and the UI shows a confirmation form the user edits + confirms. Therefore:
     - leave_type ∈ {annual, sick, personal}. Map Vietnamese: "phép năm/nghỉ phép year"→annual,
       "nghỉ ốm/bệnh"→sick, "cá nhân/việc riêng/bận việc"→personal. Default to "personal" only
       when the user clearly means a personal day and gives no other type.
-    - start_date / end_date in YYYY-MM-DD. Resolve relative dates ("thứ 6 tuần này", "mai",
-      "tuần sau", "ngày kia") against TODAY (see == CONTEXT ==). A single-day leave →
-      start_date == end_date.
+    - start_date / end_date in YYYY-MM-DD. For ANY relative date ("thứ 6 tuần này", "mai",
+      "tuần sau", "ngày kia", "3 ngày nữa"), call the resolve_date tool and use the returned
+      `date` — do NOT compute it yourself. A single-day leave → start_date == end_date (call
+      resolve_date once and reuse). Only skip resolve_date when the user gives an explicit
+      YYYY-MM-DD already.
     - reason: short free text; use the user's stated reason ("cá nhân" is a valid reason). If
       none given, leave it "".
 - If leave_type or the dates cannot be resolved, ask ONE concise clarification (Vietnamese) for
