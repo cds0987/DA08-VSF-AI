@@ -216,6 +216,11 @@ jobs:
           python-version: "3.13"
       - name: Lint Alembic migration chains (all services)
         run: python infra/ci/migration_lint.py src
+      # Chặn DRIFT code<->migration cho query-service (custom SQL migrator, không Alembic):
+      # code tham chiếu query_svc.<bảng> mà không migration nào tạo -> fail. Bắt đúng class
+      # lỗi user_access_profile (sự cố 2026-06-16) mà unit/e2e/migrator cũ đều lọt.
+      - name: Check schema drift (query-service code <-> migrations)
+        run: python infra/ci/schema_drift_check.py src/query-service
 
   # ─────────────────── Phase 1b: CONTRACT PARITY ──────────────────────
   # Guard CONTRACT giữa rag-worker (producer) và mcp-service (consumer): cùng

@@ -65,7 +65,7 @@ def require_admin(user: AuthenticatedUser = Depends(get_current_user)) -> Authen
 def get_conversation_repo():
     settings = get_settings()
     if settings.database_url:
-        return PostgresConversationRepository(settings.database_url)
+        return PostgresConversationRepository(settings.asyncpg_dsn)
     return InMemoryConversationRepository()
 
 
@@ -73,7 +73,7 @@ def get_conversation_repo():
 def get_document_access_repo():
     settings = get_settings()
     if settings.nats_mode.strip().lower() == "nats" and settings.database_url:
-        return PostgresDocumentAccessRepository(settings.database_url)
+        return PostgresDocumentAccessRepository(settings.asyncpg_dsn)
     return InMemoryDocumentAccessRepository()
 
 
@@ -81,7 +81,7 @@ def get_document_access_repo():
 def get_notification_repo():
     settings = get_settings()
     if settings.nats_mode.strip().lower() == "nats" and settings.database_url:
-        return PostgresNotificationRepository(settings.database_url)
+        return PostgresNotificationRepository(settings.asyncpg_dsn)
     return InMemoryNotificationRepository()
 
 
@@ -89,7 +89,7 @@ def get_notification_repo():
 def get_user_access_profile_repo():
     settings = get_settings()
     if settings.nats_mode.strip().lower() == "nats" and settings.database_url:
-        return PostgresUserAccessProfileRepository(settings.database_url)
+        return PostgresUserAccessProfileRepository(settings.asyncpg_dsn)
     return InMemoryUserAccessProfileRepository()
 
 

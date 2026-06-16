@@ -4,17 +4,15 @@ from app.domain.repositories.user_access_profile_repository import (
     UserAccessProfile,
     UserAccessProfileRepository,
 )
-from app.infrastructure.db.postgres_document_access_repo import (
-    _asyncpg_url,
-    _import_asyncpg,
-)
+from app.infrastructure.db.dsn import to_asyncpg_dsn
+from app.infrastructure.db.postgres_document_access_repo import _import_asyncpg
 
 
 class PostgresUserAccessProfileRepository(UserAccessProfileRepository):
     """Persists user access profiles to query_svc.user_access_profile (data-schema.md)."""
 
     def __init__(self, database_url: str) -> None:
-        self._database_url = _asyncpg_url(database_url)
+        self._database_url = to_asyncpg_dsn(database_url)
         self._pool = None
 
     async def upsert_profile(

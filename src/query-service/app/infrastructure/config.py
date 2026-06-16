@@ -9,6 +9,14 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str | None = None
 
+    @property
+    def asyncpg_dsn(self) -> str | None:
+        """DSN đã sạch cho asyncpg (xoá dialect SQLAlchemy). Repo dùng property này,
+        KHÔNG tự cắt chuỗi -> đóng class lỗi DSN +psycopg (sự cố 2026-06-16)."""
+        from app.infrastructure.db.dsn import to_asyncpg_dsn
+
+        return to_asyncpg_dsn(self.database_url) if self.database_url else None
+
     auth_mode: str = "mock"
     jwt_secret_key: str = "your-secret-key-change-in-production"
     jwt_algorithm: str = "HS256"

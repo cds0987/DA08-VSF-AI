@@ -1,19 +1,16 @@
-"""Regression: mọi repo asyncpg phải normalize DSN qua _asyncpg_url dùng chung.
+"""Regression: chuẩn hóa DSN tập trung — 1 implementation duy nhất.
 
-Sự cố 2026-06-16: postgres_user_access_profile_repo tự định nghĩa _asyncpg_url
-chỉ thay '+asyncpg' -> bỏ sót '+psycopg' (scheme thật trên VM) -> asyncpg.create_pool
-raise 'invalid DSN ... got postgresql+psycopg' -> HR profile events NAK-loop ->
-user_access_profile trống -> allowed_doc_ids rỗng -> RAG 0 sources -> DEPLOY FAIL.
+Sự cố 2026-06-16: postgres_user_access_profile_repo tự định nghĩa _asyncpg_url chỉ thay
+'+asyncpg' -> bỏ sót '+psycopg' (scheme thật trên VM) -> asyncpg.create_pool raise
+'invalid DSN ... got postgresql+psycopg' -> HR profile events NAK-loop -> bảng trống ->
+allowed_doc_ids/department hỏng. Sau đó chuẩn hóa tập trung qua app.infrastructure.db.dsn:
+config.asyncpg_dsn dùng nó, mọi repo dùng nó -> không còn bản sao lệch.
 """
 
 import pytest
 
-from app.infrastructure.db.postgres_document_access_repo import (
-    _asyncpg_url as _doc_access_url,
-)
-from app.infrastructure.db.postgres_user_access_profile_repo import (
-    _asyncpg_url as _profile_url,
-)
+from app.infrastructure.config import Settings
+from app.infrastructure.db.dsn import to_asyncpg_dsn
 
 
 @pytest.mark.parametrize(
@@ -25,8 +22,10 @@ from app.infrastructure.db.postgres_user_access_profile_repo import (
         ("postgres://u:p@h:5432/db", "postgres://u:p@h:5432/db"),
     ],
 )
-def test_asyncpg_url_strips_any_sqlalchemy_dialect(raw, expected):
-    assert _doc_access_url(raw) == expected
+def test_to_asyncpg_dsn_strips_any_dialect(raw, expected):
+    assert to_asyncpg_dsn(raw) == expected
+    # idempotent: chạy lại trên DSN đã sạch không đổi gì.
+    assert to_asyncpg_dsn(to_asyncpg_dsn(raw)) == expected
 
 
 @pytest.mark.parametrize(
@@ -37,8 +36,14 @@ def test_asyncpg_url_strips_any_sqlalchemy_dialect(raw, expected):
         "postgresql://u:p@h:5432/db",
     ],
 )
-def test_profile_repo_reuses_shared_normalizer(raw):
-    # user_access_profile repo PHẢI dùng đúng helper chung — không có bản local lệch.
-    assert _profile_url(raw) is _doc_access_url(raw) or _profile_url(raw) == _doc_access_url(raw)
-    # Quan trọng nhất: không còn '+dialect' nào sót lại để rò vào asyncpg.
-    assert "+" not in _profile_url(raw).split("://", 1)[0]
+def test_settings_asyncpg_dsn_is_clean(raw):
+    s = Settings(database_url=raw)
+    dsn = s.asyncpg_dsn
+    # Property phải trả DSN sạch (không còn '+dialect' trong scheme) — repo tin tưởng input này.
+    assert dsn is not None
+    assert "+" not in dsn.split("://", 1)[0]
+    assert dsn == to_asyncpg_dsn(raw)
+
+
+def test_settings_asyncpg_dsn_none_when_unset():
+    assert Settings(database_url=None).asyncpg_dsn is None

@@ -84,7 +84,14 @@ def _contribute_basic_auth(settings: McpSettings, kwargs: dict[str, Any]) -> Non
         kwargs["headers"] = headers
 
 
+def _contribute_check_compatibility(settings: McpSettings, kwargs: dict[str, Any]) -> None:
+    # Tắt cảnh báo lệch version client/server (qdrant-client 1.18 vs server 1.12.4) —
+    # chỉ bỏ kiểm tra phía client, KHÔNG đổi hành vi truy vấn. Cho override qua options.
+    kwargs.setdefault("check_compatibility", False)
+
+
 register_connection_option("url", _contribute_url)
 register_connection_option("api_key", _contribute_api_key)
 register_connection_option("timeout", _contribute_timeout)
 register_connection_option("basic_auth", _contribute_basic_auth)
+register_connection_option("check_compatibility", _contribute_check_compatibility)

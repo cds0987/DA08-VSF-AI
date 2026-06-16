@@ -320,6 +320,29 @@ if [ "$SMOKE_RAG" = "true" ]; then
   done
   [ "$rag_ok" = 1 ] || { echo "::error::SMOKE RAG FAIL (sau 6 lần retry warm-up)"; docker compose logs --no-color --tail 100 query-service mcp-service rag-worker || true; exit 1; }
 
+  # SMOKE ACL NON-ADMIN: admin BYPASS toàn bộ ACL nên smoke trên KHÔNG kiểm thử đường
+  # quyền theo user_access_profile/department (chính đường đã hỏng vụ 2026-06-16). Đăng
+  # nhập nhân viên thật (role=user) -> đi qua _get_allowed_doc_ids + get_profile. NON-FATAL
+  # (::warning::) vì corpus hiện chỉ có public/internal (chưa có doc "secret" department-gated)
+  # nên chưa thể assert phân quyền chặt; nâng thành fatal khi seed doc "secret" + dữ liệu test.
+  NV_TOK=$(curl -s --max-time 25 -X POST http://localhost/api/user/auth/login \
+            -H 'Content-Type: application/json' \
+            -d "{\"email\":\"nhanvien@company.com\",\"password\":\"Nhanvien123!\"}" \
+          | python3 -c 'import sys,json;print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null || echo "")
+  if [ -z "$NV_TOK" ]; then
+    echo "::warning::SMOKE ACL non-admin: login nhanvien FAIL (seed pass khác? bỏ qua, không chặn deploy)"
+  else
+    NV_UID=$(python3 -c 'import sys,base64,json;t="'"$NV_TOK"'".split(".")[1];t+="="*(-len(t)%4);print(json.loads(base64.urlsafe_b64decode(t)).get("user_id",""))' 2>/dev/null || echo "")
+    if curl -s --max-time 90 -X POST http://localhost/api/query/query \
+         -H "Authorization: Bearer $NV_TOK" -H 'Content-Type: application/json' -H 'X-CI-Smoke: 1' \
+         -d "{\"question\":\"Tài liệu hướng dẫn nhân viên có gì\",\"user_id\":\"$NV_UID\",\"conversation_id\":\"$(python3 -c 'import uuid;print(uuid.uuid4())')\",\"conversation_title\":\"CI smoke RAG nhanvien\"}" \
+         | python3 /tmp/smoke_parse.py "RAG non-admin (nhanvien role=user)" 1; then
+      echo "  [ACL] non-admin RAG OK -> đường user_access_profile/ACL sống"
+    else
+      echo "::warning::SMOKE ACL non-admin: nhanvien RAG sources=0 — KIỂM TRA user_access_profile/ACL (có thể profile chưa propagate)."
+    fi
+  fi
+
   # SMOKE GUARDRAIL (chỉ khi GUARDRAILS_MODE=llm_api): gửi prompt-injection trắng
   # trợn, verify LlmApiInputGuardrail (LLM-judge qua provider) CHẶN -> done event
   # mang field "guardrail" + outcome=REFUSE(1). LLM-judge có tính ngẫu nhiên và
