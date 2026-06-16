@@ -1,4 +1,9 @@
-"""Reranker for mcp-service: none, lexical, and llm with safe fallback."""
+"""Reranker for mcp-service: none, lexical, and llm with safe fallback.
+
+NOTE(ops): prod tạm dùng 'lexical' (xem deploy/env/mcp-service.env). Provider 'llm' với
+RERANK_THRESHOLD=0.7 từng lọc sạch hit -> RAG 0 sources -> deploy smoke fail. Lexical
+(overlap ratio) cần threshold thấp. Calibrate lại trước khi bật 'llm'.
+"""
 
 from __future__ import annotations
 
