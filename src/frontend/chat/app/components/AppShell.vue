@@ -205,7 +205,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
                   <div
                     :role="isCollapsed ? 'button' : undefined"
                     :tabindex="isCollapsed ? 0 : -1"
-                    class="relative group flex items-center overflow-hidden rounded-lg shrink-0 h-9 transition-all w-full bg-transparent shadow-none cursor-pointer"
+                    class="relative group flex items-center overflow-hidden rounded-lg shrink-0 h-9 transition-all w-full bg-transparent shadow-none cursor-pointer hover:bg-slate-100 dark:hover:bg-sidebar-accent"
                     @click="isCollapsed && handleSearchClick()"
                   >
                     <div class="flex h-9 w-[64px] items-center justify-center shrink-0">

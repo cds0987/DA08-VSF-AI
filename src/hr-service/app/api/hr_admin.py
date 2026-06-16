@@ -33,6 +33,10 @@ class EmployeeItem(BaseModel):
     job_title: str | None
     manager_user_id: str | None
     employment_status: str
+    full_name: str | None = None
+    phone_number: str | None = None
+    date_of_birth: datetime.date | None = None
+    hire_date: datetime.date | None = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
