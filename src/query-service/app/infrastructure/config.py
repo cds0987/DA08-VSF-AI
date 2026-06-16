@@ -84,6 +84,9 @@ class Settings(BaseSettings):
     llm_max_output_tokens: int = 1500
     rag_context_max_chars: int = 10000
     query_rate_limit_per_minute: int = 20
+    query_rate_limit_per_ip_per_minute: int = 60  # 1 IP gom nhiều user; > per-user
+    query_rate_limit_global_per_minute: int = 600  # trần tổng toàn service
+    query_max_concurrent_per_user: int = 3  # số SSE/LLM stream chạy song song / user
     rate_limiter_mode: str = "memory"
     notification_keepalive_seconds: int = 25
     nats_processed_event_max_size: int = 10000

@@ -1,5 +1,14 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+
+
+def _client_ip(request: Request) -> str | None:
+    """IP gốc của client. Sau reverse-proxy (prod VM) thì lấy hop đầu của
+    X-Forwarded-For; nếu không có thì dùng peer address."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip() or None
+    return request.client.host if request.client else None
 
 _SSE_RESPONSES = {
     200: {
@@ -53,6 +62,7 @@ router = APIRouter(tags=["query"])
              description=_QUERY_DESCRIPTION)
 async def query(
     request: QueryRequest,
+    http_request: Request,
     user: AuthenticatedUser = Depends(get_current_user),
     use_case: QueryOrchestrationUseCase = Depends(get_orchestration_use_case),
     rate_limiter=Depends(get_rate_limiter),
@@ -64,6 +74,21 @@ async def query(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="user_id must match authenticated user",
         )
+
+    # Rate-limit TRƯỚC mọi I/O (DB get_context, LLM) — spam không được chạm Postgres.
+    try:
+        allowed = await rate_limiter.allow(user.id, _client_ip(http_request))
+    except RateLimiterUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Rate limiter unavailable",
+        ) from exc
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded. Max 20 requests/minute.",
+        )
+
     if request.conversation_id:
         try:
             await conversation_repo.get_context(
@@ -76,17 +101,19 @@ async def query(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Conversation belongs to another user",
             ) from exc
+
+    # Concurrency cap: chặn 1 user mở quá nhiều SSE/LLM stream song song (đốt token).
     try:
-        allowed = await rate_limiter.allow(user.id)
+        slot = await rate_limiter.acquire(user.id)
     except RateLimiterUnavailable as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Rate limiter unavailable",
         ) from exc
-    if not allowed:
+    if slot is None:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Rate limit exceeded. Max 20 requests/minute.",
+            detail="Too many concurrent requests for this user.",
         )
 
     # Smoke CI gửi header X-CI-Smoke=1 -> dán trace vào session "ci-smoke" (gom 1 chỗ,
@@ -94,14 +121,18 @@ async def query(
     trace_session = "ci-smoke" if x_ci_smoke else request.trace_session
 
     async def events():
-        async for event in use_case.stream(
-            request.question,
-            user,
-            conversation_id=str(request.conversation_id) if request.conversation_id else None,
-            trace_session=trace_session,
-            conversation_title=request.conversation_title,
-        ):
-            yield format_sse(event)
+        try:
+            async for event in use_case.stream(
+                request.question,
+                user,
+                conversation_id=str(request.conversation_id) if request.conversation_id else None,
+                trace_session=trace_session,
+                conversation_title=request.conversation_title,
+            ):
+                yield format_sse(event)
+        finally:
+            # Trả slot khi stream kết thúc / client ngắt — release best-effort.
+            await rate_limiter.release(user.id, slot)
 
     return StreamingResponse(
         events(),

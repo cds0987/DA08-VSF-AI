@@ -171,8 +171,16 @@ def get_rate_limiter():
         return RedisRateLimiter(
             redis_url=settings.redis_url,
             max_requests_per_minute=settings.query_rate_limit_per_minute,
+            max_requests_per_ip_per_minute=settings.query_rate_limit_per_ip_per_minute,
+            max_requests_global_per_minute=settings.query_rate_limit_global_per_minute,
+            max_concurrent_per_user=settings.query_max_concurrent_per_user,
         )
-    return InMemoryRateLimiter(settings.query_rate_limit_per_minute)
+    return InMemoryRateLimiter(
+        settings.query_rate_limit_per_minute,
+        max_requests_per_ip_per_minute=settings.query_rate_limit_per_ip_per_minute,
+        max_requests_global_per_minute=settings.query_rate_limit_global_per_minute,
+        max_concurrent_per_user=settings.query_max_concurrent_per_user,
+    )
 
 
 @lru_cache
