@@ -11,6 +11,9 @@ user test cố định (uuid5, khớp seed_user.py). KHÔNG đụng user khác.
 user_id TẤT ĐỊNH:
   nhanvien@company.com -> 0ee316e0-075f-530e-914a-884e494f3d4e
   sep@company.com      -> 2dc14f72-64f6-5361-87aa-15e859f7cf90
+
+NOTE(build): migration này merge ở 38a7f8e nhưng run fail -> image hr-service chưa
+build kèm. Đụng file để buộc build-push hr-service ở deploy này (migration mới chạy).
 """
 from __future__ import annotations
 

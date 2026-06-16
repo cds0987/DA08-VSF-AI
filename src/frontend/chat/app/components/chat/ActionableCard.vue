@@ -36,7 +36,15 @@ const LEAVE_TYPES = [
   // 'personal' (đơn cũ) -> hiển thị như phép năm nếu draft trả về.
   { value: 'personal', label: 'Việc riêng (phép năm)', cap: 0 },
 ] as const
-const VALID_TYPES = LEAVE_TYPES.map(t => t.value)
+// Robust: nếu model draft loại chưa có trong list (loại mới từ registry) -> vẫn thêm
+// vào dropdown để không hiện "không hợp lệ"/rỗng. Server vẫn là người validate cuối.
+const typeOptions = computed(() => {
+  const list = LEAVE_TYPES.map(t => ({ value: t.value as string, label: t.label as string, cap: t.cap as number }))
+  if (form.leave_type && !list.some(t => t.value === form.leave_type)) {
+    list.unshift({ value: form.leave_type, label: form.leave_type, cap: 0 })
+  }
+  return list
+})
 const TYPE_LABEL: Record<string, string> = {
   annual: 'Phép năm', sick: 'Nghỉ ốm', personal: 'Cá nhân',
 }
@@ -59,7 +67,7 @@ function daysBetween(a: string, b: string): number {
 const error = computed<string | null>(() => {
   if (!form.start_date || !form.end_date) return 'Vui lòng chọn ngày bắt đầu và kết thúc.'
   if (form.end_date < form.start_date) return 'Ngày kết thúc phải sau hoặc bằng ngày bắt đầu.'
-  const meta = LEAVE_TYPES.find(t => t.value === form.leave_type)
+  const meta = typeOptions.value.find(t => t.value === form.leave_type)
   if (!meta) return 'Loại nghỉ không hợp lệ.'
   if (meta.cap && daysBetween(form.start_date, form.end_date) > meta.cap) {
     return `${meta.label} tối đa ${meta.cap} ngày/lần.`
@@ -159,7 +167,7 @@ const fieldClass
         <div>
           <label class="mb-1 block text-[10px] font-bold uppercase text-slate-400 dark:text-muted-foreground">Loại nghỉ</label>
           <select v-model="form.leave_type" :disabled="isDone" :class="fieldClass" @change="onFieldChange">
-            <option v-for="t in LEAVE_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
+            <option v-for="t in typeOptions" :key="t.value" :value="t.value">{{ t.label }}</option>
           </select>
         </div>
         <div>
