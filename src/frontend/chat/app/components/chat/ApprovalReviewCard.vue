@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { AlertTriangle, Calendar, Check, Loader2, RefreshCw, X } from '@lucide/vue'
+import { onMounted, reactive, ref } from 'vue'
+import { AlertTriangle, ArrowRight, CalendarDays, Check, Loader2, RefreshCw, User, X } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { useHRService } from '~/lib/api/hrService'
 
@@ -14,7 +14,6 @@ interface LeaveApproval {
   end_date: string
   days_count: number
   reason?: string | null
-  // Gợi ý quyết định (enrich từ hr-service, có thể chưa có):
   employee_leave_remaining?: number | null
   employee_leave_total?: number | null
   has_conflict?: boolean
@@ -25,9 +24,16 @@ const items = ref<LeaveApproval[]>([])
 const isLoading = ref(false)
 const actingId = ref<string | null>(null)
 const loaded = ref(false)
+// id đơn đang ở chế độ nhập lý do từ chối -> lý do tạm.
+const rejecting = reactive<Record<string, string>>({})
 
-const TYPE_LABEL: Record<string, string> = {
-  annual: 'Phép năm', sick: 'Nghỉ ốm', personal: 'Cá nhân',
+const TYPE_META: Record<string, { label: string; cls: string }> = {
+  annual: { label: 'Phép năm', cls: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300' },
+  sick: { label: 'Nghỉ ốm', cls: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300' },
+  personal: { label: 'Cá nhân', cls: 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300' },
+}
+function typeMeta(t: string) {
+  return TYPE_META[t] || { label: t, cls: 'bg-slate-100 text-slate-600 dark:bg-accent dark:text-foreground/80' }
 }
 
 async function load() {
@@ -48,7 +54,7 @@ async function approve(req: LeaveApproval) {
   actingId.value = req.id
   try {
     await hrService.approveLeaveRequest(req.id)
-    toast.success(`Đã duyệt đơn ${TYPE_LABEL[req.leave_type] || req.leave_type} (${req.start_date} → ${req.end_date}).`)
+    toast.success(`Đã duyệt đơn ${typeMeta(req.leave_type).label} (${req.start_date} → ${req.end_date}).`)
     items.value = items.value.filter(r => r.id !== req.id)
   } catch (e: any) {
     console.error(e)
@@ -58,14 +64,22 @@ async function approve(req: LeaveApproval) {
   }
 }
 
-async function reject(req: LeaveApproval) {
+function startReject(req: LeaveApproval) {
   if (actingId.value) return
-  const reason = window.prompt('Lý do từ chối (tùy chọn):', '') ?? ''
+  rejecting[req.id] = ''
+}
+function cancelReject(req: LeaveApproval) {
+  delete rejecting[req.id]
+}
+async function confirmReject(req: LeaveApproval) {
+  if (actingId.value) return
+  const reason = (rejecting[req.id] || '').trim()
   actingId.value = req.id
   try {
     await hrService.rejectLeaveRequest(req.id, reason)
     toast.success('Đã từ chối đơn.')
     items.value = items.value.filter(r => r.id !== req.id)
+    delete rejecting[req.id]
   } catch (e: any) {
     console.error(e)
     toast.error(e?.data?.detail || 'Từ chối đơn thất bại.')
@@ -74,29 +88,30 @@ async function reject(req: LeaveApproval) {
   }
 }
 
-function shortId(uid: string): string {
-  return uid.length > 12 ? `${uid.slice(0, 8)}…` : uid
+function initials(uid: string): string {
+  return (uid || '?').replace(/[^a-z0-9]/gi, '').slice(0, 2).toUpperCase() || '?'
 }
-
-onMounted(load)
+function shortId(uid: string): string {
+  return uid.length > 10 ? `${uid.slice(0, 6)}…${uid.slice(-2)}` : uid
+}
 </script>
 
 <template>
-  <div class="mt-4 rounded-xl border border-blue-100 dark:border-blue-500/20 bg-blue-50/30 dark:bg-blue-500/5 p-4">
-    <div class="mb-3 flex items-center justify-between">
-      <div class="flex items-center gap-2">
-        <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/10 text-blue-600">
-          <Calendar class="h-4 w-4" />
+  <div class="mt-4 rounded-2xl border border-slate-200/80 dark:border-border bg-white/70 dark:bg-card/60 p-4 shadow-sm backdrop-blur">
+    <div class="mb-4 flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 text-white shadow-sm">
+          <CalendarDays class="h-[18px] w-[18px]" />
         </div>
         <div>
-          <h4 class="text-[13px] font-semibold text-slate-900 dark:text-foreground">Đơn chờ bạn duyệt</h4>
-          <p class="text-[11px] uppercase font-bold tracking-wider text-slate-500 dark:text-muted-foreground">
+          <h4 class="text-[13.5px] font-semibold text-slate-900 dark:text-foreground">Đơn chờ bạn duyệt</h4>
+          <p class="text-[11px] text-slate-400 dark:text-muted-foreground">
             Duyệt sẽ tự trừ ngày phép của nhân viên
           </p>
         </div>
       </div>
       <button
-        class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-border px-2.5 py-1.5 text-[12px] font-medium text-slate-600 dark:text-foreground/80 hover:bg-slate-100 dark:hover:bg-accent disabled:opacity-50"
+        class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-border px-2.5 py-1.5 text-[12px] font-medium text-slate-500 dark:text-foreground/70 transition hover:bg-slate-50 dark:hover:bg-accent disabled:opacity-50"
         :disabled="isLoading"
         @click="load"
       >
@@ -104,55 +119,63 @@ onMounted(load)
       </button>
     </div>
 
-    <div v-if="isLoading && items.length === 0" class="flex items-center justify-center py-8 text-slate-400">
-      <Loader2 class="h-5 w-5 animate-spin" />
+    <div v-if="isLoading && items.length === 0" class="flex items-center justify-center py-10 text-slate-300">
+      <Loader2 class="h-6 w-6 animate-spin" />
     </div>
 
     <div
       v-else-if="loaded && items.length === 0"
-      class="rounded-lg border border-dashed border-slate-200 dark:border-border py-8 text-center text-[13px] text-slate-500 dark:text-muted-foreground"
+      class="rounded-xl border border-dashed border-slate-200 dark:border-border py-10 text-center text-[13px] text-slate-400 dark:text-muted-foreground"
     >
-      Hiện không có đơn nào chờ bạn duyệt.
+      🎉 Hiện không có đơn nào chờ bạn duyệt.
     </div>
 
     <div v-else class="flex flex-col gap-3">
       <div
         v-for="req in items"
         :key="req.id"
-        class="rounded-lg border border-blue-100 dark:border-border bg-white dark:bg-card p-3"
+        class="group rounded-xl border border-slate-200/80 dark:border-border bg-white dark:bg-card p-3.5 transition hover:border-blue-300/70 hover:shadow-md"
       >
-        <div class="mb-2 flex items-center justify-between">
-          <h5 class="text-[13px] font-semibold capitalize text-slate-900 dark:text-foreground">
-            Nghỉ {{ TYPE_LABEL[req.leave_type] || req.leave_type }} · {{ req.days_count }} ngày
-          </h5>
-          <span class="text-[11px] text-slate-400 dark:text-muted-foreground">NV: {{ shortId(req.user_id) }}</span>
+        <!-- Header: nhân viên + loại nghỉ -->
+        <div class="flex items-center justify-between gap-3">
+          <div class="flex items-center gap-2.5">
+            <div class="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 dark:bg-accent text-[11px] font-bold text-slate-500 dark:text-foreground/70">
+              {{ initials(req.user_id) }}
+            </div>
+            <div class="leading-tight">
+              <div class="flex items-center gap-1 text-[11px] text-slate-400 dark:text-muted-foreground">
+                <User class="h-3 w-3" /> {{ shortId(req.user_id) }}
+              </div>
+              <div class="text-[12.5px] font-semibold text-slate-700 dark:text-foreground/90">{{ req.days_count }} ngày nghỉ</div>
+            </div>
+          </div>
+          <span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="typeMeta(req.leave_type).cls">
+            {{ typeMeta(req.leave_type).label }}
+          </span>
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="text-[10px] font-bold uppercase text-slate-400 dark:text-muted-foreground">Từ ngày</label>
-            <div class="text-[13px] font-medium text-slate-700 dark:text-foreground/90">{{ req.start_date }}</div>
-          </div>
-          <div>
-            <label class="text-[10px] font-bold uppercase text-slate-400 dark:text-muted-foreground">Đến ngày</label>
-            <div class="text-[13px] font-medium text-slate-700 dark:text-foreground/90">{{ req.end_date }}</div>
-          </div>
-          <div class="col-span-2">
-            <label class="text-[10px] font-bold uppercase text-slate-400 dark:text-muted-foreground">Lý do</label>
-            <div class="text-[13px] font-medium text-slate-700 dark:text-foreground/90">{{ req.reason || '—' }}</div>
-          </div>
+        <!-- Khoảng ngày -->
+        <div class="mt-3 flex items-center gap-2 rounded-lg bg-slate-50 dark:bg-accent/40 px-3 py-2 text-[13px] font-medium text-slate-700 dark:text-foreground/90">
+          <span>{{ req.start_date }}</span>
+          <ArrowRight class="h-3.5 w-3.5 text-slate-400" />
+          <span>{{ req.end_date }}</span>
         </div>
 
-        <!-- Gợi ý quyết định (nếu hr-service đã enrich) -->
+        <!-- Lý do -->
+        <div v-if="req.reason" class="mt-2 text-[12.5px] text-slate-500 dark:text-muted-foreground">
+          <span class="text-slate-400">Lý do:</span> {{ req.reason }}
+        </div>
+
+        <!-- Gợi ý quyết định -->
         <div
           v-if="req.employee_leave_remaining != null || req.has_conflict"
-          class="mt-2 flex flex-wrap items-center gap-2 text-[12px]"
+          class="mt-2.5 flex flex-wrap items-center gap-1.5 text-[11.5px]"
         >
           <span
             v-if="req.employee_leave_remaining != null"
-            class="rounded-md bg-slate-100 dark:bg-accent px-2 py-0.5 font-medium text-slate-600 dark:text-foreground/80"
+            class="inline-flex items-center gap-1 rounded-md bg-emerald-50 dark:bg-emerald-500/10 px-2 py-0.5 font-medium text-emerald-700 dark:text-emerald-400"
           >
-            Phép còn lại của NV: {{ req.employee_leave_remaining }}<span v-if="req.employee_leave_total != null">/{{ req.employee_leave_total }}</span> ngày
+            Phép còn {{ req.employee_leave_remaining }}<span v-if="req.employee_leave_total != null">/{{ req.employee_leave_total }}</span> ngày
           </span>
           <span
             v-if="req.has_conflict"
@@ -162,17 +185,47 @@ onMounted(load)
           </span>
         </div>
 
-        <div class="mt-3 flex justify-end gap-2">
+        <!-- Ô nhập lý do từ chối (inline, thay window.prompt) -->
+        <div v-if="rejecting[req.id] !== undefined" class="mt-3 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50/50 dark:bg-red-500/5 p-2.5">
+          <label class="mb-1 block text-[11px] font-semibold text-red-600 dark:text-red-400">Lý do từ chối (tùy chọn)</label>
+          <input
+            v-model="rejecting[req.id]"
+            type="text"
+            placeholder="Nhập lý do rồi xác nhận…"
+            class="w-full rounded-md border border-red-200 dark:border-red-500/30 bg-white dark:bg-card px-2.5 py-1.5 text-[13px] text-slate-700 dark:text-foreground/90 outline-none focus:ring-2 focus:ring-red-400/40"
+            @keydown.enter="confirmReject(req)"
+          >
+          <div class="mt-2 flex justify-end gap-2">
+            <button
+              class="rounded-lg px-3 py-1.5 text-[12.5px] font-medium text-slate-500 dark:text-foreground/70 hover:bg-slate-100 dark:hover:bg-accent"
+              :disabled="actingId === req.id"
+              @click="cancelReject(req)"
+            >
+              Hủy
+            </button>
+            <button
+              class="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-[12.5px] font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
+              :disabled="actingId === req.id"
+              @click="confirmReject(req)"
+            >
+              <Loader2 v-if="actingId === req.id" class="h-3.5 w-3.5 animate-spin" />
+              <X v-else class="h-3.5 w-3.5" /> Xác nhận từ chối
+            </button>
+          </div>
+        </div>
+
+        <!-- Nút hành động -->
+        <div v-else class="mt-3 flex justify-end gap-2">
           <button
-            class="inline-flex items-center gap-1.5 rounded-lg border border-red-200 dark:border-red-500/30 px-3 py-1.5 text-[13px] font-semibold text-red-600 transition hover:bg-red-50 dark:hover:bg-red-500/10 disabled:opacity-50"
-            :disabled="actingId === req.id"
-            @click="reject(req)"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-border px-3 py-1.5 text-[13px] font-semibold text-slate-600 dark:text-foreground/80 transition hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 disabled:opacity-50"
+            :disabled="!!actingId"
+            @click="startReject(req)"
           >
             <X class="h-3.5 w-3.5" /> Từ chối
           </button>
           <button
-            class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-1.5 text-[13px] font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
-            :disabled="actingId === req.id"
+            class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-1.5 text-[13px] font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
+            :disabled="!!actingId"
             @click="approve(req)"
           >
             <Loader2 v-if="actingId === req.id" class="h-3.5 w-3.5 animate-spin" />
