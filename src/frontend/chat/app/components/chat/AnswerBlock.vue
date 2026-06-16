@@ -13,6 +13,7 @@ import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import ActionableCard from './ActionableCard.vue'
 import ApprovalReviewCard from './ApprovalReviewCard.vue'
+import ProactiveSuggestionCard from './ProactiveSuggestionCard.vue'
 
 const props = defineProps<{ data: ChatMessage }>()
 const emit = defineEmits<{
@@ -81,6 +82,7 @@ function selectSource(citation: Citation) {
       />
       <template v-for="(act, i) in data.actions" :key="act.idempotency_key || i">
         <ApprovalReviewCard v-if="act.action_type === 'review_leave_approvals'" />
+        <ProactiveSuggestionCard v-else-if="act.action_type === 'proactive_doc_suggestion'" :action="act" />
         <ActionableCard v-else :action="act" />
       </template>
     </div>

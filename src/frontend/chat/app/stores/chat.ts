@@ -695,6 +695,29 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function injectProactiveMessage(documentName: string) {
+    if (!currentConversationId.value) {
+      currentConversationId.value = crypto.randomUUID()
+    }
+    messages.value.push({
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: `Tài liệu **${documentName}** vừa được cập nhật. Mình có thể giúp gì cho bạn?`,
+      timestamp: new Date().toISOString(),
+      actions: [
+        {
+          action_type: 'proactive_doc_suggestion',
+          document_name: documentName,
+          suggestions: [
+            { label: 'Tóm tắt tài liệu', query: `Tóm tắt nội dung tài liệu ${documentName}` },
+            { label: 'Hỏi về tài liệu', query: `Tài liệu ${documentName} nói về điều gì?` },
+            { label: 'Điểm mới so với tài liệu cũ', query: `So với các tài liệu trước, ${documentName} có gì mới không?` },
+          ],
+        },
+      ],
+    })
+  }
+
   return {
     input,
     files,
@@ -723,5 +746,6 @@ export const useChatStore = defineStore('chat', () => {
     renameConversation,
     ask,
     submitFeedback,
+    injectProactiveMessage,
   }
 })
