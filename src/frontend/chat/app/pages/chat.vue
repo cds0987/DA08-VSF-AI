@@ -76,6 +76,7 @@ onMounted(async () => {
   }
 
   const synced = await chat.syncHistory()
+  chat.flushProactiveMessage()
   if (!synced) {
     toast.warning('Không thể tải lịch sử từ server. Đang sử dụng bản lưu tạm trên thiết bị.')
   }

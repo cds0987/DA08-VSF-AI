@@ -145,6 +145,7 @@ export interface HRActionPayload {
   idempotency_key?: string
   // proactive_doc_suggestion fields
   document_name?: string
+  doc_id?: string | null
   suggestions?: Array<{ label: string; query: string }>
 }
 

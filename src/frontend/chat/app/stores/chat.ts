@@ -229,6 +229,7 @@ export const useChatStore = defineStore('chat', () => {
   const traceLog = ref<TraceEntry[]>([])
   const panelCitation = ref<Citation | null>(null)
   const isPanelOpen = ref(false)
+  const pendingProactiveDoc = ref<{ name: string; docId: string | null } | null>(null)
   let abortController: AbortController | null = null
 
   function setInput(val: string) {
@@ -695,7 +696,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function injectProactiveMessage(documentName: string) {
+  function injectProactiveMessage(documentName: string, docId: string | null = null) {
     if (!currentConversationId.value) {
       currentConversationId.value = crypto.randomUUID()
     }
@@ -708,6 +709,7 @@ export const useChatStore = defineStore('chat', () => {
         {
           action_type: 'proactive_doc_suggestion',
           document_name: documentName,
+          doc_id: docId,
           suggestions: [
             { label: 'Tóm tắt tài liệu', query: `Tóm tắt nội dung tài liệu ${documentName}` },
             { label: 'Hỏi về tài liệu', query: `Tài liệu ${documentName} nói về điều gì?` },
@@ -716,6 +718,17 @@ export const useChatStore = defineStore('chat', () => {
         },
       ],
     })
+  }
+
+  function queueProactiveMessage(documentName: string, docId: string | null) {
+    pendingProactiveDoc.value = { name: documentName, docId }
+  }
+
+  function flushProactiveMessage() {
+    if (!pendingProactiveDoc.value) return
+    const { name, docId } = pendingProactiveDoc.value
+    pendingProactiveDoc.value = null
+    injectProactiveMessage(name, docId)
   }
 
   return {
@@ -747,5 +760,7 @@ export const useChatStore = defineStore('chat', () => {
     ask,
     submitFeedback,
     injectProactiveMessage,
+    queueProactiveMessage,
+    flushProactiveMessage,
   }
 })

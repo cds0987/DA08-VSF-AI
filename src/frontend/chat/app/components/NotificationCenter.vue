@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Bell, Check, Sparkles, WifiOff, X } from '@lucide/vue'
-import { useRouter } from 'vue-router'
+import { Bell, Sparkles, WifiOff, X } from '@lucide/vue'
+import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useNotificationStore } from '~/stores/notifications'
 import { useChatStore } from '~/stores/chat'
@@ -13,6 +13,8 @@ defineProps<{
 const notifications = useNotificationStore()
 const chat = useChatStore()
 const router = useRouter()
+const route = useRoute()
+const isOpen = ref(false)
 
 function formatCreatedAt(value: string) {
   return new Intl.DateTimeFormat('vi-VN', {
@@ -35,16 +37,32 @@ async function handleOpen(open: boolean) {
   })
 }
 
+watch(isOpen, (open) => { if (open) void handleOpen(open) })
+
+// Click item body → chỉ mark read, dropdown tự đóng qua @select
 async function handleItemClick(item: NotificationItem) {
   if (!item.is_read) {
     await notifications.markAsRead(item.id).catch(() => {})
   }
-  if (item.event === 'doc_new') {
-    chat.injectProactiveMessage(extractDocName(item.message))
+}
+
+// Click "Hỏi AI" button → đóng dropdown + inject AI + navigate
+async function handleAskAI(event: MouseEvent, item: NotificationItem) {
+  event.stopPropagation()
+  isOpen.value = false
+  if (!item.is_read) {
+    await notifications.markAsRead(item.id).catch(() => {})
+  }
+  const docName = extractDocName(item.message)
+  if (route.path === '/') {
+    chat.injectProactiveMessage(docName, item.doc_id)
+  } else {
+    chat.queueProactiveMessage(docName, item.doc_id)
   }
   await router.push('/')
 }
 
+// Click X → mark read + xóa khỏi list
 async function handleDismiss(event: MouseEvent, item: NotificationItem) {
   event.stopPropagation()
   if (!item.is_read) {
@@ -52,12 +70,13 @@ async function handleDismiss(event: MouseEvent, item: NotificationItem) {
       toast.error('Không thể đánh dấu thông báo đã đọc.')
     })
   }
+  notifications.removeItem(item.id)
 }
 </script>
 
 <template>
   <Tooltip>
-    <DropdownMenu @update:open="handleOpen">
+    <DropdownMenu v-model:open="isOpen">
       <TooltipTrigger as-child>
         <DropdownMenuTrigger as-child>
           <button
@@ -139,12 +158,13 @@ async function handleDismiss(event: MouseEvent, item: NotificationItem) {
               <span class="mt-1 block text-xs text-slate-400 dark:text-muted-foreground">
                 {{ formatCreatedAt(item.created_at) }}
               </span>
-              <span
+              <button
                 v-if="!item.is_read && item.event === 'doc_new'"
-                class="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-indigo-500 dark:text-indigo-400"
+                class="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-indigo-500 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors"
+                @click="handleAskAI($event, item)"
               >
                 <Sparkles class="h-3 w-3" /> Hỏi AI về tài liệu này
-              </span>
+              </button>
             </span>
             <button
               class="mt-0.5 shrink-0 rounded p-0.5 text-slate-300 opacity-0 transition-opacity hover:bg-slate-100 hover:text-slate-600 group-hover:opacity-100 dark:text-muted-foreground/50 dark:hover:bg-white/5 dark:hover:text-muted-foreground"
