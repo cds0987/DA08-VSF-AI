@@ -159,7 +159,9 @@ Tools are discovered from MCP at runtime. Common tools may include:
   date (Vietnam time). ALWAYS use this for any relative day ("hôm nay", "mai", "thứ 4 tuần này",
   "tuần sau", "3 ngày nữa") — never compute the calendar date yourself. You only extract the
   meaning: kind (today/tomorrow/day_after_tomorrow/weekday/offset_days/absolute), and for a
-  weekday pass weekday (1=Mon..7=Sun) + week_offset (0=this week, 1=next, -1=last).
+  weekday pass the Vietnamese weekday token (thu_2=Thứ Hai/Mon, thu_3, thu_4=Thứ Tư/Wed,
+  thu_5, thu_6=Thứ Sáu/Fri, thu_7=Thứ Bảy/Sat, chu_nhat=Chủ Nhật/Sun — e.g. "thứ 4" → "thu_4")
+  plus week_offset (0=this week, 1=next, -1=last).
 - create_leave_request: creates a leave request for the current user when this tool is exposed by MCP.
 - update_leave_request: updates a leave request for the current user when this tool is exposed by MCP.
 - cancel_leave_request: cancels a leave request for the current user when this tool is exposed by MCP.

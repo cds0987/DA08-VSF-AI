@@ -10,13 +10,15 @@ TODAY = datetime.date(2026, 6, 16)  # Thứ Ba
 
 
 def test_weekday_this_week():
-    assert compute("weekday", weekday=3, today=TODAY)["date"] == "2026-06-17"  # Thứ Tư
-    assert compute("weekday", weekday=5, today=TODAY)["date"] == "2026-06-19"  # Thứ Sáu
+    # Token tiếng Việt: thu_4 = Thứ Tư = Wednesday (KHÔNG lệch sang Thursday).
+    assert compute("weekday", weekday="thu_4", today=TODAY)["date"] == "2026-06-17"  # Thứ Tư
+    assert compute("weekday", weekday="thu_6", today=TODAY)["date"] == "2026-06-19"  # Thứ Sáu
+    assert compute("weekday", weekday="chu_nhat", today=TODAY)["date"] == "2026-06-21"  # CN
 
 
 def test_weekday_next_and_prev_week():
-    assert compute("weekday", weekday=3, week_offset=1, today=TODAY)["date"] == "2026-06-24"
-    assert compute("weekday", weekday=3, week_offset=-1, today=TODAY)["date"] == "2026-06-10"
+    assert compute("weekday", weekday="thu_4", week_offset=1, today=TODAY)["date"] == "2026-06-24"
+    assert compute("weekday", weekday="thu_4", week_offset=-1, today=TODAY)["date"] == "2026-06-10"
 
 
 def test_today_tomorrow_day_after():
@@ -31,13 +33,13 @@ def test_offset_days_and_absolute():
 
 
 def test_weekday_vi_and_today_echo():
-    out = compute("weekday", weekday=3, today=TODAY)
+    out = compute("weekday", weekday="thu_4", today=TODAY)
     assert out["weekday_vi"] == "Thứ Tư"
     assert out["today"] == "2026-06-16"
 
 
 def test_invalid_inputs_return_error():
-    assert "error" in compute("weekday", today=TODAY)            # thiếu weekday
-    assert "error" in compute("weekday", weekday=9, today=TODAY)  # ngoài 1..7
+    assert "error" in compute("weekday", today=TODAY)              # thiếu weekday
+    assert "error" in compute("weekday", weekday="thu_9", today=TODAY)  # token lạ
     assert "error" in compute("absolute", date="not-a-date", today=TODAY)
-    assert "error" in compute("xyz", today=TODAY)                # kind lạ
+    assert "error" in compute("xyz", today=TODAY)                 # kind lạ

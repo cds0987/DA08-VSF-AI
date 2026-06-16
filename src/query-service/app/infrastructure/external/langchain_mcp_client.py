@@ -75,9 +75,14 @@ class _ResolveDateInput(BaseModel):
     kind: Literal[
         "today", "tomorrow", "day_after_tomorrow", "weekday", "offset_days", "absolute"
     ] = Field(description="Loại biểu thức ngày trích từ câu user")
-    weekday: Optional[int] = Field(
-        default=None, ge=1, le=7,
-        description="1=Thứ Hai .. 7=Chủ Nhật. Bắt buộc khi kind=weekday")
+    weekday: Optional[
+        Literal["thu_2", "thu_3", "thu_4", "thu_5", "thu_6", "thu_7", "chu_nhat"]
+    ] = Field(
+        default=None,
+        description=(
+            "Token thứ tiếng Việt khi kind=weekday: thu_2=Thứ Hai, thu_3=Thứ Ba, "
+            "thu_4=Thứ Tư, thu_5=Thứ Năm, thu_6=Thứ Sáu, thu_7=Thứ Bảy, chu_nhat=Chủ Nhật. "
+            "Vd user nói 'thứ 4' -> 'thu_4'."))
     week_offset: int = Field(
         default=0, description="0=tuần này, 1=tuần sau, -1=tuần trước (kind=weekday)")
     days: Optional[int] = Field(

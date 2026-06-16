@@ -28,6 +28,20 @@ DateKind = Literal[
     "today", "tomorrow", "day_after_tomorrow", "weekday", "offset_days", "absolute"
 ]
 
+# Token thứ TIẾNG VIỆT -> ISO weekday (Mon=0..Sun=6). Dùng token (không dùng số) để
+# tránh lệch: tiếng Việt "thứ 4" = Wednesday, KHÁC ISO 4 (= Thursday). Model map
+# thẳng "thứ 4" -> "thu_4", không phải làm số học.
+ViWeekday = Literal["thu_2", "thu_3", "thu_4", "thu_5", "thu_6", "thu_7", "chu_nhat"]
+_VI_WEEKDAY_TO_ISO: dict[str, int] = {
+    "thu_2": 0,   # Thứ Hai  = Monday
+    "thu_3": 1,   # Thứ Ba   = Tuesday
+    "thu_4": 2,   # Thứ Tư   = Wednesday
+    "thu_5": 3,   # Thứ Năm  = Thursday
+    "thu_6": 4,   # Thứ Sáu  = Friday
+    "thu_7": 5,   # Thứ Bảy  = Saturday
+    "chu_nhat": 6,  # Chủ Nhật = Sunday
+}
+
 
 def _today() -> _dt.date:
     return _dt.datetime.now(_BUSINESS_TZ).date()
@@ -36,7 +50,7 @@ def _today() -> _dt.date:
 def compute(
     kind: str,
     *,
-    weekday: Optional[int] = None,
+    weekday: Optional[str] = None,
     week_offset: int = 0,
     days: Optional[int] = None,
     date: Optional[str] = None,
@@ -53,10 +67,11 @@ def compute(
     elif kind == "offset_days":
         d = today + _dt.timedelta(days=int(days or 0))
     elif kind == "weekday":
-        if not weekday or not (1 <= int(weekday) <= 7):
-            return {"error": "weekday phải 1..7 (1=Thứ Hai .. 7=Chủ Nhật) khi kind=weekday"}
+        iso = _VI_WEEKDAY_TO_ISO.get(str(weekday or "").strip().lower())
+        if iso is None:
+            return {"error": "weekday phải là thu_2..thu_7 hoặc chu_nhat khi kind=weekday"}
         monday = today - _dt.timedelta(days=today.weekday())  # Thứ Hai của tuần hiện tại
-        d = monday + _dt.timedelta(days=int(weekday) - 1, weeks=int(week_offset or 0))
+        d = monday + _dt.timedelta(days=iso, weeks=int(week_offset or 0))
     elif kind == "absolute":
         s = (date or "").strip()
         try:
@@ -83,7 +98,7 @@ class ResolveDateTool:
         @mcp.tool()
         async def resolve_date(
             kind: DateKind,
-            weekday: Optional[int] = None,
+            weekday: Optional[ViWeekday] = None,
             week_offset: int = 0,
             days: Optional[int] = None,
             date: str = "",
@@ -95,8 +110,10 @@ class ResolveDateTool:
 
             kind:
               - "today" / "tomorrow" / "day_after_tomorrow": hôm nay / mai / ngày kia.
-              - "weekday": một thứ cụ thể. weekday=1..7 (1=Thứ Hai .. 7=Chủ Nhật);
-                week_offset: 0=tuần này, 1=tuần sau, -1=tuần trước.
+              - "weekday": một thứ trong tuần. weekday dùng ĐÚNG token tiếng Việt:
+                "thu_2"=Thứ Hai, "thu_3"=Thứ Ba, "thu_4"=Thứ Tư, "thu_5"=Thứ Năm,
+                "thu_6"=Thứ Sáu, "thu_7"=Thứ Bảy, "chu_nhat"=Chủ Nhật (vd user nói
+                "thứ 4" -> weekday="thu_4"). week_offset: 0=tuần này, 1=tuần sau, -1=trước.
               - "offset_days": days = số ngày kể từ hôm nay (vd 3 = 3 ngày nữa).
               - "absolute": date = ngày user nói rõ ràng (YYYY-MM-DD).
 

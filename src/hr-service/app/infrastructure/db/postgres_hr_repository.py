@@ -446,7 +446,9 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
                             "INSERT INTO hr_svc.attendance "
                             "(user_id, period, work_days, late_count, absent_count) "
                             "VALUES (:uid, :period, :wd, :late, :absent) "
-                            "ON CONFLICT (user_id) DO NOTHING"
+                            # PK composite (user_id, period) -> conflict target phải khớp,
+                            # KHÔNG có unique constraint trên (user_id) đơn cột.
+                            "ON CONFLICT (user_id, period) DO NOTHING"
                         ),
                         {
                             "uid": user_id,
