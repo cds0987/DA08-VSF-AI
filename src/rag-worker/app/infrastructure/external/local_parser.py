@@ -271,7 +271,7 @@ def _make_pymupdf_reader(params: Mapping[str, Any]) -> Reader:
         pages: list[_Page] = []
         with fitz.open(path) as doc:
             for page in doc:
-                text = _normalize_markdown(page.get_text("markdown"))
+                text = _normalize_markdown(page.get_text("text"))
                 images: list[VisionImage] = []
                 if not text:
                     # Trang scan / không có text-layer → rasterize cả trang cho vision.

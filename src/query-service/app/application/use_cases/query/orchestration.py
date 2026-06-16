@@ -898,7 +898,7 @@ class QueryOrchestrationUseCase:
         sources = [self._source_payload(result) for result in acl_filtered_results]
         context_text = "\n\n".join(
             f"[{index + 1}] {result.document_name} / {result.caption}\n{result.parent_text}"
-            for index, result in enumerate(grounded_results)
+            for index, result in enumerate(acl_filtered_results)
         )
         answer_parts: list[str] = []
         async for token in _word_stream(

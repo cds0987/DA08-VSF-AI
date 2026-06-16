@@ -544,7 +544,39 @@ async def act_node(
                         )
                         for i, r in enumerate(qualified)
                     ]
+                elif results:
+                    # Adaptive fallback: có kết quả nhưng dưới ngưỡng -> pass cho LLM tự đánh giá
+                    start_ref = state.get("source_ref_counter", 0)
+                    data = json.dumps({
+                        "results": [
+                            {
+                                "ref": start_ref + i + 1,
+                                "document_name": r.document_name,
+                                "caption": r.caption,
+                                "parent_text": r.parent_text,
+                                "heading_path": r.heading_path,
+                                "page_number": r.page_number,
+                            }
+                            for i, r in enumerate(results)
+                        ]
+                    })
+                    success = True
+                    new_sources = [
+                        SourceDoc(
+                            document_name=r.document_name,
+                            caption=r.caption,
+                            heading_path=r.heading_path,
+                            score=r.score,
+                            source_gcs_uri=r.source_gcs_uri,
+                            document_id=r.document_id,
+                            page_number=r.page_number,
+                            ref=start_ref + i + 1,
+                            chunk_id=r.chunk_id,
+                        )
+                        for i, r in enumerate(results)
+                    ]
                 else:
+                    # Hoàn toàn trống -> hard-stop NO_INFO
                     data = json.dumps({
                         "results": [],
                         "message": _RAG_NO_INFO_ANSWER,
