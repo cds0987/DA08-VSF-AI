@@ -234,6 +234,10 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
             employment_status=record.employment_status,
             created_at=record.created_at,
             updated_at=record.updated_at,
+            full_name=record.full_name,
+            phone_number=record.phone_number,
+            date_of_birth=record.date_of_birth,
+            hire_date=record.hire_date,
         )
     async def get_leave_balance(self, user_id: str) -> Optional[LeaveBalanceDTO]:
         def _query() -> Optional[LeaveBalanceDTO]:
