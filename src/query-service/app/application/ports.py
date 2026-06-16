@@ -30,6 +30,7 @@ class SearchResultLike(Protocol):
     document_id: str
     document_name: str
     caption: str
+    child_text: str
     parent_text: str
     heading_path: list[str]
     score: float

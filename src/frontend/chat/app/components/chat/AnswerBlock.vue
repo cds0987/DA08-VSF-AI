@@ -4,10 +4,11 @@ import {
   Check,
   ChevronRight,
   Copy,
+  FileText,
   ThumbsDown,
   ThumbsUp,
 } from '@lucide/vue'
-import { citationHeadingPath, cn } from '~/lib/utils'
+import { citationHeadingPath, cn, formatRelevance } from '~/lib/utils'
 import type { ChatMessage, Citation } from '~/types'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
@@ -108,15 +109,28 @@ function selectSource(citation: Citation) {
           )"
           @click="selectSource(citation)"
         >
-          <div class="truncate text-[13px] font-semibold text-slate-900 dark:text-foreground">
-            {{ citation.ref ?? (index + 1) }}. {{ citation.caption || citation.document }}
+          <div class="flex items-start gap-2">
+            <div class="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-900 dark:text-foreground">
+              {{ citation.ref ?? (index + 1) }}. {{ citation.caption || citation.document }}
+            </div>
+            <span
+              v-if="formatRelevance(citation.score)"
+              class="shrink-0 rounded-full bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300"
+              title="Độ liên quan"
+            >
+              {{ formatRelevance(citation.score) }}
+            </span>
           </div>
-          <div class="mt-1 truncate text-[11px] font-medium text-slate-700 dark:text-muted-foreground">
-            {{ citation.document }}
+          <div class="mt-1 flex items-center gap-1 truncate text-[11px] font-medium text-slate-700 dark:text-muted-foreground">
+            <FileText class="h-3 w-3 shrink-0 text-slate-400 dark:text-muted-foreground/70" />
+            <span class="truncate">{{ citation.document }}</span>
           </div>
           <div v-if="citationHeadingPath(citation.heading_path, citation.document).length" class="mt-1 truncate text-[11px] font-medium text-slate-600 dark:text-muted-foreground/70">
             {{ citationHeadingPath(citation.heading_path, citation.document).join(' › ') }}
           </div>
+          <p v-if="citation.snippet" class="mt-1.5 line-clamp-2 border-l-2 border-slate-200 dark:border-white/10 pl-2 text-[11px] italic leading-snug text-slate-500 dark:text-muted-foreground/80">
+            {{ citation.snippet }}
+          </p>
         </button>
       </div>
     </div>
