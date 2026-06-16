@@ -101,6 +101,12 @@ class QdrantReader:
         self._meta = meta_collection_name(settings.collection)
         self._stamp_id = point_id(f"__contract__::{self._index}")
         self._client = None
+        # Cache schema collection (remote) -> chọn truy vấn tương thích ngược:
+        #   "hybrid"        = named dense + sparse (e371bef, collection mới) -> dense+BM25 fusion.
+        #   "dense_named"   = named dense, chưa có sparse                    -> dense theo tên.
+        #   "dense_unnamed" = vector trần (collection CŨ, prod chưa migrate) -> dense trần.
+        # Tránh hybrid query trên collection cũ -> 0 sources (RAG smoke fail).
+        self._mode: str | None = None
 
     # --- client helpers ---------------------------------------------------
     def _remote_client(self):
@@ -216,6 +222,30 @@ class QdrantReader:
             return await self._search_remote(vector, query_text, top_k, document_ids=document_ids)
         return await asyncio.to_thread(self._search_local, vector, query_text, top_k, document_ids)
 
+    @staticmethod
+    def _collection_mode(info) -> str:
+        """Suy schema collection -> 'hybrid' | 'dense_named' | 'dense_unnamed'."""
+        try:
+            params = info.config.params
+            vectors = params.vectors
+            sparse = getattr(params, "sparse_vectors", None)
+        except Exception:  # noqa: BLE001 — info lạ -> coi như collection cũ
+            return "dense_unnamed"
+        if isinstance(vectors, dict):
+            if sparse and "dense" in vectors:
+                return "hybrid"
+            return "dense_named"
+        return "dense_unnamed"
+
+    async def _remote_mode(self, client) -> str:
+        if self._mode is None:
+            try:
+                info = await client.get_collection(self._index)
+                self._mode = self._collection_mode(info)
+            except Exception:  # noqa: BLE001 — không lấy được info -> an toàn: dense trần
+                self._mode = "dense_unnamed"
+        return self._mode
+
     async def _search_remote(
         self,
         vector: Sequence[float],
@@ -227,27 +257,35 @@ class QdrantReader:
 
         client = self._remote_client()
         doc_filter = self._build_filter(document_ids)
-        sparse_idx, sparse_val = _sparse_encode(query_text)
-        res = await client.query_points(
-            collection_name=self._index,
-            prefetch=[
-                models.Prefetch(
-                    query=list(vector),
-                    using="dense",
-                    limit=top_k,
-                    filter=doc_filter,
-                ),
-                models.Prefetch(
-                    query=models.SparseVector(indices=sparse_idx, values=sparse_val),
-                    using="sparse",
-                    limit=top_k,
-                    filter=doc_filter,
-                ),
-            ],
-            query=models.FusionQuery(fusion=models.Fusion.RRF),
-            limit=top_k,
-            with_payload=True,
-        )
+        mode = await self._remote_mode(client)
+
+        if mode == "hybrid":
+            sparse_idx, sparse_val = _sparse_encode(query_text)
+            res = await client.query_points(
+                collection_name=self._index,
+                prefetch=[
+                    models.Prefetch(query=list(vector), using="dense", limit=top_k, filter=doc_filter),
+                    models.Prefetch(
+                        query=models.SparseVector(indices=sparse_idx, values=sparse_val),
+                        using="sparse", limit=top_k, filter=doc_filter,
+                    ),
+                ],
+                query=models.FusionQuery(fusion=models.Fusion.RRF),
+                limit=top_k,
+                with_payload=True,
+            )
+        else:
+            # Collection cũ chưa migrate hybrid -> dense-only (named hoặc trần).
+            kwargs = dict(
+                collection_name=self._index,
+                query=list(vector),
+                query_filter=doc_filter,
+                limit=top_k,
+                with_payload=True,
+            )
+            if mode == "dense_named":
+                kwargs["using"] = "dense"
+            res = await client.query_points(**kwargs)
         return [_to_hit(p.payload, p.score) for p in res.points]
 
     def _search_local(

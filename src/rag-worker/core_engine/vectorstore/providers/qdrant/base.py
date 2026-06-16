@@ -86,7 +86,10 @@ class QdrantBase(VectorStoreProvider):
                 ),
             }
         else:
-            vector = list(record.vector)
+            # Doc không có chữ (sparse rỗng, vd PDF scan tắt OCR): VẪN ghi dense CÓ TÊN
+            # "dense" (collection dùng named vectors). Trước đây trả list TRẦN -> lệch
+            # schema named -> Qdrant reject -> ingest fail. BM25 bỏ qua vì không có từ nào.
+            vector = {"dense": list(record.vector)}
         return models.PointStruct(
             id=point_id(record.chunk_id),
             vector=vector,

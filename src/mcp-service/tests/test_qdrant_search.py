@@ -132,6 +132,12 @@ async def test_remote_search_passes_document_filter_and_reuses_client(monkeypatc
     recorded_filters: list[object] = []
 
     class FakeClient:
+        async def get_collection(self, name):
+            # Collection hybrid (named dense + sparse) -> reader chọn hybrid query.
+            return SimpleNamespace(config=SimpleNamespace(params=SimpleNamespace(
+                vectors={"dense": object()}, sparse_vectors={"sparse": object()},
+            )))
+
         async def query_points(self, **kwargs):
             # Hybrid search passes filter inside Prefetch objects, not top-level query_filter
             prefetch = kwargs.get("prefetch") or []
