@@ -76,7 +76,7 @@ async def route(req: Request) -> dict:
     return dec.model_dump()
 
 
-@app.post("/v1/chat/completions")
+@app.post("/v1/chat/completions", response_model=None)
 async def chat_completions(req: Request,
                            authorization: str | None = Header(None),
                            x_internal_token: str | None = Header(None),

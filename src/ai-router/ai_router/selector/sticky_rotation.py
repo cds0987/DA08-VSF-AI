@@ -34,7 +34,7 @@ class StickyRotationSoft(Selector):
             order = live[active:] + live[:active]
 
             for k in order:
-                model = self.pick_model(tier_name, tdef, req)
+                model = await self.pick_model(tier_name, tdef, req)
                 if model is None:
                     break  # tier này không có model khả thi cho request -> sang tier kế
                 daily_limit = k.limit.value if tdef.limit_kind != "none" else 0.0

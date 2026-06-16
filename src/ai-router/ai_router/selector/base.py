@@ -56,19 +56,18 @@ class Selector(ABC):
             return False
         return True
 
-    def pick_model(self, tier_name: str, tdef: TierDef, req: ResolveRequest) -> ModelEntry | None:
+    async def pick_model(self, tier_name: str, tdef: TierDef, req: ResolveRequest) -> ModelEntry | None:
         # 1) embed -> PIN (BẪY embedding, PLAN §4b)
         if req.cap_config.pinned_model:
             m = self.catalog.get(req.cap_config.pinned_model)
             return m if self.feasible_model(m, tdef, req) else None
-        # 2) model chỉ định cho tier này
-        mid = req.cap_config.models.get(tier_name)
-        if mid:
+        # 2) danh sách model chỉ định cho tier (interchange/failover): thử lần lượt,
+        #    bỏ model không khả thi/biến mất hoặc đang cooldown (vừa lỗi/sập) -> model kế.
+        for mid in req.cap_config.model_ids(tier_name):
             m = self.catalog.get(mid)
-            if self.feasible_model(m, tdef, req):
+            if m and self.feasible_model(m, tdef, req) and not await self.counters.in_model_cooldown(m.id):
                 return m
-            # chỉ định nhưng không khả thi/biến mất -> rơi xuống auto
-        # 3) auto: ứng viên rẻ nhất khả thi
+        # 3) auto: ứng viên rẻ nhất khả thi, cũng bỏ model đang cooldown
         cands = self.catalog.candidates(
             provider=tdef.provider,
             is_free=tdef.model_free,
@@ -77,10 +76,11 @@ class Selector(ABC):
             min_context=req.est_tokens,
             endpoint=req.endpoint,
         )
-        if not cands:
-            return None
         cands.sort(key=lambda x: (x.price_out_with_fee, -x.context_length))
-        return cands[0]
+        for m in cands:
+            if not await self.counters.in_model_cooldown(m.id):
+                return m
+        return None
 
     def build_decision(self, key, model: ModelEntry, tier_name: str, req: ResolveRequest) -> RouteDecision:
         return RouteDecision(

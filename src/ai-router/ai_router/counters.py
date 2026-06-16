@@ -57,6 +57,12 @@ class Counters(ABC):
     async def in_cooldown(self, key_id: str) -> bool: ...
 
     @abstractmethod
+    async def set_model_cooldown(self, model_id: str, seconds: int) -> None: ...
+
+    @abstractmethod
+    async def in_model_cooldown(self, model_id: str) -> bool: ...
+
+    @abstractmethod
     async def usage(self, key_id: str, daily_kind: str) -> dict: ...
 
     @abstractmethod
@@ -130,6 +136,12 @@ class RedisCounters(Counters):
     async def in_cooldown(self, key_id):
         return bool(await self._r.exists(f"cooldown:{key_id}"))
 
+    async def set_model_cooldown(self, model_id, seconds):
+        await self._r.set(f"mcooldown:{model_id}", "1", ex=seconds)
+
+    async def in_model_cooldown(self, model_id):
+        return bool(await self._r.exists(f"mcooldown:{model_id}"))
+
     async def usage(self, key_id, daily_kind):
         now = _now()
         minute, day, month = now.strftime("%Y%m%d%H%M"), now.strftime("%Y%m%d"), now.strftime("%Y%m")
@@ -154,6 +166,7 @@ class MemoryCounters(Counters):
     def __init__(self) -> None:
         self._d: dict[str, tuple[float, float]] = {}   # key -> (value, expire_at)
         self._cool: dict[str, float] = {}
+        self._mcool: dict[str, float] = {}             # model_id -> expire_at
         self._active: dict[str, int] = {}
 
     def _get(self, k: str) -> float:
@@ -203,6 +216,16 @@ class MemoryCounters(Counters):
         if exp and time.time() < exp:
             return True
         self._cool.pop(key_id, None)
+        return False
+
+    async def set_model_cooldown(self, model_id, seconds):
+        self._mcool[model_id] = time.time() + seconds
+
+    async def in_model_cooldown(self, model_id):
+        exp = self._mcool.get(model_id)
+        if exp and time.time() < exp:
+            return True
+        self._mcool.pop(model_id, None)
         return False
 
     async def usage(self, key_id, daily_kind):

@@ -100,6 +100,11 @@ class Router:
     async def cooldown(self, dec: RouteDecision) -> None:
         await self.counters.set_cooldown(dec.key_id, COOLDOWN_SECONDS)
 
+    async def cooldown_model(self, dec: RouteDecision) -> None:
+        """Model vừa lỗi/sập -> nghỉ ngắn để resolve kế xoay sang model interchange khác
+        (cùng key, cùng tier). Không phạt key vì key có thể vẫn tốt."""
+        await self.counters.set_model_cooldown(dec.model_id, COOLDOWN_SECONDS)
+
     # ----------------- call engine -----------------
     def _prep_body(self, body: dict, dec: RouteDecision) -> dict:
         """Gán model thật + chuẩn hoá param theo provider (PLAN §6)."""
@@ -133,11 +138,11 @@ class Router:
                 await self.account(dec, extract_usage(data), est)
                 data["_router"] = dec.public()
                 return data
-            except Exception as exc:  # noqa: BLE001 — lỗi/429 -> cooldown + thử key/tier khác
+            except Exception as exc:  # noqa: BLE001 — lỗi/sập -> cooldown model, thử model/tier khác
                 last_err = exc
-                await self.cooldown(dec)
-                logger.warning("chat_attempt_failed attempt=%d key=%s err=%s",
-                               attempt, dec.key_id, str(exc)[:160])
+                await self.cooldown_model(dec)
+                logger.warning("chat_attempt_failed attempt=%d key=%s model=%s err=%s",
+                               attempt, dec.key_id, dec.model_id, str(exc)[:160])
         raise RouterCallError(str(last_err) if last_err else "unknown")
 
     async def chat_stream(self, capability_alias: str, body: dict,

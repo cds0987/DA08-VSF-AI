@@ -30,11 +30,20 @@ class TierConfig(BaseModel):
 class CapabilityConfig(BaseModel):
     """1 block/capability (PLAN §4b). tiers = thứ tự bậc thang cost."""
     tiers: list[str]                             # vd ["free_oai", "free_or", "paid"]
-    models: dict[str, str] = Field(default_factory=dict)  # tier_name -> model_id ưu tiên
+    # tier_name -> model_id ưu tiên. CÓ THỂ là 1 model (str) hoặc DANH SÁCH model
+    # interchange (list): model đầu sập/biến mất -> tự thử model kế trong cùng tier.
+    models: dict[str, str | list[str]] = Field(default_factory=dict)
     quality_floor: str | None = None             # model id tối thiểu (tùy chọn)
     require_tools: bool = False                   # answer/agent
     require_vision: bool = False                  # ocr/caption
     pinned_model: str | None = None              # embed -> pin (BẪY embedding, PLAN §4b)
+
+    def model_ids(self, tier: str) -> list[str]:
+        """Danh sách model ưu tiên cho tier (interchange). str -> [str]; thiếu -> []."""
+        v = self.models.get(tier)
+        if v is None:
+            return []
+        return [v] if isinstance(v, str) else list(v)
 
 
 class SelectorConfig(BaseModel):
