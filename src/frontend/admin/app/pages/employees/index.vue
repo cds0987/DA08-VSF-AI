@@ -5,6 +5,8 @@ import {
   ChevronRight,
   Eye,
   Loader2,
+  Power,
+  PowerOff,
   UserPlus,
   X,
 } from '@lucide/vue'
@@ -14,7 +16,7 @@ import StatusBadge from '~/components/admin-ui/StatusBadge.vue'
 import { getApiErrorMessage, getApiStatus } from '~/lib/api/apiError'
 import hrService from '~/lib/api/hrService'
 import userService from '~/lib/api/userService'
-import type { AccountType, EmployeeItem, EmploymentStatus, Role } from '~/types'
+import type { AccountType, EmployeeItem, EmploymentStatus, Role, User } from '~/types'
 
 const router = useRouter()
 
@@ -27,23 +29,53 @@ const statusFilter = ref<EmploymentStatus | ''>('')
 const limit = ref(20)
 const offset = ref(0)
 
+// user_id → account info (role, is_active) from User Service, joined onto each employee row
+const usersById = ref<Record<string, User>>({})
+const togglingUserId = ref<string | null>(null)
+
 const fetchEmployees = async () => {
   isLoading.value = true
   try {
-    const res = await hrService.listEmployees({
-      department: departmentFilter.value || undefined,
-      status: (statusFilter.value as EmploymentStatus) || undefined,
-      limit: limit.value,
-      offset: offset.value,
-    })
+    const [res, usersRes] = await Promise.all([
+      hrService.listEmployees({
+        department: departmentFilter.value || undefined,
+        status: (statusFilter.value as EmploymentStatus) || undefined,
+        limit: limit.value,
+        offset: offset.value,
+      }),
+      userService.listUsers().catch(() => ({ items: [] as User[], total: 0 })),
+    ])
     employees.value = res.items
     total.value = res.total
+    usersById.value = Object.fromEntries(usersRes.items.map(u => [u.id, u]))
   } catch (error) {
     const status = getApiStatus(error)
     if (status === 403) toast.error('Access denied: admin role required')
     else toast.error(getApiErrorMessage(error, 'Failed to load employees'))
   } finally {
     isLoading.value = false
+  }
+}
+
+const toggleAccountStatus = async (emp: EmployeeItem) => {
+  const account = usersById.value[emp.user_id]
+  if (!account) return
+  togglingUserId.value = emp.user_id
+  try {
+    if (account.is_active) {
+      await userService.deactivateUser(emp.user_id)
+      toast.success(`${emp.full_name || emp.company_email} deactivated`)
+    } else {
+      await userService.reactivateUser(emp.user_id)
+      toast.success(`${emp.full_name || emp.company_email} reactivated`)
+    }
+    await fetchEmployees()
+  } catch (error) {
+    const status = getApiStatus(error)
+    if (status === 403) toast.error('Access denied: admin role required')
+    else toast.error(getApiErrorMessage(error, 'Failed to update account status'))
+  } finally {
+    togglingUserId.value = null
   }
 }
 
@@ -62,9 +94,9 @@ const formatDate = (d: string) => new Date(d).toLocaleDateString('en-GB', {
   day: '2-digit', month: 'short', year: 'numeric',
 })
 
-// Build user_id→email map from the current page so Manager column can resolve names
+// Build user_id→display name map from the current page so Manager column can resolve names
 const managerMap = computed(() =>
-  Object.fromEntries(employees.value.map(e => [e.user_id, e.company_email]))
+  Object.fromEntries(employees.value.map(e => [e.user_id, e.full_name || e.company_email]))
 )
 const resolveManager = (managerId: string | null) => {
   if (!managerId) return '—'
@@ -163,7 +195,7 @@ const pollForEmployee = async (userId: string) => {
   <div class="flex h-full flex-col overflow-y-auto">
     <PageHeader
       title="Employee Management"
-      description="HR profiles, employee codes, job titles, and manager assignments."
+      description="HR profiles, departments, job titles, manager assignments, and account status."
     >
       <template #actions>
         <button
@@ -189,9 +221,9 @@ const pollForEmployee = async (userId: string) => {
             v-model="statusFilter"
             class="rounded-md border border-input bg-card px-3 py-1.5 text-[13px] outline-none focus:border-primary"
           >
-            <option value="">All Statuses</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
+            <option value="">All Employment Statuses</option>
+            <option value="active">Employment: Active</option>
+            <option value="inactive">Employment: Inactive</option>
           </select>
         </div>
         <span class="text-[12px] text-muted-foreground">{{ total }} total employees</span>
@@ -202,8 +234,8 @@ const pollForEmployee = async (userId: string) => {
         <table class="w-full text-[13px]">
           <thead class="bg-background/60 text-[11px] uppercase tracking-wider text-muted-foreground">
             <tr>
-              <th class="px-4 py-2.5 text-left font-medium">Employee</th>
-              <th class="px-4 py-2.5 text-left font-medium">Code</th>
+              <th class="px-4 py-2.5 text-left font-medium">Tên</th>
+              <th class="px-4 py-2.5 text-left font-medium">Email</th>
               <th class="px-4 py-2.5 text-left font-medium">Department</th>
               <th class="px-4 py-2.5 text-left font-medium">Job Title</th>
               <th class="px-4 py-2.5 text-left font-medium">Manager</th>
@@ -213,13 +245,13 @@ const pollForEmployee = async (userId: string) => {
           </thead>
           <tbody class="divide-y divide-border">
             <tr v-if="isLoading">
-              <td colspan="8" class="px-4 py-12 text-center">
+              <td colspan="7" class="px-4 py-12 text-center">
                 <Loader2 class="mx-auto h-6 w-6 animate-spin text-primary" />
                 <p class="mt-2 text-muted-foreground">Loading employees...</p>
               </td>
             </tr>
             <tr v-else-if="employees.length === 0">
-              <td colspan="8" class="px-4 py-12 text-center">
+              <td colspan="7" class="px-4 py-12 text-center">
                 <Briefcase class="mx-auto h-8 w-8 text-muted-foreground/40" />
                 <p class="mt-2 text-muted-foreground">No employees found.</p>
               </td>
@@ -233,27 +265,45 @@ const pollForEmployee = async (userId: string) => {
               <td class="px-4 py-2.5">
                 <div class="flex items-center gap-2.5">
                   <div class="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">
-                    {{ emp.company_email.substring(0, 2).toUpperCase() }}
+                    {{ (emp.full_name || emp.company_email).substring(0, 2).toUpperCase() }}
                   </div>
-                  <span class="font-medium text-foreground">{{ emp.company_email }}</span>
+                  <span class="font-medium text-foreground">{{ emp.full_name || '—' }}</span>
                 </div>
               </td>
-              <td class="px-4 py-2.5 text-muted-foreground">{{ emp.employee_code ?? '—' }}</td>
+              <td class="px-4 py-2.5 text-foreground">{{ emp.company_email }}</td>
               <td class="px-4 py-2.5 text-foreground">{{ emp.department || '—' }}</td>
               <td class="px-4 py-2.5 text-foreground">{{ emp.job_title ?? '—' }}</td>
               <td class="px-4 py-2.5 text-muted-foreground">{{ resolveManager(emp.manager_user_id) }}</td>
               <td class="px-4 py-2.5">
-                <StatusBadge :status="emp.employment_status" />
+                <StatusBadge
+                  v-if="usersById[emp.user_id]"
+                  :status="usersById[emp.user_id].is_active ? 'active' : 'suspended'"
+                />
+                <span v-else class="text-muted-foreground">—</span>
               </td>
               <td class="px-4 py-2.5 text-right" @click.stop>
-                <NuxtLink
-                  :to="`/employees/${emp.id}`"
-                  title="View employee detail"
-                  class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground transition hover:bg-accent hover:text-foreground"
-                >
-                  <Eye class="h-3.5 w-3.5" />
-                  View
-                </NuxtLink>
+                <div class="flex items-center justify-end gap-1">
+                  <NuxtLink
+                    :to="`/employees/${emp.id}`"
+                    title="View employee detail"
+                    class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                  >
+                    <Eye class="h-3.5 w-3.5" />
+                    View
+                  </NuxtLink>
+                  <button
+                    v-if="usersById[emp.user_id]"
+                    :disabled="togglingUserId === emp.user_id"
+                    class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-50"
+                    :class="usersById[emp.user_id].is_active ? 'text-destructive hover:bg-destructive/10' : 'text-emerald-600 hover:bg-emerald-50'"
+                    :title="usersById[emp.user_id].is_active ? 'Deactivate account' : 'Reactivate account'"
+                    @click="toggleAccountStatus(emp)"
+                  >
+                    <Loader2 v-if="togglingUserId === emp.user_id" class="h-3.5 w-3.5 animate-spin" />
+                    <PowerOff v-else-if="usersById[emp.user_id].is_active" class="h-3.5 w-3.5" />
+                    <Power v-else class="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>

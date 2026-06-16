@@ -33,14 +33,25 @@ function handleKeyDown(event: KeyboardEvent) {
   }
 }
 
-watch(() => props.input, (value) => {
+function adjustHeight() {
   const textarea = textareaRef.value
   if (!textarea) return
-  requestAnimationFrame(() => {
-    textarea.style.height = 'auto'
-    textarea.style.height = value ? `${textarea.scrollHeight}px` : 'auto'
-    isMultiline.value = value ? textarea.scrollHeight > 44 : false
-  })
+  textarea.style.height = '0px'                        // reset về 0 để scrollHeight co lại đúng
+  const next = textarea.scrollHeight
+  textarea.style.height = `${next}px`
+  isMultiline.value = next > 44
+}
+
+watch(() => props.input, (value) => {
+  if (!value) {
+    // input bị clear (sau khi send) — reset hoàn toàn
+    const textarea = textareaRef.value
+    if (!textarea) return
+    textarea.style.height = ''
+    isMultiline.value = false
+    return
+  }
+  requestAnimationFrame(adjustHeight)
 })
 </script>
 
@@ -62,7 +73,7 @@ watch(() => props.input, (value) => {
         maxlength="500"
         placeholder="Ask a question about FeatureMind policies, procedures, or knowledge..."
         :class="cn(
-          'max-h-[200px] w-full resize-none bg-transparent text-[16px] text-slate-800 dark:text-foreground outline-none placeholder:text-slate-400 dark:placeholder:text-chat-placeholder',
+          'max-h-[200px] w-full resize-none overflow-hidden bg-transparent text-[16px] text-slate-800 dark:text-foreground outline-none placeholder:text-slate-400 dark:placeholder:text-chat-placeholder',
           isMultiline ? 'min-h-[60px] px-4 pb-2 pt-4' : 'min-h-[36px] flex-1 px-3 py-2',
         )"
       />

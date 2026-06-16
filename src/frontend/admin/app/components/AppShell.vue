@@ -4,7 +4,6 @@ import {
   FileText,
   Upload,
   ShieldCheck,
-  Users,
   Briefcase,
   PanelLeftOpen,
   PanelLeftClose,
@@ -26,7 +25,6 @@ const ADMIN_NAV = [
   { label: 'Documents', to: '/documents', icon: FileText },
   { label: 'Upload Center', to: '/upload', icon: Upload },
   { label: 'Audit Logs', to: '/audit', icon: ShieldCheck },
-  { label: 'User Management', to: '/users', icon: Users },
   { label: 'Employee Management', to: '/employees', icon: Briefcase },
 ]
 

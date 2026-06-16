@@ -92,8 +92,12 @@ const formatDate = (d: string) => new Date(d).toLocaleString('en-GB', {
   day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
 })
 
+const formatDateOnly = (d: string | null) => d
+  ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+  : '—'
+
 const managerLabel = (emp: EmployeeItem) =>
-  `${emp.company_email}${emp.job_title ? ` · ${emp.job_title}` : ''}`
+  `${emp.full_name || emp.company_email}${emp.job_title ? ` · ${emp.job_title}` : ''}`
 </script>
 
 <template>
@@ -137,12 +141,28 @@ const managerLabel = (emp: EmployeeItem) =>
           <h2 class="mb-4 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Profile Info</h2>
           <dl class="grid grid-cols-2 gap-x-6 gap-y-3 text-[13px]">
             <div>
+              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Full Name</dt>
+              <dd class="mt-0.5 text-foreground">{{ employee.full_name || '—' }}</dd>
+            </div>
+            <div>
               <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Email</dt>
               <dd class="mt-0.5 text-foreground">{{ employee.company_email }}</dd>
             </div>
             <div>
+              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Phone Number</dt>
+              <dd class="mt-0.5 text-foreground">{{ employee.phone_number || '—' }}</dd>
+            </div>
+            <div>
+              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Date of Birth</dt>
+              <dd class="mt-0.5 text-foreground">{{ formatDateOnly(employee.date_of_birth) }}</dd>
+            </div>
+            <div>
               <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Department</dt>
               <dd class="mt-0.5 text-foreground">{{ employee.department || '—' }}</dd>
+            </div>
+            <div>
+              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Hire Date</dt>
+              <dd class="mt-0.5 text-foreground">{{ formatDateOnly(employee.hire_date) }}</dd>
             </div>
             <div>
               <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Status</dt>

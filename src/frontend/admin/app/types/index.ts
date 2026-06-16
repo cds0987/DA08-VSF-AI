@@ -134,6 +134,10 @@ export interface EmployeeItem {
   job_title: string | null
   manager_user_id: string | null
   employment_status: EmploymentStatus
+  full_name: string | null
+  phone_number: string | null
+  date_of_birth: string | null
+  hire_date: string | null
   created_at: string
   updated_at: string
 }

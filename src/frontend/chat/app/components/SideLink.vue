@@ -28,7 +28,7 @@ const active = computed(() => {
           'flex items-center rounded-md text-[13px] font-semibold overflow-hidden cursor-pointer shrink-0 h-9 transition-all w-full justify-start',
           active
             ? 'bg-blue-50 text-blue-700 shadow-sm ring-1 ring-blue-100'
-            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+            : 'text-slate-600 dark:text-muted-foreground hover:bg-slate-100 dark:hover:bg-sidebar-accent hover:text-slate-900 dark:hover:text-sidebar-accent-foreground',
         )"
       >
         <div class="flex h-9 w-[64px] items-center justify-center shrink-0">
