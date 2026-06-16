@@ -12,6 +12,7 @@ import type { ChatMessage, Citation } from '~/types'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import ActionableCard from './ActionableCard.vue'
+import ApprovalReviewCard from './ApprovalReviewCard.vue'
 
 const props = defineProps<{ data: ChatMessage }>()
 const emit = defineEmits<{
@@ -78,11 +79,10 @@ function selectSource(citation: Citation) {
         v-html="renderedContent"
         @click="handleContentClick"
       />
-      <ActionableCard
-        v-for="(act, i) in data.actions"
-        :key="act.idempotency_key || i"
-        :action="act"
-      />
+      <template v-for="(act, i) in data.actions" :key="act.idempotency_key || i">
+        <ApprovalReviewCard v-if="act.action_type === 'review_leave_approvals'" />
+        <ActionableCard v-else :action="act" />
+      </template>
     </div>
 
     <div v-if="data.citations?.length" class="border-t border-slate-100 dark:border-white/5 bg-slate-50/20 dark:bg-background/10">

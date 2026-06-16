@@ -131,8 +131,10 @@ export interface MessageAttachment {
 }
 
 export interface HRActionPayload {
-  action_type: 'create_leave_request'
-  parameters: {
+  // 'create_leave_request': thẻ tạo đơn (có parameters).
+  // 'review_leave_approvals': thẻ duyệt — FE tự nạp hàng đợi live, không cần parameters.
+  action_type: 'create_leave_request' | 'review_leave_approvals'
+  parameters?: {
     leave_type: string
     start_date: string
     end_date: string

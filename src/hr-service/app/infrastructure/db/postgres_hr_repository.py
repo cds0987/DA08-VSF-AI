@@ -868,9 +868,40 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
                     .order_by(LeaveRequestRecord.created_at.asc())
                     .all()
                 )
-                return [_req_to_dict(row) for row in rows]
+                return [self._enrich_approval(session, row) for row in rows]
 
         return await asyncio.to_thread(_list)
+
+    def _enrich_approval(self, session: Session, row: LeaveRequestRecord) -> dict:
+        """Đính kèm GỢI Ý QUYẾT ĐỊNH cho sếp: số phép còn lại của NV (annual/sick;
+        personal không trừ quỹ -> None) + cờ trùng lịch (đơn active khác của cùng NV
+        đè khoảng ngày). Giúp sếp duyệt nhanh, không phải tra cứu tay."""
+        item = _req_to_dict(row)
+        remaining: int | None = None
+        total: int | None = None
+        bal = session.get(LeaveBalanceRecord, row.user_id)
+        if bal is not None:
+            if row.leave_type == "annual":
+                remaining = bal.annual_leave_total - bal.annual_leave_used
+                total = bal.annual_leave_total
+            elif row.leave_type == "sick":
+                remaining = bal.sick_leave_total - bal.sick_leave_used
+                total = bal.sick_leave_total
+        conflicts = (
+            session.query(LeaveRequestRecord)
+            .filter(
+                LeaveRequestRecord.user_id == row.user_id,
+                LeaveRequestRecord.id != row.id,
+                LeaveRequestRecord.status.in_(("pending", "approved")),
+                LeaveRequestRecord.start_date <= row.end_date,
+                LeaveRequestRecord.end_date >= row.start_date,
+            )
+            .count()
+        )
+        item["employee_leave_remaining"] = remaining
+        item["employee_leave_total"] = total
+        item["has_conflict"] = conflicts > 0
+        return item
 
     async def update_leave_status(
         self,

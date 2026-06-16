@@ -50,6 +50,11 @@ function extractAction(rawContent: string): { actions?: any[]; content: string }
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
     try {
       const parsed = JSON.parse(trimmed)
+      // Thẻ duyệt: không cần items/parameters — FE tự nạp hàng đợi live.
+      if (parsed.action_type === 'review_leave_approvals') {
+        const actions = [{ action_type: 'review_leave_approvals', idempotency_key: newIdempotencyKey() }]
+        return { actions, content: buildActionIntro(actions) }
+      }
       if (parsed.action_type) {
         const rawItems: any[] = Array.isArray(parsed.items)
           ? parsed.items
@@ -83,6 +88,9 @@ function describeLeave(p: any): string {
 // Model chỉ trả PURE JSON cho action -> dựng câu dẫn nhập tiếng Việt thân thiện hiển
 // thị phía trên (các) form xác nhận. 1 đơn -> 1 câu; nhiều đơn -> liệt kê.
 function buildActionIntro(actions: { action_type?: string; parameters?: any }[]): string {
+  if (actions.some(a => a.action_type === 'review_leave_approvals')) {
+    return 'Đây là các đơn đang chờ bạn duyệt. Bạn xem rồi bấm **Duyệt** hoặc **Từ chối** cho từng đơn nhé.'
+  }
   const leaves = actions.filter(a => a.action_type === 'create_leave_request')
   if (leaves.length === 1) {
     return `Mình đã chuẩn bị đơn ${describeLeave(leaves[0].parameters)}. Bạn kiểm tra, chỉnh sửa nếu cần rồi bấm **Xác nhận & Gửi** nhé.`
