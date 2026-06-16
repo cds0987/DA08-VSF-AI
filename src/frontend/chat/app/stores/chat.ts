@@ -35,6 +35,29 @@ const LEAVE_TYPE_LABEL: Record<string, string> = {
   personal: 'cá nhân',
 }
 
+// Tách action JSON ra khỏi content thô của trợ lý. Dùng CHUNG cho cả luồng stream
+// (lần đầu) lẫn rehydrate từ lịch sử (toChatMessage) -> reload không bị lòi raw JSON.
+// Trả { action, content }: content = câu dẫn nhập nếu là action, ngược lại giữ nguyên.
+function extractAction(rawContent: string): { action?: any; content: string } {
+  const trimmed = (rawContent || '').trim()
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (parsed.action_type && parsed.parameters) {
+        if (!parsed.idempotency_key) {
+          // idempotency_key sinh 1 lần (lúc dựng card) -> bấm Confirm nhiều lần chỉ tạo 1 đơn.
+          parsed.idempotency_key
+            = (globalThis.crypto?.randomUUID?.() ?? `idem-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+        }
+        return { action: parsed, content: buildActionIntro(parsed) }
+      }
+    } catch {
+      // Không phải JSON hợp lệ / không phải action -> coi như text thường.
+    }
+  }
+  return { content: rawContent }
+}
+
 // Model chỉ trả PURE JSON cho action -> dựng 1 câu dẫn nhập tiếng Việt thân thiện
 // để hiển thị phía trên form xác nhận (thay vì bong bóng trợ lý trống).
 function buildActionIntro(action: { action_type?: string; parameters?: any }): string {
@@ -96,10 +119,15 @@ function toCitation(source: QuerySource, id: string): Citation {
 
 function toChatMessage(message: ConversationHistoryMessage): ChatMessage {
   const createdAt = new Date(message.created_at)
+  // Trợ lý có thể đã lưu raw JSON action -> parse lại để render form khi reload lịch sử.
+  const extracted = message.role === 'assistant'
+    ? extractAction(message.content)
+    : { content: message.content, action: undefined as any }
   return {
     id: message.id,
     role: message.role,
-    content: message.content,
+    content: extracted.content,
+    action: extracted.action,
     citations: message.sources?.map((source, index) => toCitation(
       source,
       message.id + '-source-' + index,
@@ -571,34 +599,14 @@ export const useChatStore = defineStore('chat', () => {
         await nextTick()
         const result = donePayload as QueryDoneEvent
         
-        // Attempt to extract JSON action from fullContent if it looks like JSON
-        let actionPayload: any = undefined
-        const trimmedContent = fullContent.trim()
-        if (trimmedContent.startsWith('{') && trimmedContent.endsWith('}')) {
-          try {
-            const parsed = JSON.parse(trimmedContent)
-            if (parsed.action_type && parsed.parameters) {
-              // idempotency_key sinh 1 lần ở đây (lúc dựng card), KHÔNG sinh lúc submit
-              // -> user bấm Confirm nhiều lần vẫn chỉ tạo 1 đơn (hr-service dedupe theo key).
-              if (!parsed.idempotency_key) {
-                parsed.idempotency_key
-                  = (globalThis.crypto?.randomUUID?.() ?? `idem-${Date.now()}-${Math.random().toString(16).slice(2)}`)
-              }
-              actionPayload = parsed
-            }
-          } catch {
-            // Not a valid JSON or not an action payload, treat as normal text
-          }
-        }
-
-        // Model chỉ xuất PURE JSON cho action -> tự sinh 1 dòng dẫn nhập thân thiện
-        // (giống cách trợ lý trả lời) hiển thị PHÍA TRÊN form xác nhận.
-        const actionIntro = actionPayload ? buildActionIntro(actionPayload) : ''
+        // Tách action JSON khỏi content (dùng chung helper với rehydrate lịch sử).
+        const extracted = extractAction(fullContent)
+        const actionPayload = extracted.action
 
         const assistant: ChatMessage = {
           id: 'a-' + Date.now(),
           role: 'assistant',
-          content: actionPayload ? actionIntro : fullContent, // Hide raw JSON if it's an action
+          content: extracted.content, // intro nếu là action, raw JSON đã được ẩn
           action: actionPayload,
           citations: result.sources.map((source, index) => toCitation(
             source,
