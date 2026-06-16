@@ -265,6 +265,10 @@ export const useNotificationStore = defineStore('notifications', () => {
     }
   }
 
+  function removeItem(id: string) {
+    items.value = items.value.filter((item) => item.id !== id)
+  }
+
   return {
     isConnected,
     items,
@@ -276,5 +280,6 @@ export const useNotificationStore = defineStore('notifications', () => {
     fetchHistory,
     fetchUnreadCount,
     markAsRead,
+    removeItem,
   }
 })
