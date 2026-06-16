@@ -19,6 +19,7 @@ const markdown = new MarkdownIt({
   linkify: true,
   typographer: true,
 })
+const HIGHLIGHT_ID = 'vsf-citation-highlight'
 const imageFileTypes = new Set<ImageFileType>(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'])
 const supportedFileTypes = new Set<SupportedFileType>([
   'pdf',
@@ -64,12 +65,18 @@ function createPdfViewerUrl(url: string, citation: Citation): string {
   // Neo highlight bằng đoạn text literal (snippet) đã khớp truy vấn; caption là tóm
   // tắt AI nên thường không khớp nguyên văn trong tài liệu -> chỉ dùng làm fallback.
   const anchor = citation.snippet?.trim() || citation.caption
-  const snippet = anchor.split(/\s+/).slice(0, 15).join(' ')
+  // ~12 từ liền mạch: đủ đặc trưng để khớp 1 cụm, không quá dài khiến lệch do PDF
+  // ngắt dòng. PHẢI kèm phrase=true, nếu không pdf.js tách thành mảng từ rời -> tô
+  // rải rác từng từ và KHÔNG cuộn tới đoạn (viewer.mjs setHash).
+  const snippet = anchor.split(/\s+/).slice(0, 12).join(' ')
   let viewerUrl = '/pdfjs/web/viewer.html?file=' + encodeURIComponent(url)
   const params = new URLSearchParams()
   // KHÔNG set 'page': page_number thực ra là section_index (không phải trang PDF thật)
-  // -> sẽ nhảy sai trang. Để 'search' tự cuộn tới đúng đoạn khớp.
-  if (snippet) params.set('search', snippet)
+  // -> sẽ nhảy sai trang. Để phrase search tự cuộn tới đúng đoạn khớp.
+  if (snippet) {
+    params.set('search', snippet)
+    params.set('phrase', 'true')
+  }
   if (params.size) viewerUrl += `#${params.toString()}`
   return viewerUrl
 }
@@ -139,6 +146,7 @@ function createHtmlDocument(content: string, highlight: string): string {
       if (index < 0 || !node.parentNode) continue
 
       const mark = document.createElement("mark")
+      mark.id = HIGHLIGHT_ID
       mark.textContent = node.data.slice(index, index + snippet.length)
       const after = node.splitText(index)
       after.deleteData(0, snippet.length)
@@ -166,6 +174,14 @@ function createHtmlDocument(content: string, highlight: string): string {
     mark { border-radius: 3px; background: ${isDark ? '#3b82f640' : '#fde68a'}; padding: 0 2px; color: inherit; }
   `
   document.head.appendChild(style)
+
+  // Tự cuộn tới đoạn đã tô khi mở (iframe sandbox dùng allow-scripts, KHÔNG
+  // allow-same-origin -> opaque origin, script không chạm được parent). Content
+  // đã qua DOMPurify nên không còn script lạ; chỉ script tin cậy này chạy.
+  const scroll = document.createElement("script")
+  scroll.textContent = `(function(){var m=document.getElementById(${JSON.stringify(HIGHLIGHT_ID)});if(m){m.scrollIntoView({block:"center"});}})();`
+  document.body.appendChild(scroll)
+
   return "<!doctype html>" + document.documentElement.outerHTML
 }
 
@@ -351,7 +367,7 @@ onBeforeUnmount(() => {
       <iframe
         v-else-if="viewerMode === 'html'"
         :srcdoc="htmlContent"
-        sandbox="allow-popups allow-popups-to-escape-sandbox"
+        sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
         class="h-full w-full border-none bg-white dark:bg-card"
         title="Document preview"
       />
