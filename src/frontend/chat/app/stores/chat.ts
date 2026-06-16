@@ -29,6 +29,26 @@ function createConversationId() {
   return crypto.randomUUID()
 }
 
+const LEAVE_TYPE_LABEL: Record<string, string> = {
+  annual: 'phép năm',
+  sick: 'nghỉ ốm',
+  personal: 'cá nhân',
+}
+
+// Model chỉ trả PURE JSON cho action -> dựng 1 câu dẫn nhập tiếng Việt thân thiện
+// để hiển thị phía trên form xác nhận (thay vì bong bóng trợ lý trống).
+function buildActionIntro(action: { action_type?: string; parameters?: any }): string {
+  if (action.action_type === 'create_leave_request') {
+    const p = action.parameters || {}
+    const typeLabel = LEAVE_TYPE_LABEL[p.leave_type] || p.leave_type || ''
+    const range = p.start_date === p.end_date
+      ? `ngày ${p.start_date}`
+      : `từ ${p.start_date} đến ${p.end_date}`
+    return `Mình đã chuẩn bị đơn nghỉ ${typeLabel} ${range}. Bạn kiểm tra, chỉnh sửa nếu cần rồi bấm **Xác nhận & Gửi** nhé.`
+  }
+  return 'Mình đã chuẩn bị thông tin bên dưới, bạn kiểm tra rồi xác nhận giúp mình nhé.'
+}
+
 function isConversationId(value: string | null | undefined) {
   return Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value))
 }
@@ -571,10 +591,14 @@ export const useChatStore = defineStore('chat', () => {
           }
         }
 
+        // Model chỉ xuất PURE JSON cho action -> tự sinh 1 dòng dẫn nhập thân thiện
+        // (giống cách trợ lý trả lời) hiển thị PHÍA TRÊN form xác nhận.
+        const actionIntro = actionPayload ? buildActionIntro(actionPayload) : ''
+
         const assistant: ChatMessage = {
           id: 'a-' + Date.now(),
           role: 'assistant',
-          content: actionPayload ? '' : fullContent, // Hide raw JSON if it's an action
+          content: actionPayload ? actionIntro : fullContent, // Hide raw JSON if it's an action
           action: actionPayload,
           citations: result.sources.map((source, index) => toCitation(
             source,
