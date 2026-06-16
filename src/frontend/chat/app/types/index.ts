@@ -154,7 +154,8 @@ export interface ChatMessage {
   timestamp: string
   attachments?: MessageAttachment[]
   error?: string
-  action?: HRActionPayload
+  // Nhiều đơn 1 lượt -> mỗi phần tử là 1 form xác nhận riêng.
+  actions?: HRActionPayload[]
 }
 
 export interface Conversation {

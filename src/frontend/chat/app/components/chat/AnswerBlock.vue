@@ -78,7 +78,11 @@ function selectSource(citation: Citation) {
         v-html="renderedContent"
         @click="handleContentClick"
       />
-      <ActionableCard v-if="data.action" :action="data.action" />
+      <ActionableCard
+        v-for="(act, i) in data.actions"
+        :key="act.idempotency_key || i"
+        :action="act"
+      />
     </div>
 
     <div v-if="data.citations?.length" class="border-t border-slate-100 dark:border-white/5 bg-slate-50/20 dark:bg-background/10">

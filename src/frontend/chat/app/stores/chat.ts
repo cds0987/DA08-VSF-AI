@@ -35,21 +35,35 @@ const LEAVE_TYPE_LABEL: Record<string, string> = {
   personal: 'cá nhân',
 }
 
+function newIdempotencyKey(): string {
+  return globalThis.crypto?.randomUUID?.()
+    ?? `idem-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
 // Tách action JSON ra khỏi content thô của trợ lý. Dùng CHUNG cho cả luồng stream
 // (lần đầu) lẫn rehydrate từ lịch sử (toChatMessage) -> reload không bị lòi raw JSON.
-// Trả { action, content }: content = câu dẫn nhập nếu là action, ngược lại giữ nguyên.
-function extractAction(rawContent: string): { action?: any; content: string } {
+// Hỗ trợ NHIỀU đơn 1 lượt: model xuất {action_type, items:[{...},...]} -> mỗi item là
+// 1 form riêng. Vẫn nhận format cũ {action_type, parameters:{...}} (1 đơn).
+// Trả { actions, content }: actions = danh sách payload; content = câu dẫn nhập.
+function extractAction(rawContent: string): { actions?: any[]; content: string } {
   const trimmed = (rawContent || '').trim()
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
     try {
       const parsed = JSON.parse(trimmed)
-      if (parsed.action_type && parsed.parameters) {
-        if (!parsed.idempotency_key) {
-          // idempotency_key sinh 1 lần (lúc dựng card) -> bấm Confirm nhiều lần chỉ tạo 1 đơn.
-          parsed.idempotency_key
-            = (globalThis.crypto?.randomUUID?.() ?? `idem-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+      if (parsed.action_type) {
+        const rawItems: any[] = Array.isArray(parsed.items)
+          ? parsed.items
+          : (parsed.parameters ? [parsed.parameters] : [])
+        if (rawItems.length) {
+          // Mỗi đơn 1 idempotency_key riêng (sinh 1 lần lúc dựng card) -> bấm Confirm
+          // nhiều lần / nhiều đơn không tạo trùng nhau.
+          const actions = rawItems.map(p => ({
+            action_type: parsed.action_type,
+            parameters: p,
+            idempotency_key: newIdempotencyKey(),
+          }))
+          return { actions, content: buildActionIntro(actions) }
         }
-        return { action: parsed, content: buildActionIntro(parsed) }
       }
     } catch {
       // Không phải JSON hợp lệ / không phải action -> coi như text thường.
@@ -58,16 +72,24 @@ function extractAction(rawContent: string): { action?: any; content: string } {
   return { content: rawContent }
 }
 
-// Model chỉ trả PURE JSON cho action -> dựng 1 câu dẫn nhập tiếng Việt thân thiện
-// để hiển thị phía trên form xác nhận (thay vì bong bóng trợ lý trống).
-function buildActionIntro(action: { action_type?: string; parameters?: any }): string {
-  if (action.action_type === 'create_leave_request') {
-    const p = action.parameters || {}
-    const typeLabel = LEAVE_TYPE_LABEL[p.leave_type] || p.leave_type || ''
-    const range = p.start_date === p.end_date
-      ? `ngày ${p.start_date}`
-      : `từ ${p.start_date} đến ${p.end_date}`
-    return `Mình đã chuẩn bị đơn nghỉ ${typeLabel} ${range}. Bạn kiểm tra, chỉnh sửa nếu cần rồi bấm **Xác nhận & Gửi** nhé.`
+function describeLeave(p: any): string {
+  const typeLabel = LEAVE_TYPE_LABEL[p?.leave_type] || p?.leave_type || ''
+  const range = p?.start_date === p?.end_date
+    ? `ngày ${p?.start_date}`
+    : `từ ${p?.start_date} đến ${p?.end_date}`
+  return `nghỉ ${typeLabel} ${range}`.trim()
+}
+
+// Model chỉ trả PURE JSON cho action -> dựng câu dẫn nhập tiếng Việt thân thiện hiển
+// thị phía trên (các) form xác nhận. 1 đơn -> 1 câu; nhiều đơn -> liệt kê.
+function buildActionIntro(actions: { action_type?: string; parameters?: any }[]): string {
+  const leaves = actions.filter(a => a.action_type === 'create_leave_request')
+  if (leaves.length === 1) {
+    return `Mình đã chuẩn bị đơn ${describeLeave(leaves[0].parameters)}. Bạn kiểm tra, chỉnh sửa nếu cần rồi bấm **Xác nhận & Gửi** nhé.`
+  }
+  if (leaves.length > 1) {
+    const lines = leaves.map((a, i) => `${i + 1}. ${describeLeave(a.parameters)}`).join('\n')
+    return `Mình đã chuẩn bị ${leaves.length} đơn nghỉ:\n${lines}\n\nBạn kiểm tra từng đơn, chỉnh sửa nếu cần rồi bấm **Xác nhận & Gửi** cho mỗi đơn nhé.`
   }
   return 'Mình đã chuẩn bị thông tin bên dưới, bạn kiểm tra rồi xác nhận giúp mình nhé.'
 }
@@ -122,12 +144,12 @@ function toChatMessage(message: ConversationHistoryMessage): ChatMessage {
   // Trợ lý có thể đã lưu raw JSON action -> parse lại để render form khi reload lịch sử.
   const extracted = message.role === 'assistant'
     ? extractAction(message.content)
-    : { content: message.content, action: undefined as any }
+    : { content: message.content, actions: undefined as any }
   return {
     id: message.id,
     role: message.role,
     content: extracted.content,
-    action: extracted.action,
+    actions: extracted.actions,
     citations: message.sources?.map((source, index) => toCitation(
       source,
       message.id + '-source-' + index,
@@ -601,13 +623,12 @@ export const useChatStore = defineStore('chat', () => {
         
         // Tách action JSON khỏi content (dùng chung helper với rehydrate lịch sử).
         const extracted = extractAction(fullContent)
-        const actionPayload = extracted.action
 
         const assistant: ChatMessage = {
           id: 'a-' + Date.now(),
           role: 'assistant',
           content: extracted.content, // intro nếu là action, raw JSON đã được ẩn
-          action: actionPayload,
+          actions: extracted.actions,
           citations: result.sources.map((source, index) => toCitation(
             source,
             result.session_id + '-source-' + index,
