@@ -14,7 +14,6 @@ import {
 import { useSessionStore } from '~/stores/session'
 
 const session = useSessionStore()
-const router = useRouter()
 
 const isCollapsed = ref(true)
 const isAnimatingSidebar = ref(false)
@@ -29,8 +28,10 @@ const ADMIN_NAV = [
 ]
 
 const handleSignOut = () => {
+  // session.signOut() -> authService.logout() đã tự điều hướng tới /login
+  // (hard redirect) sau khi clear cookie; router.push thừa ở đây gây double
+  // navigation: soft route change chạy trước, rồi hard reload đè lên sau.
   session.signOut()
-  router.push('/login')
 }
 
 const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')

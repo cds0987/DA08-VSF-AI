@@ -52,6 +52,7 @@ class NotificationService:
                 user_id=user.id,
                 role=user.role,
                 department=getattr(user, "department", "") or "",
+                account_type=getattr(user, "account_type", "internal") or "internal",
                 classification=event.classification,
                 allowed_departments=event.allowed_departments,
                 allowed_user_ids=event.allowed_user_ids,
