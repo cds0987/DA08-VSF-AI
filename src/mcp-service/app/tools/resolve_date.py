@@ -53,10 +53,16 @@ def compute(
     weekday: Optional[str] = None,
     week_offset: int = 0,
     days: Optional[int] = None,
+    span_days: Optional[int] = None,
     date: Optional[str] = None,
     today: Optional[_dt.date] = None,
 ) -> dict[str, Any]:
-    """Tính ngày từ ngữ nghĩa đã trích xuất. Tách riêng để test thuần (truyền today)."""
+    """Tính ngày từ ngữ nghĩa đã trích xuất. Tách riêng để test thuần (truyền today).
+
+    span_days: số ngày nghỉ LIÊN TIẾP kể từ ngày tính được (vd "5 ngày từ thứ 2
+    tuần sau" -> span_days=5). Khi có, trả thêm start_date/end_date = [d, d+span-1]
+    để model KHỎI tự cộng ngày (model dở số học lịch). span_days<=1 -> bỏ qua.
+    """
     today = today or _today()
     if kind == "today":
         d = today
@@ -80,11 +86,17 @@ def compute(
             return {"error": f"date không hợp lệ (cần YYYY-MM-DD): {s!r}"}
     else:
         return {"error": f"kind không hợp lệ: {kind!r}"}
-    return {
+    out: dict[str, Any] = {
         "date": d.isoformat(),
         "weekday_vi": _WEEKDAY_VI[d.weekday()],
         "today": today.isoformat(),
     }
+    if span_days is not None and int(span_days) > 1:
+        end = d + _dt.timedelta(days=int(span_days) - 1)  # 5 ngày -> +4
+        out["start_date"] = d.isoformat()
+        out["end_date"] = end.isoformat()
+        out["end_weekday_vi"] = _WEEKDAY_VI[end.weekday()]
+    return out
 
 
 class ResolveDateTool:
@@ -101,6 +113,7 @@ class ResolveDateTool:
             weekday: Optional[ViWeekday] = None,
             week_offset: int = 0,
             days: Optional[int] = None,
+            span_days: Optional[int] = None,
             date: str = "",
             user_id: str = "",  # query-service tiêm — không dùng, chỉ để absorb.
         ) -> dict[str, Any]:
@@ -117,14 +130,22 @@ class ResolveDateTool:
               - "offset_days": days = số ngày kể từ hôm nay (vd 3 = 3 ngày nữa).
               - "absolute": date = ngày user nói rõ ràng (YYYY-MM-DD).
 
-            Trả về {date, weekday_vi, today}; nếu sai tham số -> {error}.
+            span_days: số ngày nghỉ LIÊN TIẾP (vd "nghỉ 5 ngày từ thứ 2 tuần sau"
+              -> kind=weekday, weekday=thu_2, week_offset=1, span_days=5). Khi có,
+              kết quả trả thêm start_date + end_date (= ngày tính được + span-1) —
+              dùng cặp này cho đơn nghỉ, KHÔNG tự cộng ngày.
+
+            Trả về {date, weekday_vi, today} (+ {start_date,end_date,end_weekday_vi}
+            khi span_days>1); nếu sai tham số -> {error}.
             """
             result = compute(
-                kind, weekday=weekday, week_offset=week_offset, days=days, date=date
+                kind, weekday=weekday, week_offset=week_offset, days=days,
+                span_days=span_days, date=date,
             )
             logger.info(
-                "resolve_date kind=%s weekday=%s week_offset=%s -> %s",
-                kind, weekday, week_offset, result.get("date") or result.get("error"),
+                "resolve_date kind=%s weekday=%s week_offset=%s span_days=%s -> %s",
+                kind, weekday, week_offset, span_days,
+                result.get("end_date") or result.get("date") or result.get("error"),
             )
             return result
 
