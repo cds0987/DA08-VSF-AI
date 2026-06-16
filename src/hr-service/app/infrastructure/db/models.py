@@ -39,6 +39,10 @@ class EmployeeRecord(Base):
     job_title: Mapped[str | None] = mapped_column(String(150), nullable=True)
     manager_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     employment_status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone_number: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    date_of_birth: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    hire_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -93,7 +97,7 @@ class AttendanceRecord(Base):
     __table_args__ = {"schema": "hr_svc"}
 
     user_id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    period: Mapped[str] = mapped_column(String(7), nullable=False)
+    period: Mapped[str] = mapped_column(String(7), primary_key=True)
     work_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     late_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     absent_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

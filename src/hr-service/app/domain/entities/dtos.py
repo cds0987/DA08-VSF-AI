@@ -92,6 +92,10 @@ class EmployeeDTO:
     employment_status: str
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    full_name: str | None = None
+    phone_number: str | None = None
+    date_of_birth: datetime.date | None = None
+    hire_date: datetime.date | None = None
 
 
 @dataclass(frozen=True)
