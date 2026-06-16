@@ -30,6 +30,13 @@ def create_app() -> FastAPI:
             repo_factory=lambda: PostgresHrRepository(settings.database_url),
             publisher=publisher,
         )
+        # Dev/demo: seed hồ sơ HR cho user test (seed thẳng vào users -> không có
+        # employee row) để sếp thấy tên/email trong hàng đợi duyệt. Best-effort.
+        if settings.is_develop:
+            try:
+                await PostgresHrRepository(settings.database_url).seed_demo_employees()
+            except Exception as exc:  # noqa: BLE001 — seed lỗi KHÔNG được làm sập service
+                logging.getLogger("hr-service").warning("seed_demo_employees skipped: %s", exc)
         try:
             yield
         finally:

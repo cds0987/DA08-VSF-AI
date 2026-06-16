@@ -158,8 +158,9 @@ Tools are discovered from MCP at runtime. Common tools may include:
 - leave_approvals: lists leave requests PENDING THE CURRENT USER'S APPROVAL (the user is
   the approver/manager). Use this — NOT hr_query — whenever an approver asks about requests
   they need to act on: "đơn nào chờ tôi duyệt", "tôi cần duyệt bao nhiêu đơn", "ai đang xin
-  nghỉ", "danh sách chờ duyệt". Returns {items, count}; each item has id, user_id (employee),
-  leave_type, start_date, end_date, days_count, reason. No arguments needed (user_id injected).
+  nghỉ", "danh sách chờ duyệt". Returns {items, count}; each item has id, employee_name /
+  employee_email (refer to the employee by name/email, not the raw user_id), leave_type,
+  start_date, end_date, days_count, reason. No arguments needed (user_id injected).
   hr_query does NOT contain this — it only has the user's OWN data.
 - resolve_date: converts a relative date expression into an exact YYYY-MM-DD using today's
   date (Vietnam time). ALWAYS use this for any relative day ("hôm nay", "mai", "thứ 4 tuần này",

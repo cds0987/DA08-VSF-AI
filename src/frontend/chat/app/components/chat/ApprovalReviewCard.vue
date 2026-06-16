@@ -17,6 +17,10 @@ interface LeaveApproval {
   employee_leave_remaining?: number | null
   employee_leave_total?: number | null
   has_conflict?: boolean
+  employee_name?: string | null
+  employee_email?: string | null
+  employee_department?: string | null
+  employee_job_title?: string | null
 }
 
 const hrService = useHRService()
@@ -88,11 +92,23 @@ async function confirmReject(req: LeaveApproval) {
   }
 }
 
-function initials(uid: string): string {
-  return (uid || '?').replace(/[^a-z0-9]/gi, '').slice(0, 2).toUpperCase() || '?'
+// Nhãn nhân viên: ưu tiên tên thật -> email -> user_id rút gọn.
+function employeeLabel(req: LeaveApproval): string {
+  if (req.employee_name) return req.employee_name
+  if (req.employee_email) return req.employee_email
+  return req.user_id.length > 10 ? `${req.user_id.slice(0, 6)}…${req.user_id.slice(-2)}` : req.user_id
 }
-function shortId(uid: string): string {
-  return uid.length > 10 ? `${uid.slice(0, 6)}…${uid.slice(-2)}` : uid
+function employeeSub(req: LeaveApproval): string {
+  const parts = [req.employee_job_title, req.employee_department].filter(Boolean) as string[]
+  // Nếu nhãn chính là tên thật thì phụ hiện thêm email; ngược lại hiện chức danh/phòng ban.
+  if (req.employee_name && req.employee_email) parts.unshift(req.employee_email)
+  return parts.join(' · ')
+}
+function initials(req: LeaveApproval): string {
+  const base = req.employee_name || req.employee_email || req.user_id || '?'
+  const words = base.replace(/@.*/, '').split(/[\s._-]+/).filter(Boolean)
+  const ini = words.length >= 2 ? words[0][0] + words[1][0] : base.slice(0, 2)
+  return (ini || '?').toUpperCase()
 }
 </script>
 
@@ -139,14 +155,15 @@ function shortId(uid: string): string {
         <!-- Header: nhân viên + loại nghỉ -->
         <div class="flex items-center justify-between gap-3">
           <div class="flex items-center gap-2.5">
-            <div class="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 dark:bg-accent text-[11px] font-bold text-slate-500 dark:text-foreground/70">
-              {{ initials(req.user_id) }}
+            <div class="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-slate-200 to-slate-300 dark:from-accent dark:to-accent/60 text-[12px] font-bold text-slate-600 dark:text-foreground/80">
+              {{ initials(req) }}
             </div>
             <div class="leading-tight">
-              <div class="flex items-center gap-1 text-[11px] text-slate-400 dark:text-muted-foreground">
-                <User class="h-3 w-3" /> {{ shortId(req.user_id) }}
+              <div class="flex items-center gap-1 text-[13px] font-semibold text-slate-800 dark:text-foreground">
+                <User class="h-3.5 w-3.5 text-slate-400" /> {{ employeeLabel(req) }}
               </div>
-              <div class="text-[12.5px] font-semibold text-slate-700 dark:text-foreground/90">{{ req.days_count }} ngày nghỉ</div>
+              <div v-if="employeeSub(req)" class="text-[11px] text-slate-400 dark:text-muted-foreground">{{ employeeSub(req) }}</div>
+              <div class="text-[11.5px] font-medium text-slate-500 dark:text-foreground/70">{{ req.days_count }} ngày nghỉ</div>
             </div>
           </div>
           <span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="typeMeta(req.leave_type).cls">

@@ -326,6 +326,40 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
 
         await asyncio.to_thread(_upsert)
 
+    async def seed_demo_employees(self) -> None:
+        """Dev/demo: user test (nhanvien/sep) được seed THẲNG vào user_svc.users, bỏ qua
+        event UserCreated -> không có hồ sơ HR -> sếp chỉ thấy user_id. Seed employee row
+        (idempotent) cho 2 user test cố định để hàng đợi duyệt hiện tên/email. Chỉ chạy
+        khi APP_STAGE=develop (gọi từ lifespan)."""
+        import uuid as _uuid
+
+        # user_id TẤT ĐỊNH = uuid5 (khớp seed_user.py + HR_DEFAULT_APPROVER).
+        demo = [
+            ("0ee316e0-075f-530e-914a-884e494f3d4e", "nhanvien@company.com", "Nhân viên Demo", "Engineering", "Nhân viên"),
+            ("2dc14f72-64f6-5361-87aa-15e859f7cf90", "sep@company.com", "Sếp Demo", "Engineering", "Quản lý"),
+        ]
+
+        def _seed() -> None:
+            with self._session() as session:
+                for uid, email, name, dept, title in demo:
+                    session.execute(
+                        sa.text(
+                            "INSERT INTO hr_svc.employees "
+                            "(id, user_id, company_email, full_name, department, job_title, "
+                            " employment_status, account_type) "
+                            "VALUES (:id, :uid, :email, :name, :dept, :title, 'active', 'internal') "
+                            "ON CONFLICT (user_id) DO UPDATE SET "
+                            "  full_name = COALESCE(hr_svc.employees.full_name, EXCLUDED.full_name), "
+                            "  job_title = COALESCE(hr_svc.employees.job_title, EXCLUDED.job_title), "
+                            "  updated_at = now()"
+                        ),
+                        {"id": str(_uuid.uuid4()), "uid": uid, "email": email,
+                         "name": name, "dept": dept, "title": title},
+                    )
+                session.commit()
+
+        await asyncio.to_thread(_seed)
+
     async def get_leave_requests(self, user_id: str) -> List[LeaveRequestDTO]:
         def _query() -> List[LeaveRequestDTO]:
             with self._session() as session:
@@ -916,6 +950,16 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
         item["employee_leave_remaining"] = remaining
         item["employee_leave_total"] = total
         item["has_conflict"] = conflicts > 0
+        # Danh tính nhân viên (từ bảng employees) -> sếp thấy tên/email thay user_id.
+        emp = (
+            session.query(EmployeeRecord)
+            .filter(EmployeeRecord.user_id == row.user_id)
+            .first()
+        )
+        item["employee_name"] = emp.full_name if emp else None
+        item["employee_email"] = emp.company_email if emp else None
+        item["employee_department"] = emp.department if emp else None
+        item["employee_job_title"] = emp.job_title if emp else None
         return item
 
     async def update_leave_status(
