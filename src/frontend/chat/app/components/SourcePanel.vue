@@ -6,8 +6,9 @@ import MarkdownIt from 'markdown-it'
 import type { Citation } from '~/types'
 import documentService from '~/lib/api/documentService'
 
-type ViewerMode = 'pdf' | 'html' | 'text' | 'unsupported'
-type SupportedFileType = 'pdf' | 'docx' | 'txt' | 'xlsx' | 'csv' | 'pptx' | 'md'
+type ViewerMode = 'pdf' | 'html' | 'text' | 'image' | 'unsupported'
+type SupportedFileType = 'pdf' | 'docx' | 'txt' | 'xlsx' | 'csv' | 'pptx' | 'md' | ImageFileType
+type ImageFileType = 'png' | 'jpg' | 'jpeg' | 'gif' | 'bmp' | 'webp'
 
 const props = defineProps<{ citation: Citation | null }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -17,6 +18,7 @@ const markdown = new MarkdownIt({
   linkify: true,
   typographer: true,
 })
+const imageFileTypes = new Set<ImageFileType>(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'])
 const supportedFileTypes = new Set<SupportedFileType>([
   'pdf',
   'docx',
@@ -25,6 +27,7 @@ const supportedFileTypes = new Set<SupportedFileType>([
   'csv',
   'pptx',
   'md',
+  ...imageFileTypes,
 ])
 
 const viewerMode = ref<ViewerMode>('unsupported')
@@ -197,6 +200,12 @@ watch(
         return
       }
 
+      if (imageFileTypes.has(supportedType as ImageFileType)) {
+        viewerMode.value = 'image'
+        fileUrl.value = result.url
+        return
+      }
+
       const data = await fetchFile(result.url, controller.signal)
       if (controller.signal.aborted) return
 
@@ -325,6 +334,16 @@ onBeforeUnmount(() => loadController?.abort())
         v-else-if="viewerMode === 'text'"
         class="h-full overflow-auto whitespace-pre-wrap break-words bg-white dark:bg-card p-6 font-mono text-sm leading-6 text-slate-800 dark:text-foreground"
       >{{ textContent }}</pre>
+      <div
+        v-else-if="viewerMode === 'image' && fileUrl"
+        class="flex h-full w-full items-center justify-center overflow-auto bg-slate-100 dark:bg-background p-6"
+      >
+        <img
+          :src="fileUrl"
+          :alt="citation?.caption || citation?.document || 'Document preview'"
+          class="max-h-full max-w-full object-contain"
+        >
+      </div>
       <div v-else class="absolute inset-0 flex items-center justify-center bg-white dark:bg-card text-sm text-slate-400 dark:text-muted-foreground">
         Preview not available
       </div>
