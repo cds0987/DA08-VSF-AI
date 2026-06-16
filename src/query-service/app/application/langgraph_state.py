@@ -64,10 +64,10 @@ class AgentState(TypedDict):
     user_role: str
     user_department: str
     allowed_doc_ids: list[str]
-    # Ngưỡng điểm RAG (config-driven) để act_node lọc kết quả — trước hardcode 0.70.
-    rag_score_threshold: float
     # Số chunk tối đa lấy từ rag-service mỗi lần gọi (config-driven).
     rag_top_k: int
+    # Cosine score threshold — backup khi LlmReranker fail → NoopReranker trả cosine scores.
+    rag_score_threshold: float
 
     # --- Loop termination guards ---
     # force_answer: set True by observe_node (iteration cap) or act_node (duplicate tool call)
@@ -83,7 +83,7 @@ class AgentState(TypedDict):
 
     # --- Observability accumulator ---
     # rag_search_events: list of JSON-safe dicts written by act_node per rag_search call.
-    # Each entry: {query, top_k, allowed_count, threshold, total, qualified, scores, doc_names,
+    # Each entry: {query, top_k, allowed_count, total, qualified, scores, doc_names,
     #              start (ISO), end (ISO)}.  Consumed by orchestration to build Langfuse spans.
     rag_search_events: list
 
@@ -101,8 +101,8 @@ def create_initial_state(
     session_id: str,
     max_iterations: int = 3,
     recent_messages: list | None = None,
-    rag_score_threshold: float = 0.70,
     rag_top_k: int = 5,
+    rag_score_threshold: float = 0.45,
 ) -> AgentState:
     """
     recent_messages: optional list of LangChain BaseMessage objects representing
@@ -126,8 +126,8 @@ def create_initial_state(
         user_role=user_role,
         user_department=user_department,
         allowed_doc_ids=allowed_doc_ids,
-        rag_score_threshold=rag_score_threshold,
         rag_top_k=rag_top_k,
+        rag_score_threshold=rag_score_threshold,
         source_ref_counter=0,
         session_id=session_id,
         question=question,

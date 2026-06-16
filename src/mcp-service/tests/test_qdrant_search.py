@@ -133,7 +133,9 @@ async def test_remote_search_passes_document_filter_and_reuses_client(monkeypatc
 
     class FakeClient:
         async def query_points(self, **kwargs):
-            recorded_filters.append(kwargs.get("query_filter"))
+            # Hybrid search passes filter inside Prefetch objects, not top-level query_filter
+            prefetch = kwargs.get("prefetch") or []
+            recorded_filters.append(prefetch[0].filter if prefetch else None)
             payload = {
                 "chunk_id": "chunk-1",
                 "document_id": "doc-a",

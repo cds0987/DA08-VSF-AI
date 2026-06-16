@@ -78,9 +78,9 @@ class Settings(BaseSettings):
 
     semantic_cache_ttl_seconds: int = 3600
     semantic_cache_threshold: float = 0.90
-    rag_score_threshold: float = 0.45  # 0.35–0.44 là weak context gây hallucination
     rag_result_limit: int = 3
     rag_top_k: int = 8  # số chunk tối đa mỗi lần gọi rag_search (LangGraph path)
+    rag_score_threshold: float = 0.45  # cosine backup khi reranker fail → NoopReranker
     llm_max_output_tokens: int = 1500
     rag_context_max_chars: int = 10000
     query_rate_limit_per_minute: int = 20

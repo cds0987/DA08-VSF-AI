@@ -88,6 +88,9 @@ class ProviderCaptioner:
 
     async def caption_with_metadata(self, text: str) -> CaptionResult:
         source_text = (text or "").strip()
+        if not source_text:
+            _METRICS.record(used_fallback=True)
+            return CaptionResult(text="(no content)", used_fallback=True)
         used_fallback = False
         try:
             output = await self._provider.chat(
