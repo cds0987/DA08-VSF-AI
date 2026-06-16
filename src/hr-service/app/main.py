@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# NOTE(build): buộc rebuild hr-service để image chứa migration 0006 (DB prod đã ở
+# revision 0006 nhưng image rollback thiếu file -> alembic 'Can't locate revision 0006'
+# -> hr-migrate exit 255). Rebuild đồng bộ image với DB.
 import logging
 from contextlib import asynccontextmanager
 
