@@ -24,7 +24,11 @@ from pathlib import Path
 # Cho phép `import app...` khi chạy từ thư mục query-service.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.infrastructure.observability.price_catalog import fetch_prices_from_hf  # noqa: E402
+from app.infrastructure.observability.price_catalog import (  # noqa: E402
+    OPENAI_PRICE_SUPPLEMENT,
+    fetch_prices_from_hf,
+    fetch_prices_from_openrouter,
+)
 
 DEFAULT_REPO = "gunnybd01/openrouter-models-cache"
 
@@ -37,16 +41,30 @@ def main() -> int:
     repo_id = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("MODEL_PRICE_DATASET_REPO", DEFAULT_REPO)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Nguồn ưu tiên: OpenRouter LIVE (model mới nhất). Hụt mạng -> HF dataset cache ->
+    # seed đã commit. Luôn merge supplement embeddings. Luôn exit 0 (không chặn deploy).
+    prices: dict | None = None
     try:
-        prices = fetch_prices_from_hf(repo_id, cache_dir=None)
+        prices = fetch_prices_from_openrouter()
+        print(f"price catalog OK (OpenRouter live): {len(prices)} models")
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARN OpenRouter live failed ({str(exc)[:160]}); thử HF dataset…")
+        try:
+            prices = fetch_prices_from_hf(repo_id, cache_dir=None)
+            prices.update(OPENAI_PRICE_SUPPLEMENT)
+            print(f"price catalog OK (HF fallback): {len(prices)} models")
+        except Exception as exc2:  # noqa: BLE001
+            print(f"WARN HF fetch failed ({str(exc2)[:160]})")
+
+    if prices:
         out_path.write_text(json.dumps(prices, separators=(",", ":")), encoding="utf-8")
-        print(f"price catalog OK: {len(prices)} models -> {out_path}")
-    except Exception as exc:  # noqa: BLE001 — không chặn build vì HF hụt mạng
-        if out_path.exists():
-            print(f"WARN HF fetch failed ({str(exc)[:200]}); giữ seed sẵn có tại {out_path}")
-        else:
-            out_path.write_text("{}", encoding="utf-8")
-            print(f"WARN HF fetch failed ({str(exc)[:200]}); KHÔNG có seed -> ghi rỗng {out_path}")
+        print(f"-> {out_path}")
+    elif out_path.exists():
+        print(f"giữ seed sẵn có tại {out_path}")
+    else:
+        out_path.write_text("{}", encoding="utf-8")
+        print(f"KHÔNG có seed -> ghi rỗng {out_path}")
     return 0
 
 

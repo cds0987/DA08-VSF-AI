@@ -134,6 +134,42 @@ def load_price_catalog(path: str, override_path: str | None = None) -> PriceCata
 _DATASETS_SERVER = "https://datasets-server.huggingface.co"
 _ROWS_PAGE = 100  # giới hạn datasets-server /rows
 
+# Nguồn giá LIVE (model mới nhất) — public, KHÔNG cần key. Đây là nguồn ưu tiên để Langfuse
+# luôn build theo thông tin model mới nhất (deepseek-v4, xiaomi mimo... xuất hiện ngay).
+_OPENROUTER_MODELS = "https://openrouter.ai/api/v1/models"
+
+# Supplement: model OpenAI-direct mà OpenRouter KHÔNG liệt kê (embeddings) -> tự khai giá
+# (USD/token). Giữ Langfuse có cost cho embeddings. Đồng bộ với ai-router openai_supplement.json.
+OPENAI_PRICE_SUPPLEMENT: dict[str, dict[str, float]] = {
+    "text-embedding-3-small": {"prompt": 0.02e-6, "completion": 0.0, "cache_read": 0.0},
+    "text-embedding-3-large": {"prompt": 0.13e-6, "completion": 0.0, "cache_read": 0.0},
+}
+
+
+def fetch_prices_from_openrouter() -> dict[str, dict[str, float]]:
+    """Fetch giá model từ OpenRouter /models (LIVE, public). Raise nếu lỗi/rỗng.
+
+    OpenRouter pricing là USD/token (string) -> map thẳng prompt/completion/input_cache_read.
+    Merge OPENAI_PRICE_SUPPLEMENT (embeddings) để không thiếu cost embeddings.
+    """
+    data = _http_get_json(_OPENROUTER_MODELS)
+    rows = data.get("data") or []
+    prices: dict[str, dict[str, float]] = {}
+    for row in rows:
+        model_id = _normalize_model(row.get("id"))
+        if not model_id:
+            continue
+        pricing = row.get("pricing") or {}
+        prices[model_id] = {
+            "prompt": _to_float(pricing.get("prompt")),
+            "completion": _to_float(pricing.get("completion")),
+            "cache_read": _to_float(pricing.get("input_cache_read")),
+        }
+    if not prices:
+        raise RuntimeError("OpenRouter trả danh sách model rỗng")
+    prices.update(OPENAI_PRICE_SUPPLEMENT)  # supplement đè -> embeddings luôn có giá
+    return prices
+
 
 def _http_get_json(url: str, timeout: float = 30.0) -> dict:
     import json as _json
