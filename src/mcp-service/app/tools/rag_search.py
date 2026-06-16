@@ -19,6 +19,7 @@ def _hit_to_dict(hit: SearchHit) -> dict[str, Any]:
         "document_id": hit.document_id,
         "document_name": hit.document_name,
         "caption": hit.caption,
+        "child_text": hit.child_text,
         "parent_text": hit.parent_text,
         "heading_path": hit.heading_path,
         "score": hit.score,

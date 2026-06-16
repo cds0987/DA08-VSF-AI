@@ -300,6 +300,7 @@ class LangChainMCPToolsLoader:
                         "document_id": r.document_id,
                         "document_name": r.document_name,
                         "caption": r.caption,
+                        "child_text": r.child_text,
                         "parent_text": r.parent_text,
                         "heading_path": r.heading_path,
                         "score": r.score,

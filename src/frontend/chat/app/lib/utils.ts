@@ -20,3 +20,10 @@ export function citationHeadingPath(headingPath: string[], documentName?: string
     return value.length > 0 && part !== NO_HEADING_PLACEHOLDER && value !== docName
   })
 }
+
+/** Điểm liên quan (0..1) -> chuỗi phần trăm cho chip citation. '' nếu không hợp lệ. */
+export function formatRelevance(score?: number | null): string {
+  if (typeof score !== 'number' || Number.isNaN(score)) return ''
+  const pct = Math.round(Math.max(0, Math.min(1, score)) * 100)
+  return `${pct}%`
+}

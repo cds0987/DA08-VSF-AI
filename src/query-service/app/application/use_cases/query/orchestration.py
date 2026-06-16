@@ -1130,6 +1130,9 @@ class QueryOrchestrationUseCase:
         return {
             "document_name": result.document_name,
             "caption": result.caption,
+            # snippet = đoạn text literal đã khớp truy vấn -> frontend neo highlight + hiện
+            # trích dẫn (caption chỉ là tóm tắt AI, không khớp nguyên văn trong tài liệu).
+            "snippet": result.child_text,
             "heading_path": result.heading_path,
             "score": result.score,
             "source_gcs_uri": result.source_gcs_uri,

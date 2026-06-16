@@ -66,6 +66,7 @@ class SearchResult:
     parent_text: str
     heading_path: list[str]
     score: float
+    child_text: str = ""
     page_number: int | None = None
     source_gcs_uri: str = ""
     markdown_gcs_uri: str = ""
@@ -153,6 +154,7 @@ class MockMCPClient:
                         "document_id": r.document_id,
                         "document_name": r.document_name,
                         "caption": r.caption,
+                        "child_text": r.child_text,
                         "parent_text": r.parent_text,
                         "heading_path": r.heading_path,
                         "score": r.score,
@@ -219,6 +221,7 @@ class MockMCPClient:
                     document_id=document.id,
                     document_name=document.name,
                     caption=document.caption,
+                    child_text=document.section_content[:200],
                     parent_text=document.section_content,
                     heading_path=document.heading_path,
                     score=min(score, 0.99),
@@ -654,6 +657,7 @@ def _search_result_from_payload(item: dict[str, Any]) -> SearchResult:
         document_id=str(item.get("document_id", "")),
         document_name=str(item.get("document_name") or item.get("display_name") or ""),
         caption=str(item.get("caption", "")),
+        child_text=str(item.get("child_text") or ""),
         parent_text=str(item.get("parent_text") or item.get("section_content") or item.get("content") or ""),
         heading_path=list(item.get("heading_path") or []),
         score=float(item.get("score") or item.get("rerank_score") or 0.0),

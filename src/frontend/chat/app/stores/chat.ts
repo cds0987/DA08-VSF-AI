@@ -146,6 +146,8 @@ function toCitation(source: QuerySource, id: string): Citation {
     document_id: sourceDocumentId(source),
     document: source.document_name,
     caption: source.caption,
+    snippet: source.snippet,
+    score: source.score,
     heading_path: source.heading_path,
     page_number: source.page_number,
     ref: source.ref,

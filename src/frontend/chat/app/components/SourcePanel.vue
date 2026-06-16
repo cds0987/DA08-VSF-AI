@@ -5,7 +5,7 @@ import DOMPurify from 'dompurify'
 import MarkdownIt from 'markdown-it'
 import type { Citation } from '~/types'
 import documentService from '~/lib/api/documentService'
-import { citationHeadingPath } from '~/lib/utils'
+import { citationHeadingPath, formatRelevance } from '~/lib/utils'
 
 type ViewerMode = 'pdf' | 'html' | 'text' | 'image' | 'unsupported'
 type SupportedFileType = 'pdf' | 'docx' | 'txt' | 'xlsx' | 'csv' | 'pptx' | 'md' | ImageFileType
@@ -61,10 +61,14 @@ function normalizeFileType(value: string, documentName: string): string {
 }
 
 function createPdfViewerUrl(url: string, citation: Citation): string {
-  const snippet = citation.caption.split(/\s+/).slice(0, 15).join(' ')
+  // Neo highlight bằng đoạn text literal (snippet) đã khớp truy vấn; caption là tóm
+  // tắt AI nên thường không khớp nguyên văn trong tài liệu -> chỉ dùng làm fallback.
+  const anchor = citation.snippet?.trim() || citation.caption
+  const snippet = anchor.split(/\s+/).slice(0, 15).join(' ')
   let viewerUrl = '/pdfjs/web/viewer.html?file=' + encodeURIComponent(url)
   const params = new URLSearchParams()
-  if (citation.page_number) params.set('page', String(citation.page_number))
+  // KHÔNG set 'page': page_number thực ra là section_index (không phải trang PDF thật)
+  // -> sẽ nhảy sai trang. Để 'search' tự cuộn tới đúng đoạn khớp.
   if (snippet) params.set('search', snippet)
   if (params.size) viewerUrl += `#${params.toString()}`
   return viewerUrl
@@ -122,10 +126,10 @@ async function renderOfficeFile(
   return sanitizeHtml(value)
 }
 
-function createHtmlDocument(content: string, caption: string): string {
+function createHtmlDocument(content: string, highlight: string): string {
   const parser = new DOMParser()
   const document = parser.parseFromString(sanitizeHtml(content), "text/html")
-  const snippet = caption.trim().split(/\s+/).slice(0, 10).join(" ")
+  const snippet = highlight.trim().split(/\s+/).slice(0, 10).join(" ")
 
   if (snippet) {
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
@@ -233,14 +237,14 @@ watch(
       if (supportedType === 'md') {
         viewerMode.value = 'html'
         const source = new TextDecoder('utf-8').decode(data)
-        htmlContent.value = createHtmlDocument(markdown.render(source), newCitation.caption)
+        htmlContent.value = createHtmlDocument(markdown.render(source), newCitation.snippet?.trim() || newCitation.caption)
         return
       }
 
       viewerMode.value = 'html'
       htmlContent.value = createHtmlDocument(
         await renderOfficeFile(data, supportedType),
-        newCitation.caption,
+        newCitation.snippet?.trim() || newCitation.caption,
       )
     } catch (error: any) {
       if (error?.name === 'AbortError') return
@@ -288,7 +292,10 @@ onBeforeUnmount(() => {
               <span v-if="fileTypeLabel" class="rounded bg-slate-100 dark:bg-muted px-1.5 py-0.5 font-semibold text-slate-500 dark:text-muted-foreground">
                 {{ fileTypeLabel }}
               </span>
-              <span v-if="citation?.page_number">Page {{ citation.page_number }}</span>
+              <span v-if="citation?.page_number">Đoạn {{ citation.page_number }}</span>
+              <span v-if="formatRelevance(citation?.score)" class="rounded-full bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 font-semibold text-blue-600 dark:text-blue-300" title="Độ liên quan">
+                {{ formatRelevance(citation?.score) }}
+              </span>
             </div>
           </div>
         </div>
