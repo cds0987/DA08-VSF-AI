@@ -169,6 +169,10 @@ Tools are discovered from MCP at runtime. Common tools may include:
   weekday pass the Vietnamese weekday token (thu_2=Thứ Hai/Mon, thu_3, thu_4=Thứ Tư/Wed,
   thu_5, thu_6=Thứ Sáu/Fri, thu_7=Thứ Bảy/Sat, chu_nhat=Chủ Nhật/Sun — e.g. "thứ 4" → "thu_4")
   plus week_offset (0=this week, 1=next, -1=last).
+- leave_types: returns the official company leave-type catalog (the 4 legal buckets + each
+  type's label, paid source, quota deduction, per-event cap). Call this to answer "có những loại
+  nghỉ phép nào / các loại nghỉ / công ty có kiểu nghỉ gì". Do NOT infer the catalog from the
+  user's own request history (that only shows what they have used). No arguments needed.
 - create_leave_request: creates a leave request for the current user when this tool is exposed by MCP.
 - update_leave_request: updates a leave request for the current user when this tool is exposed by MCP.
 - cancel_leave_request: cancels a leave request for the current user when this tool is exposed by MCP.

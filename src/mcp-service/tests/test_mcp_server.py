@@ -297,6 +297,7 @@ def test_build_mcp_registers_hr_query_tool(monkeypatch) -> None:
                 "leave_write": {"enabled": "0"},
                 "resolve_date": {"enabled": "0"},  # built-in default-on -> tắt để cô lập hr_query
                 "leave_approvals": {"enabled": "0"},
+                "leave_types": {"enabled": "0"},
                 "hr_query": {
                     "enabled": "1",
                     "params": {
