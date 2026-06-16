@@ -312,7 +312,7 @@ if [ "$SMOKE_RAG" = "true" ]; then
   for attempt in $(seq 1 6); do
     if curl -s --max-time 90 -X POST http://localhost/api/query/query \
          -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -H 'X-CI-Smoke: 1' \
-         -d "{\"question\":\"chính sách nghỉ phép của công ty\",\"user_id\":\"$SMOKE_UID\",\"conversation_id\":\"$SMOKE_CONV_RAG\",\"conversation_title\":\"CI smoke RAG\"}" \
+         -d "{\"question\":\"Tài liệu hướng dẫn nhân viên có gì\",\"user_id\":\"$SMOKE_UID\",\"conversation_id\":\"$SMOKE_CONV_RAG\",\"conversation_title\":\"CI smoke RAG\"}" \
          | python3 /tmp/smoke_parse.py "RAG query->mcp->rag (lần $attempt)" 1; then
       rag_ok=1; break
     fi
