@@ -336,7 +336,12 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
     async def get_attendance(self, user_id: str) -> Optional[AttendanceDTO]:
         def _query() -> Optional[AttendanceDTO]:
             with self._session() as session:
-                row = session.get(AttendanceRecord, user_id)
+                row = session.execute(
+                    sa.select(AttendanceRecord)
+                    .where(AttendanceRecord.user_id == user_id)
+                    .order_by(AttendanceRecord.period.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
                 if row is None:
                     return None
                 return AttendanceDTO(
