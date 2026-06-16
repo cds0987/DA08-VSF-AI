@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import uuid
 from datetime import datetime
@@ -108,9 +109,21 @@ async def main(argv: list[str] | None = None) -> int:
 
         semaphore = asyncio.Semaphore(settings.concurrency)
         qa_rows: list[dict[str, Any]] = []
+        # Enforce minimum interval between request starts to respect server rate limits.
+        # Default: 3.5s keeps throughput under 18 req/min (well under common 20 req/min cap).
+        # Override via REQUEST_INTERVAL_SECONDS env var.
+        request_interval = float(os.getenv("REQUEST_INTERVAL_SECONDS", "3.5"))
+        last_sent: list[float] = [0.0]
+        throttle_lock = asyncio.Lock()
 
         async def run_one(index: int, qa: Any) -> None:
             async with semaphore:
+                async with throttle_lock:
+                    now = asyncio.get_event_loop().time()
+                    wait = request_interval - (now - last_sent[0])
+                    if wait > 0:
+                        await asyncio.sleep(wait)
+                    last_sent[0] = asyncio.get_event_loop().time()
                 row = await _run_question(
                     index=index,
                     qa=qa,

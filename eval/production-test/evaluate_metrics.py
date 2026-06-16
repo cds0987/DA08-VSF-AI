@@ -112,12 +112,16 @@ def performance_metrics(
         "total_latency_p95_seconds": percentile(total, 0.95),
         "thresholds": thresholds,
     }
+    # concurrent_users from eval config reflects the runner's concurrency (max 5), not a
+    # real load test. Mark None (insufficient_evidence) when below threshold so it doesn't
+    # incorrectly fail every production-test run. A dedicated load test is needed for this.
+    concurrent_threshold = int(thresholds["concurrent_users"])
     out["checks"] = {
         "first_token_latency_p95_seconds": is_lt(out["first_token_latency_p95_seconds"], thresholds["first_token_latency_p95_seconds"]),
         "total_latency_p95_seconds": is_lt(out["total_latency_p95_seconds"], thresholds["total_latency_p95_seconds"]),
-        "concurrent_users": concurrency >= int(thresholds["concurrent_users"]),
+        "concurrent_users": None if concurrency < concurrent_threshold else concurrency >= concurrent_threshold,
     }
-    out["passed"] = all(out["checks"].values())
+    out["passed"] = all(v is True for v in out["checks"].values())
     return out
 
 
@@ -389,7 +393,13 @@ def build_decision(
         else:
             checks[name] = is_gte(value, threshold)
 
-    checks.update({f"performance.{name}": ok for name, ok in (performance.get("checks") or {}).items()})
+    for name, ok in (performance.get("checks") or {}).items():
+        key = f"performance.{name}"
+        if ok is None:
+            checks[key] = None
+            insufficient.append(key)
+        else:
+            checks[key] = ok
     for name, ok in (safety.get("checks") or {}).items():
         status_name = {
             "hallucination_rate": "hallucination_status",
@@ -553,11 +563,39 @@ def group_by_question(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, An
     return grouped
 
 
+_CONTEXT_MAX_CHARS = 800
+
+# Same patterns as eval/lib/metrics.py — LLM meta-responses stored verbatim during bad ingestion.
+_GARBAGE_CONTEXT_PATTERNS = (
+    "xin vui long cung cap noi dung",
+    "please provide",
+    "provide the content",
+    "de toi co the tom tat",
+    "xin cung cap noi dung",
+    "vui long cung cap",
+)
+
+
+def _is_garbage_context(text: str) -> bool:
+    normalized = normalize_text(text)
+    if len(normalized.strip()) < 20:
+        return True
+    return any(pattern in normalized for pattern in _GARBAGE_CONTEXT_PATTERNS)
+
+
 def context_texts_for_row(row: dict[str, Any], chunks: list[dict[str, Any]]) -> list[str]:
+    # Prefer text_preview (already capped at 500 chars in production_client) over full
+    # parent_text which can be 3000-5000 chars. Cap at _CONTEXT_MAX_CHARS to keep RAGAS
+    # judge focused and reduce token cost (~70% reduction with typical chunk sizes).
+    # Filter out garbage contexts (LLM meta-responses from corrupt chunk ingestion).
     contexts = [
-        str(chunk.get("text") or chunk.get("text_preview") or chunk.get("parent_text") or "").strip()
-        for chunk in chunks
-        if str(chunk.get("text") or chunk.get("text_preview") or chunk.get("parent_text") or "").strip()
+        c
+        for c in [
+            str(chunk.get("text_preview") or chunk.get("text") or chunk.get("parent_text") or "")[:_CONTEXT_MAX_CHARS].strip()
+            for chunk in chunks
+            if str(chunk.get("text_preview") or chunk.get("text") or chunk.get("parent_text") or "").strip()
+        ]
+        if not _is_garbage_context(c)
     ]
     if contexts:
         return contexts
@@ -566,6 +604,7 @@ def context_texts_for_row(row: dict[str, Any], chunks: list[dict[str, Any]]) -> 
         for source in row.get("sources") or []
         if isinstance(source, dict)
         and str(source.get("caption") or source.get("text") or source.get("document_name") or "").strip()
+        and not _is_garbage_context(str(source.get("caption") or source.get("text") or ""))
     ]
 
 

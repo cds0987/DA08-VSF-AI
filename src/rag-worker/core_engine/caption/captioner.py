@@ -89,6 +89,11 @@ class ProviderCaptioner:
     async def caption_with_metadata(self, text: str) -> CaptionResult:
         source_text = (text or "").strip()
         used_fallback = False
+        # Guard: do not call AI for empty chunks — an empty prompt causes the model to
+        # return a "please provide content" meta-response that gets stored as the caption.
+        if not source_text:
+            _METRICS.record(used_fallback=True)
+            return CaptionResult(text="(no content)", used_fallback=True)
         try:
             output = await self._provider.chat(
                 source_text[: self._max_chars],
@@ -107,7 +112,7 @@ class ProviderCaptioner:
             used_fallback = True
         output = (output or "").strip()
         if not output:
-            output = source_text[:600] or "(no content)"
+            output = source_text[:600]
             used_fallback = True
         _METRICS.record(used_fallback=used_fallback)
         return CaptionResult(text=output, used_fallback=used_fallback)

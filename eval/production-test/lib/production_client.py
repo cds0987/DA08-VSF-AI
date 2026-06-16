@@ -142,19 +142,24 @@ class ProductionClient:
                 raw = (await response.aread()).decode("utf-8", errors="replace")
                 raise QueryHttpError(response.status_code, raw[:1000] or f"HTTP {response.status_code}")
             buffer = ""
-            async for chunk in response.aiter_text():
-                buffer += chunk
-                while "\n\n" in buffer:
-                    packet, buffer = buffer.split("\n\n", 1)
-                    parsed = parse_sse_packet(packet)
-                    if parsed is None:
-                        continue
-                    events.append({"event_index": len(events), "received_at": utc_now(), "data": parsed})
-                    token = parsed.get("token")
-                    if token is not None:
-                        if first_token_latency is None:
-                            first_token_latency = time.perf_counter() - started
-                        answer_parts.append(str(token))
+            stream_error: str | None = None
+            try:
+                async for chunk in response.aiter_text():
+                    buffer += chunk
+                    while "\n\n" in buffer:
+                        packet, buffer = buffer.split("\n\n", 1)
+                        parsed = parse_sse_packet(packet)
+                        if parsed is None:
+                            continue
+                        events.append({"event_index": len(events), "received_at": utc_now(), "data": parsed})
+                        token = parsed.get("token")
+                        if token is not None:
+                            if first_token_latency is None:
+                                first_token_latency = time.perf_counter() - started
+                            answer_parts.append(str(token))
+            except (httpx.RemoteProtocolError, httpx.ReadError) as exc:
+                # Server dropped the SSE connection mid-stream; keep whatever was buffered.
+                stream_error = f"stream_cut: {exc}"
         ended = time.perf_counter()
         data_events = [event["data"] for event in events]
         done = next((event for event in reversed(data_events) if event.get("done") is True), None)
@@ -167,6 +172,7 @@ class ProductionClient:
             done=done,
             first_token_latency_seconds=first_token_latency,
             total_latency_seconds=ended - started,
+            error=stream_error,
         )
 
     async def list_documents(self) -> dict[str, Any]:
