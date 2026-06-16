@@ -286,7 +286,9 @@ if outcome in (6, "ERROR"):
 if need and src < 1:
     print("  [%s] FAIL: can sources>0 (query->mcp->rag->qdrant tra rong)" % label); sys.exit(1)
 PYEOF
-SMOKE_EMAIL="admin@company.com"; SMOKE_PW="DemoAdminPassword123!"
+# Mật khẩu LẤY TỪ secret (SEED_ADMIN_PASSWORD đã đẩy vào payload) — KHÔNG hardcode trong
+# git (GitGuardian bắt cặp email+password; creds này sống thật trên prod).
+SMOKE_EMAIL="admin@company.com"; SMOKE_PW="${SEED_ADMIN_PASSWORD:-}"
 TOK=$(curl -s --max-time 25 -X POST http://localhost/api/user/auth/login \
         -H 'Content-Type: application/json' \
         -d "{\"email\":\"$SMOKE_EMAIL\",\"password\":\"$SMOKE_PW\"}" \
@@ -325,12 +327,17 @@ if [ "$SMOKE_RAG" = "true" ]; then
   # nhập nhân viên thật (role=user) -> đi qua _get_allowed_doc_ids + get_profile. NON-FATAL
   # (::warning::) vì corpus hiện chỉ có public/internal (chưa có doc "secret" department-gated)
   # nên chưa thể assert phân quyền chặt; nâng thành fatal khi seed doc "secret" + dữ liệu test.
-  NV_TOK=$(curl -s --max-time 25 -X POST http://localhost/api/user/auth/login \
-            -H 'Content-Type: application/json' \
-            -d "{\"email\":\"nhanvien@company.com\",\"password\":\"Nhanvien123!\"}" \
-          | python3 -c 'import sys,json;print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null || echo "")
+  # Mật khẩu nhân viên TỪ secret SEED_EMPLOYEE_PASSWORD (chưa cấu hình -> rỗng -> tự skip).
+  # KHÔNG hardcode trong git. DevOps thêm secret này để kích hoạt smoke non-admin.
+  NV_TOK=""
+  if [ -n "${SEED_EMPLOYEE_PASSWORD:-}" ]; then
+    NV_TOK=$(curl -s --max-time 25 -X POST http://localhost/api/user/auth/login \
+              -H 'Content-Type: application/json' \
+              -d "{\"email\":\"nhanvien@company.com\",\"password\":\"${SEED_EMPLOYEE_PASSWORD}\"}" \
+            | python3 -c 'import sys,json;print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null || echo "")
+  fi
   if [ -z "$NV_TOK" ]; then
-    echo "::warning::SMOKE ACL non-admin: login nhanvien FAIL (seed pass khác? bỏ qua, không chặn deploy)"
+    echo "::warning::SMOKE ACL non-admin: bỏ qua (SEED_EMPLOYEE_PASSWORD chưa cấu hình hoặc login fail) — không chặn deploy"
   else
     NV_UID=$(python3 -c 'import sys,base64,json;t="'"$NV_TOK"'".split(".")[1];t+="="*(-len(t)%4);print(json.loads(base64.urlsafe_b64decode(t)).get("user_id",""))' 2>/dev/null || echo "")
     if curl -s --max-time 90 -X POST http://localhost/api/query/query \
