@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// build: ship dropdown 7 loại (Phase 3) — image frontend-chat cũ chưa kèm, retry deploy.
+// build: ship dropdown 7 loại (Phase 3) — image frontend-chat cũ chưa kèm; retry build
+// sau khi gate e2e (hybrid-search) được nới.
 import { computed, reactive, ref } from 'vue'
 import { AlertTriangle, Calendar, Check, Loader2, Send } from '@lucide/vue'
 import { toast } from 'vue-sonner'
