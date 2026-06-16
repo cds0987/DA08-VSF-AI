@@ -16,7 +16,7 @@ import StatusBadge from '~/components/admin-ui/StatusBadge.vue'
 import { getApiErrorMessage, getApiStatus } from '~/lib/api/apiError'
 import hrService from '~/lib/api/hrService'
 import userService from '~/lib/api/userService'
-import type { AccountType, EmployeeItem, EmploymentStatus, Role, User } from '~/types'
+import type { AccountType, EmployeeItem, EmploymentStatus, Role, UpdateEmployeeRequest, User } from '~/types'
 
 const router = useRouter()
 
@@ -104,22 +104,61 @@ const resolveManager = (managerId: string | null) => {
 }
 
 // --- create dialog ---
+// Luồng: nhập đầy đủ thông tin -> tạo account (POST /users) -> chờ HR profile sinh ra
+// (eventual consistency) -> PATCH các trường hồ sơ -> điều hướng tới trang detail.
 const showCreate = ref(false)
 const form = reactive({
+  // account (User Service)
   email: '',
   password: '',
   role: 'user' as Role,
   account_type: 'internal' as AccountType,
+  // profile (HR Service — set qua PATCH sau khi profile tồn tại)
+  full_name: '',
+  phone_number: '',
+  date_of_birth: '',
+  hire_date: '',
+  department: '',
+  employee_code: '',
+  job_title: '',
+  manager_user_id: '',
 })
 const formErrors = reactive({ email: '', password: '' })
 const isSubmitting = ref(false)
 const isPolling = ref(false)
+
+// Danh sách nhân viên active để chọn Manager trong form tạo
+const managerOptions = ref<EmployeeItem[]>([])
+const loadManagerOptions = async () => {
+  try {
+    const res = await hrService.listEmployees({ status: 'active', limit: 200, offset: 0 })
+    managerOptions.value = res.items
+  } catch {
+    managerOptions.value = []
+  }
+}
+const managerOptionLabel = (e: EmployeeItem) =>
+  `${e.full_name || e.company_email}${e.job_title ? ` · ${e.job_title}` : ''}`
+
+const openCreate = () => {
+  resetForm()
+  showCreate.value = true
+  void loadManagerOptions()
+}
 
 const resetForm = () => {
   form.email = ''
   form.password = ''
   form.role = 'user'
   form.account_type = 'internal'
+  form.full_name = ''
+  form.phone_number = ''
+  form.date_of_birth = ''
+  form.hire_date = ''
+  form.department = ''
+  form.employee_code = ''
+  form.job_title = ''
+  form.manager_user_id = ''
   formErrors.email = ''
   formErrors.password = ''
 }
@@ -139,9 +178,24 @@ const validateForm = () => {
   return ok
 }
 
+// Gom các trường hồ sơ HR người dùng đã nhập thành payload PATCH (bỏ trường rỗng)
+const buildProfilePayload = (): UpdateEmployeeRequest => {
+  const payload: UpdateEmployeeRequest = {}
+  if (form.full_name.trim()) payload.full_name = form.full_name.trim()
+  if (form.phone_number.trim()) payload.phone_number = form.phone_number.trim()
+  if (form.date_of_birth) payload.date_of_birth = form.date_of_birth
+  if (form.hire_date) payload.hire_date = form.hire_date
+  if (form.department.trim()) payload.department = form.department.trim()
+  if (form.employee_code.trim()) payload.employee_code = form.employee_code.trim()
+  if (form.job_title.trim()) payload.job_title = form.job_title.trim()
+  if (form.manager_user_id) payload.manager_user_id = form.manager_user_id
+  return payload
+}
+
 const submitCreate = async () => {
   if (!validateForm()) return
   isSubmitting.value = true
+  const profilePayload = buildProfilePayload()
   try {
     const created = await userService.createUser({
       email: form.email,
@@ -153,11 +207,12 @@ const submitCreate = async () => {
     showCreate.value = false
     toast.info('Account created, syncing HR profile...')
     isPolling.value = true
-    await pollForEmployee(created.id)
+    await pollAndApplyProfile(created.id, profilePayload)
   } catch (error) {
     const status = getApiStatus(error)
     if (status === 409) {
       formErrors.email = 'Email already exists'
+      showCreate.value = true
     } else {
       toast.error(getApiErrorMessage(error, 'Failed to create account'))
     }
@@ -166,7 +221,7 @@ const submitCreate = async () => {
   }
 }
 
-const pollForEmployee = async (userId: string) => {
+const pollAndApplyProfile = async (userId: string, profilePayload: UpdateEmployeeRequest) => {
   const deadline = Date.now() + 10_000
   const INTERVAL = 500
   while (Date.now() < deadline) {
@@ -175,6 +230,14 @@ const pollForEmployee = async (userId: string) => {
       const res = await hrService.listEmployees({ limit: 50, offset: 0 })
       const found = res.items.find(e => e.user_id === userId)
       if (found) {
+        // Profile đã sinh ra — áp các trường hồ sơ đã nhập (nếu có)
+        if (Object.keys(profilePayload).length > 0) {
+          try {
+            await hrService.updateEmployee(found.id, profilePayload)
+          } catch (error) {
+            toast.warning(getApiErrorMessage(error, 'Account created, but some profile fields could not be saved. Please edit them on the detail page.'))
+          }
+        }
         isPolling.value = false
         resetForm()
         await router.push(`/employees/${found.id}`)
@@ -200,7 +263,7 @@ const pollForEmployee = async (userId: string) => {
       <template #actions>
         <button
           class="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[12.5px] font-medium text-primary-foreground hover:bg-primary/90 cursor-pointer"
-          @click="showCreate = true"
+          @click="openCreate"
         >
           <UserPlus class="h-3.5 w-3.5" />
           Create employee
@@ -352,11 +415,11 @@ const pollForEmployee = async (userId: string) => {
         class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm"
         @click.self="showCreate = false"
       >
-        <div class="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl">
-          <div class="mb-4 flex items-center justify-between">
+        <div class="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl border border-border bg-card shadow-xl">
+          <div class="flex items-center justify-between border-b border-border p-6">
             <div>
-              <h2 class="text-[15px] font-semibold text-foreground">Create Employee Account</h2>
-              <p class="mt-0.5 text-[12px] text-muted-foreground">Creates a user account; HR profile syncs automatically.</p>
+              <h2 class="text-[15px] font-semibold text-foreground">Create Employee</h2>
+              <p class="mt-0.5 text-[12px] text-muted-foreground">Enter the full profile first; the account and HR profile are created on submit.</p>
             </div>
             <button
               class="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -366,8 +429,12 @@ const pollForEmployee = async (userId: string) => {
             </button>
           </div>
 
-          <form class="flex flex-col gap-4" @submit.prevent="submitCreate">
-            <div>
+          <form class="flex min-h-0 flex-1 flex-col" @submit.prevent="submitCreate">
+            <div class="flex flex-col gap-5 overflow-y-auto p-6">
+            <!-- Account section -->
+            <div class="flex flex-col gap-4">
+              <h3 class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Account</h3>
+              <div>
               <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-email">Email</label>
               <input
                 id="emp-email"
@@ -418,9 +485,113 @@ const pollForEmployee = async (userId: string) => {
                   <option value="external">External</option>
                 </select>
               </div>
+              </div>
             </div>
 
-            <div class="mt-2 flex justify-end gap-2">
+            <!-- Profile section -->
+            <div class="flex flex-col gap-4 border-t border-border pt-5">
+              <h3 class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Employee Profile</h3>
+
+              <div class="flex gap-3">
+                <div class="flex-1">
+                  <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-full-name">Full Name</label>
+                  <input
+                    id="emp-full-name"
+                    v-model="form.full_name"
+                    type="text"
+                    placeholder="e.g. Nguyễn Văn A"
+                    class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                </div>
+                <div class="flex-1">
+                  <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-phone">Phone Number</label>
+                  <input
+                    id="emp-phone"
+                    v-model="form.phone_number"
+                    type="tel"
+                    placeholder="e.g. 0901234567"
+                    class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                </div>
+              </div>
+
+              <div class="flex gap-3">
+                <div class="flex-1">
+                  <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-dob">Date of Birth</label>
+                  <input
+                    id="emp-dob"
+                    v-model="form.date_of_birth"
+                    type="date"
+                    class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                </div>
+                <div class="flex-1">
+                  <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-hire">Hire Date</label>
+                  <input
+                    id="emp-hire"
+                    v-model="form.hire_date"
+                    type="date"
+                    class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                </div>
+              </div>
+
+              <div>
+                <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-department">Department</label>
+                <input
+                  id="emp-department"
+                  v-model="form.department"
+                  type="text"
+                  placeholder="e.g. Engineering"
+                  class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-primary/20"
+                >
+              </div>
+
+              <div class="flex gap-3">
+                <div class="flex-1">
+                  <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-code">Employee Code</label>
+                  <input
+                    id="emp-code"
+                    v-model="form.employee_code"
+                    type="text"
+                    placeholder="e.g. EMP-001"
+                    class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                </div>
+                <div class="flex-1">
+                  <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-title">Job Title</label>
+                  <input
+                    id="emp-title"
+                    v-model="form.job_title"
+                    type="text"
+                    placeholder="e.g. Backend Engineer"
+                    class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                </div>
+              </div>
+
+              <div>
+                <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-manager">Manager</label>
+                <select
+                  id="emp-manager"
+                  v-model="form.manager_user_id"
+                  class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="">No manager</option>
+                  <option
+                    v-for="mgr in managerOptions"
+                    :key="mgr.user_id"
+                    :value="mgr.user_id"
+                  >
+                    {{ managerOptionLabel(mgr) }}
+                  </option>
+                </select>
+              </div>
+            </div>
+            </div>
+
+            <!-- footer -->
+            <div class="flex justify-end gap-2 border-t border-border p-6">
               <button
                 type="button"
                 class="rounded-md border border-border px-3 py-1.5 text-[12.5px] font-medium hover:bg-accent cursor-pointer"
@@ -434,7 +605,7 @@ const pollForEmployee = async (userId: string) => {
                 :disabled="isSubmitting"
               >
                 <Loader2 v-if="isSubmitting" class="h-3.5 w-3.5 animate-spin" />
-                Create
+                Create employee
               </button>
             </div>
           </form>

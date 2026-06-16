@@ -192,6 +192,11 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
         employee_code: str | None,
         job_title: str | None,
         manager_user_id: str | None,
+        full_name: str | None,
+        phone_number: str | None,
+        date_of_birth: datetime.date | None,
+        hire_date: datetime.date | None,
+        department: str | None,
         provided_fields: set[str],
     ) -> Optional[EmployeeDTO]:
         def _update() -> Optional[EmployeeDTO]:
@@ -206,6 +211,16 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
                     record.job_title = job_title
                 if "manager_user_id" in provided_fields:
                     record.manager_user_id = manager_user_id
+                if "full_name" in provided_fields:
+                    record.full_name = full_name
+                if "phone_number" in provided_fields:
+                    record.phone_number = phone_number
+                if "date_of_birth" in provided_fields:
+                    record.date_of_birth = date_of_birth
+                if "hire_date" in provided_fields:
+                    record.hire_date = hire_date
+                if "department" in provided_fields:
+                    record.department = department or ""
 
                 record.updated_at = _now()
                 try:

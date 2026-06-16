@@ -35,6 +35,11 @@ const loadEmployee = async () => {
 
 // --- edit form ---
 const form = reactive({
+  full_name: '',
+  phone_number: '',
+  date_of_birth: '',
+  hire_date: '',
+  department: '',
   employee_code: '',
   job_title: '',
   manager_user_id: '',
@@ -43,6 +48,11 @@ const isSaving = ref(false)
 
 const syncForm = () => {
   if (!employee.value) return
+  form.full_name = employee.value.full_name ?? ''
+  form.phone_number = employee.value.phone_number ?? ''
+  form.date_of_birth = employee.value.date_of_birth ?? ''
+  form.hire_date = employee.value.hire_date ?? ''
+  form.department = employee.value.department ?? ''
   form.employee_code = employee.value.employee_code ?? ''
   form.job_title = employee.value.job_title ?? ''
   form.manager_user_id = employee.value.manager_user_id ?? ''
@@ -70,6 +80,11 @@ const saveEmployee = async () => {
   isSaving.value = true
   try {
     const payload = {
+      full_name: form.full_name.trim() || null,
+      phone_number: form.phone_number.trim() || null,
+      date_of_birth: form.date_of_birth || null,
+      hire_date: form.hire_date || null,
+      department: form.department.trim() || null,
       employee_code: form.employee_code.trim() || null,
       job_title: form.job_title.trim() || null,
       manager_user_id: form.manager_user_id || null,
@@ -91,10 +106,6 @@ const saveEmployee = async () => {
 const formatDate = (d: string) => new Date(d).toLocaleString('en-GB', {
   day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
 })
-
-const formatDateOnly = (d: string | null) => d
-  ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-  : '—'
 
 const managerLabel = (emp: EmployeeItem) =>
   `${emp.full_name || emp.company_email}${emp.job_title ? ` · ${emp.job_title}` : ''}`
@@ -141,28 +152,8 @@ const managerLabel = (emp: EmployeeItem) =>
           <h2 class="mb-4 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Profile Info</h2>
           <dl class="grid grid-cols-2 gap-x-6 gap-y-3 text-[13px]">
             <div>
-              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Full Name</dt>
-              <dd class="mt-0.5 text-foreground">{{ employee.full_name || '—' }}</dd>
-            </div>
-            <div>
               <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Email</dt>
               <dd class="mt-0.5 text-foreground">{{ employee.company_email }}</dd>
-            </div>
-            <div>
-              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Phone Number</dt>
-              <dd class="mt-0.5 text-foreground">{{ employee.phone_number || '—' }}</dd>
-            </div>
-            <div>
-              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Date of Birth</dt>
-              <dd class="mt-0.5 text-foreground">{{ formatDateOnly(employee.date_of_birth) }}</dd>
-            </div>
-            <div>
-              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Department</dt>
-              <dd class="mt-0.5 text-foreground">{{ employee.department || '—' }}</dd>
-            </div>
-            <div>
-              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Hire Date</dt>
-              <dd class="mt-0.5 text-foreground">{{ formatDateOnly(employee.hire_date) }}</dd>
             </div>
             <div>
               <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Status</dt>
@@ -187,6 +178,61 @@ const managerLabel = (emp: EmployeeItem) =>
         <div class="rounded-lg border border-border bg-card p-5">
           <h2 class="mb-4 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Edit HR Fields</h2>
           <form class="flex flex-col gap-4" @submit.prevent="saveEmployee">
+
+            <div class="flex gap-3">
+              <div class="flex-1">
+                <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-full-name">Full Name</label>
+                <input
+                  id="emp-full-name"
+                  v-model="form.full_name"
+                  type="text"
+                  placeholder="e.g. Nguyễn Văn A"
+                  class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                >
+              </div>
+              <div class="flex-1">
+                <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-phone">Phone Number</label>
+                <input
+                  id="emp-phone"
+                  v-model="form.phone_number"
+                  type="tel"
+                  placeholder="e.g. 0901234567"
+                  class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                >
+              </div>
+            </div>
+
+            <div class="flex gap-3">
+              <div class="flex-1">
+                <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-dob">Date of Birth</label>
+                <input
+                  id="emp-dob"
+                  v-model="form.date_of_birth"
+                  type="date"
+                  class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                >
+              </div>
+              <div class="flex-1">
+                <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-hire">Hire Date</label>
+                <input
+                  id="emp-hire"
+                  v-model="form.hire_date"
+                  type="date"
+                  class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                >
+              </div>
+            </div>
+
+            <div>
+              <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-department">Department</label>
+              <input
+                id="emp-department"
+                v-model="form.department"
+                type="text"
+                placeholder="e.g. Engineering"
+                class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+              >
+            </div>
 
             <div>
               <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-code">Employee Code</label>
