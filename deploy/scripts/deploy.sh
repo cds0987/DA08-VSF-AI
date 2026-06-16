@@ -55,7 +55,10 @@ echo "==> 3a) PRE-FLIGHT migration — image MỚI có định vị được rev
 # 255 ở bước up. Bắt Ở ĐÂY -> ABORT khi CHƯA recreate gì -> stack đang chạy KHÔNG bị đụng,
 # prod GIỮ NGUYÊN bản cũ. Đây chính là ca đã làm sập prod (hr_db=0006, image thiếu 0006).
 preflight_fail=0
-for m in query-migrate hr-migrate user-migrate doc-migrate rag-migrate; do
+# CHỈ các service dùng alembic. query-migrate KHÔNG nằm đây vì nó chạy migrator riêng
+# (`python -m app.infrastructure.db.migrate`), không có alembic.ini -> `alembic current` sẽ
+# lỗi GIẢ. query-service migrate tự lo state của nó, không thuộc class drift alembic này.
+for m in hr-migrate user-migrate doc-migrate rag-migrate; do
   if out=$(docker compose run --rm --no-deps "$m" alembic current 2>&1); then
     echo "  [$m] OK ($(echo "$out" | tr '\n' ' ' | grep -oE '[0-9a-f_]+ \(head\)|[0-9a-z_]+$' | head -1))"
   else
