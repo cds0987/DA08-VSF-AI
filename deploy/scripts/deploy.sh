@@ -7,12 +7,11 @@
 set -euo pipefail
 cd "${APP_DIR:?thiếu APP_DIR}"
 
-ROLLBACK_SVCS="rag-worker mcp-service hr-service user-service document-service query-service ai-router frontend-chat frontend-admin nginx"
 QUERY_DB_BACKUP=/tmp/query_db_pre_deploy.dump
 DEPLOY_OK=0; ROLLBACK_DONE=0; QUERY_DB_BACKUP_READY=0
-restore_query_db() {
-  [ "$QUERY_DB_BACKUP_READY" = 1 ] || return 0
-  echo "::warning::Khôi phục query_db về snapshot trước deploy"
+# KHÔI PHỤC query_db THỦ CÔNG (admin) khi thực sự cần — KHÔNG còn tự gọi (forward-only).
+# Chạy tay: source deploy/scripts/deploy.sh là sai; thay vào đó admin pg_restore từ $QUERY_DB_BACKUP.
+restore_query_db_manual() {
   docker compose stop query-service >/dev/null 2>&1 || true
   docker exec da08-vsf-app-postgres-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
     -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='query_db' AND pid <> pg_backend_pid();" >/dev/null
@@ -20,29 +19,20 @@ restore_query_db() {
   docker exec da08-vsf-app-postgres-1 createdb -U postgres query_db
   docker exec -i da08-vsf-app-postgres-1 pg_restore -U postgres -d query_db --no-owner --no-privileges < "$QUERY_DB_BACKUP"
 }
-rollback() {
+# FORWARD-ONLY (sau sự cố 2026-06-16). KHÔNG tự lùi image/schema khi deploy fail.
+# VÌ SAO: rollback cũ retag image về bản CŨ + `compose up --force-recreate`, NHƯNG migration
+# đã đẩy schema TIẾN (vd hr_db lên 0006). Image cũ không định vị nổi revision -> hr-migrate
+# exit 255 -> nginx kẹt -> SẬP TOÀN BỘ prod, rồi log báo "production giữ bản trước đó" (SAI).
+# Lùi-nửa-vời TỆ HƠN không lùi. Drift đã được chặn TỪ TRƯỚC ở PRE-FLIGHT (bước 3a), nên tới
+# đây gần như chỉ là lỗi app sau khi đã up -> giữ BẢN MỚI đang chạy + báo động, sửa-tiến.
+on_failure() {
   [ "$ROLLBACK_DONE" = 1 ] && return 0; ROLLBACK_DONE=1
-  [ -s /tmp/rollback_images.txt ] || { echo "::warning::Chưa có điểm rollback (fail sớm) — prod chưa bị đổi."; return 0; }
-  echo "::warning::DEPLOY FAIL -> ROLLBACK database + image về bản trước khi deploy"
-  restore_ok=1
-  if ! restore_query_db; then
-    restore_ok=0
-    echo "::error::Khôi phục query_db thất bại; giữ image query-service/frontend-chat mới để tránh chạy code cũ trên schema mới"
-  fi
-  rollback_svcs="$ROLLBACK_SVCS"
-  while read -r svc img; do
-    if [ "$restore_ok" = 0 ] && { [ "$svc" = query-service ] || [ "$svc" = frontend-chat ]; }; then
-      continue
-    fi
-    [ -n "$img" ] && docker tag "$img" "$DOCKERHUB_USERNAME/$svc:develop" || true
-  done < /tmp/rollback_images.txt
-  if [ "$restore_ok" = 0 ]; then
-    rollback_svcs="rag-worker mcp-service hr-service user-service document-service frontend-admin nginx"
-  fi
-  docker compose up -d --no-build --force-recreate $rollback_svcs || true
-  echo "::warning::ROLLBACK xong — production giữ bản trước đó. Pipeline = FAIL."
+  echo "::error::DEPLOY FAIL — forward-only: KHÔNG tự lùi image/schema (tránh wedge + sập như sự cố cũ)."
+  echo "::error::Production đang ở TRẠNG THÁI VỪA DEPLOY. Xử lý: sửa lỗi rồi DEPLOY LẠI (fix-forward), TUYỆT ĐỐI không vá tay trên VM."
+  echo "::error::Chẩn đoán: docker compose ps; docker compose logs --tail=120 <service>; kiểm tra https://vsfchat.cloud"
+  echo "::error::Có snapshot query_db trước deploy nếu admin cần khôi phục THỦ CÔNG: $QUERY_DB_BACKUP (dùng pg_restore)"
 }
-trap '[ "$DEPLOY_OK" = 1 ] || rollback' EXIT
+trap '[ "$DEPLOY_OK" = 1 ] || on_failure' EXIT
 
 
 
@@ -55,17 +45,27 @@ done
 # gcp-sa.json (org policy chặn tạo SA key). Bỏ check file SA.
 [ "$miss" = 0 ] || { echo "::error::Thiếu cấu hình -> DỪNG deploy"; exit 1; }
 
-echo "==> 2b) Ghi ĐIỂM ROLLBACK = image ID đang chạy (trước khi pull bản mới)"
-: > /tmp/rollback_images.txt
-for svc in $ROLLBACK_SVCS; do
-  img=$(docker inspect -f '{{.Image}}' "da08-vsf-$svc-1" 2>/dev/null || echo "")
-  [ -n "$img" ] && echo "$svc $img" >> /tmp/rollback_images.txt
-done
-echo "  $(wc -l < /tmp/rollback_images.txt) service có điểm rollback"
-
 echo "==> 3) Login Docker Hub + PULL image (KHÔNG build trên VM)"
 echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
 docker compose pull qdrant langfuse-db langfuse nats-bootstrap rag-worker mcp-service hr-service user-service document-service query-migrate query-service ai-router frontend-chat frontend-admin nginx
+
+echo "==> 3a) PRE-FLIGHT migration — image MỚI có định vị được revision DB không? (chặn drift TRƯỚC khi đụng prod)"
+# `alembic current` (READ-ONLY): đọc alembic_version trong DB rồi tra trong lịch sử migration
+# của IMAGE MỚI. Lỗi 'Can't locate revision' = DB tiến trước image (drift) -> hr-migrate sẽ exit
+# 255 ở bước up. Bắt Ở ĐÂY -> ABORT khi CHƯA recreate gì -> stack đang chạy KHÔNG bị đụng,
+# prod GIỮ NGUYÊN bản cũ. Đây chính là ca đã làm sập prod (hr_db=0006, image thiếu 0006).
+preflight_fail=0
+for m in query-migrate hr-migrate user-migrate doc-migrate rag-migrate; do
+  if out=$(docker compose run --rm --no-deps "$m" alembic current 2>&1); then
+    echo "  [$m] OK ($(echo "$out" | tr '\n' ' ' | grep -oE '[0-9a-f_]+ \(head\)|[0-9a-z_]+$' | head -1))"
+  else
+    echo "::error::[$m] alembic current FAIL — image mới KHÔNG định vị được revision của DB (drift):"
+    echo "$out" | grep -iE "Can't locate|FAILED|Error|revision" | head -3
+    preflight_fail=1
+  fi
+done
+[ "$preflight_fail" = 0 ] || { echo "::error::PRE-FLIGHT FAIL -> ABORT. Stack đang chạy KHÔNG bị đụng (prod giữ nguyên). Đồng bộ migration code<->DB rồi deploy lại."; exit 1; }
+echo "  PRE-FLIGHT OK — mọi migrate định vị được revision DB, an toàn để recreate."
 
 echo "==> 3b) Dừng query-service và snapshot query_db ngay trước migration"
 docker compose stop query-service >/dev/null 2>&1 || true
