@@ -9,11 +9,14 @@ export function cn(...inputs: ClassValue[]) {
 const NO_HEADING_PLACEHOLDER = '(no heading)'
 
 /**
- * Heading path để hiển thị ở citation. Tài liệu cũ (ingest trước fix) có thể chứa
- * placeholder "(no heading)" -> thay bằng tên tài liệu. Trả [] nếu không có gì để hiện.
+ * Heading path để hiển thị ở citation. Bỏ placeholder "(no heading)" và phần trùng
+ * tên tài liệu (UI đã hiển thị tên file riêng -> tránh trùng tên). Trả [] nếu không
+ * còn breadcrumb thật nào để hiện.
  */
 export function citationHeadingPath(headingPath: string[], documentName?: string | null): string[] {
-  return headingPath
-    .map(part => (part === NO_HEADING_PLACEHOLDER ? (documentName ?? '') : part))
-    .filter(part => part.length > 0)
+  const docName = documentName?.trim().toLowerCase()
+  return headingPath.filter((part) => {
+    const value = part.trim().toLowerCase()
+    return value.length > 0 && part !== NO_HEADING_PLACEHOLDER && value !== docName
+  })
 }
