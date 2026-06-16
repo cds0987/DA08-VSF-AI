@@ -11,7 +11,10 @@ from pydantic import BaseModel, Field
 
 
 class LeaveCreateRequest(BaseModel):
-    leave_type: Literal["annual", "sick", "personal"]
+    # 4 rổ luật LĐ VN (khớp hr-service registry). 'personal' giữ cho tương thích đơn cũ.
+    leave_type: Literal[
+        "annual", "marriage", "child_marriage", "bereavement", "sick", "maternity", "unpaid", "personal",
+    ]
     start_date: str = Field(..., description="YYYY-MM-DD")
     end_date: str = Field(..., description="YYYY-MM-DD")
     reason: str = ""

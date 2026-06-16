@@ -49,11 +49,19 @@ class _HrQueryInput(BaseModel):
 
 # WRITE tools: schema KIỂU (Pydantic) -> qua convert_to_openai_function model THẤY & ĐIỀN
 # args (dict-schema generic bị model gọi rỗng {}). user_id KHÔNG có ở đây — tiêm server-side.
-_LeaveType = Literal["annual", "sick", "personal"]
+_LeaveType = Literal[
+    "annual", "marriage", "child_marriage", "bereavement", "sick", "maternity", "unpaid",
+]
+_LEAVE_TYPE_DESC = (
+    "Loại nghỉ theo luật LĐ VN: annual (phép năm — du lịch/việc riêng thường ngày, trừ "
+    "quỹ phép), marriage (kết hôn, ≤3 ngày), child_marriage (con kết hôn, ≤1 ngày), "
+    "bereavement (tang cha/mẹ/vợ/chồng/con, ≤3 ngày), sick (ốm đau — BHXH), maternity "
+    "(thai sản), unpaid (nghỉ không lương). Việc riêng thường ngày -> annual."
+)
 
 
 class _CreateLeaveInput(BaseModel):
-    leave_type: _LeaveType = Field(description="Loại nghỉ: annual (phép năm), sick (ốm), personal (việc riêng)")
+    leave_type: _LeaveType = Field(description=_LEAVE_TYPE_DESC)
     start_date: str = Field(description="Ngày bắt đầu, định dạng YYYY-MM-DD")
     end_date: str = Field(description="Ngày kết thúc, định dạng YYYY-MM-DD")
     reason: str = Field(default="", description="Lý do nghỉ")
