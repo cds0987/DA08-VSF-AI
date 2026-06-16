@@ -297,7 +297,7 @@ onBeforeUnmount(() => {
             <FileText class="h-5 w-5" />
           </div>
           <div class="min-w-0">
-            <div class="truncate text-sm font-semibold text-slate-900 dark:text-foreground">
+            <div :title="citation?.caption || ''" class="line-clamp-2 text-sm font-semibold text-slate-900 dark:text-foreground">
               {{ citation?.caption || citation?.document || 'No source selected' }}
             </div>
             <div v-if="headingPath.length" class="mt-1 text-xs font-medium text-slate-500 dark:text-muted-foreground">
