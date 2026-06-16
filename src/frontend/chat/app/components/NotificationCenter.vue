@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { Bell, Check, WifiOff } from '@lucide/vue'
+import { Bell, Check, Sparkles, WifiOff, X } from '@lucide/vue'
+import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useNotificationStore } from '~/stores/notifications'
+import { useChatStore } from '~/stores/chat'
 import type { NotificationItem } from '~/types'
 
 defineProps<{
@@ -9,12 +11,18 @@ defineProps<{
 }>()
 
 const notifications = useNotificationStore()
+const chat = useChatStore()
+const router = useRouter()
 
 function formatCreatedAt(value: string) {
   return new Intl.DateTimeFormat('vi-VN', {
     dateStyle: 'short',
     timeStyle: 'short',
   }).format(new Date(value))
+}
+
+function extractDocName(message: string): string {
+  return message.replace('Có tài liệu mới: ', '').trim()
 }
 
 async function handleOpen(open: boolean) {
@@ -27,12 +35,22 @@ async function handleOpen(open: boolean) {
   })
 }
 
-async function handleNotificationClick(item: NotificationItem) {
-  if (item.is_read) return
-  try {
-    await notifications.markAsRead(item.id)
-  } catch {
-    toast.error('Không thể đánh dấu thông báo đã đọc.')
+async function handleItemClick(item: NotificationItem) {
+  if (!item.is_read) {
+    await notifications.markAsRead(item.id).catch(() => {})
+  }
+  if (item.event === 'doc_new') {
+    chat.injectProactiveMessage(extractDocName(item.message))
+  }
+  await router.push('/')
+}
+
+async function handleDismiss(event: MouseEvent, item: NotificationItem) {
+  event.stopPropagation()
+  if (!item.is_read) {
+    await notifications.markAsRead(item.id).catch(() => {
+      toast.error('Không thể đánh dấu thông báo đã đọc.')
+    })
   }
 }
 </script>
@@ -104,8 +122,8 @@ async function handleNotificationClick(item: NotificationItem) {
           <DropdownMenuItem
             v-for="item in notifications.items"
             :key="item.id"
-            class="items-start gap-3 cursor-pointer rounded-lg px-3 py-3 focus:bg-slate-50 dark:focus:bg-accent"
-            @select="handleNotificationClick(item)"
+            class="group items-start gap-3 cursor-pointer rounded-lg px-3 py-3 focus:bg-slate-50 dark:focus:bg-accent"
+            @select="handleItemClick(item)"
           >
             <span
               class="mt-1.5 h-2 w-2 shrink-0 rounded-full"
@@ -121,8 +139,19 @@ async function handleNotificationClick(item: NotificationItem) {
               <span class="mt-1 block text-xs text-slate-400 dark:text-muted-foreground">
                 {{ formatCreatedAt(item.created_at) }}
               </span>
+              <span
+                v-if="!item.is_read && item.event === 'doc_new'"
+                class="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-indigo-500 dark:text-indigo-400"
+              >
+                <Sparkles class="h-3 w-3" /> Hỏi AI về tài liệu này
+              </span>
             </span>
-            <Check v-if="item.is_read" class="mt-0.5 h-4 w-4 shrink-0 text-slate-300 dark:text-muted-foreground/50" />
+            <button
+              class="mt-0.5 shrink-0 rounded p-0.5 text-slate-300 opacity-0 transition-opacity hover:bg-slate-100 hover:text-slate-600 group-hover:opacity-100 dark:text-muted-foreground/50 dark:hover:bg-white/5 dark:hover:text-muted-foreground"
+              @click="handleDismiss($event, item)"
+            >
+              <X class="h-3.5 w-3.5" />
+            </button>
           </DropdownMenuItem>
         </div>
       </DropdownMenuContent>

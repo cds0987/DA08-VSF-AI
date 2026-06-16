@@ -133,7 +133,8 @@ export interface MessageAttachment {
 export interface HRActionPayload {
   // 'create_leave_request': thẻ tạo đơn (có parameters).
   // 'review_leave_approvals': thẻ duyệt — FE tự nạp hàng đợi live, không cần parameters.
-  action_type: 'create_leave_request' | 'review_leave_approvals'
+  // 'proactive_doc_suggestion': bot gợi ý hỏi về tài liệu mới.
+  action_type: 'create_leave_request' | 'review_leave_approvals' | 'proactive_doc_suggestion'
   parameters?: {
     leave_type: string
     start_date: string
@@ -142,6 +143,9 @@ export interface HRActionPayload {
   }
   // Sinh 1 lần khi tạo card (FE) -> chống tạo trùng nếu user bấm Confirm 2 lần / retry.
   idempotency_key?: string
+  // proactive_doc_suggestion fields
+  document_name?: string
+  suggestions?: Array<{ label: string; query: string }>
 }
 
 export interface ChatMessage {
