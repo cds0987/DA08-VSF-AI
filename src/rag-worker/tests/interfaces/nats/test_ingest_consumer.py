@@ -163,6 +163,22 @@ async def test_handle_prefixes_bare_key_with_default_bucket() -> None:
 
 
 @pytest.mark.asyncio
+async def test_handle_prefixes_bare_key_with_gs_scheme_on_gcs(monkeypatch) -> None:
+    # Endpoint GCS (S3-interop) -> source_uri ghép scheme gs:// cho khớp artifact_uri,
+    # tránh lệch s3:// vs gs:// trên cùng bucket GCS trong payload vector store.
+    monkeypatch.setenv("S3_ENDPOINT_URL", "https://storage.googleapis.com")
+    use_case = FakeIngestUseCase()
+    consumer = DocIngestConsumer(use_case, default_bucket="vintravel-chatbot-docs-dev")
+    raw = json.dumps(
+        {"doc_id": "d1", "s3_key": "raw/d1/file.pdf", "file_type": "pdf"}
+    ).encode()
+
+    await consumer.handle(raw)
+
+    assert use_case.calls[0]["source_uri"] == "gs://vintravel-chatbot-docs-dev/raw/d1/file.pdf"
+
+
+@pytest.mark.asyncio
 async def test_handle_keeps_full_uri_even_with_default_bucket() -> None:
     # Key đã có scheme (BE đổi contract) -> giữ nguyên, KHÔNG ghép bucket lần nữa.
     use_case = FakeIngestUseCase()
