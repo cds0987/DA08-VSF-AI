@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
@@ -45,6 +46,11 @@ class HrRepository(ABC):
         employee_code: str | None,
         job_title: str | None,
         manager_user_id: str | None,
+        full_name: str | None,
+        phone_number: str | None,
+        date_of_birth: datetime.date | None,
+        hire_date: datetime.date | None,
+        department: str | None,
         provided_fields: set[str],
     ) -> Optional[EmployeeDTO]:
         raise NotImplementedError

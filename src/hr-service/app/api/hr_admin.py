@@ -48,8 +48,16 @@ class UpdateEmployeeRequest(BaseModel):
     employee_code: Optional[str] = None
     job_title: Optional[str] = None
     manager_user_id: Optional[str] = None
+    full_name: Optional[str] = None
+    phone_number: Optional[str] = None
+    date_of_birth: Optional[datetime.date] = None
+    hire_date: Optional[datetime.date] = None
+    department: Optional[str] = None
 
-    @field_validator("employee_code", "job_title", "manager_user_id", mode="before")
+    @field_validator(
+        "employee_code", "job_title", "manager_user_id", "full_name", "phone_number", "department",
+        mode="before",
+    )
     @classmethod
     def empty_string_to_none(cls, v: Any) -> Any:
         if isinstance(v, str) and not v.strip():
@@ -130,6 +138,11 @@ async def update_employee(
             employee_code=request.employee_code,
             job_title=request.job_title,
             manager_user_id=request.manager_user_id,
+            full_name=request.full_name,
+            phone_number=request.phone_number,
+            date_of_birth=request.date_of_birth,
+            hire_date=request.hire_date,
+            department=request.department,
             provided_fields=set(provided_fields),
         )
         return EmployeeItem(**updated.__dict__)

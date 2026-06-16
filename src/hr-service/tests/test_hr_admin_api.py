@@ -53,7 +53,9 @@ class FakeHrRepository(HrRepository):
                 return e
         return None
 
-    async def update_employee(self, employee_id, employee_code, job_title, manager_user_id, provided_fields):
+    async def update_employee(self, employee_id, employee_code, job_title, manager_user_id,
+                              full_name=None, phone_number=None, date_of_birth=None,
+                              hire_date=None, department=None, provided_fields=frozenset()):
         for i, e in enumerate(self.employees):
             if e.id == employee_id:
                 updated = EmployeeDTO(
@@ -62,12 +64,16 @@ class FakeHrRepository(HrRepository):
                     account_type=e.account_type,
                     employee_code=employee_code if "employee_code" in provided_fields else e.employee_code,
                     company_email=e.company_email,
-                    department=e.department,
+                    department=department if "department" in provided_fields else e.department,
                     job_title=job_title if "job_title" in provided_fields else e.job_title,
                     manager_user_id=manager_user_id if "manager_user_id" in provided_fields else e.manager_user_id,
                     employment_status=e.employment_status,
                     created_at=e.created_at,
                     updated_at=datetime.datetime.now(datetime.timezone.utc),
+                    full_name=full_name if "full_name" in provided_fields else e.full_name,
+                    phone_number=phone_number if "phone_number" in provided_fields else e.phone_number,
+                    date_of_birth=date_of_birth if "date_of_birth" in provided_fields else e.date_of_birth,
+                    hire_date=hire_date if "hire_date" in provided_fields else e.hire_date,
                 )
                 self.employees[i] = updated
                 return updated
@@ -197,8 +203,7 @@ def test_patch_empty_string_normalized_to_null():
 def test_patch_duplicate_employee_code_returns_409():
     """Duplicate employee_code phải trả 409."""
     class ConflictRepo(FakeHrRepository):
-        async def update_employee(self, employee_id, employee_code, job_title,
-                                  manager_user_id, provided_fields):
+        async def update_employee(self, *args, **kwargs):
             raise ValueError("Duplicate employee_code")
 
     app.dependency_overrides[require_admin_jwt] = mock_require_admin_jwt
@@ -238,8 +243,7 @@ def test_patch_manager_not_found_returns_404():
 def test_patch_db_fail_no_event_published():
     """Khi DB update fail, event hr.employee_profile.updated không được publish."""
     class FailingUpdateRepo(FakeHrRepository):
-        async def update_employee(self, employee_id, employee_code, job_title,
-                                  manager_user_id, provided_fields):
+        async def update_employee(self, *args, **kwargs):
             raise RuntimeError("db write failed")
 
     fake_publisher = FakePublisher()

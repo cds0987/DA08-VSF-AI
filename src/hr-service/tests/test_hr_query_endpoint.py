@@ -50,7 +50,7 @@ class FakeHrRepository(HrRepository):
     async def get_employee_by_user_id(self, user_id):
         return None
 
-    async def update_employee(self, employee_id, code, title, manager, fields):
+    async def update_employee(self, *args, **kwargs):
         return None
 
     async def upsert_employee_from_user(

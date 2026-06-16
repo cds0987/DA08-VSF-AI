@@ -153,4 +153,9 @@ export interface UpdateEmployeeRequest {
   employee_code?: string | null
   job_title?: string | null
   manager_user_id?: string | null
+  full_name?: string | null
+  phone_number?: string | null
+  date_of_birth?: string | null
+  hire_date?: string | null
+  department?: string | null
 }
