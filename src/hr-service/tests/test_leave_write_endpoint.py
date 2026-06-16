@@ -103,7 +103,8 @@ class FakeLeaveWriteRepo(LeaveWriteRepository):
         return None
 
     async def create_leave_request(self, *, user_id, leave_type, start_date, end_date,
-                                   reason, default_approver, idempotency_key=None) -> dict:
+                                   reason, default_approver, idempotency_key=None,
+                                   confirm_overlap=False) -> dict:
         existing = self._find_key(idempotency_key)
         if existing is not None:
             return {"request": dict(existing), "created": False}

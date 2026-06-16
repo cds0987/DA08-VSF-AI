@@ -24,7 +24,9 @@ import sqlalchemy as sa
 from app.domain.repositories.leave_write_repository import (
     InsufficientLeaveBalance,
     LeaveRequestConflict,
+    LeaveRequestDuplicate,
     LeaveRequestForbidden,
+    LeaveRequestOverlapWarning,
 )
 
 DB_URL = os.environ.get("HR_TEST_DATABASE_URL")
@@ -127,6 +129,47 @@ def test_idempotency_unique_no_duplicate(repo):
     with engine.begin() as conn:
         count = conn.execute(sa.text("SELECT count(*) FROM hr_svc.leave_requests")).scalar()
     assert count == 1
+
+
+def test_create_exact_duplicate_rejected(repo):
+    """Key khác nhau nhưng TRÙNG TOÀN BỘ (loại+ngày+lý do) -> LeaveRequestDuplicate."""
+    r, engine = repo
+    _seed_employee(engine, EMP, MANAGER)
+    first = _run(r.create_leave_request(
+        user_id=EMP, leave_type="personal", start_date="2026-07-10",
+        end_date="2026-07-10", reason="cá nhân", default_approver="", idempotency_key="a"))
+    assert first["created"] is True
+    with pytest.raises(LeaveRequestDuplicate):
+        _run(r.create_leave_request(
+            user_id=EMP, leave_type="personal", start_date="2026-07-10",
+            end_date="2026-07-10", reason="cá nhân", default_approver="", idempotency_key="b"))
+    with engine.begin() as conn:
+        count = conn.execute(sa.text("SELECT count(*) FROM hr_svc.leave_requests")).scalar()
+    assert count == 1
+
+
+def test_create_overlap_warns_then_confirm_creates(repo):
+    """Cùng/đè ngày nhưng KHÁC nội dung -> cảnh báo OverlapWarning (kèm đơn cũ);
+    gọi lại confirm_overlap=True -> tạo được."""
+    r, engine = repo
+    _seed_employee(engine, EMP, MANAGER)
+    _run(r.create_leave_request(
+        user_id=EMP, leave_type="personal", start_date="2026-07-11",
+        end_date="2026-07-11", reason="khám bệnh", default_approver="", idempotency_key="c"))
+    with pytest.raises(LeaveRequestOverlapWarning) as ei:
+        _run(r.create_leave_request(
+            user_id=EMP, leave_type="personal", start_date="2026-07-11",
+            end_date="2026-07-11", reason="việc gia đình", default_approver="", idempotency_key="d"))
+    assert ei.value.existing and ei.value.existing[0]["start_date"] == "2026-07-11"
+    # User xác nhận vẫn tạo -> bỏ qua cảnh báo.
+    out = _run(r.create_leave_request(
+        user_id=EMP, leave_type="personal", start_date="2026-07-11",
+        end_date="2026-07-11", reason="việc gia đình", default_approver="",
+        idempotency_key="d", confirm_overlap=True))
+    assert out["created"] is True
+    with engine.begin() as conn:
+        count = conn.execute(sa.text("SELECT count(*) FROM hr_svc.leave_requests")).scalar()
+    assert count == 2
 
 
 def test_approve_deducts_then_cancel_refunds(repo):

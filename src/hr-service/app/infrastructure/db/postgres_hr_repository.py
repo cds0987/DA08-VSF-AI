@@ -33,8 +33,10 @@ from app.domain.repositories.leave_write_repository import (
     ApproverNotConfigured,
     InsufficientLeaveBalance,
     LeaveRequestConflict,
+    LeaveRequestDuplicate,
     LeaveRequestForbidden,
     LeaveRequestNotFound,
+    LeaveRequestOverlapWarning,
     LeaveWriteRepository,
 )
 from app.infrastructure.db.models import (
@@ -592,6 +594,62 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
             .first()
         )
 
+    @staticmethod
+    def _norm_reason(reason: Optional[str]) -> str:
+        return (reason or "").strip().casefold()
+
+    def _find_active_duplicate(
+        self,
+        session: Session,
+        *,
+        user_id: str,
+        leave_type: str,
+        start: datetime.date,
+        end: datetime.date,
+        reason: str,
+    ):
+        """Đơn active (pending/approved) TRÙNG TOÀN BỘ: cùng user + loại + đúng khoảng
+        ngày + cùng lý do (chuẩn hoá). Khác bất kỳ field nào -> không phải trùng."""
+        candidates = (
+            session.query(LeaveRequestRecord)
+            .filter(
+                LeaveRequestRecord.user_id == user_id,
+                LeaveRequestRecord.leave_type == leave_type,
+                LeaveRequestRecord.start_date == start,
+                LeaveRequestRecord.end_date == end,
+                LeaveRequestRecord.status.in_(("pending", "approved")),
+            )
+            .all()
+        )
+        target = self._norm_reason(reason)
+        for rec in candidates:
+            if self._norm_reason(rec.reason) == target:
+                return rec
+        return None
+
+    def _find_overlaps(
+        self,
+        session: Session,
+        *,
+        user_id: str,
+        start: datetime.date,
+        end: datetime.date,
+    ) -> list[LeaveRequestRecord]:
+        """Đơn active (pending/approved) của user CHỒNG khoảng ngày [start, end]
+        (rec.start <= end AND rec.end >= start). Dùng để cảnh báo khi user có thể
+        đã quên đặt đơn cùng/đè ngày."""
+        return (
+            session.query(LeaveRequestRecord)
+            .filter(
+                LeaveRequestRecord.user_id == user_id,
+                LeaveRequestRecord.status.in_(("pending", "approved")),
+                LeaveRequestRecord.start_date <= end,
+                LeaveRequestRecord.end_date >= start,
+            )
+            .order_by(LeaveRequestRecord.start_date)
+            .all()
+        )
+
     def _new_request(
         self,
         session: Session,
@@ -633,6 +691,7 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
         reason: str,
         default_approver: str,
         idempotency_key: Optional[str] = None,
+        confirm_overlap: bool = False,
     ) -> dict:
         start, end = _parse_date(start_date), _parse_date(end_date)
 
@@ -641,6 +700,33 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
                 existing = self._find_by_key(session, idempotency_key)
                 if existing is not None:
                     return {"request": _req_to_dict(existing), "created": False}
+                dup = self._find_active_duplicate(
+                    session,
+                    user_id=user_id,
+                    leave_type=leave_type,
+                    start=start,
+                    end=end,
+                    reason=reason,
+                )
+                if dup is not None:
+                    status_vi = "đang chờ duyệt" if dup.status == "pending" else "đã được duyệt"
+                    raise LeaveRequestDuplicate(
+                        f"Bạn đã có một đơn nghỉ y hệt ({status_vi}) cho khoảng ngày này — "
+                        f"không tạo thêm để tránh trùng.",
+                        existing=_req_to_dict(dup),
+                    )
+                # Chồng ngày nhưng khác nội dung: user có thể quên -> cảnh báo, để user
+                # xác nhận (confirm_overlap) thay vì tạo mù hoặc chặn cứng.
+                if not confirm_overlap:
+                    overlaps = self._find_overlaps(
+                        session, user_id=user_id, start=start, end=end
+                    )
+                    if overlaps:
+                        raise LeaveRequestOverlapWarning(
+                            "Bạn đã có đơn nghỉ trùng/đè lên khoảng ngày này. Kiểm tra lại "
+                            "bên dưới — nếu vẫn muốn tạo đơn mới, hãy xác nhận.",
+                            existing=[_req_to_dict(o) for o in overlaps],
+                        )
                 approver = self._resolve_approver(session, user_id, default_approver)
                 rec = self._new_request(
                     session,

@@ -17,6 +17,8 @@ class LeaveCreateRequest(BaseModel):
     reason: str = ""
     # Chống tạo trùng khi double-click/retry: frontend sinh 1 key/lần mở form.
     idempotency_key: Optional[str] = None
+    # User đã xem cảnh báo chồng ngày và vẫn muốn tạo -> bỏ qua cảnh báo overlap.
+    confirm_overlap: bool = False
 
 
 class LeaveCancelRequest(BaseModel):

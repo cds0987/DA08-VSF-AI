@@ -52,6 +52,7 @@ class HRLeaveClient:
         end_date: str,
         reason: str,
         idempotency_key: str | None = None,
+        confirm_overlap: bool = False,
     ) -> tuple[int, dict]:
         payload: dict[str, Any] = {
             "user_id": user_id,
@@ -59,6 +60,7 @@ class HRLeaveClient:
             "start_date": start_date,
             "end_date": end_date,
             "reason": reason,
+            "confirm_overlap": confirm_overlap,
         }
         if idempotency_key:
             payload["idempotency_key"] = idempotency_key

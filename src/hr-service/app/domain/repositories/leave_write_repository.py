@@ -39,6 +39,29 @@ class InsufficientLeaveBalance(LeaveWriteError):
     """Duyệt mà số ngày vượt hạn mức còn lại -> 409 (rollback, đơn giữ pending)."""
 
 
+class LeaveRequestDuplicate(LeaveWriteError):
+    """Đã có đơn active (pending/approved) TRÙNG TOÀN BỘ (cùng loại + cùng khoảng
+    ngày + cùng lý do) -> 409. Chống tạo lặp khi mỗi lượt chat sinh idempotency_key
+    mới (idempotency_key chỉ chặn double-submit cùng 1 form). KHÁC lý do/loại hoặc
+    chỉ đè 1 phần ngày -> KHÔNG coi là trùng, vẫn cho tạo. Mang theo đơn trùng để báo.
+    """
+
+    def __init__(self, message: str, *, existing: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.existing = existing or {}
+
+
+class LeaveRequestOverlapWarning(LeaveWriteError):
+    """Có đơn active CHỒNG NGÀY nhưng KHÁC nội dung (không phải trùng toàn bộ) -> 409
+    CẢNH BÁO (không chặn cứng). User có thể quên đã đặt đơn ngày đó -> FE hiện form
+    riêng + chi tiết đơn cũ; muốn vẫn tạo thì gọi lại với confirm_overlap=True.
+    """
+
+    def __init__(self, message: str, *, existing: list[dict[str, Any]] | None = None) -> None:
+        super().__init__(message)
+        self.existing = existing or []
+
+
 class LeaveWriteRepository(ABC):
     @abstractmethod
     async def create_leave_request(
@@ -51,10 +74,14 @@ class LeaveWriteRepository(ABC):
         reason: str,
         default_approver: str,
         idempotency_key: Optional[str] = None,
+        confirm_overlap: bool = False,
     ) -> dict[str, Any]:
         """Tạo đơn pending. Resolve approver = manager_user_id OR default_approver
         (rỗng -> ApproverNotConfigured). days_count server tính (ngày lịch).
         idempotency_key trùng -> trả đơn cũ (created=False), KHÔNG tạo thêm.
+        Trùng TOÀN BỘ (loại+ngày+lý do, đơn active) -> LeaveRequestDuplicate (chặn).
+        Chồng ngày nhưng khác nội dung & confirm_overlap=False -> LeaveRequestOverlapWarning.
+        confirm_overlap=True -> bỏ qua cảnh báo chồng ngày, vẫn tạo.
         Trả: {"request": <đơn>, "created": bool}."""
         raise NotImplementedError
 

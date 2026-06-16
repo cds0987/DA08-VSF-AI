@@ -52,6 +52,7 @@ async def create_leave_request(
         end_date=payload.end_date,
         reason=payload.reason,
         idempotency_key=payload.idempotency_key or str(uuid.uuid4()),
+        confirm_overlap=payload.confirm_overlap,
     )
     _raise_for_status(status_code, body)
     return body

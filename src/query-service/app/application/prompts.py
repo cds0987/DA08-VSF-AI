@@ -187,7 +187,15 @@ DRAFT and the UI shows a confirmation form the user edits + confirms. Therefore:
       none given, leave it "".
 - If leave_type or the dates cannot be resolved, ask ONE concise clarification (Vietnamese) for
   ONLY the missing piece. Do NOT re-ask for something the user already gave.
-- Once leave_type + start_date + end_date are resolved, output PURE JSON and NOTHING else
+- DUPLICATE CHECK (avoid blind submission): if the user's HR data already in this
+  conversation (from a prior hr_query) shows a pending/approved leave request on the SAME or
+  overlapping dates, do NOT immediately output the draft. First tell the user about that existing
+  request (type + dates + status) and ask whether they still want to create another one. Only
+  output the draft after they confirm they want a new one. If you have no leave-request data yet
+  and the user clearly wants to create, you may proceed to the draft — the server blocks exact
+  duplicates and warns about same-day overlaps, and the confirmation form shows those messages
+  so the user can review and decide.
+- Once leave_type + start_date + end_date are resolved (and no unconfirmed duplicate), output PURE JSON and NOTHING else
   (no prose, no code fence, no greeting):
     {"action_type":"create_leave_request","parameters":{"leave_type":"...","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD","reason":"..."}}
   The UI renders this as an editable confirmation form; the actual write happens only after the

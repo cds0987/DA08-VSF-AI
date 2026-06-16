@@ -15,8 +15,10 @@ from app.domain.repositories.leave_write_repository import (
     ApproverNotConfigured,
     InsufficientLeaveBalance,
     LeaveRequestConflict,
+    LeaveRequestDuplicate,
     LeaveRequestForbidden,
     LeaveRequestNotFound,
+    LeaveRequestOverlapWarning,
     LeaveWriteRepository,
 )
 
@@ -124,6 +126,8 @@ class LeaveCreateRequest(BaseModel):
     end_date: str
     reason: str = ""
     idempotency_key: Optional[str] = None
+    # User đã xem cảnh báo chồng ngày và vẫn muốn tạo -> bỏ qua LeaveRequestOverlapWarning.
+    confirm_overlap: bool = False
 
 
 class LeaveUpdateRequest(BaseModel):
@@ -153,9 +157,35 @@ def _map_leave_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=403, detail="không có quyền với đơn này")
     if isinstance(exc, InsufficientLeaveBalance):
         return HTTPException(status_code=409, detail="không đủ hạn mức phép")
+    if isinstance(exc, LeaveRequestDuplicate):
+        # Trùng toàn bộ -> CHẶN (FE không cho "vẫn tạo"). detail object để FE nhận diện.
+        return HTTPException(status_code=409, detail={
+            "code": "leave_duplicate",
+            "message": str(exc),
+            "existing": [_existing_summary(exc.existing)] if exc.existing else [],
+        })
+    if isinstance(exc, LeaveRequestOverlapWarning):
+        # Chồng ngày khác nội dung -> CẢNH BÁO (FE cho phép xác nhận tạo tiếp).
+        return HTTPException(status_code=409, detail={
+            "code": "leave_overlap",
+            "message": str(exc),
+            "existing": [_existing_summary(e) for e in exc.existing],
+        })
     if isinstance(exc, LeaveRequestConflict):
         return HTTPException(status_code=409, detail="đơn không ở trạng thái hợp lệ")
     return HTTPException(status_code=500, detail="leave write error")
+
+
+def _existing_summary(req: dict[str, Any]) -> dict[str, Any]:
+    """Tóm tắt đơn đang đè (chỉ data của chính user) cho FE hiển thị cảnh báo."""
+    return {
+        "request_id": req.get("id"),
+        "leave_type": req.get("leave_type"),
+        "start_date": req.get("start_date"),
+        "end_date": req.get("end_date"),
+        "status": req.get("status"),
+        "reason": req.get("reason"),
+    }
 
 
 def _validate_dates(start_date: str, end_date: str) -> None:
@@ -222,6 +252,7 @@ async def create_leave_request(
             reason=body.reason,
             default_approver=settings.default_approver,
             idempotency_key=body.idempotency_key,
+            confirm_overlap=body.confirm_overlap,
         )
     except Exception as exc:  # noqa: BLE001
         raise _map_leave_error(exc)
