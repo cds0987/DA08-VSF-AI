@@ -305,11 +305,23 @@ def test_create_bad_date_format_returns_422(ctx):
 def test_create_invalid_leave_type_returns_422(ctx):
     client, repo, pub, _ = ctx
     repo.managers[EMP] = MANAGER
+    # 'unpaid' giờ là loại HỢP LỆ (rổ 4). Dùng loại không có trong registry để test 422.
     r = client.post("/hr/leave-requests", json={
-        "user_id": EMP, "leave_type": "unpaid",
+        "user_id": EMP, "leave_type": "khong_ton_tai",
         "start_date": "2026-07-01", "end_date": "2026-07-02",
     })
-    assert r.status_code == 422  # Literal validation
+    assert r.status_code == 422  # leave_type không hợp lệ (registry validation)
+
+
+def test_create_event_leave_cap_exceeded_returns_422(ctx):
+    client, repo, pub, _ = ctx
+    repo.managers[EMP] = MANAGER
+    # Kết hôn tối đa 3 ngày/lần -> 5 ngày phải bị 422.
+    r = client.post("/hr/leave-requests", json={
+        "user_id": EMP, "leave_type": "marriage",
+        "start_date": "2026-07-01", "end_date": "2026-07-05",
+    })
+    assert r.status_code == 422
 
 
 def test_create_idempotent_same_key_no_duplicate(ctx):
