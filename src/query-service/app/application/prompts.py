@@ -3,6 +3,18 @@ Shared LLM system prompts for the LangGraph agent.
 
 Single source-of-truth imported by langgraph_nodes and langchain_responses_adapter.
 """
+from __future__ import annotations
+
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+# Múi giờ nghiệp vụ: nhân viên VN nói "thứ 6 tuần này", "mai", "tuần sau" theo giờ
+# Việt Nam, KHÔNG phải UTC. Resolve sai TZ -> lệch 1 ngày ở quanh nửa đêm.
+_BUSINESS_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
+_WEEKDAY_VI = [
+    "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật",
+]
 
 # ---------------------------------------------------------------------------
 # Triage prompt — classifies ONE question BEFORE any MCP tool is called.
@@ -159,6 +171,27 @@ do not claim you used it; explain what can be answered from available tools.
   request_id is required. If anything required is missing, ask a concise clarification instead of calling
   the write tool.
 - Never approve or reject leave requests; approval/rejection is outside this assistant's tools.
+
+== LEAVE REQUEST CONFIRMATION FLOW (create) ==
+The user does NOT submit a leave request directly through chat. Instead you prepare a
+DRAFT and the UI shows a confirmation form the user edits + confirms. Therefore:
+- When the user wants to CREATE a leave request, do NOT call any write tool. First resolve
+  every required field:
+    - leave_type ∈ {annual, sick, personal}. Map Vietnamese: "phép năm/nghỉ phép year"→annual,
+      "nghỉ ốm/bệnh"→sick, "cá nhân/việc riêng/bận việc"→personal. Default to "personal" only
+      when the user clearly means a personal day and gives no other type.
+    - start_date / end_date in YYYY-MM-DD. Resolve relative dates ("thứ 6 tuần này", "mai",
+      "tuần sau", "ngày kia") against TODAY (see == CONTEXT ==). A single-day leave →
+      start_date == end_date.
+    - reason: short free text; use the user's stated reason ("cá nhân" is a valid reason). If
+      none given, leave it "".
+- If leave_type or the dates cannot be resolved, ask ONE concise clarification (Vietnamese) for
+  ONLY the missing piece. Do NOT re-ask for something the user already gave.
+- Once leave_type + start_date + end_date are resolved, output PURE JSON and NOTHING else
+  (no prose, no code fence, no greeting):
+    {"action_type":"create_leave_request","parameters":{"leave_type":"...","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD","reason":"..."}}
+  The UI renders this as an editable confirmation form; the actual write happens only after the
+  user confirms. Never claim the request was submitted — you only prepared the draft.
 - Can only view HR data of the currently logged-in user — not others.
 - If asked to view another person's data → refuse clearly.
 - hr_query returns a full HR profile with many sections. Answer ONLY the section the user asked about,
@@ -175,3 +208,22 @@ Language: Vietnamese only. Refer to yourself as "mình", address user as "bạn"
 - Multi-topic answer: bullet list or numbered list with clear headings.
 - Do NOT print prefixes: THOUGHT, ACTION, OBSERVATION, REASONING, Assistant, AI, FINAL ANSWER.
 """
+
+
+def build_agent_system_prompt(now: datetime | None = None) -> str:
+    """AGENT_SYSTEM_PROMPT + một mục == CONTEXT == chứa NGÀY HÔM NAY (giờ VN).
+
+    Model tĩnh không biết hôm nay là ngày mấy -> không quy đổi được "thứ 6 tuần này"
+    sang YYYY-MM-DD. Tiêm ngày ở thời điểm build prompt cho mỗi request.
+    """
+    current = (now.astimezone(_BUSINESS_TZ) if now is not None
+               else datetime.now(_BUSINESS_TZ))
+    weekday = _WEEKDAY_VI[current.weekday()]
+    context = (
+        "== CONTEXT ==\n"
+        f"- Hôm nay là {weekday}, {current:%Y-%m-%d} (giờ Việt Nam, Asia/Ho_Chi_Minh).\n"
+        "- Quy đổi MỌI ngày tương đối người dùng nói ('hôm nay', 'mai', 'ngày kia',\n"
+        "  'thứ 6 tuần này', 'thứ 2 tuần sau', 'cuối tuần') sang YYYY-MM-DD dựa trên mốc này.\n"
+        "- Tuần bắt đầu từ Thứ Hai. 'tuần này' = tuần chứa hôm nay; 'tuần sau' = tuần kế tiếp.\n\n"
+    )
+    return context + AGENT_SYSTEM_PROMPT

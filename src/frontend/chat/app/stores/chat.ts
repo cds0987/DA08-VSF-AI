@@ -558,6 +558,12 @@ export const useChatStore = defineStore('chat', () => {
           try {
             const parsed = JSON.parse(trimmedContent)
             if (parsed.action_type && parsed.parameters) {
+              // idempotency_key sinh 1 lần ở đây (lúc dựng card), KHÔNG sinh lúc submit
+              // -> user bấm Confirm nhiều lần vẫn chỉ tạo 1 đơn (hr-service dedupe theo key).
+              if (!parsed.idempotency_key) {
+                parsed.idempotency_key
+                  = (globalThis.crypto?.randomUUID?.() ?? `idem-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+              }
               actionPayload = parsed
             }
           } catch {

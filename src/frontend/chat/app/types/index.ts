@@ -138,6 +138,8 @@ export interface HRActionPayload {
     end_date: string
     reason: string
   }
+  // Sinh 1 lần khi tạo card (FE) -> chống tạo trùng nếu user bấm Confirm 2 lần / retry.
+  idempotency_key?: string
 }
 
 export interface ChatMessage {
