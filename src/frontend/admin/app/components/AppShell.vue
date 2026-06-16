@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { 
-  LayoutDashboard, 
-  FileText, 
-  Upload, 
-  ShieldCheck, 
-  Users, 
-  PanelLeftOpen, 
+import {
+  LayoutDashboard,
+  FileText,
+  Upload,
+  ShieldCheck,
+  Users,
+  Briefcase,
+  PanelLeftOpen,
   PanelLeftClose,
   Settings,
   LogOut,
@@ -26,6 +27,7 @@ const ADMIN_NAV = [
   { label: 'Upload Center', to: '/upload', icon: Upload },
   { label: 'Audit Logs', to: '/audit', icon: ShieldCheck },
   { label: 'User Management', to: '/users', icon: Users },
+  { label: 'Employee Management', to: '/employees', icon: Briefcase },
 ]
 
 const handleSignOut = () => {
