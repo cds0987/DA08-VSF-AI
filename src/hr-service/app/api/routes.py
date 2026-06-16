@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from app.api.auth import require_internal_token
 from app.core.config import HrSettings, get_settings as load_hr_settings
+from app.domain.leave_policy import get_policy, registry_payload
 from app.domain.repositories.hr_repository import HrRepository
 from app.domain.repositories.leave_write_repository import (
     ApproverNotConfigured,
@@ -95,7 +96,9 @@ class HrProfileRequest(BaseModel):
 
 
 # ──────────────────────────── LEAVE WRITE ────────────────────────────
-LeaveType = Literal["annual", "sick", "personal"]
+# leave_type validate ĐỘNG theo Leave Type Registry (4 rổ) thay vì Literal cứng —
+# nguồn sự thật ở app/domain/leave_policy.py. Giá trị lạ -> 422 (xem _validate_leave_type).
+LeaveType = str
 
 
 async def get_write_repo(
@@ -200,6 +203,26 @@ def _validate_dates(start_date: str, end_date: str) -> None:
         raise HTTPException(status_code=422, detail="start_date phải <= end_date")
 
 
+def _validate_leave_type(leave_type: str, start_date: str, end_date: str) -> None:
+    """Loại nghỉ phải hợp lệ (theo registry) + tôn trọng định mức MỖI ĐƠN của rổ sự
+    kiện (vd kết hôn ≤ 3 ngày, con kết hôn ≤ 1). Sai -> 422."""
+    import datetime as _dt
+
+    policy = get_policy(leave_type)
+    if policy is None:
+        valid = ", ".join(p["code"] for p in registry_payload())
+        raise HTTPException(status_code=422, detail=f"leave_type không hợp lệ. Hợp lệ: {valid}")
+    if policy.per_event_cap is not None:
+        start = _dt.date.fromisoformat(start_date)
+        end = _dt.date.fromisoformat(end_date)
+        days = (end - start).days + 1
+        if days > policy.per_event_cap:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{policy.label_vi} tối đa {policy.per_event_cap} ngày/lần (đơn này {days} ngày).",
+            )
+
+
 def _created_payload(req: dict[str, Any]) -> dict[str, Any]:
     return {
         "request_id": req["id"],
@@ -243,6 +266,7 @@ async def create_leave_request(
     publisher: Any = Depends(get_publisher),
 ) -> dict[str, Any]:
     _validate_dates(body.start_date, body.end_date)
+    _validate_leave_type(body.leave_type, body.start_date, body.end_date)
     try:
         result = await repo.create_leave_request(
             user_id=body.user_id,
@@ -272,6 +296,7 @@ async def update_leave_request(
     publisher: Any = Depends(get_publisher),
 ) -> dict[str, Any]:
     _validate_dates(body.start_date, body.end_date)
+    _validate_leave_type(body.leave_type, body.start_date, body.end_date)
     try:
         result = await repo.update_leave_request(
             user_id=body.user_id,
@@ -642,6 +667,12 @@ async def hr_profile(
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@public_router.get("/hr/leave-types")
+async def list_leave_types() -> dict[str, Any]:
+    """Taxonomy loại nghỉ (4 rổ luật LĐ VN) — nguồn sự thật cho FE + agent lấy động."""
+    return {"leave_types": registry_payload()}
 
 
 @public_router.get("/hr/departments")

@@ -28,6 +28,7 @@ from app.domain.entities.dtos import (
     PayrollDTO,
     PerformanceReviewDTO,
 )
+from app.domain.leave_policy import get_policy
 from app.domain.repositories.hr_repository import HrRepository
 from app.domain.repositories.leave_write_repository import (
     ApproverNotConfigured,
@@ -618,9 +619,16 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
 
     @staticmethod
     def _adjust_balance(session: Session, owner_id: str, leave_type: str, delta_days: int) -> None:
-        """delta_days > 0 = trừ (duyệt); < 0 = hoàn (hủy/sửa-approved). Chỉ annual/sick
-        đụng balance; personal bỏ qua. Trừ vượt hạn mức -> InsufficientLeaveBalance."""
-        if leave_type not in ("annual", "sick"):
+        """delta_days > 0 = trừ (duyệt); < 0 = hoàn (hủy/sửa-approved).
+
+        Định tuyến quỹ theo Leave Type Registry (4 rổ luật LĐ VN):
+        - deduct_pool="annual" -> trừ quỹ phép năm.
+        - deduct_pool="sick"   -> trừ quỹ nghỉ ốm (BHXH cap).
+        - None (rổ 2 sự kiện / rổ 4 không lương / thai sản) -> KHÔNG trừ quỹ.
+        Trừ vượt quỹ -> InsufficientLeaveBalance."""
+        policy = get_policy(leave_type)
+        pool = policy.deduct_pool if policy else "annual"  # type lạ -> mặc định an toàn
+        if pool is None:
             return
         bal = (
             session.query(LeaveBalanceRecord)
@@ -633,15 +641,15 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
             if delta_days > 0:
                 raise InsufficientLeaveBalance("nhân viên chưa có hồ sơ hạn mức phép")
             return
-        if leave_type == "annual":
+        if pool == "annual":
             new_used = bal.annual_leave_used + delta_days
             if new_used > bal.annual_leave_total:
-                raise InsufficientLeaveBalance("vượt hạn mức phép năm còn lại")
+                raise InsufficientLeaveBalance("vượt quỹ phép năm còn lại")
             bal.annual_leave_used = max(0, new_used)
         else:  # sick
             new_used = bal.sick_leave_used + delta_days
             if new_used > bal.sick_leave_total:
-                raise InsufficientLeaveBalance("vượt hạn mức phép ốm còn lại")
+                raise InsufficientLeaveBalance("vượt quỹ nghỉ ốm còn lại")
             bal.sick_leave_used = max(0, new_used)
         bal.updated_at = _now()
 
@@ -929,13 +937,15 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
         remaining: int | None = None
         total: int | None = None
         bal = session.get(LeaveBalanceRecord, row.user_id)
-        if bal is not None:
-            if row.leave_type == "annual":
-                remaining = bal.annual_leave_total - bal.annual_leave_used
-                total = bal.annual_leave_total
-            elif row.leave_type == "sick":
-                remaining = bal.sick_leave_total - bal.sick_leave_used
-                total = bal.sick_leave_total
+        policy = get_policy(row.leave_type)
+        pool = policy.deduct_pool if policy else None
+        if bal is not None and pool == "annual":
+            remaining = bal.annual_leave_total - bal.annual_leave_used
+            total = bal.annual_leave_total
+        elif bal is not None and pool == "sick":
+            remaining = bal.sick_leave_total - bal.sick_leave_used
+            total = bal.sick_leave_total
+        # Rổ 2 (sự kiện) / rổ 4 (không lương) / thai sản: không trừ quỹ -> remaining=None.
         conflicts = (
             session.query(LeaveRequestRecord)
             .filter(
