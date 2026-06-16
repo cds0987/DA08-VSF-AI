@@ -71,6 +71,6 @@ class LeaveTypesTool:
             self._client = None
 
 
-# NOTE(build): tool này được merge ở 38a7f8e nhưng run đó fail -> image mcp-service
-# chưa build kèm nó. Đụng file để buộc build-push mcp-service ở deploy này.
+# NOTE(build): tool này được merge ở 38a7f8e nhưng các run sau fail -> image mcp-service
+# vẫn chưa build kèm. Đụng file để buộc build-push mcp-service ở deploy này (retry).
 register_tool("leave_types", lambda settings, params: LeaveTypesTool(settings, params))

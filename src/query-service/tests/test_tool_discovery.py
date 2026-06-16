@@ -237,7 +237,7 @@ def _rag_tool_state(question: str = "Quy định nghỉ phép năm là gì?"):
 
 @pytest.mark.asyncio
 async def test_act_node_rag_weak_results_adaptive_fallback():
-    """Chunk dưới ngưỡng nhưng qdrant CÓ kết quả -> fallback top-3 cho LLM, KHÔNG hard-stop."""
+    """Chunk điểm thấp NHƯNG đạt ngưỡng (0.45) -> đưa vào sources, KHÔNG hard-stop NO_INFO."""
     from app.application.langgraph_nodes import act_node
     from app.infrastructure.external.mcp_client import SearchResult
 
@@ -251,7 +251,7 @@ async def test_act_node_rag_weak_results_adaptive_fallback():
                     caption="Chính sách nghỉ phép",
                     parent_text="Nhân viên được 12 ngày phép năm.",
                     heading_path=[],
-                    score=0.28,  # < ngưỡng 0.70 nhưng vẫn có kết quả
+                    score=0.5,  # >= ngưỡng 0.45 -> đạt, vẫn dùng làm nguồn
                 )
             ]
 
