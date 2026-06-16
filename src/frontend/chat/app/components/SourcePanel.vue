@@ -5,6 +5,7 @@ import DOMPurify from 'dompurify'
 import MarkdownIt from 'markdown-it'
 import type { Citation } from '~/types'
 import documentService from '~/lib/api/documentService'
+import { citationHeadingPath } from '~/lib/utils'
 
 type ViewerMode = 'pdf' | 'html' | 'text' | 'image' | 'unsupported'
 type SupportedFileType = 'pdf' | 'docx' | 'txt' | 'xlsx' | 'csv' | 'pptx' | 'md' | ImageFileType
@@ -39,8 +40,19 @@ const fileType = ref('')
 const isLoading = ref(false)
 const errorMsg = ref<string | null>(null)
 let loadController: AbortController | null = null
+// Blob URL (same-origin) cấp cho PDF.js viewer: presigned URL của GCS/MinIO khác origin
+// nên viewer.mjs validateFileURL chặn ("file origin does not match viewer's").
+let objectUrl: string | null = null
+
+function revokeObjectUrl() {
+  if (objectUrl) {
+    URL.revokeObjectURL(objectUrl)
+    objectUrl = null
+  }
+}
 
 const fileTypeLabel = computed(() => fileType.value ? fileType.value.toUpperCase() : '')
+const headingPath = computed(() => props.citation ? citationHeadingPath(props.citation.heading_path, props.citation.document) : [])
 
 function normalizeFileType(value: string, documentName: string): string {
   const normalized = value.trim().toLowerCase().replace(/^\./, '')
@@ -154,6 +166,7 @@ function createHtmlDocument(content: string, caption: string): string {
 }
 
 function resetViewer() {
+  revokeObjectUrl()
   viewerMode.value = 'unsupported'
   fileUrl.value = null
   sourceUrl.value = null
@@ -194,12 +207,6 @@ watch(
       }
 
       const supportedType = normalizedType as SupportedFileType
-      if (supportedType === 'pdf') {
-        viewerMode.value = 'pdf'
-        fileUrl.value = createPdfViewerUrl(result.url, newCitation)
-        return
-      }
-
       if (imageFileTypes.has(supportedType as ImageFileType)) {
         viewerMode.value = 'image'
         fileUrl.value = result.url
@@ -208,6 +215,14 @@ watch(
 
       const data = await fetchFile(result.url, controller.signal)
       if (controller.signal.aborted) return
+
+      if (supportedType === 'pdf') {
+        // Tải PDF qua blob same-origin để vượt qua origin check của PDF.js viewer.
+        objectUrl = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }))
+        viewerMode.value = 'pdf'
+        fileUrl.value = createPdfViewerUrl(objectUrl, newCitation)
+        return
+      }
 
       if (supportedType === 'txt') {
         viewerMode.value = 'text'
@@ -247,7 +262,10 @@ watch(
   { immediate: true },
 )
 
-onBeforeUnmount(() => loadController?.abort())
+onBeforeUnmount(() => {
+  loadController?.abort()
+  revokeObjectUrl()
+})
 </script>
 
 <template>
@@ -262,8 +280,8 @@ onBeforeUnmount(() => loadController?.abort())
             <div class="truncate text-sm font-semibold text-slate-900 dark:text-foreground">
               {{ citation?.caption || citation?.document || 'No source selected' }}
             </div>
-            <div v-if="citation?.heading_path?.length" class="mt-1 text-xs font-medium text-slate-500 dark:text-muted-foreground">
-              {{ citation.heading_path.join(' › ') }}
+            <div v-if="headingPath.length" class="mt-1 text-xs font-medium text-slate-500 dark:text-muted-foreground">
+              {{ headingPath.join(' › ') }}
             </div>
             <div class="mt-1 flex items-center gap-2 truncate text-[11px] text-slate-400 dark:text-muted-foreground">
               <span class="truncate">{{ citation?.document || '—' }}</span>

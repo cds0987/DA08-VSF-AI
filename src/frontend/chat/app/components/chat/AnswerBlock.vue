@@ -7,7 +7,7 @@ import {
   ThumbsDown,
   ThumbsUp,
 } from '@lucide/vue'
-import { cn } from '~/lib/utils'
+import { citationHeadingPath, cn } from '~/lib/utils'
 import type { ChatMessage, Citation } from '~/types'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
@@ -114,8 +114,8 @@ function selectSource(citation: Citation) {
           <div class="mt-1 truncate text-[11px] font-medium text-slate-700 dark:text-muted-foreground">
             {{ citation.document }}
           </div>
-          <div v-if="citation.heading_path.length" class="mt-1 truncate text-[11px] font-medium text-slate-600 dark:text-muted-foreground/70">
-            {{ citation.heading_path.join(' › ') }}
+          <div v-if="citationHeadingPath(citation.heading_path, citation.document).length" class="mt-1 truncate text-[11px] font-medium text-slate-600 dark:text-muted-foreground/70">
+            {{ citationHeadingPath(citation.heading_path, citation.document).join(' › ') }}
           </div>
         </button>
       </div>
