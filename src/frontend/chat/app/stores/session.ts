@@ -37,9 +37,10 @@ export const useSessionStore = defineStore('session', () => {
     user.value = userData
   }
 
-  function signOut() {
+  async function signOut() {
     user.value = null
-    authService.logout(true)
+    await authService.logout(false)
+    await navigateTo('/login', { replace: true })
   }
 
   return {
