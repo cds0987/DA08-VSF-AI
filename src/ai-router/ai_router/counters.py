@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 RPM_TTL = 90
 DAY_TTL = 93_600       # 26h
 MONTH_TTL = 2_764_800  # 32d
+BAND_TTL = 3_600       # 1h — band là cửa sổ trượt rải tải, không cần bền
+SEQ_TTL = 93_600       # 26h — bộ đếm weighted round-robin theo capability
 
 
 def _now() -> datetime:
@@ -70,6 +72,19 @@ class Counters(ABC):
 
     @abstractmethod
     async def set_active(self, name: str, idx: int) -> None: ...
+
+    # --- banded rotation (rải tải 250K/150K) + weighted round-robin ---
+    @abstractmethod
+    async def add_band(self, scope: str, key_id: str, amount: int) -> int: ...
+
+    @abstractmethod
+    async def get_band(self, scope: str, key_id: str) -> int: ...
+
+    @abstractmethod
+    async def reset_band(self, scope: str, key_id: str) -> None: ...
+
+    @abstractmethod
+    async def next_seq(self, name: str) -> int: ...
 
 
 # --------------------------------------------------------------------------- #
@@ -158,6 +173,24 @@ class RedisCounters(Counters):
     async def set_active(self, name, idx):
         await self._r.set(f"active:{name}", int(idx))
 
+    async def add_band(self, scope, key_id, amount):
+        k = f"band:{scope}:{key_id}"
+        val = await self._r.incrby(k, int(amount))
+        await self._r.expire(k, BAND_TTL)
+        return int(val)
+
+    async def get_band(self, scope, key_id):
+        return int(await self._r.get(f"band:{scope}:{key_id}") or 0)
+
+    async def reset_band(self, scope, key_id):
+        await self._r.delete(f"band:{scope}:{key_id}")
+
+    async def next_seq(self, name):
+        k = f"seq:{name}"
+        val = await self._r.incr(k)
+        await self._r.expire(k, SEQ_TTL)
+        return int(val)
+
 
 # --------------------------------------------------------------------------- #
 # In-memory backend — dev/test, 1 process. KHÔNG atomic xuyên process.
@@ -244,6 +277,24 @@ class MemoryCounters(Counters):
 
     async def set_active(self, name, idx):
         self._active[name] = int(idx)
+
+    async def add_band(self, scope, key_id, amount):
+        k = f"band:{scope}:{key_id}"
+        val = self._get(k) + int(amount)
+        self._set(k, val, BAND_TTL)
+        return int(val)
+
+    async def get_band(self, scope, key_id):
+        return int(self._get(f"band:{scope}:{key_id}"))
+
+    async def reset_band(self, scope, key_id):
+        self._d.pop(f"band:{scope}:{key_id}", None)
+
+    async def next_seq(self, name):
+        k = f"seq:{name}"
+        val = int(self._get(k)) + 1
+        self._set(k, val, SEQ_TTL)
+        return val
 
 
 def create_counters(redis_url: str | None) -> Counters:

@@ -29,6 +29,13 @@ router = Router(settings)
 app = FastAPI(title="AI Router", version="0.1.0")
 
 
+@app.on_event("startup")
+async def _reconcile_on_boot() -> None:
+    """Đọc usage thật provider lúc boot (opt-in) -> thuật toán không 'mù 0'."""
+    if settings.reconcile_on_boot:
+        await router.reconcile_usage()
+
+
 def _auth(authorization: str | None, x_internal_token: str | None) -> None:
     """Bảo vệ nội bộ. Nếu AIROUTER_INTERNAL_TOKEN không set -> bỏ qua (dev)."""
     if not settings.internal_token:

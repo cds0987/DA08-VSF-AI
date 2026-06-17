@@ -27,18 +27,88 @@ class Selector(ABC):
     """Bộ não: tín hiệu sống -> 1 RouteDecision. PLAN §5.0."""
 
     def __init__(self, *, registry: Registry, catalog: Catalog, counters: Counters,
-                 tier_defs: dict[str, TierDef], params: dict | None = None) -> None:
+                 tier_defs: dict[str, TierDef], params: dict | None = None,
+                 metrics=None) -> None:
         self.registry = registry
         self.catalog = catalog
         self.counters = counters
         self.tier_defs = tier_defs
         self.params = params or {}
+        self.metrics = metrics            # observ strategy (band-rotation/save-mode); None = off
 
     @abstractmethod
     async def resolve(self, req: ResolveRequest) -> RouteDecision | None:
         """Trả (key,base_url,model) hoặc None nếu cạn mọi tier khả thi."""
 
     # ----- helpers dùng chung -----
+    def _emit(self, name: str, labels: dict | None = None) -> None:
+        if self.metrics is not None:
+            self.metrics.inc(name, labels or {})
+
+    async def banded_tier(
+        self, req: ResolveRequest, tier_name: str, band_tokens: int, *,
+        scope: str | None = None, model_override: ModelEntry | None = None,
+        daily_kind: str | None = None,
+    ) -> RouteDecision | None:
+        """BANDED key rotation trong 1 tier: dính key active tới khi nó phục vụ >= band_tokens
+        (est) thì tiến con trỏ + reset band, rồi reserve (vẫn tôn trọng RPM + daily hard cap).
+        Dùng chung cho banded_rotation, weighted_banded (mỗi lane), và save mode.
+
+        model_override: ép 1 model (save mode = gpt-4o-mini). daily_kind: override limit_kind
+        của tier (save mode = 'none' -> bỏ trần free, chấp nhận paid)."""
+        tdef = self.tier_defs.get(tier_name)
+        if tdef is None:
+            return None
+        keys = self.registry.keys_for_provider(tdef.provider)
+        live = [k for k in keys if not await self.counters.in_cooldown(k.id)]
+        if not live:
+            return None
+        scope = scope or f"{req.capability}:{tier_name}"
+        active = (await self.counters.get_active(scope)) % len(live)
+        cur = live[active]
+        # Banded: key active đã đủ band -> reset + tiến con trỏ sang key kế.
+        if (await self.counters.get_band(scope, cur.id)) >= band_tokens:
+            await self.counters.reset_band(scope, cur.id)
+            active = (active + 1) % len(live)
+            self._emit("airouter_band_rotation_total", {"scope": scope, "tier": tier_name})
+        order = live[active:] + live[:active]
+        for k in order:
+            if model_override is not None:
+                model = model_override if self.feasible_model(model_override, tdef, req) else None
+            else:
+                model = await self.pick_model(tier_name, tdef, req)
+            if model is None:
+                break  # tier/lane không có model khả thi -> spill sang tier/lane kế
+            dk = daily_kind or tdef.limit_kind
+            daily_limit = k.limit.value if dk != "none" else 0.0
+            ok = await self.counters.reserve(
+                k.id, rpm_limit=tdef.rpm, daily_kind=dk,
+                daily_limit=daily_limit, est_tokens=req.est_tokens,
+            )
+            if ok:
+                await self.counters.set_active(scope, live.index(k))
+                await self.counters.add_band(scope, k.id, req.est_tokens)
+                return self.build_decision(k, model, tier_name, req)
+            # key chạm ngưỡng -> thử key kế (soft overflow trong lane)
+        return None
+
+    async def save_mode(self, req: ResolveRequest, cfg) -> RouteDecision | None:
+        """Save mode: MỌI tier cạn -> ép gpt-4o-mini trên tier OpenAI, bỏ trần free
+        (daily_kind='none'), vẫn band. KHÔNG trả 503 mà degrade rẻ."""
+        if cfg is None or not getattr(cfg, "enabled", False):
+            return None
+        model = self.catalog.get(cfg.model)
+        if model is None:
+            return None
+        dec = await self.banded_tier(
+            req, cfg.tier, cfg.band_tokens, scope=f"{req.capability}:save",
+            model_override=model, daily_kind="none",
+        )
+        if dec is not None:
+            self._emit("airouter_save_mode_total", {"capability": req.capability})
+        return dec
+
+    # ----- helpers cũ -----
     def feasible_model(self, m: ModelEntry | None, tdef: TierDef, req: ResolveRequest) -> bool:
         if m is None:
             return False

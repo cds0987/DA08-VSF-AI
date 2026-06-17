@@ -396,6 +396,52 @@ Monitor → Analyze → Plan(Strategy plugin) → [HUMAN GATE] → Execute(AI Ro
 
 ---
 
+## §11. Cập nhật từ phiên thảo luận (2026-06-17) — đính chính + cụ thể hoá
+
+> Bổ sung cho §1, §7, §8. KHÔNG thay nội dung cũ; chỉ sửa 1 giả định sai + chốt 4 quyết định.
+
+### 11.1 ⚠️ ĐÍNH CHÍNH §1.1 — embed/caption/ingest HIỆN KHÔNG đi qua ai-router
+Sơ đồ §1.1 (dòng "caption/embed đi qua ai-router") là **mục tiêu, chưa phải hiện trạng**. Audit code+env chứng minh ngược lại:
+- [common.env:29](../../deploy/env/common.env#L29) + [README-ai-router.md:42](../../deploy/observability/README-ai-router.md#L42): `EMBED_BASE_URL` **rỗng = gọi thẳng OpenAI**.
+- **3 luồng AI bypass router** (vô hình với accounting → đây chính là gốc của §8 #5 cost sai):
+  1. `mcp-service` embed query (mỗi rag_search) — [embedding.py](../../src/mcp-service/app/core/embedding.py) base_url rỗng.
+  2. `rag-worker` embed ingestion — [openai_provider.py](../../src/rag-worker/core_engine/ai/openai_provider.py).
+  3. `rag-worker` caption + OCR (vision) — cùng provider.
+- Chỉ **query-service LLM chat** (think/triage/guardrail) là đã route + có **CI gate** ([test_llm_architecture_enforcement.py](../../src/query-service/tests/test_llm_architecture_enforcement.py)).
+
+**Remediation "khống chế HẾT" (điều kiện cần cho observability đúng):**
+- (a) Trỏ env `EMBED_BASE_URL` + mcp `embed/rerank_base_url` + rag-worker caption/ocr/embed base_url → `http://ai-router:8010/v1` (code đã sẵn sàng, zero code).
+- (b) **Thêm CI architecture-gate cho mcp-service + rag-worker** (mirror query-service) → chống hồi quy vĩnh viễn. ĐÂY mới là "khống chế hết" đúng nghĩa, không chỉ là đổi env.
+- (c) ⚠️ Caveat: route embed qua router → router thành **critical path của RAG search + ingest**. Cần **fallback graceful** (router lỗi → tạm gọi thẳng) trước khi bật (a).
+
+### 11.2 Cụ thể hoá §7.1 Strategy — selector `weighted_banded` (per-node strategy)
+Hiện thực đầu tiên cho "Strategy interface" của §7.1, áp cho node `think`:
+- **Backbone:** thêm `selector` optional vào `CapabilityConfig` → strategy **riêng từng capability** (các node khác giữ `sticky_rotation_soft`).
+- **Lane = tier + weight + band.** think: lane A `gpt-5.4-mini`@free_oai (weight 4, band **250K**/key, vẫn tôn trọng hard cap 2.5M/key); lane B `deepseek-v4-flash`@OpenRouter (weight 1, band **50K**/key). Weighted round-robin → "cứ ~5 request 1 nhịp deepseek".
+- **Counters mới:** `next_seq` (RR, Redis INCR atomic) + band-counter; reserve cũ giữ nguyên.
+- Mục tiêu: rải đều key + thử nghiệm deepseek-flash vs gpt-5.4-nano ở chính path tool-calling. **Rủi ro:** deepseek format tool-call khác OpenAI → có thể tái phát leak raw-JSON (xem [chat.ts extractAction đã gia cố](../../src/frontend/chat/app/stores/chat.ts)); GÁC bằng e2e tool-gate trước khi mở master switch.
+
+### 11.3 Ranh giới Langfuse ↔ Grafana (chốt cho §5 vùng Cost + câu 5/6)
+- **Grafana = bộ não OPERATIONAL** (độc quyền): cost · token · model · key · capability · routing · quota · RED. Nguồn = accounting của router (cost thật từ catalog), KHÔNG đọc Langfuse.
+- **Langfuse = kính hiển vi per-request** (debug 1 hội thoại): prompt · completion · tool calls · session · user · latency · usage. **Không** dùng làm nơi phân tích cost/model (Langfuse cost hiện = $0 do không map giá qua router).
+- Nối 2 mặt bằng **`key_id` + `trace_id`** (tag tối thiểu trên trace, chỉ để cross-link, KHÔNG để analytics ở Langfuse).
+- Cần: thêm metric router `airouter_calls_total` / `tokens_total` / `cost_usd_total` `{key_id, model, capability, tier, status}` (per-key **× model** — chiều §8 #5 còn thiếu) + table Grafana "Key × Model × Capability".
+
+### 11.4 Chốt phạm vi Control Plane v1 (cụ thể hoá §7.0/§7.0b — bảo thủ hơn)
+- **UI:** tab admin trong **frontend Vue hiện có** (tái dùng auth/UX), Grafana chỉ observe + link sang.
+- **Quyền v1 = read-only + DRAIN KEY khẩn cấp THÔI.** Pin model / đổi selector **vẫn qua `routing.yaml` + `/admin/reload`** (audit qua git). Override model/selector runtime → để **v2**.
+- Hiện thực v1 tối giản: `ovr:key:{id}:state=drain` (Redis, có TTL) + selector bỏ key drain + 2 endpoint `/admin/key/{id}/drain|resume` (internal_token, audit) + tab Vue đọc `/admin/quota`.
+- Rào an toàn (cả v1): TTL tự hết hạn · không drain key sống cuối cùng · audit (ai/lúc nào/vì sao) · preview trước commit.
+
+### 11.5 Thứ tự thực thi (nhánh AI Router, bám §6/§9)
+1. **Khống chế hết** (11.1 a+b+c) — điều kiện cần.
+2. **Per-key×model metrics + Grafana table** (11.3) — để quan sát blend.
+3. **weighted_banded + routing.yaml** (11.2) — bật blend, verify bằng (2).
+4. **Control Plane v1** (11.4) — drain key + tab Vue.
+> (2) phải trước (3): không quan sát được thì bật blend là mù — đúng tinh thần §7.1 "quan sát thiếu thì điều khiển mù".
+
+---
+
 ### Phụ lục — dẫn chứng code (file:line) cho Task Inventory
 - Query/LangGraph nodes: `query-service/.../orchestration.py`, `.../langgraph_nodes.py`, `.../observability/langfuse_tracing.py`
 - Retrieval: `mcp-service/app/core/search.py`, `embedding.py`, `vectorstore.py`, `rerank.py`

@@ -4,11 +4,16 @@
 """
 from __future__ import annotations
 
+from .banded_rotation import BandedRotation
 from .base import ResolveRequest, Selector
 from .sticky_rotation import StickyRotationSoft
+from .weighted_banded import WeightedBanded
 
+# MOSA: thêm strategy = thêm 1 dòng ở đây + 1 file selector tự-register.
 _REGISTRY: dict[str, type[Selector]] = {
-    "sticky_rotation_soft": StickyRotationSoft,
+    "banded_rotation": BandedRotation,          # ❖ DEFAULT toàn hệ (250K + save mode)
+    "weighted_banded": WeightedBanded,          # node think: blend gpt + deepseek
+    "sticky_rotation_soft": StickyRotationSoft,  # giữ làm lựa chọn thay thế
 }
 
 

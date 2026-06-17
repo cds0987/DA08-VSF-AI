@@ -44,41 +44,92 @@ function newIdempotencyKey(): string {
     ?? `idem-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+// Quét các JSON object top-level (cân bằng ngoặc) trong 1 chuỗi. Model yếu (nano) thỉnh
+// thoảng in tham số tool-call ra text rồi mới nối action JSON thật ->
+//   {"kind":"absolute",...}\n{"action_type":...}
+// JSON.parse cả chuỗi sẽ throw. Hàm này tách từng object để ta nhặt đúng object action,
+// tránh fallback đổ raw JSON ra cho user.
+function scanTopLevelJsonObjects(text: string): any[] {
+  const out: any[] = []
+  let depth = 0
+  let start = -1
+  let inStr = false
+  let escaped = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (inStr) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inStr = false
+      continue
+    }
+    if (ch === '"') { inStr = true; continue }
+    if (ch === '{') { if (depth === 0) start = i; depth++ }
+    else if (ch === '}') {
+      depth--
+      if (depth === 0 && start >= 0) {
+        try { out.push(JSON.parse(text.slice(start, i + 1))) }
+        catch { /* object hỏng -> bỏ qua */ }
+        start = -1
+      }
+    }
+  }
+  return out
+}
+
+// Dựng actions từ 1 parsed object có action_type. Trả null nếu không phải object action.
+function actionsFromParsed(parsed: any): any[] | null {
+  if (!parsed || typeof parsed !== 'object' || !parsed.action_type) return null
+  // Thẻ duyệt: không cần items/parameters — FE tự nạp hàng đợi live.
+  if (parsed.action_type === 'review_leave_approvals') {
+    return [{ action_type: 'review_leave_approvals', idempotency_key: newIdempotencyKey() }]
+  }
+  const rawItems: any[] = Array.isArray(parsed.items)
+    ? parsed.items
+    : (parsed.parameters ? [parsed.parameters] : [])
+  if (!rawItems.length) return []
+  // Mỗi đơn 1 idempotency_key riêng (sinh 1 lần lúc dựng card) -> bấm Confirm
+  // nhiều lần / nhiều đơn không tạo trùng nhau.
+  return rawItems.map(p => ({
+    action_type: parsed.action_type,
+    parameters: p,
+    idempotency_key: newIdempotencyKey(),
+  }))
+}
+
 // Tách action JSON ra khỏi content thô của trợ lý. Dùng CHUNG cho cả luồng stream
 // (lần đầu) lẫn rehydrate từ lịch sử (toChatMessage) -> reload không bị lòi raw JSON.
 // Hỗ trợ NHIỀU đơn 1 lượt: model xuất {action_type, items:[{...},...]} -> mỗi item là
 // 1 form riêng. Vẫn nhận format cũ {action_type, parameters:{...}} (1 đơn).
+// ROBUST với model leak: nếu content có lẫn JSON rác (vd tham số resolve_date) trước
+// action JSON, vẫn nhặt đúng object action thay vì đổ raw cho user.
 // Trả { actions, content }: actions = danh sách payload; content = câu dẫn nhập.
 function extractAction(rawContent: string): { actions?: any[]; content: string } {
   const trimmed = (rawContent || '').trim()
+  if (!trimmed.includes('{') || !trimmed.includes('}')) return { content: rawContent }
+
+  // Đường nhanh: cả chuỗi là 1 JSON object hợp lệ.
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
     try {
-      const parsed = JSON.parse(trimmed)
-      // Thẻ duyệt: không cần items/parameters — FE tự nạp hàng đợi live.
-      if (parsed.action_type === 'review_leave_approvals') {
-        const actions = [{ action_type: 'review_leave_approvals', idempotency_key: newIdempotencyKey() }]
-        return { actions, content: buildActionIntro(actions) }
-      }
-      if (parsed.action_type) {
-        const rawItems: any[] = Array.isArray(parsed.items)
-          ? parsed.items
-          : (parsed.parameters ? [parsed.parameters] : [])
-        if (rawItems.length) {
-          // Mỗi đơn 1 idempotency_key riêng (sinh 1 lần lúc dựng card) -> bấm Confirm
-          // nhiều lần / nhiều đơn không tạo trùng nhau.
-          const actions = rawItems.map(p => ({
-            action_type: parsed.action_type,
-            parameters: p,
-            idempotency_key: newIdempotencyKey(),
-          }))
-          return { actions, content: buildActionIntro(actions) }
-        }
-        // action_type hợp lệ nhưng thiếu items/parameters → fallback, không hiện raw JSON
-        return { content: 'Mình đã xử lý yêu cầu của bạn. Bạn có thể hỏi thêm nếu cần nhé.' }
-      }
-    } catch {
-      // JSON không hợp lệ → coi như text thường, hiện nguyên văn
-    }
+      const actions = actionsFromParsed(JSON.parse(trimmed))
+      if (actions && actions.length) return { actions, content: buildActionIntro(actions) }
+      if (actions) return { content: 'Mình đã xử lý yêu cầu của bạn. Bạn có thể hỏi thêm nếu cần nhé.' }
+    } catch { /* rơi xuống nhánh quét nhiều object */ }
+  }
+
+  // Đường robust: model leak nhiều JSON object -> nhặt object action CUỐI CÙNG.
+  const objs = scanTopLevelJsonObjects(trimmed)
+  const actionObj = [...objs].reverse().find(o => o && o.action_type)
+  if (actionObj) {
+    const actions = actionsFromParsed(actionObj)
+    if (actions && actions.length) return { actions, content: buildActionIntro(actions) }
+    return { content: 'Mình đã xử lý yêu cầu của bạn. Bạn có thể hỏi thêm nếu cần nhé.' }
+  }
+
+  // Không có object action: nếu content trông như JSON rác (chỉ gồm các object), đừng đổ
+  // raw cho user; ngược lại giữ nguyên văn (text thường).
+  if (trimmed.startsWith('{') && objs.length) {
+    return { content: 'Mình đã xử lý yêu cầu của bạn. Bạn có thể hỏi thêm nếu cần nhé.' }
   }
   return { content: rawContent }
 }

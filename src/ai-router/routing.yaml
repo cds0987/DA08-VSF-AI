@@ -3,10 +3,14 @@
 version: 1
 
 selector:
-  impl: sticky_rotation_soft        # ❖ (b) sticky + soft overflow (PLAN §5.9)
+  impl: banded_rotation             # ❖ DEFAULT toàn hệ: xoay key mỗi 250K token (PLAN §11.2)
   params:
-    # khi key active còn dưới ngưỡng này (theo RPM) thì giữ dính; chạm thì tràn key kế
-    rpm_soft_ratio: 1.0             # 1.0 = chỉ tràn khi đã full RPM (soft overflow đúng nghĩa)
+    band_tokens: 250000             # key active phục vụ >= 250K (est) -> xoay key kế
+    save_mode:                      # cạn MỌI tier -> ép gpt-4o-mini (OpenAI), bỏ trần free
+      enabled: true
+      model: openai/gpt-4o-mini
+      tier: free_oai
+      band_tokens: 250000
 
 tiers:
   - { name: free_oai,  endpoint_default: chat }
@@ -43,15 +47,22 @@ capabilities:
         - qwen/qwen3-next-80b-a3b-instruct:free
         - openai/gpt-oss-120b:free
       paid: deepseek/deepseek-v4-flash
-  think:                            # node CHÍNH XÁC CAO: openai free -> HẾT thì vào PAID
-    tiers: [free_oai, paid]         # bỏ qua free OpenRouter (yếu) — think cần độ chính xác
+  think:                            # node CHÍNH: blend gpt-5.4-mini + deepseek-flash (PLAN §11.2)
+    tiers: [free_oai, paid]
     models:
-      free_oai: openai/gpt-5.4-nano
-      paid:                           # ưu tiên CHẤT LƯỢNG (pro trước), flash/rẻ làm fallback. interchange + đối chiếu giá OpenRouter
-        - deepseek/deepseek-v4-pro    # 1.6T MoE, reasoning mạnh nhất  ($0.435/$0.87, ctx 1.05M)
-        - xiaomi/mimo-v2.5-pro        # pro agentic                    ($0.435/$0.87, ctx 1.05M)
-        - deepseek/deepseek-v4-flash  # rẻ hơn, vẫn mạnh               ($0.098/$0.196, ctx 1.05M)
-        - xiaomi/mimo-v2.5            # fallback rẻ                     ($0.14/$0.28, ctx 1.05M)
+      free_oai: openai/gpt-5.4-mini   # lane chính (đổi từ nano)
+      paid: deepseek/deepseek-v4-flash  # lane blend (OpenRouter)
+    selector:                         # ❖ strategy RIÊNG: weighted_banded (override global)
+      impl: weighted_banded
+      params:
+        lanes:
+          - { tier: free_oai, weight: 4, band_tokens: 250000 }  # gpt-5.4-mini, xoay 250K
+          - { tier: paid,     weight: 1, band_tokens: 150000 }  # deepseek-flash, xoay 150K
+        save_mode:                    # cạn hết -> gpt-4o-mini (OpenAI)
+          enabled: true
+          model: openai/gpt-4o-mini
+          tier: free_oai
+          band_tokens: 250000
   rerank:                           # LLM-as-reranker
     tiers: [free_oai, free_or, paid]
     models:

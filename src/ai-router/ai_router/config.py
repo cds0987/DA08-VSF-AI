@@ -20,11 +20,52 @@ class Settings(BaseSettings):
     request_timeout: float = 60.0
     # bật/tắt toàn bộ router; off -> caller tự xử (an toàn rollout, PLAN §8)
     enabled: bool = True
+    # đọc usage thật từ provider lúc boot (OpenRouter /key) -> hết "mù 0". Off mặc định
+    # (tránh chậm boot / lỗi mạng ở test); bật ở prod qua AIROUTER_RECONCILE_ON_BOOT=1.
+    reconcile_on_boot: bool = False
 
 
 class TierConfig(BaseModel):
     name: str                                    # "free_oai" | "free_or" | "paid"
     endpoint_default: str = "chat"
+
+
+# --------------------------------------------------------------------------- #
+# Selector params (MOSA) — mỗi selector tự validate self.params bằng model dưới.
+# Thêm strategy mới = thêm 1 param-model ở đây, KHÔNG đụng khung config.
+# --------------------------------------------------------------------------- #
+class SaveModeConfig(BaseModel):
+    """Save mode: khi MỌI tier cạn -> ép model rẻ (gpt-4o-mini) trên tier OpenAI,
+    bỏ trần token free (daily_kind='none' -> chấp nhận paid để KHÔNG trả 503), vẫn band.
+    'áp dụng với openai thôi' -> tier mặc định free_oai."""
+    enabled: bool = True
+    model: str = "openai/gpt-4o-mini"
+    tier: str = "free_oai"                        # tier OpenAI để lấy key + provider
+    band_tokens: int = 250_000
+
+
+class LaneConfig(BaseModel):
+    """1 làn của weighted_banded: 1 tier + trọng số RR + band xoay key riêng."""
+    tier: str
+    weight: int = 1
+    band_tokens: int = 250_000
+
+
+class BandedParams(BaseModel):
+    """Params cho selector banded_rotation (default toàn hệ)."""
+    band_tokens: int = 250_000
+    save_mode: SaveModeConfig = Field(default_factory=SaveModeConfig)
+
+
+class WeightedBandedParams(BaseModel):
+    """Params cho selector weighted_banded (node think: blend gpt + deepseek)."""
+    lanes: list[LaneConfig] = Field(default_factory=list)
+    save_mode: SaveModeConfig = Field(default_factory=SaveModeConfig)
+
+
+class SelectorConfig(BaseModel):
+    impl: str = "banded_rotation"                 # ❖ DEFAULT toàn hệ (PLAN §5.8, §11.2)
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class CapabilityConfig(BaseModel):
@@ -37,6 +78,9 @@ class CapabilityConfig(BaseModel):
     require_tools: bool = False                   # answer/agent
     require_vision: bool = False                  # ocr/caption
     pinned_model: str | None = None              # embed -> pin (BẪY embedding, PLAN §4b)
+    # ❖ MOSA hook: strategy RIÊNG cho node này (None -> dùng selector global).
+    # vd think: weighted_banded (gpt-5.4-mini + deepseek-flash blend).
+    selector: SelectorConfig | None = None
 
     def model_ids(self, tier: str) -> list[str]:
         """Danh sách model ưu tiên cho tier (interchange). str -> [str]; thiếu -> []."""
@@ -44,11 +88,6 @@ class CapabilityConfig(BaseModel):
         if v is None:
             return []
         return [v] if isinstance(v, str) else list(v)
-
-
-class SelectorConfig(BaseModel):
-    impl: str = "sticky_rotation_soft"           # ❖ đổi thuật toán ở đây (PLAN §5.8)
-    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class RoutingTable(BaseModel):
