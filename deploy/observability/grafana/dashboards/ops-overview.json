@@ -1,0 +1,110 @@
+{
+  "title": "VSF AI Operations — Overview (7 câu hỏi)",
+  "uid": "vsf-ops-overview",
+  "tags": ["ops", "overview", "ai-router"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] },
+  "links": [
+    { "title": "AI Router detail ↗", "type": "dashboards", "tags": ["ai-router"], "asDropdown": false, "targetBlank": false }
+  ],
+  "panels": [
+    { "id": 100, "type": "row", "title": "① Hệ thống có khỏe không?", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 } },
+    {
+      "id": 1, "type": "stat", "title": "AI Router",
+      "description": "up = Prometheus scrape được ai-router. 0 = down (app có thể vẫn chạy kill-switch).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } } ], "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+      "targets": [ { "expr": "up{job=\"ai-router\"}", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 2, "type": "stat", "title": "Alert đang kêu",
+      "description": "Số alert firing (Prometheus ALERTS). >0 = có việc cần xử lý (xem vùng ⑦).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 3 } ] } } },
+      "targets": [ { "expr": "count(ALERTS{alertstate=\"firing\"}) or vector(0)", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 3, "type": "stat", "title": "Số key AI đang đăng ký",
+      "description": "airouter_keys_total. Hụt so với kỳ vọng = secret render thiếu.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
+      "targets": [ { "expr": "airouter_keys_total", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 4, "type": "stat", "title": "Fallback rate (5m)",
+      "description": "% request rơi khỏi tier ưu tiên. Cao = drift + tốn tiền.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "area" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 0.1 }, { "color": "red", "value": 0.3 } ] } } },
+      "targets": [ { "expr": "sum(rate(airouter_fallback_total[5m])) / clamp_min(sum(rate(airouter_resolve_total[5m])), 1)", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+
+    { "id": 700, "type": "row", "title": "⑦ Cần làm gì ngay — Alert đang kêu", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 } },
+    {
+      "id": 7, "type": "table", "title": "Alert firing (severity · service · runbook)",
+      "description": "Lấy từ Prometheus ALERTS. Bấm severity/service để biết ưu tiên. Runbook trong annotation alert.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 7 },
+      "targets": [ { "expr": "ALERTS{alertstate=\"firing\"}", "format": "table", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ],
+      "transformations": [
+        { "id": "organize", "options": {
+          "excludeByName": { "Time": true, "__name__": true, "instance": true, "job": true, "alertstate": true, "Value": true },
+          "renameByName": { "alertname": "Alert", "severity": "Mức", "service": "Service" },
+          "indexByName": { "severity": 0, "alertname": 1, "service": 2 }
+        } }
+      ],
+      "fieldConfig": { "defaults": {}, "overrides": [
+        { "matcher": { "id": "byName", "options": "Mức" }, "properties": [ { "id": "custom.cellOptions", "value": { "type": "color-background" } }, { "id": "mappings", "value": [ { "type": "value", "options": { "P1": { "color": "red" }, "P2": { "color": "orange" } } } ] } ] }
+      ] }
+    },
+
+    { "id": 500, "type": "row", "title": "⑤ Tốn bao nhiêu tiền? (chi tiết: AI Router detail ↗)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 } },
+    {
+      "id": 5, "type": "bargauge", "title": "Token hôm nay theo key",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "min": 0, "color": { "mode": "continuous-GrYlRd" } } },
+      "targets": [ { "expr": "airouter_key_tokens_today", "instant": true, "legendFormat": "{{key_id}}", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Cost USD tháng theo tier",
+      "description": "PAID nhảy = fallback nhiều = tốn tiền.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "custom": { "fillOpacity": 10, "showPoints": "always" } } },
+      "targets": [ { "expr": "sum by (tier) (airouter_key_cost_month_usd)", "legendFormat": "{{tier}}", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+
+    { "id": 600, "type": "row", "title": "⑥ Output AI còn đúng không? (hiện: proxy qua fallback — quality score thêm ở Phase 5)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 } },
+    {
+      "id": 8, "type": "timeseries", "title": "Fallback rate (leading indicator drift)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "custom": { "fillOpacity": 10 } } },
+      "targets": [ { "expr": "sum(rate(airouter_fallback_total[5m])) / clamp_min(sum(rate(airouter_resolve_total[5m])), 1)", "legendFormat": "fallback rate", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 9, "type": "text", "title": "Quality score — sắp có (Phase 5)",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 24 },
+      "options": { "mode": "markdown", "content": "### ⏳ Chờ Phase 5\n\nVùng này sẽ hiển thị:\n- **Groundedness / faithfulness** (answer có bám tài liệu không)\n- **User feedback** 👍/👎 gắn trace_id\n- **Retrieval relevance** (top_score)\n\nXem kịch bản chẩn đoán: `docs/nguyenworking/observability-plan.md` §5b." }
+    },
+
+    { "id": 200, "type": "row", "title": "② Ở đâu? · ④ Vì sao? · ③ Ai & bao nhiêu? — sắp có (Phase 2–3)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 } },
+    {
+      "id": 10, "type": "text", "title": "Trace map · RED per-service · Impact",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 32 },
+      "options": { "mode": "markdown", "content": "### ⏳ Chờ Phase 2–3 (OTel hóa toàn hệ)\n\n- **② Ở đâu:** service/task map + trace explorer (Tempo) — cần trace_id xuyên suốt.\n- **④ Vì sao:** click task đỏ → trace → log cùng trace_id (Tempo + Loki).\n- **③ Ai & bao nhiêu:** RED per-service (rate/error/latency) + impact theo role/department.\n\nHiện chỉ **ai-router** phát metric. Các vùng trên điền dần khi từng service được OTel hóa (Phase 2) và có Tempo/Loki (Phase 3). Bố cục đã dựng sẵn — không phải vẽ lại." }
+    }
+  ]
+}
