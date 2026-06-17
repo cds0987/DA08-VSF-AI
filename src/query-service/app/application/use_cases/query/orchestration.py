@@ -1117,12 +1117,19 @@ class QueryOrchestrationUseCase:
         started: float,
     ) -> None:
         latency_ms = int((perf_counter() - started) * 1000)
+        # Append source document names so follow-up questions like "which docs did you cite"
+        # can be answered from conversation history without requiring another RAG search.
+        content_to_save = answer
+        if sources:
+            unique_names = sorted({s["document_name"] for s in sources if s.get("document_name")})
+            if unique_names:
+                content_to_save = answer + "\n[Nguồn tham khảo: " + ", ".join(unique_names) + "]"
         save_message_detail = getattr(self._conversation_repo, "save_message_detail", None)
         if save_message_detail:
             await save_message_detail(
                 user_id=user_id,
                 role="assistant",
-                content=answer,
+                content=content_to_save,
                 conversation_id=_ACTIVE_CONVERSATION_ID.get(),
                 conversation_title=_ACTIVE_CONVERSATION_TITLE.get(),
                 session_id=session_id,
@@ -1149,7 +1156,7 @@ class QueryOrchestrationUseCase:
             await self._conversation_repo.save_message(
                 user_id,
                 "assistant",
-                answer,
+                content_to_save,
                 conversation_id=_ACTIVE_CONVERSATION_ID.get(),
             )
 
