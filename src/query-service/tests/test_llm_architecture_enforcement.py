@@ -58,6 +58,29 @@ def test_no_direct_openai_sdk_call_outside_allowlist():
     )
 
 
+# --------------------------------------------------------------- GATE 1b
+# File route-aware PHẢI thực sự đọc base_url (qua build_routed_openai hoặc trực tiếp). Chặn
+# tái diễn bug: client tạo AsyncOpenAI() KHÔNG base_url -> SDK âm thầm đọc env OPENAI_BASE_URL
+# -> responses.create bắn /v1/responses (router không có) -> 404 -> guardrail fail-open câm.
+# langchain_responses_adapter = kill-switch legacy CỐ Ý không route -> loại trừ.
+_ROUTE_AWARE_REQUIRED = _SDK_CALL_ALLOWLIST - {
+    "infrastructure/external/langchain_responses_adapter.py",
+}
+
+
+def test_allowlisted_clients_are_route_aware():
+    not_route_aware: list[str] = []
+    for rel in sorted(_ROUTE_AWARE_REQUIRED):
+        text = (_APP / rel).read_text(encoding="utf-8")
+        if "build_routed_openai" not in text and "base_url" not in text:
+            not_route_aware.append(rel)
+    assert not not_route_aware, (
+        "File trong allowlist gọi SDK nhưng KHÔNG route-aware (thiếu build_routed_openai/base_url) "
+        "-> nguy cơ bypass router + bug âm thầm /v1/responses 404. "
+        f"Vi phạm: {not_route_aware}"
+    )
+
+
 # ----------------------------------------------------------------- GATE 2
 def test_capability_settings_are_valid():
     from app.infrastructure.config import Settings

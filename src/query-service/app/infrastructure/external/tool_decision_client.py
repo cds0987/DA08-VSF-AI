@@ -70,13 +70,12 @@ class OpenAIToolDecisionClient:
     def __init__(self, settings: Settings) -> None:
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is required for OpenAI tool decisions")
-        from openai import AsyncOpenAI
+        from app.infrastructure.external.routed_openai import build_routed_openai, route_model
 
         self._settings = settings
-        self._client = AsyncOpenAI(
-            api_key=settings.openai_api_key,
-            timeout=settings.openai_timeout_seconds,
-        )
+        # Route qua ai-router (chat.completions, capability `triage`) khi OPENAI_BASE_URL set.
+        self._client, _ = build_routed_openai(settings)
+        self._model = route_model(settings, settings.intent_capability, settings.openai_llm_model)
 
     async def choose_tool(
         self,
@@ -88,23 +87,31 @@ class OpenAIToolDecisionClient:
         all_tool_names = sorted(set(available_tools)) if available_tools else sorted(VALID_TOOL_NAMES)
         history = "\n".join(f"{role}: {content}" for role, content in recent_messages[-5:])
         tool_list_str = ", ".join(all_tool_names)
+        from app.infrastructure.external.routed_openai import extract_json_text
+
         try:
-            response = await self._client.responses.create(
-                model=self._settings.openai_llm_model,
-                instructions=(
-                    "You route one internal chatbot question to exactly one tool. "
-                    "Return only JSON: {\"tool_name\": \"<name>\", \"arguments\": {<args>}}. "
-                    f"Available tools: {tool_list_str}. "
-                    "Rules: use hr_query only for the current user's personal HR data "
-                    "(leave balance / leave requests / attendance / personal onboarding / "
-                    "payroll / benefits / performance) with argument {\"intent\": "
-                    "\"leave_balance|leave_requests|attendance|onboarding|payroll|benefits|performance\"}. "
-                    "Use rag_search for policies, procedures, internal documents, or unclear questions "
-                    "(argument: {\"query\": \"<search query>\"}). "
-                    "For any other listed tool, use its name and pass only the arguments it needs. "
-                    "Never include user_id, document_ids, top_k, or authorization data in arguments."
-                ),
-                input=f"Recent messages:\n{history or '(empty)'}\n\nQuestion:\n{question}",
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You route one internal chatbot question to exactly one tool. "
+                            "Return only JSON: {\"tool_name\": \"<name>\", \"arguments\": {<args>}}. "
+                            f"Available tools: {tool_list_str}. "
+                            "Rules: use hr_query only for the current user's personal HR data "
+                            "(leave balance / leave requests / attendance / personal onboarding / "
+                            "payroll / benefits / performance) with argument {\"intent\": "
+                            "\"leave_balance|leave_requests|attendance|onboarding|payroll|benefits|performance\"}. "
+                            "Use rag_search for policies, procedures, internal documents, or unclear questions "
+                            "(argument: {\"query\": \"<search query>\"}). "
+                            "For any other listed tool, use its name and pass only the arguments it needs. "
+                            "Never include user_id, document_ids, top_k, or authorization data in arguments."
+                        ),
+                    },
+                    {"role": "user", "content": f"Recent messages:\n{history or '(empty)'}\n\nQuestion:\n{question}"},
+                ],
+                temperature=0,
             )
         except Exception as exc:
             raise HTTPException(
@@ -113,7 +120,8 @@ class OpenAIToolDecisionClient:
             ) from exc
 
         try:
-            payload = json.loads(getattr(response, "output_text", "") or "{}")
+            content = response.choices[0].message.content if response.choices else ""
+            payload = json.loads(extract_json_text(content))
         except json.JSONDecodeError:
             return ToolDecision(tool_name="rag_search", arguments={}, reason="invalid JSON from model")
 

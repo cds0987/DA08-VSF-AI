@@ -60,12 +60,11 @@ class OpenAIIntentEmbeddingClient:
     def __init__(self, settings: Settings) -> None:
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is required for OpenAI intent embeddings")
-        from openai import AsyncOpenAI
+        from app.infrastructure.external.routed_openai import build_routed_openai
 
-        self._client = AsyncOpenAI(
-            api_key=settings.openai_api_key,
-            timeout=settings.openai_timeout_seconds,
-        )
+        # Route qua ai-router (/v1/embeddings) khi OPENAI_BASE_URL set; router thay model =
+        # pinned embed model. Direct OpenAI khi không route.
+        self._client, _ = build_routed_openai(settings)
         self._model = settings.openai_embedding_model
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
@@ -80,13 +79,12 @@ class OpenAIIntentLLMClient:
     def __init__(self, settings: Settings) -> None:
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is required for OpenAI intent classification")
-        from openai import AsyncOpenAI
+        from app.infrastructure.external.routed_openai import build_routed_openai, route_model
 
-        self._client = AsyncOpenAI(
-            api_key=settings.openai_api_key,
-            timeout=settings.intent_llm_timeout_seconds,
-        )
-        self._model = settings.intent_llm_model
+        # Route qua ai-router (chat.completions, capability `triage`) khi OPENAI_BASE_URL set;
+        # direct OpenAI (intent_llm_model) khi không route.
+        self._client, _ = build_routed_openai(settings, timeout=settings.intent_llm_timeout_seconds)
+        self._model = route_model(settings, settings.intent_capability, settings.intent_llm_model)
 
     async def classify(
         self,
@@ -96,28 +94,40 @@ class OpenAIIntentLLMClient:
         history = "\n".join(
             f"{role}: {content}" for role, content in list(recent_messages or [])[-5:]
         )
-        response = await self._client.responses.create(
+        from app.infrastructure.external.routed_openai import extract_json_text
+
+        response = await self._client.chat.completions.create(
             model=self._model,
-            instructions=(
-                "Classify one user question for an internal company chatbot. "
-                "Return only JSON with fields: intent, confidence, reason. "
-                f"Allowed intent values: {', '.join(sorted(VALID_INTENTS))}. "
-                "Use the same intent for semantically equivalent English and Vietnamese questions. "
-                "Use identity for questions about who the assistant is or who created it. "
-                "Use clarification for greetings, vague chat, or low-context follow-ups that should ask the user to clarify. "
-                "Use out_of_scope for passwords, credentials, internal secrets, or unsafe requests. "
-                "Use hr:leave_balance, hr:leave_requests, hr:attendance, hr:onboarding, hr:payroll, "
-                "hr:benefits, or hr:performance only for the current user's personal HR data "
-                "(leave, attendance/late, personal onboarding progress, salary, personal benefits, performance review). "
-                "Use rag for general policies, procedures, onboarding guidelines, and internal document lookup. "
-                "Do not include user_id, document_ids, tool arguments, or direct responses."
-            ),
-            input=(
-                f"Recent messages:\n{history or '(empty)'}\n\n"
-                f"Question:\n{question}"
-            ),
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Classify one user question for an internal company chatbot. "
+                        "Return only JSON with fields: intent, confidence, reason. "
+                        f"Allowed intent values: {', '.join(sorted(VALID_INTENTS))}. "
+                        "Use the same intent for semantically equivalent English and Vietnamese questions. "
+                        "Use identity for questions about who the assistant is or who created it. "
+                        "Use clarification for greetings, vague chat, or low-context follow-ups that should ask the user to clarify. "
+                        "Use out_of_scope for passwords, credentials, internal secrets, or unsafe requests. "
+                        "Use hr:leave_balance, hr:leave_requests, hr:attendance, hr:onboarding, hr:payroll, "
+                        "hr:benefits, or hr:performance only for the current user's personal HR data "
+                        "(leave, attendance/late, personal onboarding progress, salary, personal benefits, performance review). "
+                        "Use rag for general policies, procedures, onboarding guidelines, and internal document lookup. "
+                        "Do not include user_id, document_ids, tool arguments, or direct responses."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Recent messages:\n{history or '(empty)'}\n\n"
+                        f"Question:\n{question}"
+                    ),
+                },
+            ],
+            temperature=0,
         )
-        payload = json.loads(getattr(response, "output_text", "") or "{}")
+        content = response.choices[0].message.content if response.choices else ""
+        payload = json.loads(extract_json_text(content))
         return IntentClassification(
             intent=str(payload.get("intent", "")),
             confidence=float(payload.get("confidence", 0.0)),
