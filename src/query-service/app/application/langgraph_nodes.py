@@ -28,22 +28,13 @@ from app.application.ports import MCPToolClient
 from app.infrastructure.external.mcp_client import MCPCircuitOpenError
 from app.application.shortcuts import (
     classify_shortcut,
-    IDENTITY_ANSWER,
-    CLARIFY_ANSWER,
-    SECURITY_ANSWER,
-    OFFTOPIC_ANSWER,
     EMERGENCY_ANSWER,
     DISTRESS_ANSWER,
     INJURY_ANSWER,
     USER_PROFILE_PLACEHOLDER,
     next_offtopic_answer,
-    IDENTITY_PHRASES,
-    CLARIFY_PHRASES,
-    SECURITY_PHRASES,
-    OFFTOPIC_PHRASES,
-    normalize as _normalize,
 )
-from app.application.tools import TOOL_DEFINITIONS, ACL_WHITELIST
+from app.application.tools import TOOL_DEFINITIONS
 from app.application.prompts import TRIAGE_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -561,29 +552,14 @@ async def act_node(
                         ]
                     })
                     success = True
-                    new_sources = [
-                        SourceDoc(
-                            document_name=r.document_name,
-                            caption=r.caption,
-                            heading_path=r.heading_path,
-                            score=r.score,
-                            source_gcs_uri=r.source_gcs_uri,
-                            document_id=r.document_id,
-                            page_number=r.page_number,
-                            ref=start_ref + i + 1,
-                            chunk_id=r.chunk_id,
-                        )
-                        for i, r in enumerate(results)
-                    ]
+                    new_sources = []  # score < threshold: LLM vẫn có context nhưng không show citations
                 else:
-                    # Hoàn toàn trống -> hard-stop NO_INFO
-                    data = json.dumps({
-                        "results": [],
-                        "message": _RAG_NO_INFO_ANSWER,
-                    }, ensure_ascii=False)
+                    # Hoàn toàn trống: LLM nhận empty results, tự tổng hợp warm NO_INFO
+                    # theo AGENT_SYSTEM_PROMPT (empathize + suggest IT Helpdesk / HR).
+                    # Không set hard_stop_response → flow tiếp tục → think_node → LLM.
+                    data = json.dumps({"results": []}, ensure_ascii=False)
                     success = False
                     new_sources = []
-                    hard_stop_response = _RAG_NO_INFO_ANSWER
 
         elif tool_name == "hr_query":
             # KHÔNG cần intent từ LLM: lấy TOÀN BỘ hồ sơ HR (mcp -> /hr/profile),
@@ -631,7 +607,7 @@ async def act_node(
             "langgraph_act_error",
             extra={"session_id": state["session_id"], "tool": tool_name, "error": str(exc)},
         )
-        data = f"Loi khi thuc thi tool: {exc}"
+        data = f"Lỗi khi thực thi tool: {exc}"
         success = False
         new_sources = []
         if tool_name == "rag_search":
@@ -676,9 +652,12 @@ async def act_node(
         new_state["source_ref_counter"] = state.get("source_ref_counter", 0) + len(new_sources)
     elif tool_name == "rag_search" and not success:
         new_state["sources"] = existing_sources
-        new_state["shortcut_response"] = hard_stop_response or _RAG_NO_INFO_ANSWER
-        new_state["shortcut_outcome"] = "NO_INFO"
-        new_state["phase"] = AgentPhase.DONE
+        if hard_stop_response:
+            # Hard-stop chỉ cho lỗi kỹ thuật: ACL violation, circuit open, exception.
+            # Empty results bình thường không hard-stop → observe → think → LLM xử lý.
+            new_state["shortcut_response"] = hard_stop_response
+            new_state["shortcut_outcome"] = "NO_INFO"
+            new_state["phase"] = AgentPhase.DONE
 
     # Observability accumulator: append rag_search debug event if recorded above.
     if _rag_event is not None:

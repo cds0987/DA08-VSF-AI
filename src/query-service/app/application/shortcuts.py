@@ -8,7 +8,7 @@ Single source-of-truth for:
   - classify_shortcut() — consumed by both shortcut_node and route_entry
 """
 
-import itertools
+import random
 import re
 import unicodedata
 
@@ -50,12 +50,9 @@ _OFFTOPIC_VARIANTS = (
     "mình chỉ hỗ trợ chính sách, quy trình và dữ liệu HR nội bộ.",
 )
 
-_offtopic_cycle = itertools.cycle(_OFFTOPIC_VARIANTS)
-
-
 def next_offtopic_answer() -> str:
-    """Return the next off-topic canned response (cycles through 3 variants)."""
-    return next(_offtopic_cycle)
+    """Return a random off-topic canned response (thread-safe, no shared state)."""
+    return random.choice(_OFFTOPIC_VARIANTS)
 
 
 # Keep OFFTOPIC_ANSWER as the first variant for backward-compat imports
@@ -74,11 +71,6 @@ DISTRESS_ANSWER = (
     "Nếu bạn muốn xin nghỉ vì sức khỏe, mình có thể hướng dẫn quy trình nghỉ phép/nghỉ ốm."
 )
 
-IT_SUPPORT_ANSWER = (
-    "Có vẻ bạn đang gặp sự cố về thiết bị/phần cứng. "
-    "Vấn đề này nằm ngoài tài liệu nội bộ của mình. "
-    "Bạn vui lòng mô tả lỗi cụ thể và liên hệ bộ phận IT Helpdesk để được hỗ trợ trực tiếp."
-)
 
 INJURY_ANSWER = (
     "Mình rất tiếc khi bạn bị thương. "
@@ -130,17 +122,6 @@ DISTRESS_PHRASES: frozenset[str] = frozenset({
     "tram cam", "khong chiu noi", "chan song", "khung hoang",
 })
 
-IT_SUPPORT_PHRASES: frozenset[str] = frozenset({
-    # Device faults (explicit device + fault required to avoid ambiguity)
-    "may tinh hong", "may tinh bi loi", "may tinh bi hong",
-    "laptop hong", "laptop bi loi", "laptop bi hong",
-    "man hinh hong", "man hinh bi hong",
-    "may in loi", "may in hong",
-    "thiet bi hong", "thiet bi bi hong",
-    "ban phim hong", "chuot hong",
-    # Network faults
-    "mat mang", "mat wifi", "khong co mang", "khong vao duoc mang",
-})
 
 # Physical injury — empathy + 115 + offer sick-leave guidance.
 # Checked BEFORE distress so "gãy chân" routes here, NOT to distress.
