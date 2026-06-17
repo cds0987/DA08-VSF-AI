@@ -8,6 +8,7 @@ import type { NotificationItem } from '~/types'
 
 defineProps<{
   isCollapsed: boolean
+  disableTooltip?: boolean
 }>()
 
 const notifications = useNotificationStore()
@@ -107,7 +108,7 @@ async function handleDismiss(event: MouseEvent, item: NotificationItem) {
         </TooltipTrigger>
       </DropdownMenuTrigger>
       <TooltipContent
-        v-if="isCollapsed"
+        v-if="isCollapsed && !disableTooltip"
         side="right"
         class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
       >

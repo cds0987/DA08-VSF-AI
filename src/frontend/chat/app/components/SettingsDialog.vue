@@ -12,7 +12,10 @@ const themes: { value: Theme; label: string; icon: any }[] = [
 </script>
 
 <template>
-  <DialogContent class="sm:max-w-[425px] bg-white dark:bg-card border-slate-200 dark:border-border">
+  <DialogContent
+    class="sm:max-w-[425px] bg-white dark:bg-card border-slate-200 dark:border-border"
+    @close-auto-focus.prevent
+  >
     <DialogHeader>
       <DialogTitle class="text-slate-900 dark:text-foreground">Settings</DialogTitle>
       <DialogDescription class="text-slate-500 dark:text-muted-foreground">
