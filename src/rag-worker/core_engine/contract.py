@@ -11,6 +11,8 @@ EMBED_MODELS: dict[str, dict[str, object]] = {
     "text-embedding-3-small": {"native": 1536, "allowed": "256..1536"},
     "text-embedding-3-large": {"native": 3072, "allowed": "256..3072"},
     "bge-m3": {"native": 1024, "allowed": {1024}},
+    # qwen3-embedding-4b qua OpenRouter (DeepInfra): native 2560, MRL 32..2560.
+    "qwen/qwen3-embedding-4b": {"native": 2560, "allowed": "32..2560"},
     "offline": {"native": 256, "allowed": {256}},
 }
 
@@ -18,6 +20,7 @@ MODEL_TAGS = {
     "text-embedding-3-small": "te3s",
     "text-embedding-3-large": "te3l",
     "bge-m3": "bgem3",
+    "qwen/qwen3-embedding-4b": "qwen3emb4b",   # collection: {base}__qwen3emb4b__d2560
     "offline": "offline",
 }
 
