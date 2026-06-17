@@ -4,9 +4,13 @@ Bug (2026-06-17): client (adapter chat query-service) gửi stream=True trong bo
 router gọi create(stream=True, **body) -> TypeError 'multiple values for stream' -> stream
 vỡ -> client nhận rỗng -> answer NO_INFO. Lộ vì đây là client chat.completions streaming
 ĐẦU TIÊN đi qua router (trước chỉ Responses API, không qua router). Test này khóa lại.
+
+Dùng asyncio.run (KHÔNG pytest.mark.asyncio) — ai-router CI không cài pytest-asyncio,
+mọi test async ở đây tự chạy event loop (xem test_router_core.py).
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 
@@ -15,8 +19,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("OPENAI_API_KEY_1", "sk-test-oai")
 os.environ.pop("AIROUTER_REDIS_URL", None)        # MemoryCounters
 os.environ.pop("AIROUTER_INTERNAL_TOKEN", None)
-
-import pytest  # noqa: E402
 
 from ai_router.config import get_settings  # noqa: E402
 from ai_router.router import Router  # noqa: E402
@@ -54,8 +56,7 @@ class _FakeFactory:
         return self._c
 
 
-@pytest.mark.asyncio
-async def test_chat_stream_strips_client_stream_flag():
+def test_chat_stream_strips_client_stream_flag():
     router = Router(get_settings())
     fake = _FakeClient()
     router.clients = _FakeFactory(fake)
@@ -66,10 +67,18 @@ async def test_chat_stream_strips_client_stream_flag():
         "stream": True,                              # <-- client SDK gửi (gây bug cũ)
         "stream_options": {"include_usage": True},
     }
-    chunks = [c async for c in router.chat_stream("answer", body)]
+
+    async def _drive():
+        return [c async for c in router.chat_stream("answer", body)]
+
+    chunks = asyncio.run(_drive())
 
     assert chunks, "phải yield chunk (stream không vỡ)"
     assert fake.chat.completions.calls, "create phải được gọi (không TypeError)"
     kw = fake.chat.completions.calls[0]
-    assert kw.get("stream") is True               # router tự set, đúng 1 lần
-    assert "stream" not in {k for k in kw if k != "stream"}  # không nhân đôi
+    assert kw.get("stream") is True               # router tự set, đúng 1 lần (không nhân đôi)
+
+
+if __name__ == "__main__":
+    test_chat_stream_strips_client_stream_flag()
+    print("OK")
