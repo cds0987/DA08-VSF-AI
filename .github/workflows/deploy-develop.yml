@@ -491,8 +491,10 @@ jobs:
           # Basic Auth gác subdomain qdrant.vsfchat.cloud (render -> deploy/nginx/.htpasswd-qdrant).
           # Optional: thiếu -> dashboard KHÓA (fail-closed), KHÔNG chặn deploy.
           QDRANT_BASIC_AUTH_HTPASSWD: ${{ secrets.QDRANT_BASIC_AUTH_HTPASSWD }}
-          # deploy/env/secret.env (env_file -> biến container)
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # deploy/env/secret.env (env_file -> biến container). secrets.OPENAI_API_KEY (key cũ)
+          # đã REVOKE -> dùng OPENAI_API_KEY_1 (key thật còn sống trong pool). mcp-service +
+          # rag-worker gọi embeddings/rerank THẲNG OpenAI bằng key này (EMBED/RERANK_BASE_URL trống).
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY_1 }}
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
           MCP_INTERNAL_TOKEN: ${{ secrets.MCP_INTERNAL_TOKEN }}
           HR_INTERNAL_TOKEN: ${{ secrets.HR_INTERNAL_TOKEN }}
