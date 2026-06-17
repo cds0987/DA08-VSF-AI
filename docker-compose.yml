@@ -312,9 +312,9 @@ services:
       - ./deploy/env/secret.env
     environment:
       AIROUTER_REDIS_URL: redis://redis:6379/1
-      # OTel auto-instrument: 1=BẬT. Entrypoint ép workers=1 (fix multi-worker crash). ai-router
-      # giờ TRONG health gate -> nếu hỏng deploy ĐỎ. Rollback = "0" + deploy.
-      VSF_OTEL_ENABLED: "1"
+      # OTel auto-instrument: 0=TẮT. Bật "1" (kể cả workers=1) vẫn làm ai-router unhealthy ->
+      # ĐÃ ROLLBACK. Đang điều tra log crash thật (opentelemetry-instrument lỗi gì). Xem README-otel.
+      VSF_OTEL_ENABLED: "0"
       OTEL_SERVICE_NAME: ai-router
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_TRACES_EXPORTER: otlp
