@@ -192,14 +192,15 @@ for i in $(seq 1 60); do
   rw=$(docker inspect -f '{{.State.Health.Status}}' da08-vsf-rag-worker-1 2>/dev/null || echo none)
   hr=$(docker inspect -f '{{.State.Health.Status}}' da08-vsf-hr-service-1   2>/dev/null || echo none)
   qs=$(docker inspect -f '{{.State.Health.Status}}' da08-vsf-query-service-1 2>/dev/null || echo none)
+  ar=$(docker inspect -f '{{.State.Health.Status}}' da08-vsf-ai-router-1    2>/dev/null || echo none)
   mc=$(docker inspect -f '{{.State.Status}}'        da08-vsf-mcp-service-1  2>/dev/null || echo none)
   mr=$(docker inspect -f '{{.RestartCount}}'        da08-vsf-mcp-service-1  2>/dev/null || echo 99)
   fc=$(docker inspect -f '{{.State.Status}}'        da08-vsf-frontend-chat-1  2>/dev/null || echo none)
   fcr=$(docker inspect -f '{{.RestartCount}}'       da08-vsf-frontend-chat-1  2>/dev/null || echo 99)
   fa=$(docker inspect -f '{{.State.Status}}'        da08-vsf-frontend-admin-1 2>/dev/null || echo none)
   far=$(docker inspect -f '{{.RestartCount}}'       da08-vsf-frontend-admin-1 2>/dev/null || echo 99)
-  echo "  [$i] rag-worker=$rw hr-service=$hr query-service=$qs mcp-service=$mc(restarts=$mr) frontend-chat=$fc(restarts=$fcr) frontend-admin=$fa(restarts=$far)"
-  if [ "$rw" = healthy ] && [ "$hr" = healthy ] && [ "$qs" = healthy ] && [ "$mc" = running ] && [ "$mr" -le 2 ] \
+  echo "  [$i] rag-worker=$rw hr-service=$hr query-service=$qs ai-router=$ar mcp-service=$mc(restarts=$mr) frontend-chat=$fc(restarts=$fcr) frontend-admin=$fa(restarts=$far)"
+  if [ "$rw" = healthy ] && [ "$hr" = healthy ] && [ "$qs" = healthy ] && [ "$ar" = healthy ] && [ "$mc" = running ] && [ "$mr" -le 2 ] \
      && [ "$fc" = running ] && [ "$fcr" -le 2 ] && [ "$fa" = running ] && [ "$far" -le 2 ]; then
     ok=1; break
   fi
@@ -208,7 +209,7 @@ done
 
 if [ "$ok" != 1 ]; then
   echo "::error::Health gate FAILED — dump logs:"
-  for s in query-service query-migrate rag-worker mcp-service hr-service hr-migrate rag-migrate qdrant frontend-chat frontend-admin nginx; do
+  for s in query-service query-migrate rag-worker mcp-service hr-service hr-migrate rag-migrate qdrant ai-router frontend-chat frontend-admin nginx; do
     echo "----- $s -----"
     docker compose -f "$APP_DIR/docker-compose.yml" logs --no-color --tail 60 "$s" 2>/dev/null || true
   done
