@@ -3,10 +3,8 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY requirements.txt .
+# Instrumentation libs liệt kê thẳng trong requirements (không cần opentelemetry-bootstrap).
 RUN pip install --no-cache-dir -r requirements.txt
-# Cài instrumentation libs cho package đã có (FastAPI, httpx...). Inert tới khi
-# opentelemetry-instrument chạy (entrypoint, khi VSF_OTEL_ENABLED=1).
-RUN opentelemetry-bootstrap -a install
 
 COPY . .
 RUN chmod +x docker-entrypoint.sh
