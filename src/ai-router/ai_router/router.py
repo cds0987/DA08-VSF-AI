@@ -28,6 +28,7 @@ logger = logging.getLogger("ai_router.router")
 MAX_ATTEMPTS = 4          # số lần thử resolve khác nhau khi key lỗi/429
 COOLDOWN_SECONDS = 30
 DEFAULT_OUTPUT_EST = 600  # ước lượng output mặc định (token)
+DRAIN_TTL_SECONDS = 86_400  # drain key tự hết hạn sau 24h (không state ẩn vĩnh viễn)
 
 
 def _seconds_to_midnight_utc() -> int:
@@ -345,6 +346,34 @@ class Router:
         data["_router"] = dec.public()
         return data
 
+    # ----------------- control plane: drain key (HITL v1) -----------------
+    async def drain_key(self, key_id: str, *, actor: str = "?", reason: str = "",
+                        ttl: int = DRAIN_TTL_SECONDS) -> dict:
+        """Rút 1 key khỏi vòng xoay (KHÔNG xóa, TTL tự hết hạn). Guardrail: KHÔNG drain
+        key SỐNG cuối cùng của provider (tránh tự cắt capacity). Audit log đầy đủ."""
+        key = self.registry.get(key_id)
+        if key is None:
+            return {"ok": False, "error": f"unknown key_id: {key_id}"}
+        same = self.registry.keys_for_provider(key.provider)
+        live = [k for k in same
+                if not await self.counters.in_cooldown(k.id)
+                and not await self.counters.is_drained(k.id)]
+        if not await self.counters.is_drained(key_id) and len(live) <= 1:
+            logger.warning("admin_drain_refused_last_key",
+                           extra={"key_id": key_id, "actor": actor, "provider": key.provider.value})
+            return {"ok": False, "error": "refuse: last live key of provider (guardrail)"}
+        await self.counters.set_drain(key_id, ttl)
+        logger.warning("admin_drain_key",
+                       extra={"key_id": key_id, "actor": actor, "reason": reason[:200], "ttl": ttl})
+        return {"ok": True, "key_id": key_id, "drained": True, "ttl": ttl}
+
+    async def resume_key(self, key_id: str, *, actor: str = "?") -> dict:
+        if self.registry.get(key_id) is None:
+            return {"ok": False, "error": f"unknown key_id: {key_id}"}
+        await self.counters.clear_drain(key_id)
+        logger.warning("admin_resume_key", extra={"key_id": key_id, "actor": actor})
+        return {"ok": True, "key_id": key_id, "drained": False}
+
     # ----------------- giám sát -----------------
     async def snapshot(self) -> dict:
         keys = []
@@ -359,6 +388,7 @@ class Router:
                 "limit_kind": k.limit.kind, "limit": limit,
                 "used_today": u["daily_used"], "remaining": remaining,
                 "rpm_now": u["rpm"], "cost_month": u["cost_month"], "cooldown": u["cooldown"],
+                "drained": await self.counters.is_drained(k.id),
             })
         return {"routing_version": self.table.version, "models": len(self.catalog),
                 "selector": self.table.selector.impl, "keys": keys}

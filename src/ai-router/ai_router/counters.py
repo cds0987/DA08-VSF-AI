@@ -86,6 +86,16 @@ class Counters(ABC):
     @abstractmethod
     async def next_seq(self, name: str) -> int: ...
 
+    # --- drain (human-in-the-loop: rút key khỏi vòng xoay, có TTL tự hết hạn) ---
+    @abstractmethod
+    async def set_drain(self, key_id: str, seconds: int) -> None: ...
+
+    @abstractmethod
+    async def is_drained(self, key_id: str) -> bool: ...
+
+    @abstractmethod
+    async def clear_drain(self, key_id: str) -> None: ...
+
 
 # --------------------------------------------------------------------------- #
 # Redis backend — reserve qua Lua (atomic)
@@ -191,6 +201,15 @@ class RedisCounters(Counters):
         await self._r.expire(k, SEQ_TTL)
         return int(val)
 
+    async def set_drain(self, key_id, seconds):
+        await self._r.set(f"drain:{key_id}", "1", ex=seconds)
+
+    async def is_drained(self, key_id):
+        return bool(await self._r.exists(f"drain:{key_id}"))
+
+    async def clear_drain(self, key_id):
+        await self._r.delete(f"drain:{key_id}")
+
 
 # --------------------------------------------------------------------------- #
 # In-memory backend — dev/test, 1 process. KHÔNG atomic xuyên process.
@@ -201,6 +220,7 @@ class MemoryCounters(Counters):
         self._cool: dict[str, float] = {}
         self._mcool: dict[str, float] = {}             # model_id -> expire_at
         self._active: dict[str, int] = {}
+        self._drain: dict[str, float] = {}             # key_id -> expire_at (drain TTL)
 
     def _get(self, k: str) -> float:
         v = self._d.get(k)
@@ -295,6 +315,19 @@ class MemoryCounters(Counters):
         val = int(self._get(k)) + 1
         self._set(k, val, SEQ_TTL)
         return val
+
+    async def set_drain(self, key_id, seconds):
+        self._drain[key_id] = time.time() + seconds
+
+    async def is_drained(self, key_id):
+        exp = self._drain.get(key_id)
+        if exp and time.time() < exp:
+            return True
+        self._drain.pop(key_id, None)
+        return False
+
+    async def clear_drain(self, key_id):
+        self._drain.pop(key_id, None)
 
 
 def create_counters(redis_url: str | None) -> Counters:

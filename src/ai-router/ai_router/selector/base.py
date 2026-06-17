@@ -60,7 +60,10 @@ class Selector(ABC):
         if tdef is None:
             return None
         keys = self.registry.keys_for_provider(tdef.provider)
-        live = [k for k in keys if not await self.counters.in_cooldown(k.id)]
+        # Loại key đang cooldown (429) HOẶC bị drain (human-in-the-loop rút ra).
+        live = [k for k in keys
+                if not await self.counters.in_cooldown(k.id)
+                and not await self.counters.is_drained(k.id)]
         if not live:
             return None
         scope = scope or f"{req.capability}:{tier_name}"

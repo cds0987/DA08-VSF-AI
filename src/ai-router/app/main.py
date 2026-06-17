@@ -50,6 +50,15 @@ def require_auth(authorization: str | None = Header(None),
     _auth(authorization, x_internal_token)
 
 
+async def _safe_json(req: Request) -> dict:
+    """Parse JSON body; rỗng/lỗi -> {} (drain/resume cho phép gọi không body)."""
+    try:
+        body = await req.json()
+        return body if isinstance(body, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "keys": len(router.registry.all_keys()),
@@ -74,6 +83,23 @@ async def metrics() -> PlainTextResponse:
 async def admin_reload() -> dict:
     router.reload()
     return {"status": "reloaded", "routing_version": router.table.version}
+
+
+@app.post("/admin/key/{key_id}/drain", dependencies=[Depends(require_auth)])
+async def admin_drain_key(key_id: str, req: Request) -> JSONResponse:
+    """HITL v1: rút 1 key khỏi vòng xoay (có TTL + guardrail không drain key cuối + audit).
+    Body tùy chọn {actor, reason} để ghi audit ai/vì sao."""
+    body = await _safe_json(req)
+    result = await router.drain_key(key_id, actor=str(body.get("actor", "?")),
+                                    reason=str(body.get("reason", "")))
+    return JSONResponse(result, status_code=200 if result.get("ok") else 409)
+
+
+@app.post("/admin/key/{key_id}/resume", dependencies=[Depends(require_auth)])
+async def admin_resume_key(key_id: str, req: Request) -> JSONResponse:
+    body = await _safe_json(req)
+    result = await router.resume_key(key_id, actor=str(body.get("actor", "?")))
+    return JSONResponse(result, status_code=200 if result.get("ok") else 409)
 
 
 @app.post("/v1/route", dependencies=[Depends(require_auth)])

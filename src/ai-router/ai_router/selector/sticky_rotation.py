@@ -23,8 +23,10 @@ class StickyRotationSoft(Selector):
             if not keys:
                 continue
 
-            # loại key đang cooling-down (429)
-            live = [k for k in keys if not await self.counters.in_cooldown(k.id)]
+            # loại key đang cooling-down (429) HOẶC bị drain (human-in-the-loop)
+            live = [k for k in keys
+                    if not await self.counters.in_cooldown(k.id)
+                    and not await self.counters.is_drained(k.id)]
             if not live:
                 continue
 
