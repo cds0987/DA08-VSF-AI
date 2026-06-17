@@ -17,7 +17,7 @@ tiers:
 # alias service truyền qua field `model` -> capability
 aliases:
   auto: answer
-  gpt-5.4-mini: answer
+  gpt-5.4-nano: answer
   default: answer
 
 # Bậc thang: OpenAI free -> OpenRouter free -> paid (PLAN §5.1). Model free_or có thể
@@ -46,7 +46,7 @@ capabilities:
   think:                            # node CHÍNH XÁC CAO: openai free -> HẾT thì vào PAID
     tiers: [free_oai, paid]         # bỏ qua free OpenRouter (yếu) — think cần độ chính xác
     models:
-      free_oai: openai/gpt-5.4-mini
+      free_oai: openai/gpt-5.4-nano
       paid:                           # ưu tiên CHẤT LƯỢNG (pro trước), flash/rẻ làm fallback. interchange + đối chiếu giá OpenRouter
         - deepseek/deepseek-v4-pro    # 1.6T MoE, reasoning mạnh nhất  ($0.435/$0.87, ctx 1.05M)
         - xiaomi/mimo-v2.5-pro        # pro agentic                    ($0.435/$0.87, ctx 1.05M)

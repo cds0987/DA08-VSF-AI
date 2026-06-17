@@ -517,7 +517,7 @@ services:
       OPENAI_LLM_MODEL: gpt-4o-mini
       OPENAI_EMBEDDING_MODEL: text-embedding-3-small
       # ── BẬT ai-router mode (MIRROR PROD): luồng trả lời chính (LangGraph) qua chat.completions
-      # -> router. Dùng ĐÚNG capability prod = "think" (-> gpt-5.4-mini) để test đúng model prod
+      # -> router. Dùng ĐÚNG capability prod = "think" (-> gpt-5.4-nano) để test đúng model prod
       # sẽ chạy, KHÔNG phải answer/gpt-4o-mini. intent/embed vẫn direct OpenAI (chưa migrate) ->
       # OPENAI_API_KEY = key THẬT; còn adapter routed gửi AIROUTER_INTERNAL_TOKEN (tách credential).
       LLM_MODEL_ADAPTER: "chat"

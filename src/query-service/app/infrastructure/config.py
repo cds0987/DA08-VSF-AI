@@ -27,7 +27,7 @@ class Settings(BaseSettings):
 
     llm_mode: str = "openai"
     openai_api_key: str | None = None
-    openai_llm_model: str = "gpt-5.4-mini"
+    openai_llm_model: str = "gpt-5.4-nano"
     openai_embedding_model: str = "text-embedding-3-small"
     openai_timeout_seconds: int = 30
 
@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     # Default "responses" -> prod KHÔNG đổi cho tới khi parity test xanh + bật "chat" có chủ đích.
     llm_model_adapter: str = "responses"
     # Capability name gửi khi route qua ai-router (chỉ dùng khi openai_base_url set).
-    llm_capability: str = "think"          # câu trả lời chính: think (giữ gpt-5.4-mini, fallback deepseek)
+    llm_capability: str = "think"          # câu trả lời chính: think (gpt-5.4-nano, fallback deepseek)
     intent_capability: str = "triage"      # phân loại nhanh
     guardrail_capability: str = "guardrail"
 
