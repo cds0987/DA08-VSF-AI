@@ -59,13 +59,37 @@ class QdrantBase(VectorStoreProvider):
                 f"Sai dimension: vector={len(record.vector)} != index={self.config.dimension}. "
                 "Doi dimension la migration (ingestion.md §8)."
             )
+        payload = {**record.payload, "chunk_id": record.chunk_id}
+        if getattr(self.config, "hybrid", False):
+            # Named vector "dense" + "sparse" (khớp query mcp using=dense/sparse + RRF).
+            idx, val = record.sparse_indices, record.sparse_values
+            if not idx:  # engine chưa điền -> encode từ bm25_text (CÙNG hàm với mcp)
+                from core_engine.vectorstore.sparse import sparse_encode
+                idx, val = sparse_encode(str(record.payload.get("bm25_text", "")))
+            return models.PointStruct(
+                id=point_id(record.chunk_id),
+                vector={
+                    "dense": list(record.vector),
+                    "sparse": models.SparseVector(indices=list(idx), values=list(val)),
+                },
+                payload=payload,
+            )
         return models.PointStruct(
             id=point_id(record.chunk_id),
             vector=list(record.vector),
-            payload={**record.payload, "chunk_id": record.chunk_id},
+            payload=payload,
         )
 
     def _collection_create_kwargs(self) -> dict:
+        if getattr(self.config, "hybrid", False):
+            return {
+                "vectors_config": {
+                    "dense": models.VectorParams(
+                        size=self.config.dimension, distance=models.Distance.COSINE
+                    ),
+                },
+                "sparse_vectors_config": {"sparse": models.SparseVectorParams()},
+            }
         return {
             "vectors_config": models.VectorParams(
                 size=self.config.dimension, distance=models.Distance.COSINE
