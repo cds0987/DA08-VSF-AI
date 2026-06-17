@@ -312,6 +312,14 @@ services:
       - ./deploy/env/secret.env
     environment:
       AIROUTER_REDIS_URL: redis://redis:6379/1
+      # OTel auto-instrument — TẮT mặc định (hành vi y nguyên). Bật =1 SAU khi test staging
+      # -> ai-router phát trace OTLP về otel-collector (trace_id xuyên suốt). Inert khi =0.
+      VSF_OTEL_ENABLED: "${VSF_OTEL_ENABLED:-0}"
+      OTEL_SERVICE_NAME: ai-router
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
     depends_on:
       redis:
         condition: service_started

@@ -32,6 +32,11 @@ scrape_configs:
     static_configs:
       - targets: ['cadvisor:8080']
 
+  # OTel Collector: metrics đã gom từ service (8889) + self-metrics (8888).
+  - job_name: otel-collector
+    static_configs:
+      - targets: ['otel-collector:8889', 'otel-collector:8888']
+
   # Prometheus tự giám sát (sanity).
   - job_name: prometheus
     static_configs:

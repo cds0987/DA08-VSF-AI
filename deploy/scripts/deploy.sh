@@ -89,7 +89,8 @@ docker compose up -d --no-build --force-recreate nginx
 # Hỏng chỉ mất biểu đồ/alert, KHÔNG chặn deploy app.
 OBS="-f docker-compose.yml -f docker-compose.observability.yml"
 docker compose $OBS up -d --no-build prometheus grafana alertmanager node-exporter cadvisor \
-  || echo "::warning::monitor stack (prometheus/grafana/alertmanager/exporters) up FAILED — biểu đồ/alert tạm thiếu, app KHÔNG ảnh hưởng"
+  otel-collector tempo loki \
+  || echo "::warning::monitor stack up FAILED — biểu đồ/alert/trace tạm thiếu, app KHÔNG ảnh hưởng"
 # Reload Prometheus để nạp alert rules mới mà KHÔNG cần recreate container (lần sửa rules sau).
 docker compose $OBS exec -T prometheus wget -q -O- --post-data='' http://localhost:9090/-/reload >/dev/null 2>&1 \
   || echo "::warning::prometheus reload rules SKIP (container mới tạo đã tự nạp, hoặc reload chưa sẵn)"

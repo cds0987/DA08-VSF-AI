@@ -79,7 +79,44 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # ───── Trace/Log backend + OTel Collector (Phase 2: nhận OTLP từ service đã instrument) ─────
+  # OTel Collector — gom OTLP từ service, chia traces->Tempo, logs->Loki, metrics->Prometheus.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.109.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./deploy/observability/otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
+    mem_limit: 512m
+    depends_on:
+      tempo:
+        condition: service_started
+      loki:
+        condition: service_started
+    restart: unless-stopped
+
+  # Tempo — lưu trace (OTLP). Storage disk, retention 7d, RAM ≤1g.
+  tempo:
+    image: grafana/tempo:2.6.1
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./deploy/observability/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo_data:/var/tempo
+    mem_limit: 1g
+    restart: unless-stopped
+
+  # Loki — lưu log (OTLP). Storage disk, retention 14d, RAM ≤1g.
+  loki:
+    image: grafana/loki:3.1.1
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./deploy/observability/loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki_data:/loki
+    mem_limit: 1g
+    restart: unless-stopped
+
 volumes:
   prometheus_data:
   grafana_data:
   alertmanager_data:
+  tempo_data:
+  loki_data:

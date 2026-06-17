@@ -676,14 +676,27 @@ export const useChatStore = defineStore('chat', () => {
       }
     } catch (error) {
       if (!controller.signal.aborted && !completed) {
-        const message = errorMessage(error)
-        messages.value.push({
-          id: `err-${Date.now()}`,
-          role: 'assistant',
-          content: fullContent || message,
-          error: message,
-          timestamp: new Date().toLocaleString(),
-        })
+        if (error instanceof QueryServiceError) {
+          // Server error (4xx/5xx) — show specific error banner
+          const message = errorMessage(error)
+          messages.value.push({
+            id: `err-${Date.now()}`,
+            role: 'assistant',
+            content: fullContent || message,
+            error: message,
+            timestamp: new Date().toLocaleString(),
+          })
+        } else {
+          // Network interruption (ERR_NETWORK_CHANGED, stream closed early, etc.)
+          // ChatGPT-style: keep partial content, show retry button — no error banner
+          messages.value.push({
+            id: `err-${Date.now()}`,
+            role: 'assistant',
+            content: fullContent,
+            interrupted: true,
+            timestamp: new Date().toLocaleString(),
+          })
+        }
         cacheCurrentConversation()
         isUsingHistoryFallback.value = true
       }
@@ -694,6 +707,16 @@ export const useChatStore = defineStore('chat', () => {
       pipeline.value = -1
     }
   }
+
+  async function retryMessage(messageId: string, pipelineStages: PipelineStage[]) {
+    const msgIndex = messages.value.findIndex(m => m.id === messageId)
+    if (msgIndex === -1) return
+    const userMsg = [...messages.value].slice(0, msgIndex).reverse().find(m => m.role === 'user')
+    if (!userMsg) return
+    messages.value.splice(msgIndex, 1)
+    await ask(userMsg.content, pipelineStages)
+  }
+
 
   async function submitFeedback(messageId: string, score: 1 | -1) {
     const message = messages.value.find((item) => item.id === messageId)
@@ -772,6 +795,7 @@ export const useChatStore = defineStore('chat', () => {
     deleteConversation,
     renameConversation,
     ask,
+    retryMessage,
     submitFeedback,
     injectProactiveMessage,
     queueProactiveMessage,

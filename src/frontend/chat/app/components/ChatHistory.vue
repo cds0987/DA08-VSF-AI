@@ -132,12 +132,6 @@ async function clearHistory() {
         <h3 class="text-sm font-semibold text-slate-900 dark:text-sidebar-foreground whitespace-nowrap">
           Gần đây
         </h3>
-        <span
-          v-if="chat.isUsingHistoryFallback"
-          class="ml-2 text-[10px] font-medium text-amber-600"
-        >
-          Bản tạm
-        </span>
       </div>
 
       <!-- History Items -->
