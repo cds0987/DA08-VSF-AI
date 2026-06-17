@@ -31,6 +31,25 @@ class Settings(BaseSettings):
     openai_embedding_model: str = "text-embedding-3-small"
     openai_timeout_seconds: int = 30
 
+    # ── AI gateway (ai-router) ────────────────────────────────────────────────
+    # openai_base_url RỖNG -> gọi THẲNG OpenAI (hành vi cũ, kill-switch tức thì). Set
+    # http://ai-router:8010/v1 -> mọi LLM/embedding đi qua router (cân bằng key + cost-per-key).
+    # Khi route: api_key = AIROUTER_INTERNAL_TOKEN; `model` gửi đi = CAPABILITY name (router
+    # tự chọn model thật). KHÔNG route: `model` = tên model thật bên dưới.
+    openai_base_url: str | None = None
+    # Token nội bộ gửi cho ai-router (Bearer) khi route. TÁCH khỏi openai_api_key để client
+    # direct CHƯA migrate (intent/guardrail dùng responses.create) vẫn gọi thẳng OpenAI bằng
+    # key thật, còn adapter routed gửi token -> router auth ON không làm gãy 2 client kia.
+    # Rỗng (auth router off, vd e2e) -> fallback openai_api_key (router bỏ qua Bearer).
+    airouter_internal_token: str | None = None
+    # Adapter LangGraph: "responses" (cũ, OpenAI-only) | "chat" (chuẩn, route được qua router).
+    # Default "responses" -> prod KHÔNG đổi cho tới khi parity test xanh + bật "chat" có chủ đích.
+    llm_model_adapter: str = "responses"
+    # Capability name gửi khi route qua ai-router (chỉ dùng khi openai_base_url set).
+    llm_capability: str = "think"          # câu trả lời chính: think (giữ gpt-5.4-mini, fallback deepseek)
+    intent_capability: str = "triage"      # phân loại nhanh
+    guardrail_capability: str = "guardrail"
+
     mcp_mode: str = "mock"
     mcp_service_url: str = "http://localhost:8003"
     mcp_timeout_seconds: int = 10

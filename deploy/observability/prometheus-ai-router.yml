@@ -1,0 +1,12 @@
+# Scrape job cho ai-router — THÊM block này vào `scrape_configs:` của prometheus.yml trên VM.
+# ai-router expose /metrics (per-key gauge từ Redis + leading-indicator counter). Không secret.
+# Prometheus cùng mạng compose -> tới được qua service name `ai-router:8010`.
+#
+# scrape_configs:
+  - job_name: ai-router
+    metrics_path: /metrics
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['ai-router:8010']
+        labels:
+          service: ai-router

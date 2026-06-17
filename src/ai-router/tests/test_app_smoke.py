@@ -41,3 +41,20 @@ def test_route_resolves_answer():
     dec = r.json()
     assert dec["model_name"] and dec["tier"]
     assert dec["provider"] in ("openai", "openrouter")
+
+
+def test_metrics_exposes_per_key_and_counters():
+    # resolve vài lần để sinh counter resolve_total -> đảm bảo /metrics có series.
+    for _ in range(2):
+        client.post("/v1/route", json={"capability": "answer",
+                                       "messages": [{"role": "user", "content": "x"}]})
+    r = client.get("/metrics")
+    assert r.status_code == 200, r.text
+    body = r.text
+    # per-key gauge + secret_env (định danh GitHub secret, KHÔNG raw key)
+    assert "airouter_key_remaining{" in body or "airouter_key_tokens_today{" in body
+    assert 'secret_env="OPENAI_API_KEY_1"' in body
+    assert "sk-test-oai" not in body          # KHÔNG bao giờ lộ raw key
+    # leading indicator
+    assert "airouter_resolve_total{" in body
+    assert "airouter_keys_total " in body

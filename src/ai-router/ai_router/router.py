@@ -14,6 +14,7 @@ from .catalog import load_catalog
 from .client_factory import ClientFactory
 from .config import RoutingTable, Settings, load_routing_table
 from .counters import create_counters
+from .observability import Metrics
 from .parser import extract_usage
 from .registry import TIER_DEFS, Registry
 from .schemas import Provider, RouteDecision, Usage
@@ -50,6 +51,7 @@ class Router:
         self.table: RoutingTable = load_routing_table(settings.routing_path)
         self.counters = create_counters(settings.redis_url)
         self.clients = ClientFactory(timeout=settings.request_timeout)
+        self.metrics = Metrics()   # leading-indicator counters (fallback, resolve-fail)
         self._build_selector()
 
     def _build_selector(self) -> None:
@@ -78,13 +80,26 @@ class Router:
         cap = self.table.capabilities.get(capability)
         if cap is None:
             logger.warning("unknown_capability alias=%s", capability_alias)
+            self.metrics.inc("airouter_resolve_fail_total",
+                             {"capability": capability_alias, "reason": "unknown_capability"})
             return None
         req = ResolveRequest(
             capability=capability, cap_config=cap, est_tokens=est_tokens,
             has_tools=has_tools, has_image=has_image, conversation_id=conversation_id,
             endpoint=endpoint,
         )
-        return await self.selector.resolve(req)
+        dec = await self.selector.resolve(req)
+        if dec is None:
+            self.metrics.inc("airouter_resolve_fail_total",
+                             {"capability": capability, "reason": "no_capacity"})
+            return None
+        # LEADING INDICATOR: tier != tier ưu tiên (tiers[0]) -> đang fallback (nguy cơ drift/cost).
+        self.metrics.inc("airouter_resolve_total",
+                         {"capability": capability, "tier": dec.tier, "provider": dec.provider.value})
+        primary = cap.tiers[0] if cap.tiers else None
+        if primary is not None and dec.tier != primary:
+            self.metrics.inc("airouter_fallback_total", {"capability": capability, "tier": dec.tier})
+        return dec
 
     # ----------------- accounting -----------------
     async def account(self, dec: RouteDecision, usage: Usage, est_tokens: int) -> None:
@@ -166,6 +181,9 @@ class Router:
             data = chunk.model_dump()
             if data.get("usage"):
                 usage_seen = extract_usage(data)
+                # Gắn _router vào chunk usage cuối -> client (adapter) đọc được key_id/tier
+                # để tag Langfuse per-key (stream path KHÔNG có response.model_dump tổng).
+                data["_router"] = dec.public()
             yield data
         if usage_seen:
             await self.account(dec, usage_seen, est)
@@ -193,7 +211,8 @@ class Router:
             limit = k.limit.value
             remaining = max(limit - u["daily_used"], 0) if k.limit.kind != "none" else None
             keys.append({
-                "key_id": k.id, "provider": k.provider.value, "tier": k.tier,
+                "key_id": k.id, "secret_env": k.api_key_env,
+                "provider": k.provider.value, "tier": k.tier,
                 "limit_kind": k.limit.kind, "limit": limit,
                 "used_today": u["daily_used"], "remaining": remaining,
                 "rpm_now": u["rpm"], "cost_month": u["cost_month"], "cooldown": u["cooldown"],

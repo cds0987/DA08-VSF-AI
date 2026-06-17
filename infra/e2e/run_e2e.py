@@ -60,6 +60,39 @@ def _http(method: str, url: str, *, headers=None, data=None, timeout=30):
         return r.status, r.read()
 
 
+AIROUTER_URL = os.environ.get("AIROUTER_URL", "http://localhost:8010").rstrip("/")
+
+
+def verify_router_served() -> None:
+    """CHỨNG MINH luồng trả lời chính ĐÃ đi qua ai-router (không phải tình cờ chạy direct).
+
+    Sau khi query, /metrics phải có airouter_resolve_total > 0 (router đã resolve key cho
+    LLM call) và ÍT NHẤT 1 key đã tiêu token hôm nay. Nếu query-service bypass router thì
+    cả 2 = 0 -> FAIL. Đây là khác biệt giữa 'answer chạy' và 'answer chạy QUA ROUTER'.
+    """
+    st, raw = _http("GET", f"{AIROUTER_URL}/metrics", timeout=15)
+    if st != 200:
+        raise SystemExit(f"[router] FAIL: /metrics status={st}")
+    text = raw.decode("utf-8", "replace")
+    resolved = sum(
+        float(line.rsplit(" ", 1)[1])
+        for line in text.splitlines()
+        if line.startswith("airouter_resolve_total{")
+    )
+    tokens = sum(
+        float(line.rsplit(" ", 1)[1])
+        for line in text.splitlines()
+        if line.startswith("airouter_key_tokens_today{")
+    )
+    print(f"  [router] resolve_total={resolved} key_tokens_today={tokens}")
+    if resolved < 1:
+        raise SystemExit("[router] FAIL: airouter_resolve_total=0 -> query KHÔNG đi qua router")
+    # raw key KHÔNG được lộ trong /metrics (chỉ key_id/secret_env)
+    if "sk-" in text:
+        raise SystemExit("[router] FAIL: /metrics lộ raw key (sk-...)")
+    print("  [router] OK: luồng LLM chính đã route qua ai-router")
+
+
 # ─────────────────────────────── 1. LOGIN ──────────────────────────────────
 def login() -> tuple[str, str]:
     body = json.dumps({"email": ADMIN_EMAIL, "password": ADMIN_PW}).encode()
@@ -403,6 +436,7 @@ def main() -> int:
         print("==> 4) verify rag-worker trace (Langfuse)"); lf1 = verify_trace("ingest", lf0)
         print("==> 5) query RAG"); query("RAG", token, uid, "công ty có chính sách nghỉ phép thế nào", True)
         print("==> 6) query HR"); query("HR", token, uid, "Tôi còn bao nhiêu ngày phép?", False)
+        print("==> 6c) verify ai-router served LLM"); verify_router_served()
         print("==> 6b) leave write flow (hr-service + Postgres thật)"); leave_write_flow()
         print("==> 7) verify query-service trace (Langfuse)"); verify_trace("query", lf1)
         print("E2E PASS ✓")

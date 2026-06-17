@@ -518,10 +518,12 @@ class QueryOrchestrationUseCase:
                                 out_msg = event.get("data", {}).get("output")
                                 output_text = getattr(out_msg, "content", "") or ""
                                 usage_meta_ev = getattr(out_msg, "usage_metadata", None) or {}
-                                model_ev = (
-                                    (getattr(out_msg, "response_metadata", None) or {}).get("model_name")
-                                    or self._settings.openai_llm_model
-                                )
+                                resp_meta_ev = getattr(out_msg, "response_metadata", None) or {}
+                                model_ev = resp_meta_ev.get("model_name") or self._settings.openai_llm_model
+                                # _router (key_id/tier/provider) khi đi qua ai-router -> tag generation
+                                # để Langfuse drill-down "request này dùng key nào" (per-key aggregate
+                                # tổng hợp ở Grafana /metrics, đây chỉ là per-request).
+                                router_ev = resp_meta_ev.get("router") or None
                                 _tracer.on_llm(
                                     _lang_trace,
                                     node=run_info["node"],
@@ -531,6 +533,7 @@ class QueryOrchestrationUseCase:
                                     usage_metadata=usage_meta_ev,
                                     start_dt=run_info["start_dt"],
                                     end_dt=end_dt,
+                                    router=router_ev,
                                 )
                             except Exception:  # noqa: BLE001 — tracing never breaks stream
                                 pass
