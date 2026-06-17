@@ -56,6 +56,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-vsf-grafana-admin}"
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_USERS_VIEWERS_CAN_EDIT: "true"   # cho Viewer (anonymous) DÙNG Explore (query Tempo/Loki/Prom), KHÔNG lưu được
     volumes:
       - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
