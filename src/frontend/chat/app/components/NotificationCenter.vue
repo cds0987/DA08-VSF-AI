@@ -15,6 +15,7 @@ const chat = useChatStore()
 const router = useRouter()
 const route = useRoute()
 const isOpen = ref(false)
+let lastFetchedAt = 0
 
 function formatCreatedAt(value: string) {
   return new Intl.DateTimeFormat('vi-VN', {
@@ -29,6 +30,9 @@ function extractDocName(message: string): string {
 
 async function handleOpen(open: boolean) {
   if (!open) return
+  const now = Date.now()
+  if (now - lastFetchedAt < 30_000) return  // throttle: không re-fetch trong 30s
+  lastFetchedAt = now
   await Promise.all([
     notifications.fetchHistory(),
     notifications.fetchUnreadCount(),

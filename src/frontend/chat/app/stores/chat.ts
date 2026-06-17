@@ -74,9 +74,11 @@ function extractAction(rawContent: string): { actions?: any[]; content: string }
           }))
           return { actions, content: buildActionIntro(actions) }
         }
+        // action_type hợp lệ nhưng thiếu items/parameters → fallback, không hiện raw JSON
+        return { content: 'Mình đã xử lý yêu cầu của bạn. Bạn có thể hỏi thêm nếu cần nhé.' }
       }
     } catch {
-      // Không phải JSON hợp lệ / không phải action -> coi như text thường.
+      // JSON không hợp lệ → coi như text thường, hiện nguyên văn
     }
   }
   return { content: rawContent }
@@ -292,10 +294,7 @@ export const useChatStore = defineStore('chat', () => {
       conversations.value.unshift(conversation)
     }
     conversations.value.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    fallbackConversations.value = conversations.value.map((item) => ({
-      ...item,
-      messages: item.messages.map((message) => ({ ...message })),
-    }))
+    persistFallbackHistory()
   }
 
   function ensureConversationId() {
@@ -305,10 +304,16 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function persistFallbackHistory() {
-    fallbackConversations.value = conversations.value.map((item) => ({
-      ...item,
-      messages: item.messages.map((message) => ({ ...message })),
-    }))
+    try {
+      fallbackConversations.value = conversations.value.map((item) => ({
+        ...item,
+        messages: item.messages.map((message) => ({ ...message })),
+      }))
+    } catch (err) {
+      // QuotaExceededError: storage đầy — giữ lịch sử in-memory, bỏ qua persist
+      if (err instanceof DOMException && err.name === 'QuotaExceededError') return
+      throw err
+    }
   }
 
   function activateConversation(conversation: Conversation) {
@@ -640,7 +645,12 @@ export const useChatStore = defineStore('chat', () => {
           }
         },
         onmessage(message) {
-          const payload: unknown = JSON.parse(message.data)
+          let payload: unknown
+          try {
+            payload = JSON.parse(message.data)
+          } catch {
+            return
+          }
           if (isTokenEvent(payload)) {
             if (payload.token) {
               hasStartedStreaming = true
