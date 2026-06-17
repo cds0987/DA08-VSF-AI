@@ -88,12 +88,14 @@ docker compose up -d --no-build --force-recreate nginx
 # Monitor stack (file riêng, overlay CÙNG project -> chung network) — NON-FATAL.
 # Hỏng chỉ mất biểu đồ/alert, KHÔNG chặn deploy app.
 OBS="-f docker-compose.yml -f docker-compose.observability.yml"
-docker compose $OBS up -d --no-build prometheus grafana alertmanager node-exporter cadvisor \
-  otel-collector tempo loki \
-  || echo "::warning::monitor stack up FAILED — biểu đồ/alert/trace tạm thiếu, app KHÔNG ảnh hưởng"
-# Reload Prometheus để nạp alert rules mới mà KHÔNG cần recreate container (lần sửa rules sau).
-docker compose $OBS exec -T prometheus wget -q -O- --post-data='' http://localhost:9090/-/reload >/dev/null 2>&1 \
-  || echo "::warning::prometheus reload rules SKIP (container mới tạo đã tự nạp, hoặc reload chưa sẵn)"
+# Service ĐỌC CONFIG FILE (prometheus scrape+rules, alertmanager, otel-collector): FORCE-RECREATE
+# mỗi deploy để CHẮC CHẮN nạp config mới (reload qua exec/wget không đáng tin giữa các image ->
+# từng làm scrape job node/cadvisor không được nạp -> dashboard trống). Data ở volume nên an toàn.
+docker compose $OBS up -d --no-build --force-recreate prometheus alertmanager otel-collector \
+  || echo "::warning::monitor config services (prometheus/alertmanager/otel) up FAILED — app KHÔNG ảnh hưởng"
+# Còn lại (exporter/backend, config ít đổi): up thường.
+docker compose $OBS up -d --no-build grafana node-exporter cadvisor tempo loki \
+  || echo "::warning::monitor stack (grafana/exporters/tempo/loki) up FAILED — app KHÔNG ảnh hưởng"
 
 echo "==> 4b) LANGFUSE readiness PROD bằng KEY THẬT (NON-FATAL — chỉ cảnh báo)"
 lf_warn() { echo "::warning::LANGFUSE prod: $1 — kiểm tra: docker compose logs langfuse"; }
