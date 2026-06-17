@@ -46,7 +46,7 @@
       "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "area" },
       "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 0.1 }, { "color": "red", "value": 0.3 } ] } } },
-      "targets": [ { "expr": "sum(rate(airouter_fallback_total[5m])) / clamp_min(sum(rate(airouter_resolve_total[5m])), 1)", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+      "targets": [ { "expr": "(sum(rate(airouter_fallback_total[5m])) or vector(0)) / clamp_min(sum(rate(airouter_resolve_total[5m])) or vector(0), 1)", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
     },
 
     { "id": 700, "type": "row", "title": "⑦ Cần làm gì ngay — Alert đang kêu", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 } },
@@ -92,7 +92,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 7, "w": 12, "x": 0, "y": 24 },
       "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "custom": { "fillOpacity": 10 } } },
-      "targets": [ { "expr": "sum(rate(airouter_fallback_total[5m])) / clamp_min(sum(rate(airouter_resolve_total[5m])), 1)", "legendFormat": "fallback rate", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+      "targets": [ { "expr": "(sum(rate(airouter_fallback_total[5m])) or vector(0)) / clamp_min(sum(rate(airouter_resolve_total[5m])) or vector(0), 1)", "legendFormat": "fallback rate", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
     },
     {
       "id": 9, "type": "text", "title": "Quality score — sắp có (Phase 5)",
