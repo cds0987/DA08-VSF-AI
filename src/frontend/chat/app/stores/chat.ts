@@ -74,9 +74,11 @@ function extractAction(rawContent: string): { actions?: any[]; content: string }
           }))
           return { actions, content: buildActionIntro(actions) }
         }
+        // action_type hợp lệ nhưng thiếu items/parameters → fallback, không hiện raw JSON
+        return { content: 'Mình đã xử lý yêu cầu của bạn. Bạn có thể hỏi thêm nếu cần nhé.' }
       }
     } catch {
-      // Không phải JSON hợp lệ / không phải action -> coi như text thường.
+      // JSON không hợp lệ → coi như text thường, hiện nguyên văn
     }
   }
   return { content: rawContent }
@@ -225,6 +227,7 @@ export const useChatStore = defineStore('chat', () => {
   const isHistoryLoading = ref(false)
   const isHistoryClearing = ref(false)
   const isUsingHistoryFallback = ref(false)
+  const conversationLoadError = ref<'error' | null>(null)
   const pipeline = ref<number>(-1)
   const streamingText = ref('')
   const thinkingStatus = ref('')
@@ -291,10 +294,7 @@ export const useChatStore = defineStore('chat', () => {
       conversations.value.unshift(conversation)
     }
     conversations.value.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    fallbackConversations.value = conversations.value.map((item) => ({
-      ...item,
-      messages: item.messages.map((message) => ({ ...message })),
-    }))
+    persistFallbackHistory()
   }
 
   function ensureConversationId() {
@@ -304,13 +304,20 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function persistFallbackHistory() {
-    fallbackConversations.value = conversations.value.map((item) => ({
-      ...item,
-      messages: item.messages.map((message) => ({ ...message })),
-    }))
+    try {
+      fallbackConversations.value = conversations.value.map((item) => ({
+        ...item,
+        messages: item.messages.map((message) => ({ ...message })),
+      }))
+    } catch (err) {
+      // QuotaExceededError: storage đầy — giữ lịch sử in-memory, bỏ qua persist
+      if (err instanceof DOMException && err.name === 'QuotaExceededError') return
+      throw err
+    }
   }
 
   function activateConversation(conversation: Conversation) {
+    conversationLoadError.value = null
     abortController?.abort()
     abortController = null
     currentConversationId.value = conversation.id
@@ -344,8 +351,17 @@ export const useChatStore = defineStore('chat', () => {
       persistFallbackHistory()
       isUsingHistoryFallback.value = false
       return true
-    } catch {
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        // Không còn trên server → xóa khỏi lịch sử, không hiện cho user
+        conversations.value = conversations.value.filter((item) => item.id !== id)
+        persistFallbackHistory()
+        currentConversationId.value = null
+        messages.value = []
+        return false
+      }
       isUsingHistoryFallback.value = true
+      conversationLoadError.value = 'error'
       return false
     }
   }
@@ -445,11 +461,23 @@ export const useChatStore = defineStore('chat', () => {
         return true
       }
 
-      const preferred = (
-        currentConversationId.value
-          ? conversations.value.find((item) => item.id === currentConversationId.value)
-          : null
-      ) || conversations.value[0]
+      // Không có session trước (logout hoặc lần đầu): chỉ populate sidebar,
+      // không tự mở conversation — giống ChatGPT/Gemini.
+      if (!currentConversationId.value) {
+        isUsingHistoryFallback.value = false
+        persistFallbackHistory()
+        return true
+      }
+
+      const preferred = conversations.value.find((item) => item.id === currentConversationId.value)
+      if (!preferred) {
+        // ID không còn trong list (bị xóa/hết hạn) → về empty state
+        currentConversationId.value = null
+        isUsingHistoryFallback.value = false
+        persistFallbackHistory()
+        return true
+      }
+
       if (!serverIds.has(preferred.id)) {
         activateConversation(preferred)
         persistFallbackHistory()
@@ -457,7 +485,7 @@ export const useChatStore = defineStore('chat', () => {
         return true
       }
 
-      // Bug 1: hiện cached data ngay lập tức, server data replace sau khi fetch xong.
+      // Optimistic: hiện cached data ngay lập tức, server data replace sau khi fetch xong.
       activateConversation(preferred)
 
       // 404 → xóa khỏi list, thử candidate tiếp theo.
@@ -629,7 +657,12 @@ export const useChatStore = defineStore('chat', () => {
           }
         },
         onmessage(message) {
-          const payload: unknown = JSON.parse(message.data)
+          let payload: unknown
+          try {
+            payload = JSON.parse(message.data)
+          } catch {
+            return
+          }
           if (isTokenEvent(payload)) {
             if (payload.token) {
               hasStartedStreaming = true
@@ -795,6 +828,7 @@ export const useChatStore = defineStore('chat', () => {
     isHistoryLoading,
     isHistoryClearing,
     isUsingHistoryFallback,
+    conversationLoadError,
     pipeline,
     streamingText,
     thinkingStatus,

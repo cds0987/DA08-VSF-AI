@@ -32,13 +32,13 @@ class OpenAIStreamingClient:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._client = None
+        self._model = settings.openai_llm_model
         if settings.llm_mode == "openai" and settings.openai_api_key:
-            from openai import AsyncOpenAI
+            from app.infrastructure.external.routed_openai import build_routed_openai, route_model
 
-            self._client = AsyncOpenAI(
-                api_key=settings.openai_api_key,
-                timeout=settings.openai_timeout_seconds,
-            )
+            # Route qua ai-router (chat.completions, capability `think`) khi OPENAI_BASE_URL set.
+            self._client, _ = build_routed_openai(settings)
+            self._model = route_model(settings, settings.llm_capability, settings.openai_llm_model)
 
     async def stream_answer(
         self,
@@ -77,20 +77,22 @@ class OpenAIStreamingClient:
         )
 
         try:
-            stream = await self._client.responses.create(
-                model=self._settings.openai_llm_model,
-                instructions=system_prompt,
-                input=user_prompt,
+            stream = await self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
                 stream=True,
-                max_output_tokens=self._settings.llm_max_output_tokens,
+                max_completion_tokens=self._settings.llm_max_output_tokens,
+                temperature=0,
             )
-            async for event in stream:
-                if getattr(event, "type", None) == "response.output_text.delta":
-                    delta = getattr(event, "delta", "")
-                    if delta:
-                        yield delta
-                elif getattr(event, "type", None) == "error":
-                    raise RuntimeError(str(getattr(event, "error", "OpenAI streaming error")))
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta.content or ""
+                if delta:
+                    yield delta
         except HTTPException:
             raise
         except Exception as exc:

@@ -63,24 +63,30 @@ class LlmApiInputGuardrail:
         self._model = getattr(settings, "guardrail_model", None) or settings.openai_llm_model
         self._client = client
         if self._client is None and getattr(settings, "openai_api_key", None):
-            from openai import AsyncOpenAI
+            from app.infrastructure.external.routed_openai import build_routed_openai, route_model
 
-            self._client = AsyncOpenAI(
-                api_key=settings.openai_api_key,
-                timeout=settings.openai_timeout_seconds,
-            )
+            # Route qua ai-router (chat.completions, capability `guardrail`) khi OPENAI_BASE_URL set;
+            # direct OpenAI (guardrail_model/openai_llm_model) khi không route.
+            self._client, _ = build_routed_openai(settings)
+            self._model = route_model(settings, settings.guardrail_capability, self._model)
 
     async def scan(self, text: str) -> tuple[bool, str]:
         if self._client is None or not text.strip():
             return False, ""
         try:
-            response = await self._client.responses.create(
+            from app.infrastructure.external.routed_openai import extract_json_text
+
+            response = await self._client.chat.completions.create(
                 model=self._model,
-                instructions=_JUDGE_INSTRUCTIONS,
-                input=text,
-                max_output_tokens=20,
+                messages=[
+                    {"role": "system", "content": _JUDGE_INSTRUCTIONS},
+                    {"role": "user", "content": text},
+                ],
+                max_completion_tokens=30,
+                temperature=0,
             )
-            payload = json.loads(getattr(response, "output_text", "") or "{}")
+            content = response.choices[0].message.content if response.choices else ""
+            payload = json.loads(extract_json_text(content))
         except Exception:
             # Fail-open: không để guardrail tự nó chặn người dùng khi provider lỗi.
             return False, ""

@@ -52,7 +52,7 @@ async function refreshAccessToken(): Promise<string | null> {
         const refreshRes = await axios.post<LoginResponse>(
           `${gatewayUrl}${userPrefix}/auth/refresh`,
           {},
-          { headers: refreshHeaders, withCredentials: true },
+          { headers: refreshHeaders, withCredentials: true, timeout: 10000 },
         )
         return refreshRes.data.access_token || null
       } catch (refreshError) {
@@ -132,7 +132,10 @@ axiosClient.interceptors.response.use(
         removeClientCookie(SESSION_COOKIE)
         const loginPath = getLoginPath()
         if (window.location.pathname !== loginPath) {
-          window.location.href = loginPath
+          // Thông báo trước khi redirect để user không bị mất trắng context
+          const { toast } = await import('vue-sonner')
+          toast.warning('Phiên đăng nhập đã hết hạn. Đang chuyển về trang đăng nhập...')
+          setTimeout(() => { window.location.href = loginPath }, 1500)
         }
       }
     }

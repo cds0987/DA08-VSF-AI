@@ -1,8 +1,8 @@
 """
 Guardrail tests — chế độ GUARDRAILS_MODE=llm_api (LLM-judge injection + regex PII).
 
-KHÔNG gọi OpenAI thật: LlmApiInputGuardrail nhận client inject (fake responses.create).
-Phản ánh đúng luồng mới sau khi GỠ llm-guard/torch khỏi image.
+KHÔNG gọi OpenAI thật: LlmApiInputGuardrail nhận client inject (fake chat.completions.create).
+Phản ánh đúng luồng mới sau khi GỠ llm-guard/torch khỏi image + migrate Responses->Chat (route ai-router).
 """
 import json
 from types import SimpleNamespace
@@ -19,19 +19,23 @@ from app.infrastructure.guardrails.llm_guard_service import (
 )
 
 
-class _FakeResponses:
-    def __init__(self, output_text: str) -> None:
-        self._output_text = output_text
+class _FakeCompletions:
+    """Giả chat.completions.create -> trả message.content (sau migrate Responses->Chat)."""
+
+    def __init__(self, content: str) -> None:
+        self._content = content
         self.calls: list[dict] = []
 
     async def create(self, **kwargs):
         self.calls.append(kwargs)
-        return SimpleNamespace(output_text=self._output_text)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=self._content))]
+        )
 
 
 class _FakeClient:
-    def __init__(self, output_text: str) -> None:
-        self.responses = _FakeResponses(output_text)
+    def __init__(self, content: str) -> None:
+        self.chat = SimpleNamespace(completions=_FakeCompletions(content))
 
 
 def _settings(**overrides) -> Settings:
@@ -84,16 +88,16 @@ async def test_input_guardrail_uses_guardrail_model_override():
     fake = _FakeClient(json.dumps({"injection": False}))
     guard = LlmApiInputGuardrail(_settings(guardrail_model="cheap-judge"), client=fake)
     await guard.scan("hello")
-    assert fake.responses.calls[0]["model"] == "cheap-judge"
+    assert fake.chat.completions.calls[0]["model"] == "cheap-judge"
 
 
 @pytest.mark.asyncio
 async def test_input_guardrail_fail_open_on_client_error():
-    class _BoomResponses:
+    class _BoomCompletions:
         async def create(self, **kwargs):
             raise RuntimeError("provider down")
 
-    client = SimpleNamespace(responses=_BoomResponses())
+    client = SimpleNamespace(chat=SimpleNamespace(completions=_BoomCompletions()))
     guard = LlmApiInputGuardrail(_settings(), client=client)
     blocked, reason = await guard.scan("bất kỳ")
     assert blocked is False and reason == ""
@@ -112,7 +116,7 @@ async def test_input_guardrail_empty_text_short_circuits():
     fake = _FakeClient(json.dumps({"injection": True}))
     guard = LlmApiInputGuardrail(_settings(), client=fake)
     assert await guard.scan("   ") == (False, "")
-    assert fake.responses.calls == []  # không gọi API cho input rỗng
+    assert fake.chat.completions.calls == []  # không gọi API cho input rỗng
 
 
 # ─────────────────────────── output: regex PII ──────────────────────────
