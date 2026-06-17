@@ -91,6 +91,8 @@ jobs:
             base:
               - 'docker-compose.yml'
               - 'docker-compose.e2e.yml'
+              - 'docker-compose.observability.yml'
+              - 'deploy/**'                 # deploy.sh, render-secrets, env, observability config/dashboard -> phải deploy
               - 'infra/nats/**'
               - 'infra/e2e/**'
             wf: '.github/workflows/deploy-develop.yml'
