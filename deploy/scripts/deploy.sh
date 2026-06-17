@@ -97,17 +97,28 @@ docker compose $OBS up -d --no-build --force-recreate prometheus alertmanager ot
 docker compose $OBS up -d --no-build grafana node-exporter cadvisor tempo loki \
   || echo "::warning::monitor stack (grafana/exporters/tempo/loki) up FAILED — app KHÔNG ảnh hưởng"
 
-# [DIAG TẠM] chẩn cadvisor per-container + mountpoint đĩa (gỡ sau khi xong).
+# [DIAG TẠM] chẩn cadvisor per-container + mountpoint đĩa qua python trong ai-router (reliable).
 echo "==> [DIAG] monitor targets" || true
-NET=$(docker network ls --format '{{.Name}}' | grep -E '_default$' | head -1); echo "[DIAG] net=$NET"
 sleep 25  # cho prometheus (vừa recreate) + cadvisor discover container
-C="docker run --rm --network $NET curlimages/curl:8.10.1 -s"
-echo "[DIAG] --- prometheus target health (cadvisor/node) ---"
-$C "http://prometheus:9090/api/v1/targets?state=active" 2>/dev/null | tr '{}' '\n' | grep -iE 'cadvisor|node-exporter|otel' | grep -iE 'health|lastError|scrapeUrl' | head -20 || echo "[DIAG] prom targets FAIL"
-echo "[DIAG] --- cadvisor: 2 dòng metric mẫu (xem có nhãn name=) ---"
-$C "http://cadvisor:8080/metrics" 2>/dev/null | grep 'container_cpu_usage_seconds_total{' | head -2 || echo "[DIAG] cadvisor no metric"
-echo "[DIAG] --- node-exporter: mountpoint đĩa thật ---"
-$C "http://node-exporter:9100/metrics" 2>/dev/null | grep 'node_filesystem_size_bytes{' | grep -oE 'mountpoint="[^"]*"' | sort -u | head -10 || echo "[DIAG] node-exp FAIL"
+docker compose exec -T ai-router python - <<'PY' 2>&1 | grep -a DIAG || echo "[DIAG] exec ai-router FAIL"
+import urllib.request, json, re
+def get(u):
+    try: return urllib.request.urlopen(u, timeout=8).read().decode()
+    except Exception as e: return "ERR %s" % e
+t = get("http://prometheus:9090/api/v1/targets?state=active")
+try:
+    for a in json.loads(t)["data"]["activeTargets"]:
+        j=a["labels"].get("job","?")
+        if j in ("cadvisor","node","otel-collector"):
+            print("[DIAG] target", j, a["health"], (a.get("lastError") or "")[:70])
+except Exception as e: print("[DIAG] prom parse err", e, t[:100])
+c = get("http://cadvisor:8080/metrics")
+ls=[l for l in c.splitlines() if l.startswith("container_cpu_usage_seconds_total{")]
+print("[DIAG] cadvisor cpu series=%d sample=%s" % (len(ls), ls[0][:120] if ls else "NONE"))
+n = get("http://node-exporter:9100/metrics")
+mps=sorted(set(re.findall(r'node_filesystem_size_bytes\{[^}]*mountpoint="([^"]*)"', n)))
+print("[DIAG] node mountpoints:", mps[:12])
+PY
 
 echo "==> 4b) LANGFUSE readiness PROD bằng KEY THẬT (NON-FATAL — chỉ cảnh báo)"
 lf_warn() { echo "::warning::LANGFUSE prod: $1 — kiểm tra: docker compose logs langfuse"; }
