@@ -22,6 +22,16 @@ scrape_configs:
         labels:
           service: ai-router
 
+  # Host metrics (CPU/RAM/đĩa VM).
+  - job_name: node
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # Per-container metrics (CPU/RAM/đĩa mỗi service).
+  - job_name: cadvisor
+    static_configs:
+      - targets: ['cadvisor:8080']
+
   # Prometheus tự giám sát (sanity).
   - job_name: prometheus
     static_configs:
