@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BookOpen, Database, Search, Wand2 } from '@lucide/vue'
+import { AlertTriangle, BookOpen, Database, Search, Wand2 } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { useDebounceFn } from '@vueuse/core'
 import { useSessionStore } from '~/stores/session'
@@ -118,6 +118,19 @@ watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText
     >
       <div ref="scrollRef" class="flex-1 overflow-y-auto custom-scrollbar">
         <div class="mx-auto flex min-h-full w-full max-w-[860px] flex-col px-8 pb-32 pt-4">
+          <div
+            v-if="chat.conversationLoadError === 'error'"
+            class="mb-4 flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800/30 dark:bg-amber-900/10 dark:text-amber-400"
+          >
+            <AlertTriangle class="h-4 w-4 shrink-0" />
+            <span>
+              Không tải được toàn bộ cuộc trò chuyện.
+              <button
+                class="ml-1 cursor-pointer font-medium underline hover:no-underline"
+                @click="() => location.reload()"
+              >Hãy thử tải lại trang này.</button>
+            </span>
+          </div>
           <ChatMessages
             v-if="hasConversation"
             :messages="chat.messages"

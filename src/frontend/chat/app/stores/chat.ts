@@ -225,6 +225,7 @@ export const useChatStore = defineStore('chat', () => {
   const isHistoryLoading = ref(false)
   const isHistoryClearing = ref(false)
   const isUsingHistoryFallback = ref(false)
+  const conversationLoadError = ref<'error' | null>(null)
   const pipeline = ref<number>(-1)
   const streamingText = ref('')
   const thinkingStatus = ref('')
@@ -311,6 +312,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function activateConversation(conversation: Conversation) {
+    conversationLoadError.value = null
     abortController?.abort()
     abortController = null
     currentConversationId.value = conversation.id
@@ -344,8 +346,17 @@ export const useChatStore = defineStore('chat', () => {
       persistFallbackHistory()
       isUsingHistoryFallback.value = false
       return true
-    } catch {
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        // Không còn trên server → xóa khỏi lịch sử, không hiện cho user
+        conversations.value = conversations.value.filter((item) => item.id !== id)
+        persistFallbackHistory()
+        currentConversationId.value = null
+        messages.value = []
+        return false
+      }
       isUsingHistoryFallback.value = true
+      conversationLoadError.value = 'error'
       return false
     }
   }
@@ -795,6 +806,7 @@ export const useChatStore = defineStore('chat', () => {
     isHistoryLoading,
     isHistoryClearing,
     isUsingHistoryFallback,
+    conversationLoadError,
     pipeline,
     streamingText,
     thinkingStatus,
