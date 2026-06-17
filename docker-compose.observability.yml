@@ -39,9 +39,9 @@ services:
       - --housekeeping_interval=15s
     volumes:
       - /:/rootfs:ro
-      - /var/run:/var/run:ro
+      - /var/run:/var/run                  # rw: cadvisor cần GHI docker.sock để gọi Docker API (lấy name per-container)
       - /sys:/sys:ro
-      - /sys/fs/cgroup:/sys/fs/cgroup:ro   # cgroup v2: cadvisor cần mount này mới thấy per-container (không chỉ root)
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro   # cgroup v2: thấy cgroup per-container
       - /var/lib/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
     devices:
