@@ -58,10 +58,16 @@ onMounted(async () => {
   if (!session.user) { void router.push('/login'); return }
 
   const id = route.params.id as string
-  const [synced] = await Promise.all([
-    chat.syncHistory(),
-    chat.loadConversation(id),
-  ])
+
+  // ask() navigate đến đây TRONG KHI stream đang chạy → conversation chưa có
+  // trên server → loadConversation sẽ nhận 404 → router.replace('/chat').
+  // Guard: nếu đây là conversation đang được stream, chỉ sync sidebar.
+  const alreadyStreaming = chat.currentConversationId === id && chat.messages.length > 0
+
+  const tasks: Promise<any>[] = [chat.syncHistory()]
+  if (!alreadyStreaming) tasks.push(chat.loadConversation(id))
+
+  const [synced] = await Promise.all(tasks)
   chat.flushProactiveMessage()
   if (!synced) {
     toast.warning('Không thể tải lịch sử từ server. Đang sử dụng bản lưu tạm trên thiết bị.')
