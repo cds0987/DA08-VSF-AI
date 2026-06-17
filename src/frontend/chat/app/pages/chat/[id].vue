@@ -67,11 +67,8 @@ onMounted(async () => {
   const tasks: Promise<any>[] = [chat.syncHistory()]
   if (!alreadyStreaming) tasks.push(chat.loadConversation(id))
 
-  const [synced] = await Promise.all(tasks)
+  await Promise.all(tasks)
   chat.flushProactiveMessage()
-  if (!synced) {
-    toast.warning('Không thể tải lịch sử từ server. Đang sử dụng bản lưu tạm trên thiết bị.')
-  }
 })
 
 // User click conversation khác trong sidebar → URL thay đổi, trang không remount
@@ -137,6 +134,7 @@ watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText
             :trace-log="chat.traceLog"
             @open-citation="chat.handleOpenCitation"
             @feedback="submitFeedback"
+            @retry="messageId => chat.retryMessage(messageId, PIPELINE_STAGES)"
           />
           <div v-else class="flex flex-1 flex-col items-center justify-center">
             <LandingState />
