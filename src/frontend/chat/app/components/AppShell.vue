@@ -59,9 +59,9 @@ const ADMIN_NAV = [
 ]
 
 const handleSignOut = () => {
-  // session.signOut() -> authService.logout() đã tự điều hướng tới /login
-  // (hard redirect) sau khi clear cookie; router.push thừa ở đây gây double
-  // navigation: soft route change chạy trước, rồi hard reload đè lên sau.
+  // Xóa currentConversationId trước khi redirect: sau login lại sẽ hiện chat mới
+  // thay vì nhảy về session cũ (giống ChatGPT/Gemini).
+  chat.clear()
   session.signOut()
 }
 

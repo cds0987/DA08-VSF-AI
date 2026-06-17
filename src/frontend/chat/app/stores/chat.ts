@@ -461,11 +461,23 @@ export const useChatStore = defineStore('chat', () => {
         return true
       }
 
-      const preferred = (
-        currentConversationId.value
-          ? conversations.value.find((item) => item.id === currentConversationId.value)
-          : null
-      ) || conversations.value[0]
+      // Không có session trước (logout hoặc lần đầu): chỉ populate sidebar,
+      // không tự mở conversation — giống ChatGPT/Gemini.
+      if (!currentConversationId.value) {
+        isUsingHistoryFallback.value = false
+        persistFallbackHistory()
+        return true
+      }
+
+      const preferred = conversations.value.find((item) => item.id === currentConversationId.value)
+      if (!preferred) {
+        // ID không còn trong list (bị xóa/hết hạn) → về empty state
+        currentConversationId.value = null
+        isUsingHistoryFallback.value = false
+        persistFallbackHistory()
+        return true
+      }
+
       if (!serverIds.has(preferred.id)) {
         activateConversation(preferred)
         persistFallbackHistory()
@@ -473,7 +485,7 @@ export const useChatStore = defineStore('chat', () => {
         return true
       }
 
-      // Bug 1: hiện cached data ngay lập tức, server data replace sau khi fetch xong.
+      // Optimistic: hiện cached data ngay lập tức, server data replace sau khi fetch xong.
       activateConversation(preferred)
 
       // 404 → xóa khỏi list, thử candidate tiếp theo.
