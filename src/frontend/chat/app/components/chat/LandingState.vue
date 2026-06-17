@@ -1,16 +1,5 @@
 <script setup lang="ts">
-import { Calendar, Clock, DollarSign, Umbrella } from '@lucide/vue'
 import OctopusLogo from '~/components/OctopusLogo.vue'
-import { useChatStore } from '~/stores/chat'
-
-const chat = useChatStore()
-
-const suggestions = [
-  { text: 'Tôi còn bao nhiêu ngày nghỉ phép?', icon: Umbrella },
-  { text: 'Tôi muốn xin nghỉ phép ngày mai.', icon: Calendar },
-  { text: 'Kiểm tra lịch sử chấm công tháng này.', icon: Clock },
-  { text: 'Xem phiếu lương gần nhất của tôi.', icon: DollarSign },
-]
 </script>
 
 <template>
@@ -19,7 +8,6 @@ const suggestions = [
     style="contain: content"
   >
     <div class="mb-6 relative group">
-      <!-- (Logo part remains the same) -->
       <div
         class="absolute inset-0 rounded-full animate-pulse"
         style="
@@ -50,23 +38,9 @@ const suggestions = [
     </div>
     <div class="flex flex-col gap-1">
       <p class="text-lg font-medium text-slate-500 dark:text-muted-foreground">
-        VSF’s Internal AI Assistant
+        VSF's Internal AI Assistant
       </p>
     </div>
     <p class="mt-6 text-base text-slate-400 dark:text-muted-foreground">How can I help you today?</p>
-
-    <div class="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-xl">
-      <button
-        v-for="s in suggestions"
-        :key="s.text"
-        class="group flex items-center gap-3 rounded-xl border border-slate-200 dark:border-border bg-white dark:bg-card p-3.5 text-left text-[13px] font-medium text-slate-600 dark:text-foreground transition hover:border-blue-300 dark:hover:border-white/15 hover:bg-blue-50/50 dark:hover:bg-accent hover:text-blue-600 dark:hover:text-accent-foreground"
-        @click="chat.ask(s.text, [])"
-      >
-        <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-50 dark:bg-muted text-slate-400 dark:text-muted-foreground group-hover:bg-blue-100 dark:group-hover:bg-accent group-hover:text-blue-500 dark:group-hover:text-accent-foreground">
-          <component :is="s.icon" class="h-4 w-4" />
-        </div>
-        {{ s.text }}
-      </button>
-    </div>
   </div>
 </template>
