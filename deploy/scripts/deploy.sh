@@ -85,9 +85,13 @@ docker compose up -d --no-build qdrant langfuse-db langfuse nats-bootstrap query
        docker logs da08-vsf-nats-bootstrap-1 2>&1 | tail -40 || true; exit 1; }
 docker compose up -d --no-build --force-recreate nginx
 
-# Monitoring (prometheus + grafana) — NON-FATAL: hỏng chỉ mất biểu đồ, KHÔNG chặn deploy app.
-docker compose up -d --no-build prometheus grafana \
-  || echo "::warning::monitoring (prometheus/grafana) up FAILED — biểu đồ ai-router tạm thiếu, app KHÔNG ảnh hưởng"
+# Monitoring (prometheus + grafana + alertmanager) — NON-FATAL: hỏng chỉ mất biểu đồ/alert,
+# KHÔNG chặn deploy app.
+docker compose up -d --no-build prometheus grafana alertmanager \
+  || echo "::warning::monitoring (prometheus/grafana/alertmanager) up FAILED — biểu đồ/alert ai-router tạm thiếu, app KHÔNG ảnh hưởng"
+# Reload Prometheus để nạp alert rules mới mà KHÔNG cần recreate container (lần sửa rules sau).
+docker compose exec -T prometheus wget -q -O- --post-data='' http://localhost:9090/-/reload >/dev/null 2>&1 \
+  || echo "::warning::prometheus reload rules SKIP (container mới tạo đã tự nạp, hoặc reload chưa sẵn)"
 
 echo "==> 4b) LANGFUSE readiness PROD bằng KEY THẬT (NON-FATAL — chỉ cảnh báo)"
 lf_warn() { echo "::warning::LANGFUSE prod: $1 — kiểm tra: docker compose logs langfuse"; }

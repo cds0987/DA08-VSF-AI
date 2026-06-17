@@ -4,6 +4,16 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# Alert rules (mount cùng thư mục alerts/). Sửa file rules + deploy -> Prometheus reload.
+rule_files:
+  - /etc/prometheus/alerts/*.rules.yml
+
+# Gửi alert đã kích hoạt sang Alertmanager (cùng network compose).
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
 scrape_configs:
   - job_name: ai-router
     metrics_path: /metrics

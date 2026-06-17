@@ -333,9 +333,23 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle           # cho phép reload rules qua POST /-/reload
     volumes:
       - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/observability/alerts:/etc/prometheus/alerts:ro    # alert rules
       - prometheus_data:/prometheus
+    restart: unless-stopped
+
+  # Alertmanager — gom alert từ Prometheus -> Slack. Up/down độc lập app (non-critical).
+  # KHÔNG mở port host. Webhook đọc từ file secret (xem alertmanager.yml).
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    volumes:
+      - ./deploy/observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./deploy/observability/alertmanager/secrets:/etc/alertmanager/secrets:ro
+      - alertmanager_data:/alertmanager
     restart: unless-stopped
 
   grafana:
@@ -546,3 +560,4 @@ volumes:
   app_pg_data:
   prometheus_data:
   grafana_data:
+  alertmanager_data:
