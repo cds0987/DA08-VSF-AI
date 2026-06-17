@@ -8,6 +8,7 @@ import type { NotificationItem } from '~/types'
 
 defineProps<{
   isCollapsed: boolean
+  disableTooltip?: boolean
 }>()
 
 const notifications = useNotificationStore()
@@ -82,8 +83,8 @@ async function handleDismiss(event: MouseEvent, item: NotificationItem) {
 <template>
   <DropdownMenu v-model:open="isOpen">
     <Tooltip>
-      <TooltipTrigger as-child>
-        <DropdownMenuTrigger as-child>
+      <DropdownMenuTrigger as-child>
+        <TooltipTrigger as-child>
           <button
             class="flex h-9 w-full shrink-0 cursor-pointer items-center justify-start rounded-md px-0 text-slate-600 transition-all hover:bg-slate-100 hover:text-slate-900 dark:text-muted-foreground dark:hover:bg-sidebar-accent dark:hover:text-sidebar-accent-foreground"
             aria-label="Thông báo"
@@ -104,10 +105,10 @@ async function handleDismiss(event: MouseEvent, item: NotificationItem) {
               Thông báo
             </span>
           </button>
-        </DropdownMenuTrigger>
-      </TooltipTrigger>
+        </TooltipTrigger>
+      </DropdownMenuTrigger>
       <TooltipContent
-        v-if="isCollapsed"
+        v-if="isCollapsed && !disableTooltip"
         side="right"
         class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
       >

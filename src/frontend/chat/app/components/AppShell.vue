@@ -30,7 +30,9 @@ const isHoveringLogo = ref(false)
 function setSidebarCollapsed(value: boolean) {
   isAnimatingSidebar.value = true
   isCollapsed.value = value
-  setTimeout(() => { isAnimatingSidebar.value = false }, 300)
+  // Blur any focused sidebar element so Radix Tooltip's focus handler can't fire
+  ;(document.activeElement as HTMLElement)?.blur()
+  setTimeout(() => { isAnimatingSidebar.value = false }, 350)
 }
 const searchQuery = ref('')
 const searchInputRef = ref<HTMLInputElement | null>(null)
@@ -168,6 +170,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
               :key="item.to"
               :item="item"
               :is-collapsed="isCollapsed"
+              :disable-tooltip="isAnimatingSidebar"
             />
           </div>
         </template>
@@ -198,7 +201,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
                   </button>
                 </TooltipTrigger>
                 <TooltipContent
-                  v-if="isCollapsed"
+                  v-if="isCollapsed && !isAnimatingSidebar"
                   side="right"
                   class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
                 >
@@ -237,7 +240,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
                   </div>
                 </TooltipTrigger>
                 <TooltipContent
-                  v-if="isCollapsed"
+                  v-if="isCollapsed && !isAnimatingSidebar"
                   side="right"
                   class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
                 >
@@ -250,6 +253,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
             <SideLink
               :item="{ label: 'Đơn nghỉ phép', to: '/leave-approvals', icon: CalendarCheck }"
               :is-collapsed="isCollapsed"
+              :disable-tooltip="isAnimatingSidebar"
             />
 
             <ChatHistory :is-collapsed="isCollapsed" :query="searchQuery" class="w-full flex flex-col flex-1 min-h-0" />
@@ -265,6 +269,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
       <NotificationCenter
         v-if="section !== 'admin'"
         :is-collapsed="isCollapsed"
+        :disable-tooltip="isAnimatingSidebar"
       />
 
       <!-- Standalone Settings Button -->
@@ -290,7 +295,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
             </DialogTrigger>
           </TooltipTrigger>
           <TooltipContent
-            v-if="isCollapsed"
+            v-if="isCollapsed && !isAnimatingSidebar"
             side="right"
             class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
           >
