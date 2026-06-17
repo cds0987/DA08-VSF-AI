@@ -268,8 +268,9 @@ async def test_act_node_rag_weak_results_adaptive_fallback():
 
 
 @pytest.mark.asyncio
-async def test_act_node_rag_no_results_hard_stops_no_info():
-    """Chỉ khi qdrant trả RỖNG mới hard-stop NO_INFO (không có gì để fallback)."""
+async def test_act_node_rag_no_results_passes_to_llm():
+    """Khi qdrant trả RỖNG, act_node KHÔNG hard-stop — LLM tự tổng hợp warm NO_INFO.
+    Phase giữ nguyên ACTING, route_after_act trả "observe" để flow tiếp tục → think → LLM."""
     from app.application.langgraph_edges import route_after_act
     from app.application.langgraph_nodes import act_node
     from app.application.langgraph_state import AgentPhase
@@ -281,12 +282,11 @@ async def test_act_node_rag_no_results_hard_stops_no_info():
     state = _rag_tool_state()
     result = await act_node(state, mcp_client=_EmptyRagMCP())
 
-    assert result["phase"] == AgentPhase.DONE
-    assert result["shortcut_outcome"] == "NO_INFO"
-    assert result["sources"] == []
-    assert result["shortcut_response"]
+    # Không hard-stop — LLM sẽ nhận ToolMessage({"results":[]}) và tự trả lời warm
+    assert result.get("phase") != AgentPhase.DONE
+    assert result.get("shortcut_outcome") is None
     assert result["tool_results"][0]["success"] is False
-    assert route_after_act({**state, **result}) == "answer"
+    assert route_after_act({**state, **result}) == "observe"
 
 
 # ---------------------------------------------------------------------------
