@@ -402,7 +402,7 @@ Monitor → Analyze → Plan(Strategy plugin) → [HUMAN GATE] → Execute(AI Ro
 
 ### 11.1 ⚠️ ĐÍNH CHÍNH §1.1 — embed/caption/ingest HIỆN KHÔNG đi qua ai-router
 Sơ đồ §1.1 (dòng "caption/embed đi qua ai-router") là **mục tiêu, chưa phải hiện trạng**. Audit code+env chứng minh ngược lại:
-- [common.env:29](../../deploy/env/common.env#L29) + [README-ai-router.md:42](../../deploy/observability/README-ai-router.md#L42): `EMBED_BASE_URL` **rỗng = gọi thẳng OpenAI**.
+- [common.env:29](../../deploy/env/common.env#L29) + [README-ai-router.md:42](../../deploy/monitor_decision/README-ai-router.md#L42): `EMBED_BASE_URL` **rỗng = gọi thẳng OpenAI**.
 - **3 luồng AI bypass router** (vô hình với accounting → đây chính là gốc của §8 #5 cost sai):
   1. `mcp-service` embed query (mỗi rag_search) — [embedding.py](../../src/mcp-service/app/core/embedding.py) base_url rỗng.
   2. `rag-worker` embed ingestion — [openai_provider.py](../../src/rag-worker/core_engine/ai/openai_provider.py).
@@ -447,4 +447,4 @@ Hiện thực đầu tiên cho "Strategy interface" của §7.1, áp cho node `t
 - Retrieval: `mcp-service/app/core/search.py`, `embedding.py`, `vectorstore.py`, `rerank.py`
 - Routing: `ai-router/ai_router/router.py`, `selector/sticky_rotation.py`, `counters.py`, `observability.py`
 - Ingest: `rag-worker/app/core/engine.py`, `captioner.py`, `.../use_cases/ingestion/ingest_document_use_case.py`
-- Gateway/Auth/Infra: `nginx/nginx.conf`, `user-service/.../auth.py`, `dependencies.py`, `query-service/.../mcp_client.py`, `docker-compose.yml`, `deploy/observability/`
+- Gateway/Auth/Infra: `nginx/nginx.conf`, `user-service/.../auth.py`, `dependencies.py`, `query-service/.../mcp_client.py`, `docker-compose.yml`, `deploy/monitor_decision/`

@@ -1,0 +1,27 @@
+# control-plane — lớp ACT (human-in-the-loop). SKELETON v1. MOSA: thêm action = +1 entry.
+# v1 BẢO THỦ: chỉ read-only + DRAIN KEY khẩn cấp. Pin model / đổi selector VẪN qua
+# routing.yaml + POST /admin/reload (audit qua git). Override runtime -> v2.
+version: 1
+
+auth:
+  # Mọi write qua ai-router /admin/* bảo vệ bằng AIROUTER_INTERNAL_TOKEN (đã có).
+  gate: internal_token
+
+actions:
+  drain_key:
+    enabled: true
+    description: "Rút 1 key khỏi vòng xoay (KHÔNG xóa) khi sự cố. Hiện thực v1: set cooldown dài."
+    endpoint: "POST /admin/key/{key_id}/drain"     # TODO v1: thêm endpoint ở app/main.py
+    resume_endpoint: "POST /admin/key/{key_id}/resume"
+    guardrails:
+      - never_drain_last_live_key: true            # không drain key sống cuối cùng
+      - ttl_seconds: 86400                          # tự hết hạn (không state ẩn vĩnh viễn)
+    audit: true                                     # ai · lúc nào · vì sao -> log (Loki)
+
+  # ── v2 (ổ cắm sẵn, chưa bật) ──
+  pin_model:    { enabled: false, note: "override ovr:cap:{cap}:model — v2" }
+  set_selector: { enabled: false, note: "A/B strategy live — v2" }
+
+human_gate:
+  # 3 nấc (PLAN §7.1). v1 dừng ở Advisory/Approval cho drain.
+  level: approval                                   # advisory | approval | autonomous

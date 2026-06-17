@@ -1,0 +1,26 @@
+# metric-contract — HỢP ĐỒNG tên + label metric (MOSA). Panel/dashboard CHỈ query metric
+# khai ở đây -> đổi tên/label phải qua review. Thêm metric = +1 entry. Router phát qua
+# Metrics.inc() (schemaless) nên thêm metric KHÔNG sửa observability.py.
+version: 1
+
+namespaces:
+  airouter:
+    description: "AI Router — routing/cost/quota/strategy."
+    metrics:
+      # ── per-key × model (commit banded_rotation): nguồn cho table 'Key×Model×Capability' ──
+      - { name: airouter_calls_total,     type: counter, labels: [key_id, secret_env, model, capability, tier, provider, status] }
+      - { name: airouter_tokens_total,    type: counter, labels: [key_id, secret_env, model, capability, tier, provider] }
+      - { name: airouter_cost_usd_total,  type: counter, labels: [key_id, secret_env, model, capability, tier, provider] }
+      # ── strategy observ (quan sát banded/save chạy) ──
+      - { name: airouter_band_rotation_total, type: counter, labels: [scope, tier] }
+      - { name: airouter_save_mode_total,     type: counter, labels: [capability] }
+      - { name: airouter_key_429_total,       type: counter, labels: [key_id, kind] }   # kind=quota|rate
+      # ── leading indicator (đã có) ──
+      - { name: airouter_resolve_total,      type: counter, labels: [capability, tier, provider] }
+      - { name: airouter_fallback_total,     type: counter, labels: [capability, tier] }
+      - { name: airouter_resolve_fail_total, type: counter, labels: [capability, reason] }
+      # ── per-key gauge (Redis snapshot) ──
+      - { name: airouter_key_tokens_today,   type: gauge, labels: [key_id, secret_env, provider, tier] }
+      - { name: airouter_key_remaining,      type: gauge, labels: [key_id, secret_env, provider, tier] }
+      - { name: airouter_key_cost_month_usd, type: gauge, labels: [key_id, secret_env, provider, tier] }
+      - { name: airouter_key_cooldown,       type: gauge, labels: [key_id, secret_env, provider, tier] }

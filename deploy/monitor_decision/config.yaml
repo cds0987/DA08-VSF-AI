@@ -1,0 +1,53 @@
+# monitor_decision — MANIFEST/REGISTRY trung tâm (MOSA).
+# Thêm dashboard / node / metric / control-action = sửa file này + drop file, KHÔNG refactor.
+# Grafana vẫn auto-provision thư mục monitor/grafana/dashboards/; config.yaml là lớp manifest
+# cho nav-tree (Vue portal), theme, hợp đồng metric, và tham chiếu control-plane.
+version: 1
+
+# UI: trắng – xanh dương, đỏ chỉ dành cho alert (yêu cầu thiết kế).
+theme: { mode: light, accent: blue }
+
+monitor:
+  datasources: [prometheus, tempo, loki]            # đã provision ở monitor/grafana/provisioning
+  metric_contract: monitor/metric-contract.yaml      # tên + label metric ỔN ĐỊNH cho panel
+  dashboards:                                         # thêm board = +1 entry + drop JSON
+    - { id: ops-overview, file: monitor/grafana/dashboards/ops-overview.json, nav: 1, title: "Tổng quan hệ thống" }
+    - { id: ai-router,    file: monitor/grafana/dashboards/ai-router.json,    nav: 2, title: "AI Router" }
+  alert_groups: [ai-router, infra]                   # monitor/alerts/*.rules.yml
+
+decision:
+  # Nguồn sự thật strategy = routing.yaml của ai-router (router hot-reload nó). KHÔNG copy
+  # (chống drift) — chỉ TRỎ tới để portal/doc biết.
+  strategy_source: ../../src/ai-router/routing.yaml
+  control_plane: decision/control-plane.yaml
+
+# ── Nav tree (2-facet observe|decide) cho Vue portal. Mỗi node tự khai observe[]/decide[];
+#    decide rỗng = chưa có (ẩn tab). Thêm service = +1 node, KHÔNG sửa code portal. ──
+tree:
+  - id: overview
+    title: "Tổng quan hệ thống"
+  - id: ai-router
+    title: "AI Router"
+    observe:
+      - { type: grafana,  ref: ai-router }
+      - { type: langfuse, query: "key:*" }            # soi prompt/completion per-key
+    decide:
+      - { type: fe_route, ref: airouter-keys }        # v1: drain/resume key (read-only + khẩn cấp)
+  - id: query-service
+    title: "Query Service"
+    observe:
+      - { type: grafana, ref: ops-overview }
+      - { type: tempo,   service: query-service }
+    decide: []                                        # v2
+  - id: retrieval
+    title: "MCP / Retrieval"
+    observe: [ { type: tempo, service: mcp-service } ]
+    decide: []
+  - id: ingest
+    title: "RAG-worker / Ingest"
+    observe: [ { type: tempo, service: rag-worker } ]
+    decide: []
+  - id: infra
+    title: "Hạ tầng (VM/DB/Qdrant)"
+    observe: [ { type: grafana, ref: ops-overview } ]
+    decide: []
