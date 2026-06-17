@@ -69,12 +69,15 @@ GROUP 1: SAFETY — Emergency, physical injury, serious mental health. Include s
   "compensation", "insurance", or "occupational safety regulation" is an internal policy question → ALLOW,
   unless the user is reporting an immediate real-world emergency or injury happening now.
 
-GROUP 2: META — Questions about conversation history:
-  (a) Previous question: "what was my last question", "what did I ask earlier", "nhắc lại câu hỏi trước của tôi".
-  (b) Previously cited documents/sources: "tài liệu trên là gì", "các tài liệu bạn vừa dùng",
-      "nguồn tham khảo trong câu trước là gì", "tài liệu được nhắc đến trong câu hỏi X",
-      "các tài liệu đó là gì", any question asking about previously cited documents/sources
-      without introducing a new substantive topic.
+GROUP 2: META — Questions about conversation history. Include meta_type:
+  (a) meta_type "question": asking about a previous user question ("what was my last question",
+      "nhắc lại câu hỏi trước của tôi", "what did I ask earlier").
+  (b) meta_type "sources": any reference to files/documents/sources that appeared in a
+      previous answer — including demonstrative/numeric references without new topic:
+      "5 file này là gì vậy", "file ở trên đó", "mấy cái đó là gì", "các tài liệu vừa nêu",
+      "tài liệu trên là gì", "nguồn tham khảo là gì", "tài liệu nào được dùng",
+      "kể tên các tài liệu đó đi", "mấy tài liệu bạn vừa dùng là gì".
+      When in doubt between ALLOW and META for a source reference → META.
 
 GROUP 3: CLARIFY — In scope but too vague, no topic anchor.
   If history is sufficient to understand intent → ALLOW. Generate 1 specific follow-up in Vietnamese
@@ -103,17 +106,22 @@ Return PURE JSON only, no extra text, no code fence:
 {
   "route": "ALLOW | CLARIFY | REFUSE | SAFETY | META",
   "safety_type": "emergency | injury | distress",
+  "meta_type": "question | sources",
   "clarify_question": "<follow-up question in Vietnamese — only when route=CLARIFY>",
   "reason": "<brief reason>"
 }
-safety_type: only when route=SAFETY. clarify_question: only when route=CLARIFY.
+safety_type: only when route=SAFETY. meta_type: only when route=META.
+clarify_question: only when route=CLARIFY.
 If unsure → ALLOW (never wrongly refuse a valid question).
 
 Examples:
 {"route":"SAFETY","safety_type":"emergency","reason":"fire emergency"}  ← "Cháy rồi"
 {"route":"SAFETY","safety_type":"injury","reason":"broken bone"}  ← "Tôi gãy chân rồi"
 {"route":"SAFETY","safety_type":"distress","reason":"self-harm signal"}  ← "Tôi không muốn sống nữa"
-{"route":"META","reason":"asking about conversation history"}  ← "Câu hỏi trước của tôi là gì"
+{"route":"META","meta_type":"question","reason":"asking about prior user question"}  ← "Câu hỏi trước của tôi là gì"
+{"route":"META","meta_type":"sources","reason":"demonstrative reference to previously cited files"}  ← "5 file này là gì vậy"
+{"route":"META","meta_type":"sources","reason":"reference to cited sources in prior answer"}  ← "file ở trên đó"
+{"route":"META","meta_type":"sources","reason":"asking which documents were cited"}  ← "mấy tài liệu bạn vừa dùng là gì"
 {"route":"ALLOW","reason":"language/capability question — assistant will respond and switch language"}  ← "bạn nói tiếng anh được không?"
 {"route":"ALLOW","reason":"internal policy question"}  ← "Chính sách nghỉ phép là gì?"
 {"route":"ALLOW","reason":"context is clear"}  ← "đơn nghỉ phép" (after asking about submitting requests)
