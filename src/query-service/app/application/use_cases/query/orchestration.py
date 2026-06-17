@@ -144,6 +144,7 @@ class QueryOrchestrationUseCase:
         trace_session: str | None = None,
         conversation_title: str | None = None,
         conversation_id: str | None = None,
+        document_ids: list[str] | None = None,
     ) -> AsyncIterator[dict]:
         """Wrapper mỏng: bọc luồng thật bằng 1 langfuse trace (best-effort, low-level
         client — KHÔNG callback). Tạo trace TRƯỚC _stream_inner để _stream_langgraph có
@@ -166,6 +167,7 @@ class QueryOrchestrationUseCase:
                 question, user,
                 _session_id=pre_session_id,
                 _lang_trace=trace,
+                _document_ids=document_ids,
             ):
                 if event.get("done"):
                     # _usage/_answer là kênh nội bộ (token/model/answer cho langfuse) —
@@ -193,6 +195,7 @@ class QueryOrchestrationUseCase:
         user: AuthenticatedUser,
         _session_id: str | None = None,
         _lang_trace: Any = None,
+        _document_ids: list[str] | None = None,
     ) -> AsyncIterator[dict]:
         started = perf_counter()
         # Dùng session_id được truyền từ stream() (đã tạo trước trace) để trace con
@@ -225,7 +228,8 @@ class QueryOrchestrationUseCase:
         # (e.g. mock mode / no OpenAI key).
         if self._langgraph_agent is not None:
             async for event in self._stream_langgraph(
-                question, user, session_id, started, _lang_trace=_lang_trace
+                question, user, session_id, started, _lang_trace=_lang_trace,
+                document_ids=_document_ids,
             ):
                 yield event
             return
@@ -316,6 +320,7 @@ class QueryOrchestrationUseCase:
         session_id: str,
         started: float,
         _lang_trace: Any = None,
+        document_ids: list[str] | None = None,
     ) -> AsyncIterator[dict]:
         """
         Stream responses using the LangGraph agent.
@@ -331,6 +336,14 @@ class QueryOrchestrationUseCase:
         from langchain_core.messages import HumanMessage, AIMessage as LCAIMessage
 
         allowed_doc_ids = await self._get_allowed_doc_ids(user)
+        # Narrow to request-specified docs (intersect with ACL).
+        # document_ids=None means no filter; user gets all their allowed docs.
+        if document_ids is not None:
+            request_set = set(document_ids)
+            if allowed_doc_ids:
+                allowed_doc_ids = {d for d in allowed_doc_ids if d in request_set}
+            else:
+                allowed_doc_ids = request_set
         effective_department = await self._get_effective_department(user)
 
         # Fetch recent conversation turns for context (follow-up queries like "Ngày mai").

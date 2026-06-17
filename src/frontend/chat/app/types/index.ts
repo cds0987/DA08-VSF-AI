@@ -49,6 +49,7 @@ export interface QueryRequest {
   conversation_id?: string
   trace_session?: string
   conversation_title?: string
+  document_ids?: string[] | null
 }
 
 export interface QuerySource {
