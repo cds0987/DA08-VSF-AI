@@ -94,8 +94,10 @@ OBS="-f docker-compose.yml -f docker-compose.observability.yml"
 docker compose $OBS up -d --no-build --force-recreate prometheus alertmanager otel-collector \
   || echo "::warning::monitor config services (prometheus/alertmanager/otel) up FAILED — app KHÔNG ảnh hưởng"
 # Còn lại (exporter/backend, config ít đổi): up thường.
-docker compose $OBS up -d --no-build grafana node-exporter cadvisor tempo loki \
+docker compose $OBS up -d --no-build grafana node-exporter tempo loki \
   || echo "::warning::monitor stack (grafana/exporters/tempo/loki) up FAILED — app KHÔNG ảnh hưởng"
+# Dọn cadvisor cũ (đã gỡ khỏi stack) nếu còn chạy orphan.
+docker rm -f da08-vsf-cadvisor-1 >/dev/null 2>&1 || true
 
 
 echo "==> 4b) LANGFUSE readiness PROD bằng KEY THẬT (NON-FATAL — chỉ cảnh báo)"

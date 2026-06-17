@@ -7,7 +7,7 @@
 # Không mở port host (firewall 80/443/22); Grafana expose qua nginx subdomain.
 # ============================================================================
 services:
-  # Prometheus — scrape ai-router/metrics + node-exporter + cadvisor; nạp alert rules.
+  # Prometheus — scrape ai-router/metrics + node-exporter + otel-collector; nạp alert rules.
   prometheus:
     image: prom/prometheus:v2.54.1
     command:
@@ -31,27 +31,8 @@ services:
       - /:/host:ro,rslave
     restart: unless-stopped
 
-  # cAdvisor — metric PER-CONTAINER (CPU/RAM/đĩa/net từng service) KHÔNG cần instrument code.
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.49.1
-    command:
-      - --docker_only=true
-      - --housekeeping_interval=15s
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /sys/fs/cgroup:/sys/fs/cgroup:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-      - /dev/disk/:/dev/disk:ro
-    devices:
-      - /dev/kmsg
-    privileged: true
-    # GHI CHÚ: trên VM cgroup-v2 này, cAdvisor v0.49 chỉ đọc được cgroup root (/) — KHÔNG ra
-    # metric per-container (đã thử mount cgroup + rw socket, không đổi; giới hạn cadvisor+kernel).
-    # Per-service resource sẽ lấy CHUẨN HƠN từ Phase 2 OTel (mỗi service tự báo). Giữ cadvisor
-    # để khi nâng cấp VM/cadvisor sẽ tự có. VM-level resource đã có từ node-exporter.
-    restart: unless-stopped
+  # (cAdvisor đã GỠ: VM cgroup-v2 này cAdvisor v0.49 chỉ đọc cgroup root, không ra per-container
+  # — giới hạn cadvisor+kernel. Per-service resource lấy từ Phase 2 OTel; VM-level: node-exporter.)
 
   # Alertmanager — gom alert từ Prometheus -> Slack (webhook đọc từ file secret, fail-open).
   alertmanager:
