@@ -246,15 +246,17 @@ async def triage_node(state: AgentState, model: BaseChatModel) -> dict:
         import re as _re
         from langchain_core.messages import AIMessage as _AI, HumanMessage as _HM
         current_q = state["question"].strip()
-        q_lower = current_q.lower()
 
-        _SOURCE_KEYWORDS = (
-            "tài liệu", "nguồn", "source", "trích dẫn", "references",
-            "tài liệu trên", "tài liệu đó", "tài liệu vừa",
-        )
-        is_source_question = any(kw in q_lower for kw in _SOURCE_KEYWORDS)
+        # Triage LLM already saw full conversation history and classified the sub-type.
+        # Fallback to keyword inference only when LLM omits meta_type (backward-compat).
+        meta_type = str(payload.get("meta_type", "")).strip().lower()  # type: ignore[possibly-undefined]
+        if not meta_type:
+            meta_type = "sources" if any(
+                kw in current_q.lower()
+                for kw in ("tài liệu", "nguồn", "source", "file", "trích dẫn")
+            ) else "question"
 
-        if is_source_question:
+        if meta_type == "sources":
             # Extract cited document names injected into the last assistant message in history.
             cited_names: list[str] = []
             for msg in reversed(list(state.get("messages") or [])):
@@ -263,34 +265,29 @@ async def triage_node(state: AgentState, model: BaseChatModel) -> dict:
                     if m:
                         cited_names = [n.strip() for n in m.group(1).split(",") if n.strip()]
                         break
-            if cited_names:
-                meta_answer = (
-                    "Dựa trên câu trả lời trước, các tài liệu được trích dẫn bao gồm:\n"
-                    + "\n".join(f"- {n}" for n in cited_names)
-                )
-            else:
-                meta_answer = "Mình không tìm thấy thông tin tài liệu nào trong lịch sử hội thoại."
-            return {
-                "shortcut_response": meta_answer,
-                "shortcut_outcome": "SUCCESS",
-                "phase": AgentPhase.DONE,
-            }
-
-        # Not a source question — look up the most recent prior user question.
-        # Skip any message that equals the current question — the save-ordering fix
-        # ensures state["messages"] holds only prior turns, but the guard prevents
-        # stale behaviour in edge cases where history is unavailable/stale.
-        prev_q: str | None = None
-        for msg in reversed(list(state.get("messages") or [])):
-            if isinstance(msg, _HM):
-                cand = str(msg.content or "").strip()
-                if cand and cand != current_q:
-                    prev_q = cand
-                    break
-        if prev_q:
-            meta_answer = f'Câu hỏi trước của bạn là: "{prev_q}".'
+            meta_answer = (
+                "Dựa trên câu trả lời trước, các tài liệu được trích dẫn bao gồm:\n"
+                + "\n".join(f"- {n}" for n in cited_names)
+                if cited_names
+                else "Mình không tìm thấy thông tin tài liệu nào trong lịch sử hội thoại."
+            )
         else:
-            meta_answer = "Mình không tìm thấy câu hỏi nào trước đó trong lịch sử hội thoại."
+            # meta_type == "question" — look up the most recent prior user question.
+            # Skip any message that equals the current question — the save-ordering fix
+            # ensures state["messages"] holds only prior turns, but the guard prevents
+            # stale behaviour in edge cases where history is unavailable/stale.
+            prev_q: str | None = None
+            for msg in reversed(list(state.get("messages") or [])):
+                if isinstance(msg, _HM):
+                    cand = str(msg.content or "").strip()
+                    if cand and cand != current_q:
+                        prev_q = cand
+                        break
+            meta_answer = (
+                f'Câu hỏi trước của bạn là: "{prev_q}".'
+                if prev_q
+                else "Mình không tìm thấy câu hỏi nào trước đó trong lịch sử hội thoại."
+            )
         return {
             "shortcut_response": meta_answer,
             "shortcut_outcome": "SUCCESS",
