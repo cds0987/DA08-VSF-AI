@@ -27,7 +27,7 @@ const active = computed(() => {
         :class="cn(
           'flex items-center rounded-md text-[13px] font-semibold overflow-hidden cursor-pointer shrink-0 h-9 transition-all w-full justify-start',
           active
-            ? 'bg-blue-50 text-blue-700 shadow-sm ring-1 ring-blue-100'
+            ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 shadow-sm ring-1 ring-blue-100 dark:ring-blue-900/50'
             : 'text-slate-600 dark:text-muted-foreground hover:bg-slate-100 dark:hover:bg-sidebar-accent hover:text-slate-900 dark:hover:text-sidebar-accent-foreground',
         )"
       >
@@ -36,7 +36,7 @@ const active = computed(() => {
             :is="item.icon" 
             :class="cn(
               'h-5 w-5 shrink-0',
-              active ? 'text-blue-600' : 'text-slate-500'
+              active ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-muted-foreground'
             )" 
           />
         </div>

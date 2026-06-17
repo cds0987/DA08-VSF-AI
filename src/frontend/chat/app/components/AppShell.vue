@@ -26,6 +26,12 @@ const route = useRoute()
 const isCollapsed = ref(true)
 const isAnimatingSidebar = ref(false)
 const isHoveringLogo = ref(false)
+
+function setSidebarCollapsed(value: boolean) {
+  isAnimatingSidebar.value = true
+  isCollapsed.value = value
+  setTimeout(() => { isAnimatingSidebar.value = false }, 300)
+}
 const searchQuery = ref('')
 const searchInputRef = ref<HTMLInputElement | null>(null)
 
@@ -74,6 +80,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
     class="flex shrink-0 flex-col relative z-50 h-full overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-300 ease-in-out transform-gpu"
     :class="[
       isCollapsed ? 'w-16' : 'w-[268px]',
+      isAnimatingSidebar ? 'pointer-events-none' : '',
     ]"
     style="display: flex !important; isolation: isolate; contain: layout style paint; will-change: width, transform;"
   >
@@ -87,7 +94,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
         <div class="flex items-center">
           <div class="flex h-20 w-[64px] items-center justify-center shrink-0">
             <button
-              @click="isCollapsed && (isCollapsed = false)"
+              @click="isCollapsed && setSidebarCollapsed(false)"
               @mouseenter="isHoveringLogo = true"
               @mouseleave="isHoveringLogo = false"
               class="relative flex items-center justify-center shrink-0 group outline-none cursor-pointer h-11 w-11"
@@ -134,7 +141,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
         </div>
 
         <button
-          @click="isCollapsed = true"
+          @click="setSidebarCollapsed(true)"
           class="rounded-md p-1.5 text-slate-500 dark:text-muted-foreground hover:bg-slate-100 dark:hover:bg-sidebar-accent hover:text-slate-900 dark:hover:text-sidebar-accent-foreground bg-white dark:bg-chat-input border border-slate-200/50 dark:border-sidebar-border shadow-sm cursor-pointer shrink-0 mr-4 transition-opacity duration-300"
           :class="isCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'"
         >
