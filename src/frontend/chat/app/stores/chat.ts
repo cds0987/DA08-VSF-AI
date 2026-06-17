@@ -503,7 +503,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function ask(q: string, pipelineStages: PipelineStage[]) {
+  async function ask(q: string, pipelineStages: PipelineStage[], docIds?: string[] | null) {
     const question = q.trim()
     if (!question || pipeline.value >= 0) return
 
@@ -549,6 +549,7 @@ export const useChatStore = defineStore('chat', () => {
       conversation_id: currentConversationId.value ?? undefined,
       trace_session: currentConversationId.value ?? undefined,
       conversation_title: conversationTitle,
+      document_ids: docIds ?? undefined,
     }
 
     const PHASE_MAP: Record<string, number> = {

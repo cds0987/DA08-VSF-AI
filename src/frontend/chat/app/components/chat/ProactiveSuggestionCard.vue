@@ -33,7 +33,7 @@ function openDocument() {
       v-for="s in action.suggestions"
       :key="s.label"
       class="rounded-lg border border-indigo-200 bg-indigo-50 dark:bg-indigo-900/20 px-3 py-1.5 text-sm font-medium text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
-      @click="chat.ask(s.query, [])"
+      @click="chat.ask(s.query, [], action.doc_id ? [action.doc_id] : undefined)"
     >
       {{ s.label }}
     </button>
