@@ -12,6 +12,7 @@ defineProps<{
 }>()
 
 const chat = useChatStore()
+const router = useRouter()
 
 // Modal state
 const isRenameModalOpen = ref(false)
@@ -148,7 +149,7 @@ async function clearHistory() {
         :style="{ zIndex: activeMenuId === item.id ? '50' : 'auto' }"
       >
         <button
-          @click="chat.loadConversation(item.id)"
+          @click="router.push('/chat/' + item.id)"
           :class="cn(
             'flex items-center rounded-lg overflow-hidden cursor-pointer shrink-0 h-9 transition-all w-full text-sm hover:bg-slate-100 dark:hover:bg-sidebar-accent hover:text-slate-900 dark:hover:text-sidebar-accent-foreground focus-visible:ring-0 outline-none pl-4 pr-10',
             chat.currentConversationId === item.id || activeMenuId === item.id
