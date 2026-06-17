@@ -97,14 +97,17 @@ docker compose $OBS up -d --no-build --force-recreate prometheus alertmanager ot
 docker compose $OBS up -d --no-build grafana node-exporter cadvisor tempo loki \
   || echo "::warning::monitor stack (grafana/exporters/tempo/loki) up FAILED — app KHÔNG ảnh hưởng"
 
-# [DIAG TẠM] dump trạng thái target Prometheus + cadvisor reachability (gỡ sau khi chẩn xong).
+# [DIAG TẠM] chẩn cadvisor per-container + mountpoint đĩa (gỡ sau khi xong).
 echo "==> [DIAG] monitor targets" || true
-docker compose $OBS ps prometheus cadvisor node-exporter otel-collector 2>/dev/null || true
 NET=$(docker network ls --format '{{.Name}}' | grep -E '_default$' | head -1); echo "[DIAG] net=$NET"
-docker run --rm --network "$NET" curlimages/curl:8.10.1 -s "http://prometheus:9090/api/v1/targets?state=active" 2>/dev/null \
-  | tr '{},' '\n' | grep -iE '"job"|"health"|"lastError"' | head -60 || echo "[DIAG] prometheus targets query FAIL"
-docker run --rm --network "$NET" curlimages/curl:8.10.1 -s -o /dev/null -w "[DIAG] cadvisor http=%{http_code}\n" "http://cadvisor:8080/metrics" 2>/dev/null || echo "[DIAG] cadvisor unreachable"
-docker run --rm --network "$NET" curlimages/curl:8.10.1 -s "http://cadvisor:8080/metrics" 2>/dev/null | grep -c "container_cpu_usage_seconds_total" | sed 's/^/[DIAG] cadvisor container_cpu lines=/' || true
+sleep 25  # cho prometheus (vừa recreate) + cadvisor discover container
+C="docker run --rm --network $NET curlimages/curl:8.10.1 -s"
+echo "[DIAG] --- prometheus target health (cadvisor/node) ---"
+$C "http://prometheus:9090/api/v1/targets?state=active" 2>/dev/null | tr '{}' '\n' | grep -iE 'cadvisor|node-exporter|otel' | grep -iE 'health|lastError|scrapeUrl' | head -20 || echo "[DIAG] prom targets FAIL"
+echo "[DIAG] --- cadvisor: 2 dòng metric mẫu (xem có nhãn name=) ---"
+$C "http://cadvisor:8080/metrics" 2>/dev/null | grep 'container_cpu_usage_seconds_total{' | head -2 || echo "[DIAG] cadvisor no metric"
+echo "[DIAG] --- node-exporter: mountpoint đĩa thật ---"
+$C "http://node-exporter:9100/metrics" 2>/dev/null | grep 'node_filesystem_size_bytes{' | grep -oE 'mountpoint="[^"]*"' | sort -u | head -10 || echo "[DIAG] node-exp FAIL"
 
 echo "==> 4b) LANGFUSE readiness PROD bằng KEY THẬT (NON-FATAL — chỉ cảnh báo)"
 lf_warn() { echo "::warning::LANGFUSE prod: $1 — kiểm tra: docker compose logs langfuse"; }
