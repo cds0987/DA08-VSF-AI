@@ -173,7 +173,9 @@ class Router:
         if dec is None:
             raise NoCapacityError(capability_alias)
         client = self.clients.get(dec.base_url, dec.api_key)
-        sb = dict(body)
+        # Router TỰ kiểm soát cờ stream -> bỏ 'stream' client gửi để không trùng keyword
+        # (client OpenAI SDK gửi stream=True trong body; create(stream=True, **body) -> TypeError).
+        sb = {k: v for k, v in body.items() if k != "stream"}
         sb.setdefault("stream_options", {"include_usage": True})
         stream = await client.chat.completions.create(stream=True, **self._prep_body(sb, dec))
         usage_seen: Usage | None = None
