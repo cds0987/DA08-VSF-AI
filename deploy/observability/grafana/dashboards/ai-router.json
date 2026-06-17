@@ -4,33 +4,64 @@
   "tags": ["ai-router", "llm", "cost"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "refresh": "30s",
-  "time": { "from": "now-24h", "to": "now" },
+  "time": { "from": "now-6h", "to": "now" },
   "templating": { "list": [] },
   "panels": [
     {
       "id": 1,
-      "type": "timeseries",
-      "title": "Load per key (tokens/requests hôm nay)",
-      "description": "Phân bố tải vào từng key (định danh GitHub secret). Tải nhẹ -> dính 1 key (soft-rotation); chỉ tràn khi chạm RPM.",
+      "type": "bargauge",
+      "title": "Token hôm nay theo key (ai chia tải nhiều nhất)",
+      "description": "Tải nhẹ -> dính 1 key (soft-rotation); chỉ tràn key kế khi chạm RPM. oai-1 gánh = bình thường.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-      "fieldConfig": { "defaults": { "custom": { "stacking": { "mode": "normal" } } } },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": { "defaults": { "min": 0, "color": { "mode": "continuous-GrYlRd" } } },
       "targets": [
-        { "expr": "airouter_key_tokens_today", "legendFormat": "{{key_id}} ({{secret_env}})", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } }
+        { "expr": "airouter_key_tokens_today", "instant": true, "legendFormat": "{{key_id}}", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } }
       ]
     },
     {
-      "id": 2,
-      "type": "timeseries",
-      "title": "RPM per key",
-      "description": "Tải tức thời theo key — thấy key nào đang nóng.",
+      "id": 4,
+      "type": "table",
+      "title": "Tổng hợp per-key (token · cost · quota còn lại)",
+      "description": "key_id = định danh GitHub secret. Cost tháng + quota còn lại theo từng key.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 0 },
       "targets": [
-        { "expr": "airouter_key_rpm", "legendFormat": "{{key_id}}", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } }
-      ]
+        { "expr": "airouter_key_tokens_today", "format": "table", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } },
+        { "expr": "airouter_key_cost_month_usd", "format": "table", "instant": true, "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" } },
+        { "expr": "airouter_key_remaining", "format": "table", "instant": true, "refId": "C", "datasource": { "type": "prometheus", "uid": "prometheus" } }
+      ],
+      "transformations": [
+        { "id": "merge", "options": {} },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true, "__name__": true, "instance": true, "job": true, "service": true },
+            "renameByName": {
+              "key_id": "Key", "secret_env": "GitHub Secret", "provider": "Provider", "tier": "Tier",
+              "Value #A": "Token hôm nay", "Value #B": "Cost tháng ($)", "Value #C": "Quota còn lại"
+            },
+            "indexByName": {
+              "key_id": 0, "secret_env": 1, "provider": 2, "tier": 3,
+              "Value #A": 4, "Value #B": 5, "Value #C": 6
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Cost tháng ($)" }, "properties": [ { "id": "unit", "value": "currencyUSD" } ] }
+        ]
+      }
     },
     {
       "id": 3,
@@ -38,23 +69,10 @@
       "title": "Cost USD tháng này theo tier",
       "description": "free_oai/free_or rẻ; PAID nhảy = đang fallback nhiều = tốn tiền + rủi ro chất lượng.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
-      "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "custom": { "fillOpacity": 10, "showPoints": "always" } } },
       "targets": [
         { "expr": "sum by (tier) (airouter_key_cost_month_usd)", "legendFormat": "{{tier}}", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } }
-      ]
-    },
-    {
-      "id": 4,
-      "type": "table",
-      "title": "Cost & quota per key",
-      "description": "Tổng hợp per-key: cost tháng, quota còn lại, cooldown.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-      "targets": [
-        { "expr": "airouter_key_cost_month_usd", "format": "table", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } },
-        { "expr": "airouter_key_remaining", "format": "table", "instant": true, "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" } },
-        { "expr": "airouter_key_cooldown", "format": "table", "instant": true, "refId": "C", "datasource": { "type": "prometheus", "uid": "prometheus" } }
       ]
     },
     {
@@ -63,11 +81,10 @@
       "title": "Fallback rate (LEADING INDICATOR drift)",
       "description": "% request rơi khỏi tier ưu tiên. Tăng = key OpenAI sắp cạn/lỗi -> nguy cơ đổi model -> quality drift.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
-      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1 } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "custom": { "fillOpacity": 10 } } },
       "targets": [
-        { "expr": "sum(rate(airouter_fallback_total[5m])) / clamp_min(sum(rate(airouter_resolve_total[5m])), 1)", "legendFormat": "fallback rate", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } },
-        { "expr": "sum by (capability) (rate(airouter_fallback_total[5m]))", "legendFormat": "fallback {{capability}}", "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" } }
+        { "expr": "sum(rate(airouter_fallback_total[5m])) / clamp_min(sum(rate(airouter_resolve_total[5m])), 1)", "legendFormat": "fallback rate", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } }
       ]
     },
     {
@@ -76,7 +93,7 @@
       "title": "Quota còn lại theo key (burndown)",
       "description": "Dự báo lúc nào cạn key OpenAI -> chủ động trước khi tụt hết sang fallback.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
       "targets": [
         { "expr": "airouter_key_remaining", "legendFormat": "{{key_id}}", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } }
       ]
@@ -84,12 +101,13 @@
     {
       "id": 7,
       "type": "timeseries",
-      "title": "Resolve failures (no_capacity / unknown_capability)",
-      "description": "unknown_capability = typo capability (dev gửi sai). no_capacity = hết key toàn bộ ladder.",
+      "title": "Resolve / fallback theo capability (rate 5m)",
+      "description": "resolve_total = router phục vụ. fallback/fail tách riêng. Thấy capability nào đang chạy + có rơi tier không.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
       "targets": [
-        { "expr": "sum by (reason, capability) (rate(airouter_resolve_fail_total[5m]))", "legendFormat": "{{reason}} {{capability}}", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } }
+        { "expr": "sum by (capability,tier) (rate(airouter_resolve_total[5m]))", "legendFormat": "resolve {{capability}}/{{tier}}", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } },
+        { "expr": "sum by (reason) (rate(airouter_resolve_fail_total[5m]))", "legendFormat": "FAIL {{reason}}", "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" } }
       ]
     }
   ]
