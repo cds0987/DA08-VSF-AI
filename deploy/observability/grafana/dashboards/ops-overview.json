@@ -109,8 +109,8 @@
 
     { "id": 110, "type": "row", "title": "①b Tài nguyên — VM & per-service (cAdvisor / node-exporter)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 38 } },
     {
-      "id": 11, "type": "timeseries", "title": "CPU theo container (cores)",
-      "description": "rate(container_cpu_usage_seconds_total). Thấy service nào ngốn CPU.",
+      "id": 11, "type": "timeseries", "title": "CPU theo container (cores) — cadvisor",
+      "description": "cAdvisor. ⚠ VM cgroup-v2 này cadvisor chỉ thấy cgroup root -> No data per-container (giới hạn cadvisor). Per-service CPU sẽ có chuẩn từ Phase 2 OTel. VM-level: xem stat dưới.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 39 },
       "fieldConfig": { "defaults": { "custom": { "fillOpacity": 10 } } },
