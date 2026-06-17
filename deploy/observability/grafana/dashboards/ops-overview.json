@@ -146,7 +146,7 @@
       "gridPos": { "h": 5, "w": 8, "x": 16, "y": 47 },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
       "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 0.8 }, { "color": "red", "value": 0.9 } ] } } },
-      "targets": [ { "expr": "1 - (sum(node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs\"}) / sum(node_filesystem_size_bytes{fstype!~\"tmpfs|overlay|squashfs\"}))", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+      "targets": [ { "expr": "1 - (node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"})", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
     }
   ]
 }
