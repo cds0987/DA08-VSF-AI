@@ -275,6 +275,9 @@ def verify_trace(label: str, baseline: int) -> int:
 # ─────────────────────────────── 4/6. QUERY (SSE) ──────────────────────────
 def _parse_sse(raw: bytes, label: str, need_sources: bool) -> None:
     done = None
+    phases: list[str] = []           # chuỗi phase: thinking->acting->observing->generating->done
+    tool_seen = False                # có event tool/acting -> think ĐÃ gọi rag_search/hr_query
+    answer_chars = 0
     for line in raw.decode("utf-8", "replace").splitlines():
         line = line.strip()
         if not line.startswith("data:"):
@@ -283,17 +286,28 @@ def _parse_sse(raw: bytes, label: str, need_sources: bool) -> None:
             d = json.loads(line[5:].strip())
         except Exception:  # noqa: BLE001
             continue
-        if d.get("done") or d.get("phase") == "done" or "outcome" in d:
+        ph = d.get("phase")
+        if ph and (not phases or phases[-1] != ph):
+            phases.append(ph)
+        if ph in ("acting", "observing") or d.get("tool") or d.get("tool_name"):
+            tool_seen = True
+        if d.get("token"):
+            answer_chars += len(d["token"])
+        if d.get("done") or ph == "done" or "outcome" in d:
             done = d
     if done is None:
         raise SystemExit(f"[{label}] FAIL: không nhận event done (stream crash/treo?)")
     outcome = done.get("outcome")
     src = len(done.get("sources") or [])
-    print(f"  [{label}] done outcome={outcome} sources={src}")
+    # DIAGNOSTIC: phases + tool_seen phân biệt 'think không gọi tool' vs 'gọi mà rỗng'.
+    diag = f"phases={phases} tool_seen={tool_seen} answer_chars={answer_chars}"
+    print(f"  [{label}] done outcome={outcome} sources={src} {diag}")
     if outcome in (6, "ERROR"):
-        raise SystemExit(f"[{label}] FAIL: outcome=ERROR (wiring query->mcp->rag/hr đứt?)")
+        raise SystemExit(f"[{label}] FAIL: outcome=ERROR (wiring đứt?) {diag}")
     if need_sources and src < 1:
-        raise SystemExit(f"[{label}] FAIL: cần sources>0 (query->mcp->rag->qdrant rỗng)")
+        hint = ("think KHÔNG gọi tool (adapter/model không phát tool_call)"
+                if not tool_seen else "tool gọi RỒI nhưng rag/qdrant trả rỗng (args rỗng?)")
+        raise SystemExit(f"[{label}] FAIL: cần sources>0 -> {hint}. {diag}")
 
 
 def query(label: str, token: str, uid: str, question: str, need_sources: bool) -> None:
