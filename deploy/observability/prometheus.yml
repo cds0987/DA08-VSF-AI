@@ -1,0 +1,18 @@
+# Prometheus config (mount vào container prometheus). Scrape ai-router /metrics qua mạng
+# compose (prometheus join CÙNG network -> tới được service name `ai-router:8010`).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: ai-router
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['ai-router:8010']
+        labels:
+          service: ai-router
+
+  # Prometheus tự giám sát (sanity).
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']

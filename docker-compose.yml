@@ -323,6 +323,42 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  # ───────────── Monitoring (Prometheus + Grafana) cho ai-router per-key ──────────
+  # Prometheus scrape ai-router:8010/metrics (CÙNG network compose). Grafana expose qua nginx
+  # subdomain grafana.vsfchat.cloud (Basic Auth TÁI DÙNG .htpasswd langfuse) + Cloudflare proxied.
+  # KHÔNG mở port host (firewall giữ 80/443/22). Up/down ĐỘC LẬP app (monitoring không critical ->
+  # deploy.sh up non-fatal). Mất -> chỉ mất biểu đồ, KHÔNG ảnh hưởng router/app.
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_SERVER_ROOT_URL: https://grafana.vsfchat.cloud
+      # Truy cập đã chắn bởi nginx Basic Auth + Cloudflare -> Grafana cho XEM ẨN DANH (Viewer),
+      # không cần login. Admin (sửa) đặt mật khẩu qua GRAFANA_ADMIN_PASSWORD (mặc định tạm).
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-vsf-grafana-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_started
+    restart: unless-stopped
+
   # Migration one-shot: alembic upgrade head lên app-postgres TRƯỚC khi rag-worker chạy.
   # Tách riêng (không nhét vào rag-worker startup) để khi scale nhiều worker không
   # chạy đua DDL trên cùng DB, và migration lỗi -> fail-fast thay vì crash-loop.
@@ -506,3 +542,5 @@ volumes:
   qdrant_data:
   langfuse_pg_data:
   app_pg_data:
+  prometheus_data:
+  grafana_data:

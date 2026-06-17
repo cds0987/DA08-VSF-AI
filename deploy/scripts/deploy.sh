@@ -85,6 +85,10 @@ docker compose up -d --no-build qdrant langfuse-db langfuse nats-bootstrap query
        docker logs da08-vsf-nats-bootstrap-1 2>&1 | tail -40 || true; exit 1; }
 docker compose up -d --no-build --force-recreate nginx
 
+# Monitoring (prometheus + grafana) — NON-FATAL: hỏng chỉ mất biểu đồ, KHÔNG chặn deploy app.
+docker compose up -d --no-build prometheus grafana \
+  || echo "::warning::monitoring (prometheus/grafana) up FAILED — biểu đồ ai-router tạm thiếu, app KHÔNG ảnh hưởng"
+
 echo "==> 4b) LANGFUSE readiness PROD bằng KEY THẬT (NON-FATAL — chỉ cảnh báo)"
 lf_warn() { echo "::warning::LANGFUSE prod: $1 — kiểm tra: docker compose logs langfuse"; }
 lf_check() {
@@ -219,6 +223,24 @@ for path in /healthz / /admin/; do
     fi
   fi
 done
+
+# SMOKE EXPOSE LANGFUSE: nginx phải route Host=langfuse.vsfchat.cloud -> 401 (Basic Auth gác).
+# NON-FATAL (::warning::) — langfuse tách khỏi health-gate/rollback nên dashboard hỏng KHÔNG
+# kéo sập / rollback cả app. Chỉ cảnh báo để BẮT khi ai sửa nginx.conf làm vỡ block langfuse
+# (smoke 5b ở trên không test subdomain này -> đây bịt gap "CI xanh mà dashboard chết").
+lfx=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H 'Host: langfuse.vsfchat.cloud' http://localhost/ || echo 000)
+case "$lfx" in
+  401) echo "  [LANGFUSE-EXPOSE] OK: Host=langfuse -> 401 (Basic Auth gac dung)" ;;
+  *)   echo "::warning::SMOKE langfuse-expose: Host=langfuse.vsfchat.cloud tra $lfx (mong 401) — block langfuse trong nginx.conf vo / .htpasswd thieu / auth_basic tat?" ;;
+esac
+
+# SMOKE EXPOSE GRAFANA: tương tự langfuse — Host=grafana.vsfchat.cloud phải 401 (Basic Auth gác).
+# Bịt gap "nginx block grafana vỡ mà CI vẫn xanh". NON-FATAL.
+gfx=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H 'Host: grafana.vsfchat.cloud' http://localhost/ || echo 000)
+case "$gfx" in
+  401) echo "  [GRAFANA-EXPOSE] OK: Host=grafana -> 401 (Basic Auth gac dung)" ;;
+  *)   echo "::warning::SMOKE grafana-expose: Host=grafana.vsfchat.cloud tra $gfx (mong 401) — block grafana nginx vo / .htpasswd thieu?" ;;
+esac
 
 echo "==> 5c) SMOKE LUỒNG-VÀNG — CHỌN LỌC theo service đổi (detect), mô phỏng FE gửi"
 RUN_RAG="${RUN_RAG:-}"
