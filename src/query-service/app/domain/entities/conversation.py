@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -8,6 +8,7 @@ class Message:
     role: str
     content: str
     created_at: datetime
+    sources: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

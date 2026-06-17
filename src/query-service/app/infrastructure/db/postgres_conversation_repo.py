@@ -64,7 +64,7 @@ class PostgresConversationRepository(ConversationRepository):
 
             rows = await connection.fetch(
                 """
-                SELECT role, content, created_at
+                SELECT role, content, created_at, sources
                 FROM query_svc.messages
                 WHERE conversation_id = $1::uuid
                 ORDER BY created_at DESC
@@ -80,6 +80,8 @@ class PostgresConversationRepository(ConversationRepository):
                     role=str(row["role"]),
                     content=str(row["content"]),
                     created_at=_aware(row["created_at"]),
+                    sources=json.loads(row["sources"]) if isinstance(row["sources"], str)
+                            else (row["sources"] or []),
                 )
                 for row in reversed(rows)
             ],
