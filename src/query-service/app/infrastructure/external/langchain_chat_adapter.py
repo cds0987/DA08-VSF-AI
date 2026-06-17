@@ -312,6 +312,10 @@ class OpenAIChatModel(BaseChatModel):
             yielded = True
 
         if not yielded:
+            # Upstream trả stream RỖNG (không content/tool_call/usage). Hay gặp khi gateway
+            # proxy lỗi giữa chừng -> client nhận rỗng -> answer NO_INFO âm thầm. Log để debug.
+            logger.warning("chat_stream_empty model=%s base_url=%s — upstream/proxy trả rỗng?",
+                           real_model or self.model, self.base_url or "openai")
             yield ChatGenerationChunk(message=AIMessageChunk(content=""))
 
     def _response_meta_from_stream(self, real_model: str | None, router_meta: Any) -> dict:

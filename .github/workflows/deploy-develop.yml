@@ -304,6 +304,21 @@ jobs:
           docker compose -f docker-compose.e2e.yml logs --no-color query-service ai-router mcp-service | tail -350 || true
           echo "===== phần còn lại (tail 150) ====="
           docker compose -f docker-compose.e2e.yml logs --no-color | tail -150 || true
+      # Log ĐẦY ĐỦ từng service làm artifact -> KHÔNG bị tail cắt / langfuse chèn (bài học:
+      # `logs | tail -400` bị langfuse migration nhấn chìm log query-service). Tải về xem sau.
+      - name: Per-service e2e logs (artifact)
+        if: always()
+        run: |
+          mkdir -p e2e-logs
+          for s in query-service ai-router mcp-service rag-worker document-service hr-service user-service; do
+            docker compose -f docker-compose.e2e.yml logs --no-color "$s" > "e2e-logs/$s.log" 2>&1 || true
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-service-logs
+          path: e2e-logs
+          retention-days: 7
       - name: Tear down stack
         if: always()
         run: docker compose -f docker-compose.e2e.yml down -v || true
