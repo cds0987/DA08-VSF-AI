@@ -25,10 +25,7 @@ const hasConversation = computed(() => chat.messages.length > 0 || chat.pipeline
 let scrollRafId: number | null = null
 
 function scrollToBottom(behavior: ScrollBehavior) {
-  scrollRef.value?.scrollTo({
-    top: scrollRef.value.scrollHeight,
-    behavior,
-  })
+  scrollRef.value?.scrollTo({ top: scrollRef.value.scrollHeight, behavior })
 }
 
 const smoothScrollToBottom = useDebounceFn(() => {
@@ -57,12 +54,9 @@ async function submitFeedback(messageId: string, score: 1 | -1) {
 
 onMounted(async () => {
   ;(window as Window & { __chatReady?: boolean }).__chatReady = true
+  if (!session.user) { void router.push('/login'); return }
 
-  if (!session.user) {
-    void router.push('/login')
-    return
-  }
-
+  chat.clear()
   const synced = await chat.syncHistory()
   chat.flushProactiveMessage()
   if (!synced) {
@@ -83,10 +77,7 @@ watch(
 )
 
 watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText], () => {
-  if (chat.isHistoryLoading) {
-    scheduleInstantScroll()
-    return
-  }
+  if (chat.isHistoryLoading) { scheduleInstantScroll(); return }
   nextTick(smoothScrollToBottom)
 })
 </script>
