@@ -4,6 +4,16 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# Alert rules (mount cùng thư mục alerts/). Sửa file rules + deploy -> Prometheus reload.
+rule_files:
+  - /etc/prometheus/alerts/*.rules.yml
+
+# Gửi alert đã kích hoạt sang Alertmanager (cùng network compose).
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
 scrape_configs:
   - job_name: ai-router
     metrics_path: /metrics
@@ -11,6 +21,21 @@ scrape_configs:
       - targets: ['ai-router:8010']
         labels:
           service: ai-router
+
+  # Host metrics (CPU/RAM/đĩa VM).
+  - job_name: node
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # Per-container metrics (CPU/RAM/đĩa mỗi service).
+  - job_name: cadvisor
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  # OTel Collector: metrics đã gom từ service (8889) + self-metrics (8888).
+  - job_name: otel-collector
+    static_configs:
+      - targets: ['otel-collector:8889', 'otel-collector:8888']
 
   # Prometheus tự giám sát (sanity).
   - job_name: prometheus

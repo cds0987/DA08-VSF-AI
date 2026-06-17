@@ -23,7 +23,6 @@ import {
 } from '~/lib/api/queryService'
 
 const HISTORY_KEY = 'eka.chat.conversations'
-const CURRENT_CONVERSATION_KEY = 'eka.chat.current-conversation'
 
 function createConversationId() {
   return crypto.randomUUID()
@@ -217,15 +216,15 @@ export const useChatStore = defineStore('chat', () => {
   const files = ref<File[]>([])
   const messages = ref<ChatMessage[]>([])
   const conversations = ref<Conversation[]>([])
+  const router = useRouter()
   const storageSuffix = sessionStore.user?.id || 'anonymous'
   const fallbackStorageKey = HISTORY_KEY + '.' + storageSuffix
   const fallbackConversations = useLocalStorage<Conversation[]>(fallbackStorageKey, [])
-  const currentConversationId = useLocalStorage<string | null>(
-    CURRENT_CONVERSATION_KEY + '.' + storageSuffix,
-    null,
-  )
+  // URL là source of truth cho conversation hiện tại — không cần persist localStorage.
+  const currentConversationId = ref<string | null>(null)
   const isHistoryLoading = ref(false)
   const isHistoryClearing = ref(false)
+  const isConversationLoading = ref(false)
   const isUsingHistoryFallback = ref(false)
   const conversationLoadError = ref<'error' | null>(null)
   const pipeline = ref<number>(-1)
@@ -331,10 +330,26 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function loadConversation(id: string) {
-    const conversation = conversations.value.find((item) => item.id === id)
-    if (!conversation) return false
+    const cached = conversations.value.find((item) => item.id === id)
 
-    activateConversation(conversation)
+    // Hiện ngay cached data (hoặc empty state) trước khi fetch server.
+    if (cached) {
+      activateConversation(cached)
+    } else {
+      conversationLoadError.value = null
+      abortController?.abort()
+      abortController = null
+      currentConversationId.value = id
+      messages.value = []
+      pipeline.value = -1
+      streamingText.value = ''
+      isPanelOpen.value = false
+      panelCitation.value = null
+      input.value = ''
+      files.value = []
+    }
+
+    isConversationLoading.value = true
     try {
       const detail = await queryService.fetchConversation(id)
       const updatedAt = detail.updated_at
@@ -353,67 +368,27 @@ export const useChatStore = defineStore('chat', () => {
       return true
     } catch (err: any) {
       if (err?.response?.status === 404) {
-        // Không còn trên server → xóa khỏi lịch sử, không hiện cho user
         conversations.value = conversations.value.filter((item) => item.id !== id)
         persistFallbackHistory()
         currentConversationId.value = null
         messages.value = []
+        void router.replace('/chat')
         return false
       }
       isUsingHistoryFallback.value = true
       conversationLoadError.value = 'error'
       return false
-    }
-  }
-
-  // Fetch và sync chi tiết một conversation mà không có UI side effect.
-  // Dùng trong syncHistory để thử từng candidate mà không gây flicker.
-  // Trả về conversation đã sync nếu thành công, 'not-found' nếu server 404,
-  // hoặc 'error' nếu lỗi tạm thời (network, 5xx) — để caller không xóa nhầm.
-  async function syncConversationDetail(
-    id: string,
-  ): Promise<Conversation | 'not-found' | 'error'> {
-    if (!conversations.value.find((item) => item.id === id)) return 'not-found'
-    try {
-      const detail = await queryService.fetchConversation(id)
-      const synced: Conversation = {
-        id: detail.id,
-        title: detail.title,
-        updatedAt: detail.updated_at,
-        bucket: getBucket(new Date(detail.updated_at)),
-        messages: detail.messages.map(toChatMessage),
-      }
-      const index = conversations.value.findIndex((item) => item.id === id)
-      if (index >= 0) conversations.value.splice(index, 1, synced)
-      return synced
-    } catch (err: any) {
-      return err?.response?.status === 404 ? 'not-found' : 'error'
+    } finally {
+      isConversationLoading.value = false
     }
   }
 
   function restoreFallbackHistory() {
-    const stored = fallbackConversations.value
-    const selectedIndex = currentConversationId.value
-      ? stored.findIndex((item) => item.id === currentConversationId.value)
-      : -1
-    conversations.value = stored.map((item) => ({
+    conversations.value = fallbackConversations.value.map((item) => ({
       ...item,
       id: isConversationId(item.id) ? item.id : createConversationId(),
       messages: item.messages.map((message) => ({ ...message })),
     }))
-
-    const conversation = selectedIndex >= 0
-      ? conversations.value[selectedIndex]
-      : conversations.value.find((item) => item.id === currentConversationId.value) || conversations.value[0]
-
-    if (conversation) {
-      activateConversation(conversation)
-      persistFallbackHistory()
-      return
-    }
-
-    currentConversationId.value = null
-    messages.value = []
   }
 
   async function fetchAllConversations() {
@@ -453,66 +428,7 @@ export const useChatStore = defineStore('chat', () => {
       conversations.value = [...serverConversations, ...localOnly]
         .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
 
-      if (conversations.value.length === 0) {
-        messages.value = []
-        currentConversationId.value = null
-        fallbackConversations.value = []
-        isUsingHistoryFallback.value = false
-        return true
-      }
-
-      // Không có session trước (logout hoặc lần đầu): chỉ populate sidebar,
-      // không tự mở conversation — giống ChatGPT/Gemini.
-      if (!currentConversationId.value) {
-        isUsingHistoryFallback.value = false
-        persistFallbackHistory()
-        return true
-      }
-
-      const preferred = conversations.value.find((item) => item.id === currentConversationId.value)
-      if (!preferred) {
-        // ID không còn trong list (bị xóa/hết hạn) → về empty state
-        currentConversationId.value = null
-        isUsingHistoryFallback.value = false
-        persistFallbackHistory()
-        return true
-      }
-
-      if (!serverIds.has(preferred.id)) {
-        activateConversation(preferred)
-        persistFallbackHistory()
-        isUsingHistoryFallback.value = true
-        return true
-      }
-
-      // Optimistic: hiện cached data ngay lập tức, server data replace sau khi fetch xong.
-      activateConversation(preferred)
-
-      // 404 → xóa khỏi list, thử candidate tiếp theo.
-      // 'error' (lỗi tạm thời) → dừng ngay, giữ preferred đang hiện, không demote.
-      const candidates = [
-        preferred,
-        ...conversations.value.filter((item) => item.id !== preferred.id && serverIds.has(item.id)),
-      ]
-      let winner: Conversation | null = null
-      for (const candidate of candidates) {
-        const result = await syncConversationDetail(candidate.id)
-        if (result !== 'not-found' && result !== 'error') {
-          winner = result
-          break
-        }
-        if (result === 'error') break
-        conversations.value = conversations.value.filter((item) => item.id !== candidate.id)
-      }
-
-      if (winner) {
-        // Bug 2: chỉ activate nếu user chưa tự switch sang conversation khác.
-        if (currentConversationId.value === preferred.id) activateConversation(winner)
-        isUsingHistoryFallback.value = false
-      } else {
-        // Bug 3/4: lỗi tạm thời hoặc tất cả 404 — giữ optimistic state, đánh dấu fallback.
-        isUsingHistoryFallback.value = true
-      }
+      isUsingHistoryFallback.value = false
       persistFallbackHistory()
       return true
     } catch {
@@ -536,6 +452,7 @@ export const useChatStore = defineStore('chat', () => {
       conversations.value = []
       fallbackConversations.value = []
       isUsingHistoryFallback.value = false
+      void router.push('/chat')
     } finally {
       isHistoryClearing.value = false
     }
@@ -554,7 +471,11 @@ export const useChatStore = defineStore('chat', () => {
     currentConversationId.value = null
     messages.value = []
     const nextConversation = conversations.value[0]
-    if (nextConversation) await loadConversation(nextConversation.id)
+    if (nextConversation) {
+      void router.push('/chat/' + nextConversation.id)
+    } else {
+      void router.push('/chat')
+    }
   }
 
   async function renameConversation(id: string, newTitle: string) {
@@ -605,6 +526,7 @@ export const useChatStore = defineStore('chat', () => {
     input.value = ''
     files.value = []
 
+    const wasNew = !currentConversationId.value
     ensureConversationId()
     messages.value.push({
       id: `m-${Date.now()}`,
@@ -613,6 +535,11 @@ export const useChatStore = defineStore('chat', () => {
       timestamp: new Date().toLocaleString(),
     })
     cacheCurrentConversation()
+
+    // Cập nhật URL ngay (giống ChatGPT) trước khi stream bắt đầu.
+    if (wasNew && import.meta.client) {
+      void router.push('/chat/' + currentConversationId.value)
+    }
 
     streamingText.value = ''
     thinkingStatus.value = ''
@@ -749,14 +676,27 @@ export const useChatStore = defineStore('chat', () => {
       }
     } catch (error) {
       if (!controller.signal.aborted && !completed) {
-        const message = errorMessage(error)
-        messages.value.push({
-          id: `err-${Date.now()}`,
-          role: 'assistant',
-          content: fullContent || message,
-          error: message,
-          timestamp: new Date().toLocaleString(),
-        })
+        if (error instanceof QueryServiceError) {
+          // Server error (4xx/5xx) — show specific error banner
+          const message = errorMessage(error)
+          messages.value.push({
+            id: `err-${Date.now()}`,
+            role: 'assistant',
+            content: fullContent || message,
+            error: message,
+            timestamp: new Date().toLocaleString(),
+          })
+        } else {
+          // Network interruption (ERR_NETWORK_CHANGED, stream closed early, etc.)
+          // ChatGPT-style: keep partial content, show retry button — no error banner
+          messages.value.push({
+            id: `err-${Date.now()}`,
+            role: 'assistant',
+            content: fullContent,
+            interrupted: true,
+            timestamp: new Date().toLocaleString(),
+          })
+        }
         cacheCurrentConversation()
         isUsingHistoryFallback.value = true
       }
@@ -767,6 +707,16 @@ export const useChatStore = defineStore('chat', () => {
       pipeline.value = -1
     }
   }
+
+  async function retryMessage(messageId: string, pipelineStages: PipelineStage[]) {
+    const msgIndex = messages.value.findIndex(m => m.id === messageId)
+    if (msgIndex === -1) return
+    const userMsg = [...messages.value].slice(0, msgIndex).reverse().find(m => m.role === 'user')
+    if (!userMsg) return
+    messages.value.splice(msgIndex, 1)
+    await ask(userMsg.content, pipelineStages)
+  }
+
 
   async function submitFeedback(messageId: string, score: 1 | -1) {
     const message = messages.value.find((item) => item.id === messageId)
@@ -785,9 +735,6 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function injectProactiveMessage(documentName: string, docId: string | null = null) {
-    if (!currentConversationId.value) {
-      currentConversationId.value = crypto.randomUUID()
-    }
     messages.value.push({
       id: crypto.randomUUID(),
       role: 'assistant',
@@ -827,6 +774,7 @@ export const useChatStore = defineStore('chat', () => {
     currentConversationId,
     isHistoryLoading,
     isHistoryClearing,
+    isConversationLoading,
     isUsingHistoryFallback,
     conversationLoadError,
     pipeline,
@@ -847,6 +795,7 @@ export const useChatStore = defineStore('chat', () => {
     deleteConversation,
     renameConversation,
     ask,
+    retryMessage,
     submitFeedback,
     injectProactiveMessage,
     queueProactiveMessage,

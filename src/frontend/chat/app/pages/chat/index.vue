@@ -25,10 +25,7 @@ const hasConversation = computed(() => chat.messages.length > 0 || chat.pipeline
 let scrollRafId: number | null = null
 
 function scrollToBottom(behavior: ScrollBehavior) {
-  scrollRef.value?.scrollTo({
-    top: scrollRef.value.scrollHeight,
-    behavior,
-  })
+  scrollRef.value?.scrollTo({ top: scrollRef.value.scrollHeight, behavior })
 }
 
 const smoothScrollToBottom = useDebounceFn(() => {
@@ -57,17 +54,11 @@ async function submitFeedback(messageId: string, score: 1 | -1) {
 
 onMounted(async () => {
   ;(window as Window & { __chatReady?: boolean }).__chatReady = true
+  if (!session.user) { void router.push('/login'); return }
 
-  if (!session.user) {
-    void router.push('/login')
-    return
-  }
-
-  const synced = await chat.syncHistory()
+  chat.clear()
+  await chat.syncHistory()
   chat.flushProactiveMessage()
-  if (!synced) {
-    toast.warning('Không thể tải lịch sử từ server. Đang sử dụng bản lưu tạm trên thiết bị.')
-  }
 })
 
 watch(
@@ -83,10 +74,7 @@ watch(
 )
 
 watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText], () => {
-  if (chat.isHistoryLoading) {
-    scheduleInstantScroll()
-    return
-  }
+  if (chat.isHistoryLoading) { scheduleInstantScroll(); return }
   nextTick(smoothScrollToBottom)
 })
 </script>
@@ -128,6 +116,7 @@ watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText
             :trace-log="chat.traceLog"
             @open-citation="chat.handleOpenCitation"
             @feedback="submitFeedback"
+            @retry="messageId => chat.retryMessage(messageId, PIPELINE_STAGES)"
           />
           <div v-else class="flex flex-1 flex-col items-center justify-center">
             <LandingState />

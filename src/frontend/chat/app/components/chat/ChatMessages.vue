@@ -18,6 +18,7 @@ defineProps<{
 const emit = defineEmits<{
   (e: 'open-citation', citation: Citation): void
   (e: 'feedback', messageId: string, score: 1 | -1): void
+  (e: 'retry', messageId: string): void
 }>()
 </script>
 
@@ -31,6 +32,7 @@ const emit = defineEmits<{
         :data="message"
         @open-citation="citation => emit('open-citation', citation)"
         @feedback="(messageId, score) => emit('feedback', messageId, score)"
+        @retry="messageId => emit('retry', messageId)"
       />
     </template>
     <Pipeline

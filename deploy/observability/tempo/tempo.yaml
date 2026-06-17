@@ -1,0 +1,28 @@
+# Tempo — backend lưu trace (nhận OTLP từ OTel Collector). Storage local (disk), retention 7d.
+# RAM giữ thấp: ingester buffer nhỏ -> flush block xuống đĩa. VM 16GB, mem_limit 1g ở compose.
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+ingester:
+  max_block_duration: 5m      # flush xuống đĩa mỗi 5m (giữ RAM thấp)
+
+compactor:
+  compaction:
+    block_retention: 168h     # 7 ngày
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks

@@ -1,0 +1,69 @@
+# Alert rules cho AI Router — Phase 1 observability plan.
+# Dùng metric ĐÃ CÓ sẵn (airouter_*) từ ai-router:8010/metrics. KHÔNG sửa code service.
+# Ngưỡng = DEFAULT ship sẵn; devops chỉnh tay sau (sửa file này + git deploy -> Prometheus
+# reload). Mọi lần đổi đi qua git => track history luôn (audit qua commit).
+groups:
+  - name: ai-router
+    rules:
+      # ── P1: AI Router chết (Prometheus scrape fail) ──────────────────────────
+      - alert: AiRouterDown
+        expr: up{job="ai-router"} == 0
+        for: 2m
+        labels:
+          severity: P1
+          service: ai-router
+        annotations:
+          summary: "AI Router không scrape được (down 2m)"
+          description: "Prometheus mất target ai-router:8010. App có thể vẫn chạy (kill-switch về OpenAI trực tiếp) nhưng MẤT cân bằng key + metrics."
+          runbook: "runbook/ai-router-down"
+
+      # ── P1: Hết capacity — mọi tier/key cạn (no_capacity) ────────────────────
+      - alert: AiRouterNoCapacity
+        expr: sum(rate(airouter_resolve_fail_total{reason="no_capacity"}[5m])) > 0
+        for: 2m
+        labels:
+          severity: P1
+          service: ai-router
+        annotations:
+          summary: "AI Router HẾT capacity — resolve thất bại (no_capacity)"
+          description: "Mọi tier key đã cạn quota/cooldown. Request LLM đang bị từ chối. Cần xoay key / nâng quota / bật tier PAID."
+          runbook: "runbook/keys-exhausted"
+
+      # ── P2: Fallback rate cao = rớt khỏi tier ưu tiên = drift + tốn tiền ──────
+      # DEFAULT 10%. Chỉnh tại đây.
+      - alert: AiRouterFallbackHigh
+        expr: |
+          sum(rate(airouter_fallback_total[5m]))
+          / clamp_min(sum(rate(airouter_resolve_total[5m])), 1) > 0.10
+        for: 10m
+        labels:
+          severity: P2
+          service: ai-router
+        annotations:
+          summary: "Fallback rate > 10% (10m) — key ưu tiên đang lỗi/cạn"
+          description: "Nhiều request rơi sang tier dự phòng -> nguy cơ đổi model (quality drift) + tăng chi phí. Kiểm tra key OpenAI 429/cooldown."
+          runbook: "runbook/ai-router-fallback"
+
+      # ── P2: Quota burndown — key sắp cạn (<10% còn lại) ──────────────────────
+      - alert: AiRouterQuotaBurndown
+        expr: airouter_key_remaining / airouter_key_limit < 0.10 and airouter_key_limit > 0
+        for: 5m
+        labels:
+          severity: P2
+          service: ai-router
+        annotations:
+          summary: "Key {{ $labels.key_id }} ({{ $labels.tier }}) còn <10% quota"
+          description: "Key {{ $labels.key_id }} / {{ $labels.secret_env }} sắp cạn quota ngày. Chuẩn bị xoay key trước khi tụt hết sang fallback."
+          runbook: "runbook/quota-burndown"
+
+      # ── P2: Key kẹt cooldown (circuit-breaker sau 429) kéo dài ───────────────
+      - alert: AiRouterKeyCooldownStuck
+        expr: airouter_key_cooldown == 1
+        for: 10m
+        labels:
+          severity: P2
+          service: ai-router
+        annotations:
+          summary: "Key {{ $labels.key_id }} kẹt cooldown >10m"
+          description: "Key {{ $labels.key_id }} / {{ $labels.secret_env }} liên tục bị 429 -> cooldown lặp. Provider có thể đã revoke/limit key này."
+          runbook: "runbook/key-cooldown"

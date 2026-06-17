@@ -25,7 +25,9 @@ test('persists and restores distinct server conversations', async () => {
   assert.match(store, /isConversationId/)
   assert.match(store, /abortController\?\.abort\(\)/)
   assert.match(store, /fetchConversation\(id\)/)
-  assert.match(store, /CURRENT_CONVERSATION_KEY \+ '\.' \+ storageSuffix/)
+  // URL-based routing: currentConversationId là ref(null), không còn dùng localStorage key
+  assert.match(store, /currentConversationId = ref<string \| null>\(null\)/)
+  assert.match(store, /isConversationLoading/)
 
   assert.match(api, /fetchConversation\(id: string/)
   assert.match(api, /deleteConversation\(id: string/)

@@ -1,0 +1,52 @@
+# OTel Collector — TRÁI TIM gom + chuẩn hóa. Service phát OTLP về đây (1 địa chỉ duy nhất),
+# Collector chia: traces->Tempo, logs->Loki, metrics->Prometheus (scrape). Đổi backend = sửa
+# file này, KHÔNG đụng service. Nơi SCRUB PII tập trung (processors/attributes).
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 400              # chặn OOM (mem_limit container 512m)
+  batch:
+    timeout: 5s
+  # PII scrub tập trung (canonical schema §7): xóa field nhạy cảm trước khi lưu.
+  # Trace TOÀN BỘ (sample 100%) nhưng che nội dung nhạy cảm. Bổ sung field khi instrument.
+  attributes/scrub:
+    actions:
+      - { key: vsf.conversation_title, action: delete }
+      - { key: hr.salary, action: delete }
+      - { key: hr.national_id, action: delete }
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true            # mạng nội bộ compose
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+  prometheus:
+    endpoint: 0.0.0.0:8889      # Prometheus scrape metrics đã gom tại đây
+
+service:
+  telemetry:
+    metrics:
+      address: 0.0.0.0:8888     # self-metrics của Collector
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/scrub, batch]
+      exporters: [otlp/tempo]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/scrub, batch]
+      exporters: [otlphttp/loki]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
