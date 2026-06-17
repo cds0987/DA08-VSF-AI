@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     semantic_cache_threshold: float = 0.90
     rag_result_limit: int = 3
     rag_top_k: int = 8  # số chunk tối đa mỗi lần gọi rag_search (LangGraph path)
-    rag_score_threshold: float = 0.45  # cosine backup khi reranker fail → NoopReranker
+    rag_score_threshold: float = 0.75  # cosine threshold để show citations cho user
     llm_max_output_tokens: int = 1500
     rag_context_max_chars: int = 10000
     query_rate_limit_per_minute: int = 20
