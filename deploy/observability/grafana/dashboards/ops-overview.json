@@ -100,7 +100,7 @@
       "options": { "mode": "markdown", "content": "### ⏳ Chờ Phase 5\n\nVùng này sẽ hiển thị:\n- **Groundedness / faithfulness** (answer có bám tài liệu không)\n- **User feedback** 👍/👎 gắn trace_id\n- **Retrieval relevance** (top_score)\n\nXem kịch bản chẩn đoán: `docs/nguyenworking/observability-plan.md` §5b." }
     },
 
-    { "id": 200, "type": "row", "title": "② Ở đâu? · ④ Vì sao? · ③ Ai & bao nhiêu? — sắp có (Phase 2–3)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 } },
+    { "id": 200, "type": "row", "title": "② Ở đâu? · ④ Vì sao? (trace Tempo) · ③ Ai & bao nhiêu? (RED spanmetrics)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 } },
     {
       "id": 16, "type": "table", "title": "② Trace gần đây (Tempo) — click mở chi tiết span",
       "description": "Trace từ service đã OTel hóa (hiện: ai-router). Click traceID -> xem span + sang log cùng trace_id. Mở rộng khi fan-out OTel các service.",
@@ -109,16 +109,30 @@
       "targets": [ { "refId": "A", "datasource": { "type": "tempo", "uid": "tempo" }, "queryType": "traceqlSearch", "limit": 20, "tableType": "traces", "filters": [] } ]
     },
     {
-      "id": 10, "type": "text", "title": "③ Ai & bao nhiêu · RED per-service — sắp có (Phase 2 fan-out)",
-      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 40 },
-      "options": { "mode": "markdown", "content": "RED per-service (rate/error/latency) + impact theo role/department sẽ điền khi **fan-out OTel** các service còn lại (nginx sinh trace_id gốc → xuyên suốt). VM-level resource: vùng dưới. **②④** trace ở bảng trên (Tempo) + Explore." }
+      "id": 10, "type": "timeseries", "title": "③ Request rate per service (req/s, từ spanmetrics)",
+      "description": "Số request mỗi service (sinh từ trace). Bao nhiêu request đang vào. Mở rộng khi fan-out OTel.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 40 },
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 10 } } },
+      "targets": [ { "expr": "sum by (service_name) (rate(vsf_calls_total[5m]))", "legendFormat": "{{service_name}}", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 17, "type": "timeseries", "title": "③ Lỗi + latency p95 per service",
+      "description": "Error rate (span status ERROR) + độ trễ p95. Bao nhiêu lỗi, service nào chậm. 'Ai' (role/department) cần fan-out query-service.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 40 },
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 10 } } },
+      "targets": [
+        { "expr": "sum by (service_name) (rate(vsf_calls_total{status_code=\"STATUS_CODE_ERROR\"}[5m]))", "legendFormat": "err {{service_name}}", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } },
+        { "expr": "histogram_quantile(0.95, sum by (service_name,le) (rate(vsf_duration_milliseconds_bucket[5m])))", "legendFormat": "p95ms {{service_name}}", "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" } }
+      ]
     },
 
-    { "id": 110, "type": "row", "title": "①b Tài nguyên VM (node-exporter)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 43 } },
+    { "id": 110, "type": "row", "title": "①b Tài nguyên VM (node-exporter)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 47 } },
     {
       "id": 13, "type": "stat", "title": "VM CPU dùng",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 44 },
+      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 48 },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "area" },
       "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 0.75 }, { "color": "red", "value": 0.9 } ] } } },
       "targets": [ { "expr": "1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
@@ -126,7 +140,7 @@
     {
       "id": 14, "type": "stat", "title": "VM RAM dùng",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 5, "w": 8, "x": 8, "y": 44 },
+      "gridPos": { "h": 5, "w": 8, "x": 8, "y": 48 },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "area" },
       "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 0.8 }, { "color": "red", "value": 0.92 } ] } } },
       "targets": [ { "expr": "1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
@@ -134,7 +148,7 @@
     {
       "id": 15, "type": "stat", "title": "VM đĩa dùng (/)",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 44 },
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 48 },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
       "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 0.8 }, { "color": "red", "value": 0.9 } ] } } },
       "targets": [ { "expr": "1 - (node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"})", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]

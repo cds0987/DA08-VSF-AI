@@ -99,21 +99,6 @@ docker compose $OBS up -d --no-build grafana node-exporter tempo loki \
 # Dọn cadvisor cũ (đã gỡ khỏi stack) nếu còn chạy orphan.
 docker rm -f da08-vsf-cadvisor-1 >/dev/null 2>&1 || true
 
-# [DIAG TRACE TẠM] soi pipeline ai-router -> collector -> Tempo (gỡ sau khi xong).
-sleep 20
-docker compose exec -T ai-router python - <<'PY' 2>&1 | grep -a DIAGT || echo "[DIAGT] exec FAIL"
-import urllib.request
-def get(u):
-    try: return urllib.request.urlopen(u, timeout=8).read().decode()
-    except Exception as e: return "ERR %s" % e
-m = get("http://otel-collector:8888/metrics")
-for k in ("otelcol_receiver_accepted_spans","otelcol_exporter_sent_spans","otelcol_exporter_send_failed_spans"):
-    vals=[l for l in m.splitlines() if l.startswith(k) and not l.startswith("#")]
-    print("[DIAGT]", k, "=", (vals[0].split()[-1] if vals else "NONE"))
-t = get("http://tempo:3200/api/search/tag/service.name/values")
-print("[DIAGT] tempo service.name:", t[:200])
-PY
-
 
 echo "==> 4b) LANGFUSE readiness PROD bằng KEY THẬT (NON-FATAL — chỉ cảnh báo)"
 lf_warn() { echo "::warning::LANGFUSE prod: $1 — kiểm tra: docker compose logs langfuse"; }

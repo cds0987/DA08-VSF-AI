@@ -33,6 +33,18 @@ exporters:
   prometheus:
     endpoint: 0.0.0.0:8889      # Prometheus scrape metrics đã gom tại đây
 
+# spanmetrics: TỰ SINH metric RED (calls/duration per service) TỪ TRACE -> Prometheus -> vùng ③.
+# Không cần instrument thêm; mở rộng theo từng service được OTel hóa.
+connectors:
+  spanmetrics:
+    namespace: vsf
+    histogram:
+      explicit:
+        buckets: [10ms, 50ms, 100ms, 250ms, 500ms, 1s, 2s, 5s]
+    dimensions:
+      - name: http.route
+    metrics_flush_interval: 15s
+
 service:
   telemetry:
     metrics:
@@ -41,12 +53,12 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, attributes/scrub, batch]
-      exporters: [otlp/tempo]
+      exporters: [otlp/tempo, spanmetrics]   # gửi trace + nuôi spanmetrics
     logs:
       receivers: [otlp]
       processors: [memory_limiter, attributes/scrub, batch]
       exporters: [otlphttp/loki]
     metrics:
-      receivers: [otlp]
+      receivers: [otlp, spanmetrics]         # nhận metric RED từ spanmetrics
       processors: [memory_limiter, batch]
       exporters: [prometheus]
