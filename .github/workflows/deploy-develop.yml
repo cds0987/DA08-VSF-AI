@@ -91,6 +91,8 @@ jobs:
             base:
               - 'docker-compose.yml'
               - 'docker-compose.e2e.yml'
+              - 'docker-compose.observability.yml'
+              - 'deploy/**'                 # deploy.sh, render-secrets, env, observability config/dashboard -> phải deploy
               - 'infra/nats/**'
               - 'infra/e2e/**'
             wf: '.github/workflows/deploy-develop.yml'
@@ -513,6 +515,11 @@ jobs:
           OPENROUTER_API_KEY_3: ${{ secrets.OPENROUTER_API_KEY_3 }}
           OPENROUTER_API_KEY_4: ${{ secrets.OPENROUTER_API_KEY_4 }}
           OPENROUTER_API_KEY_5: ${{ secrets.OPENROUTER_API_KEY_5 }}
+          # OTel golden path toggle (GitHub VARIABLE, bật/tắt qua repo Settings -> Variables, không
+          # phải secret). Rỗng -> render-secrets default 0 (tắt). =1 -> ai-router phát trace OTLP.
+          VSF_OTEL_ENABLED: ${{ vars.VSF_OTEL_ENABLED }}
+          # Webhook Slack cho Alertmanager (optional secret). Rỗng -> alert không gửi Slack (vẫn xem ở Prometheus).
+          ALERTMANAGER_SLACK_WEBHOOK: ${{ secrets.ALERTMANAGER_SLACK_WEBHOOK }}
           # Không phải secret — context cho remote-entry.sh
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -532,6 +539,7 @@ jobs:
                    AIROUTER_INTERNAL_TOKEN OPENAI_API_KEY_1 OPENAI_API_KEY_2 OPENAI_API_KEY_3 \
                    OPENAI_API_KEY_4 OPENAI_API_KEY_5 OPENROUTER_API_KEY_1 OPENROUTER_API_KEY_2 \
                    OPENROUTER_API_KEY_3 OPENROUTER_API_KEY_4 OPENROUTER_API_KEY_5 \
+                   VSF_OTEL_ENABLED ALERTMANAGER_SLACK_WEBHOOK \
                    GH_TOKEN REPO RUN_RAG RUN_HR SVCS; do
             printf 'export %s=%q\n' "$v" "${!v:-}" >> "$PAYLOAD"
           done

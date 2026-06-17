@@ -7,10 +7,7 @@ Chỉ KHÁC nhau ở cơ chế gọi client (await thuần vs to_thread) nên ph
 
 from __future__ import annotations
 
-import binascii
-import re
 import uuid
-from collections import Counter
 from typing import Sequence
 
 try:
@@ -26,21 +23,6 @@ from core_engine.vectorstore.provider import VectorStoreProvider
 from core_engine.vectorstore.types import VectorRecord
 
 _QDRANT_NS = uuid.UUID("6ba7b811-9dad-11d1-80b4-00c04fd430c8")
-
-
-def _sparse_encode(text: str) -> tuple[list[int], list[float]]:
-    tokens = re.findall(r"\w+", text.lower())
-    if not tokens:
-        return [], []
-    counts = Counter(tokens)
-    result: dict[int, float] = {}
-    for token, count in counts.items():
-        idx = binascii.crc32(token.encode()) % (1 << 16)
-        result[idx] = result.get(idx, 0) + count
-    total = sum(result.values())
-    indices = sorted(result)
-    values = [result[i] / total for i in indices]
-    return indices, values
 
 
 def point_id(chunk_id: str) -> str:
@@ -77,33 +59,17 @@ class QdrantBase(VectorStoreProvider):
                 f"Sai dimension: vector={len(record.vector)} != index={self.config.dimension}. "
                 "Doi dimension la migration (ingestion.md §8)."
             )
-        if record.sparse_indices:
-            vector: object = {
-                "dense": list(record.vector),
-                "sparse": models.SparseVector(
-                    indices=record.sparse_indices,
-                    values=record.sparse_values,
-                ),
-            }
-        else:
-            # Doc không có chữ (sparse rỗng, vd PDF scan tắt OCR): VẪN ghi dense CÓ TÊN
-            # "dense" (collection dùng named vectors). Trước đây trả list TRẦN -> lệch
-            # schema named -> Qdrant reject -> ingest fail. BM25 bỏ qua vì không có từ nào.
-            vector = {"dense": list(record.vector)}
         return models.PointStruct(
             id=point_id(record.chunk_id),
-            vector=vector,
+            vector=list(record.vector),
             payload={**record.payload, "chunk_id": record.chunk_id},
         )
 
     def _collection_create_kwargs(self) -> dict:
         return {
-            "vectors_config": {
-                "dense": models.VectorParams(
-                    size=self.config.dimension, distance=models.Distance.COSINE
-                )
-            },
-            "sparse_vectors_config": {"sparse": models.SparseVectorParams()},
+            "vectors_config": models.VectorParams(
+                size=self.config.dimension, distance=models.Distance.COSINE
+            ),
         }
 
     def _vectors_config(self) -> "models.VectorParams":
