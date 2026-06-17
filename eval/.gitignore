@@ -9,10 +9,10 @@ pycache/
 __pycache__/
 *.pyc
 *.pyo
-/dataset/
 /output/
 /output/
 /output-vm/
 logs/
 output-vm/
 output/
+/dataset/

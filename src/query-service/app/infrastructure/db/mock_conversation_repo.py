@@ -52,7 +52,8 @@ class InMemoryConversationRepository(ConversationRepository):
         return ConversationContext(
             summary=conversation.summary,
             recent_messages=[
-                Message(role=item.role, content=item.content, created_at=item.created_at)
+                Message(role=item.role, content=item.content, created_at=item.created_at,
+                        sources=item.sources)
                 for item in recent_messages
             ],
         )

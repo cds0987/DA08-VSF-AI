@@ -91,9 +91,15 @@ function Gcloud-ScpArgs {
 function Run-Gcloud {
     param([string[]]$Arguments, [string]$Label)
     Write-Host "+ gcloud $($Arguments -join ' ')" -ForegroundColor DarkGray
+    # Temporarily allow stderr (gcloud prints update warnings to stderr which PS5.1
+    # wraps as NativeCommandError; we check exit code manually instead).
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     & gcloud @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        Fail "$Label failed with exit code $LASTEXITCODE"
+    $ec = $LASTEXITCODE
+    $ErrorActionPreference = $prev
+    if ($ec -ne 0) {
+        Fail "$Label failed with exit code $ec"
     }
 }
 
@@ -180,10 +186,16 @@ Require-Env @(
 if (-not $env:EVAL_PRODUCTION_READONLY) { $env:EVAL_PRODUCTION_READONLY = "true" }
 if (-not $env:EVAL_REQUIRE_INDEXED_DOCS) { $env:EVAL_REQUIRE_INDEXED_DOCS = "true" }
 if (-not $env:OPENAI_EMBEDDING_MODEL) { $env:OPENAI_EMBEDDING_MODEL = "text-embedding-3-small" }
+# Suppress gcloud update-check warnings so they don't become NativeCommandError under EAP=Stop
+$env:CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK = '1'
 
 Write-Step "Checking gcloud"
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 & gcloud --version *> $null
-if ($LASTEXITCODE -ne 0) {
+$gcloudEc = $LASTEXITCODE
+$ErrorActionPreference = $prevEAP
+if ($gcloudEc -ne 0) {
     Fail "gcloud is not available. Install Google Cloud SDK, open a new PowerShell, then run gcloud auth login."
 }
 Run-Gcloud -Arguments @("config", "set", "project", $env:GCP_PROJECT_ID) -Label "Set gcloud project"

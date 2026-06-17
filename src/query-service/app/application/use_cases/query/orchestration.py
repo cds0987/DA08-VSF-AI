@@ -358,7 +358,14 @@ class QueryOrchestrationUseCase:
                 if msg.role == "user":
                     recent_lc_messages.append(HumanMessage(content=msg.content))
                 elif msg.role == "assistant":
-                    recent_lc_messages.append(LCAIMessage(content=msg.content))
+                    content = msg.content
+                    if msg.sources:
+                        names = sorted({
+                            s["document_name"] for s in msg.sources if s.get("document_name")
+                        })
+                        if names:
+                            content += "\n[Nguồn tham khảo: " + ", ".join(names) + "]"
+                    recent_lc_messages.append(LCAIMessage(content=content))
         except Exception:
             pass  # history is optional — never block the current query
 

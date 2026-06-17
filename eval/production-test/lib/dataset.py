@@ -20,6 +20,8 @@ _SPEC.loader.exec_module(_MODULE)
 GoldenQA = _MODULE.GoldenQA
 load_dataset = _MODULE.load_dataset
 
+_UNANSWERABLE_TYPES = {"unanswerable", "off_topic", "out_of_scope", "no_info"}
+
 
 def load_questions(
     dataset_root: Path,
@@ -38,8 +40,24 @@ def load_questions(
         exclude_doc_ids=exclude_doc_ids,
         questions_per_doc=questions_per_doc,
     )
-    candidates = list(candidates[max(0, offset):])
-    questions = candidates[:limit] if limit else candidates
+
+    # Always inject labeled unanswerable/off-topic questions so graceful_rejection_rate
+    # is measurable in every eval run (not just when limit > dataset size).
+    # Exception: very small runs (smoke test with limit=1) skip injection to stay fast.
+    unanswerable = [q for q in candidates if (q.question_type or "") in _UNANSWERABLE_TYPES]
+    regular = [q for q in candidates if (q.question_type or "") not in _UNANSWERABLE_TYPES]
+    regular = list(regular[max(0, offset):])
+
+    if not unanswerable or (limit and limit < len(unanswerable) + 2):
+        # Smoke/tiny run — select normally without injection
+        questions = regular[:limit] if limit else regular
+    else:
+        # Reserve slots for unanswerable questions, fill the rest with regular
+        regular_slots = (limit - len(unanswerable)) if limit else None
+        if regular_slots is not None:
+            regular = regular[:max(0, regular_slots)]
+        questions = regular + unanswerable
+
     return bundle, questions
 
 

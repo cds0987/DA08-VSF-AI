@@ -296,21 +296,59 @@ def build_decision(
     }
 
 
+_CONTEXT_MAX_CHARS = 800
+
+# Patterns (in normalized form) that indicate a chunk contains an LLM meta-response
+# rather than real document content — happens when the ingestion pipeline passes an
+# empty/invalid chunk to the caption-generation LLM and stores its "please provide
+# content" reply verbatim.
+_GARBAGE_CONTEXT_PATTERNS = (
+    "xin vui long cung cap noi dung",
+    "please provide",
+    "provide the content",
+    "de toi co the tom tat",
+    "xin cung cap noi dung",
+    "vui long cung cap",
+)
+
+
+def _is_garbage_context(text: str) -> bool:
+    normalized = _normalize(text)
+    if len(normalized.strip()) < 20:
+        return True
+    return any(pattern in normalized for pattern in _GARBAGE_CONTEXT_PATTERNS)
+
+
+_UNANSWERABLE_TYPES = {"unanswerable", "off_topic", "out_of_scope", "no_info"}
+
+
 def _ragas_samples(qa_rows: list[dict[str, Any]], chunks_by_qid: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
     out = []
     for row in qa_rows:
         if row.get("skip_reason") or row.get("error") or not row.get("answer"):
             continue
+        # Unanswerable/off-topic questions are evaluated via graceful_rejection_rate,
+        # not RAG quality — their ground_truth is empty so RAGAS scores would be meaningless.
+        if (row.get("question_type") or "") in _UNANSWERABLE_TYPES:
+            continue
+        # Prefer text_preview (capped at 500 chars) over full parent_text to keep RAGAS
+        # judge focused. Cap at _CONTEXT_MAX_CHARS regardless to limit token usage.
+        # Filter out garbage contexts (LLM meta-responses stored during bad ingestion).
         contexts = [
-            str(chunk.get("text") or chunk.get("text_preview") or "")
-            for chunk in chunks_by_qid.get(str(row.get("question_id")), [])
-            if str(chunk.get("text") or chunk.get("text_preview") or "").strip()
+            c
+            for c in [
+                str(chunk.get("text_preview") or chunk.get("text") or "")[:_CONTEXT_MAX_CHARS]
+                for chunk in chunks_by_qid.get(str(row.get("question_id")), [])
+                if str(chunk.get("text_preview") or chunk.get("text") or "").strip()
+            ]
+            if not _is_garbage_context(c)
         ]
         if not contexts:
             contexts = [
                 str(source.get("caption") or source.get("document_name") or "")
                 for source in row.get("sources", [])
                 if str(source.get("caption") or source.get("document_name") or "").strip()
+                and not _is_garbage_context(str(source.get("caption") or ""))
             ]
         ground_truth = row.get("ground_truth") or row.get("golden_answer")
         if ground_truth and contexts:
@@ -333,7 +371,9 @@ def _fallback_ragas_scores(sample: dict[str, Any], chunks: list[dict[str, Any]])
     question = str(sample.get("question") or "")
     return {
         "faithfulness": _token_f1(answer, contexts),
-        "answer_relevancy": _token_f1(answer, question),
+        # When contexts are available, compare answer against contexts (grounding proxy)
+        # rather than question (lexical overlap proxy) — closer to RAGAS semantics.
+        "answer_relevancy": _token_f1(answer, contexts) if contexts else _token_f1(answer, question),
         "context_precision": _context_precision(chunks, sample),
         "context_recall": _token_f1(contexts, ground_truth),
         "answer_correctness": _token_f1(answer, ground_truth),
@@ -438,11 +478,9 @@ def _page_hit(row: dict[str, Any], chunks: list[dict[str, Any]]) -> bool | None:
 def _stale_sources(row: dict[str, Any]) -> list[dict[str, Any]]:
     effective = {str(doc_id) for doc_id in row.get("effective_document_ids") or [] if str(doc_id).strip()}
     if not effective:
-        return [
-            source
-            for source in row.get("sources", [])
-            if str((source or {}).get("document_id") or "").strip()
-        ]
+        # No per-user ACL data recorded — cannot determine which sources are unauthorized.
+        # Returning [] avoids false-positive ACL violations for admin/unrestricted test accounts.
+        return []
     stale = []
     for source in row.get("sources", []):
         document_id = str((source or {}).get("document_id") or "").strip()
