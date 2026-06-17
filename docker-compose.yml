@@ -312,10 +312,9 @@ services:
       - ./deploy/env/secret.env
     environment:
       AIROUTER_REDIS_URL: redis://redis:6379/1
-      # OTel auto-instrument: 0=TẮT (uvicorn thẳng — AN TOÀN). Bật "1" làm ai-router CRASH với
-      # uvicorn --workers (opentelemetry-instrument không tương thích multi-worker fork) -> ĐÃ ROLLBACK.
-      # Cần sửa: chạy workers=1 hoặc post-fork hook trước khi bật lại. Xem README-otel.md.
-      VSF_OTEL_ENABLED: "0"
+      # OTel auto-instrument: 1=BẬT. Entrypoint ép workers=1 (fix multi-worker crash). ai-router
+      # giờ TRONG health gate -> nếu hỏng deploy ĐỎ. Rollback = "0" + deploy.
+      VSF_OTEL_ENABLED: "1"
       OTEL_SERVICE_NAME: ai-router
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_TRACES_EXPORTER: otlp
