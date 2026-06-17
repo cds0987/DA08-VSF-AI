@@ -57,11 +57,8 @@ onMounted(async () => {
   if (!session.user) { void router.push('/login'); return }
 
   chat.clear()
-  const synced = await chat.syncHistory()
+  await chat.syncHistory()
   chat.flushProactiveMessage()
-  if (!synced) {
-    toast.warning('Không thể tải lịch sử từ server. Đang sử dụng bản lưu tạm trên thiết bị.')
-  }
 })
 
 watch(
@@ -119,6 +116,7 @@ watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText
             :trace-log="chat.traceLog"
             @open-citation="chat.handleOpenCitation"
             @feedback="submitFeedback"
+            @retry="messageId => chat.retryMessage(messageId, PIPELINE_STAGES)"
           />
           <div v-else class="flex flex-1 flex-col items-center justify-center">
             <LandingState />

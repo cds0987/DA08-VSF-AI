@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Copy,
   FileText,
+  RefreshCw,
   ThumbsDown,
   ThumbsUp,
 } from '@lucide/vue'
@@ -20,6 +21,7 @@ const props = defineProps<{ data: ChatMessage }>()
 const emit = defineEmits<{
   (e: 'open-citation', citation: Citation): void
   (e: 'feedback', messageId: string, score: 1 | -1): void
+  (e: 'retry', messageId: string): void
 }>()
 
 const copied = ref(false)
@@ -66,6 +68,7 @@ function selectSource(citation: Citation) {
 
 <template>
   <div class="overflow-hidden rounded-2xl bg-transparent">
+    <!-- Server error banner (4xx/5xx) -->
     <div
       v-if="data.error"
       class="flex items-start gap-2 border-b border-rose-100 dark:border-rose-900/30 bg-rose-50/60 dark:bg-rose-900/10 px-5 py-3 text-[12.5px] text-rose-700 dark:text-rose-400"
@@ -81,6 +84,13 @@ function selectSource(citation: Citation) {
         v-html="renderedContent"
         @click="handleContentClick"
       />
+      <!-- Network interruption — ChatGPT style: no content received, show subtle placeholder -->
+      <p
+        v-else-if="data.interrupted"
+        class="text-sm text-slate-400 dark:text-muted-foreground italic"
+      >
+        Kết nối bị gián đoạn.
+      </p>
       <template v-for="(act, i) in data.actions" :key="act.idempotency_key || i">
         <ApprovalReviewCard v-if="act.action_type === 'review_leave_approvals'" />
         <ProactiveSuggestionCard v-else-if="act.action_type === 'proactive_doc_suggestion'" :action="act" />
@@ -140,6 +150,21 @@ function selectSource(citation: Citation) {
     </div>
 
     <div class="flex items-center gap-1 px-5 py-2">
+      <!-- Retry button — only shown for interrupted (network) messages -->
+      <Tooltip v-if="data.interrupted">
+        <TooltipTrigger as-child>
+          <button
+            class="rounded-md p-1.5 text-slate-500 cursor-pointer transition-all duration-200 hover:bg-slate-100 hover:text-slate-900 dark:text-muted-foreground dark:hover:bg-white/5 dark:hover:text-foreground"
+            @click="emit('retry', data.id)"
+          >
+            <RefreshCw class="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" :side-offset="8" class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900">
+          Thử lại
+        </TooltipContent>
+      </Tooltip>
+
       <Tooltip>
         <TooltipTrigger as-child>
           <button
