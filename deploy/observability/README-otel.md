@@ -4,20 +4,22 @@
 > y như cũ). Bật theo các bước dưới SAU khi test staging. Backend (otel-collector/Tempo/Loki)
 > đã chạy sẵn trong monitor stack.
 
-## Bật (sau khi test staging)
-1. Set env trên VM (hoặc CI secret forward): `VSF_OTEL_ENABLED=1`.
-2. Recreate ai-router: `docker compose up -d --force-recreate ai-router`.
-3. Entrypoint sẽ chạy `opentelemetry-instrument uvicorn ...` → phát trace OTLP về `otel-collector:4317`.
+## Bật — QUA CI/CD (KHÔNG đụng tay VM)
+1. Repo **Settings → Secrets and variables → Actions → Variables** → tạo/sửa
+   **`VSF_OTEL_ENABLED` = `1`** (đây là Variable, không phải Secret).
+2. Chạy lại workflow **deploy-develop** (push 1 commit, hoặc Actions → Run workflow).
+3. Pipeline render `.env` (VSF_OTEL_ENABLED=1) → `docker compose up -d ai-router` TỰ recreate
+   ai-router với entrypoint `opentelemetry-instrument` → phát trace OTLP về `otel-collector:4317`.
 
-## Verify
-- Log ai-router: `docker compose logs ai-router | grep entrypoint` → thấy `OTel ENABLED`.
-- Sinh traffic (1 request LLM qua ai-router).
-- Grafana → Explore → datasource **Tempo** → query gần nhất → thấy trace `ai-router` (span FastAPI + httpx tới OpenAI/OpenRouter).
-- Health ai-router vẫn `200 /health` (không crash).
+## Verify (qua Grafana, không cần SSH)
+- Sinh 1 request LLM (hỏi chatbot 1 câu qua app).
+- Grafana (`grafana.vsfchat.cloud`) → **Explore** → datasource **Tempo** → tìm trace gần nhất
+  → thấy trace `ai-router` (span FastAPI + httpx tới OpenAI/OpenRouter).
+- Dashboard ai-router vẫn xanh (health 200) = không crash.
 
-## Rollback tức thì
-- `VSF_OTEL_ENABLED=0` + `docker compose up -d --force-recreate ai-router` → về uvicorn thẳng.
-- ai-router KHÔNG ai depends_on → kể cả lỗi cũng không kéo sập app (và có kill-switch LLM_MODEL_ADAPTER).
+## Rollback — cũng qua CI/CD
+- Đổi Variable **`VSF_OTEL_ENABLED` = `0`** → chạy lại deploy → ai-router về uvicorn thẳng.
+- ai-router KHÔNG ai depends_on → kể cả lỗi cũng không kéo sập app (+ kill-switch LLM_MODEL_ADAPTER).
 
 ## Lưu ý kỹ thuật
 - **Multi-worker**: ai-router chạy `--workers 2`. Auto-instrumentation qua `opentelemetry-instrument`

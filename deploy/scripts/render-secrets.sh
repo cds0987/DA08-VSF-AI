@@ -27,6 +27,7 @@ done
 : "${AIROUTER_INTERNAL_TOKEN:=}"
 for n in 1 2 3 4 5; do eval ": \"\${OPENAI_API_KEY_$n:=}\""; eval ": \"\${OPENROUTER_API_KEY_$n:=}\""; done
 : "${ALERTMANAGER_SLACK_WEBHOOK:=}"   # optional: rỗng -> Alertmanager vẫn chạy, alert không gửi Slack (xem ở Prometheus)
+: "${VSF_OTEL_ENABLED:=0}"            # optional: 0 (mặc định, ai-router uvicorn thẳng) | 1 (bật OTel trace)
 
 umask 077
 
@@ -44,6 +45,7 @@ LANGFUSE_ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY}
 LANGFUSE_INIT_USER_PASSWORD=${LANGFUSE_INIT_USER_PASSWORD}
 LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
 LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+VSF_OTEL_ENABLED=${VSF_OTEL_ENABLED}
 EOF
 
 # deploy/env/secret.env: env_file -> biến container (load CUỐI, override).
