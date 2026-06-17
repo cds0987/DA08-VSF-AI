@@ -1,0 +1,85 @@
+# ============================================================================
+# MONITOR STACK — tách riêng khỏi app (devops sở hữu, lifecycle độc lập).
+# Chạy OVERLAY cùng project để DÙNG CHUNG network mặc định với app
+# (Prometheus scrape ai-router:8010, cadvisor đọc docker socket host):
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d <svc>
+# App KHÔNG phụ thuộc — observability mất chỉ mất biểu đồ/alert, KHÔNG ảnh hưởng app.
+# Không mở port host (firewall 80/443/22); Grafana expose qua nginx subdomain.
+# ============================================================================
+services:
+  # Prometheus — scrape ai-router/metrics + node-exporter + cadvisor; nạp alert rules.
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle           # reload rules qua POST /-/reload
+    volumes:
+      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/observability/alerts:/etc/prometheus/alerts:ro
+      - prometheus_data:/prometheus
+    restart: unless-stopped
+
+  # node-exporter — metric host (CPU/RAM/đĩa/network VM).
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    restart: unless-stopped
+
+  # cAdvisor — metric PER-CONTAINER (CPU/RAM/đĩa/net từng service) KHÔNG cần instrument code.
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=15s
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    privileged: true
+    restart: unless-stopped
+
+  # Alertmanager — gom alert từ Prometheus -> Slack (webhook đọc từ file secret, fail-open).
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    volumes:
+      - ./deploy/observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./deploy/observability/alertmanager/secrets:/etc/alertmanager/secrets:ro
+      - alertmanager_data:/alertmanager
+    restart: unless-stopped
+
+  # Grafana — 1 cửa dashboard. Expose qua nginx grafana.vsfchat.cloud (Basic Auth + Cloudflare).
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_SERVER_ROOT_URL: https://grafana.vsfchat.cloud
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-vsf-grafana-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  alertmanager_data:

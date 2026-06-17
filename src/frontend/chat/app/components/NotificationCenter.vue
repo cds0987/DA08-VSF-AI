@@ -58,12 +58,13 @@ async function handleAskAI(event: MouseEvent, item: NotificationItem) {
     await notifications.markAsRead(item.id).catch(() => {})
   }
   const docName = extractDocName(item.message)
-  if (route.path === '/') {
+  // Nếu đang ở /chat (new chat), inject trực tiếp; nếu không thì queue + navigate
+  if (route.path === '/chat' && !route.params.id) {
     chat.injectProactiveMessage(docName, item.doc_id)
   } else {
     chat.queueProactiveMessage(docName, item.doc_id)
+    await router.push('/chat')
   }
-  await router.push('/')
 }
 
 // Click X → mark read + xóa khỏi list

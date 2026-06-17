@@ -26,6 +26,7 @@ done
 # ít key hơn / tắt auth, KHÔNG chặn deploy. ai-router KHÔNG ai depends_on nên rỗng cũng an toàn.
 : "${AIROUTER_INTERNAL_TOKEN:=}"
 for n in 1 2 3 4 5; do eval ": \"\${OPENAI_API_KEY_$n:=}\""; eval ": \"\${OPENROUTER_API_KEY_$n:=}\""; done
+: "${ALERTMANAGER_SLACK_WEBHOOK:=}"   # optional: rỗng -> Alertmanager vẫn chạy, alert không gửi Slack (xem ở Prometheus)
 
 umask 077
 
@@ -83,6 +84,13 @@ chmod 600 "$APP_DIR/.env" "$APP_DIR/deploy/env/secret.env"
 mkdir -p "$APP_DIR/deploy/nginx"
 printf '%s\n' "${LANGFUSE_BASIC_AUTH_HTPASSWD}" > "$APP_DIR/deploy/nginx/.htpasswd"
 chmod 644 "$APP_DIR/deploy/nginx/.htpasswd"
+
+# Webhook Slack cho Alertmanager (api_url_file). Render từ GitHub Secret ALERTMANAGER_SLACK_WEBHOOK.
+# RỖNG -> file rỗng -> Alertmanager vẫn khởi động, alert KHÔNG gửi đi (vẫn xem ở Prometheus UI).
+# Cùng cơ chế fail-open, nguồn-duy-nhất GitHub Secrets. chmod 600 (chỉ chứa URL bí mật).
+mkdir -p "$APP_DIR/deploy/observability/alertmanager/secrets"
+printf '%s' "${ALERTMANAGER_SLACK_WEBHOOK}" > "$APP_DIR/deploy/observability/alertmanager/secrets/slack_webhook"
+chmod 600 "$APP_DIR/deploy/observability/alertmanager/secrets/slack_webhook"
 
 # .htpasswd-qdrant cho Basic Auth subdomain Qdrant — file RIÊNG (Qdrant không có login nên
 # Basic Auth là lớp bảo vệ duy nhất + chắn cả REST API). Cùng cơ chế fail-closed như langfuse.
