@@ -80,8 +80,8 @@ async function handleDismiss(event: MouseEvent, item: NotificationItem) {
 </script>
 
 <template>
-  <Tooltip>
-    <DropdownMenu v-model:open="isOpen">
+  <DropdownMenu v-model:open="isOpen">
+    <Tooltip>
       <TooltipTrigger as-child>
         <DropdownMenuTrigger as-child>
           <button
@@ -106,6 +106,14 @@ async function handleDismiss(event: MouseEvent, item: NotificationItem) {
           </button>
         </DropdownMenuTrigger>
       </TooltipTrigger>
+      <TooltipContent
+        v-if="isCollapsed"
+        side="right"
+        class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
+      >
+        Thông báo
+      </TooltipContent>
+    </Tooltip>
 
       <DropdownMenuContent
         side="right"
@@ -180,16 +188,7 @@ async function handleDismiss(event: MouseEvent, item: NotificationItem) {
           </DropdownMenuItem>
         </div>
       </DropdownMenuContent>
-    </DropdownMenu>
-
-    <TooltipContent
-      v-if="isCollapsed"
-      side="right"
-      class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
-    >
-      Thông báo
-    </TooltipContent>
-  </Tooltip>
+  </DropdownMenu>
 </template>
 
 <style scoped>
