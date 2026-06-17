@@ -300,6 +300,8 @@ services:
   # ───────────── AI Router (gateway OpenAI-compatible, stateless) ─────────────
   # Đứng GIỮA AI-logic service và provider (OpenAI/OpenRouter). Service trỏ base_url
   # http://ai-router:8010/v1 + dùng OpenAI SDK như cũ (MOSA, zero dependency).
+  # ACTIVE 2026-06-17: query-service route LLM chính qua đây (LLM_MODEL_ADAPTER=chat +
+  # OPENAI_BASE_URL). Rollback tức thì: query-service.env -> LLM_MODEL_ADAPTER=responses.
   # ⚠ AN TOÀN: KHÔNG service nào depends_on ai-router -> ai-router chết KHÔNG kéo sập app.
   # Key auto-discover từ secret.env (OPENAI_API_KEY_{n} / OPENROUTER_API_KEY_{n}); state ở redis.
   ai-router:
@@ -319,6 +321,44 @@ services:
       timeout: 5s
       retries: 6
       start_period: 15s
+    restart: unless-stopped
+
+  # ───────────── Monitoring (Prometheus + Grafana) cho ai-router per-key ──────────
+  # Prometheus scrape ai-router:8010/metrics (CÙNG network compose). Grafana expose qua nginx
+  # subdomain grafana.vsfchat.cloud (Basic Auth TÁI DÙNG .htpasswd langfuse) + Cloudflare proxied.
+  # KHÔNG mở port host (firewall giữ 80/443/22). Up/down ĐỘC LẬP app (monitoring không critical ->
+  # deploy.sh up non-fatal). Mất -> chỉ mất biểu đồ, KHÔNG ảnh hưởng router/app.
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_SERVER_ROOT_URL: https://grafana.vsfchat.cloud
+      # Truy cập đã chắn bởi nginx Basic Auth + Cloudflare -> Grafana cho XEM ẨN DANH (Viewer),
+      # không cần login. Admin (sửa) đặt mật khẩu qua GRAFANA_ADMIN_PASSWORD (mặc định tạm).
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-vsf-grafana-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      # Dashboard JSON mount :ro + provider updateIntervalSeconds=30 -> sửa file trong git +
+      # deploy (git reset) -> Grafana TỰ nạp lại trong 30s, KHÔNG cần recreate container.
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_started
     restart: unless-stopped
 
   # Migration one-shot: alembic upgrade head lên app-postgres TRƯỚC khi rag-worker chạy.
@@ -493,6 +533,9 @@ services:
       # (render-secrets.sh), gitignored, fail-closed nếu secret rỗng. CHỈ mount file secret
       # này; nginx.conf VẪN nướng trong image (không bind-mount config -> chống sửa tay VM).
       - ./deploy/nginx/.htpasswd:/etc/nginx/.htpasswd:ro
+      # Basic Auth subdomain qdrant — file RIÊNG (Qdrant không có login, Basic Auth là lớp
+      # bảo vệ duy nhất + chắn cả REST API). Cùng pattern: render từ secret, gitignored, fail-closed.
+      - ./deploy/nginx/.htpasswd-qdrant:/etc/nginx/.htpasswd-qdrant:ro
     restart: unless-stopped
 
 volumes:
@@ -501,3 +544,5 @@ volumes:
   qdrant_data:
   langfuse_pg_data:
   app_pg_data:
+  prometheus_data:
+  grafana_data:

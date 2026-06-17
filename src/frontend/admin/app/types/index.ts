@@ -106,3 +106,56 @@ export interface AuditLogListResponse {
   items: AuditLogItem[]
   total: number
 }
+
+export type AccountType = 'internal' | 'external'
+export type EmploymentStatus = 'active' | 'inactive'
+
+export interface CreateUserRequest {
+  email: string
+  password: string
+  role: Role
+  account_type: AccountType
+}
+
+export interface CreatedUser {
+  id: string
+  email: string
+  role: Role
+  account_type: AccountType
+  is_active: boolean
+}
+
+export interface EmployeeItem {
+  id: string
+  user_id: string
+  employee_code: string | null
+  company_email: string
+  department: string
+  job_title: string | null
+  manager_user_id: string | null
+  employment_status: EmploymentStatus
+  full_name: string | null
+  phone_number: string | null
+  date_of_birth: string | null
+  hire_date: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type EmployeeDetail = EmployeeItem
+
+export interface EmployeeListResponse {
+  items: EmployeeItem[]
+  total: number
+}
+
+export interface UpdateEmployeeRequest {
+  employee_code?: string | null
+  job_title?: string | null
+  manager_user_id?: string | null
+  full_name?: string | null
+  phone_number?: string | null
+  date_of_birth?: string | null
+  hire_date?: string | null
+  department?: string | null
+}

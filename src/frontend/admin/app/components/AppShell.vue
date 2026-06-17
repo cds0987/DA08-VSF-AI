@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { 
-  LayoutDashboard, 
-  FileText, 
-  Upload, 
-  ShieldCheck, 
-  Users, 
-  PanelLeftOpen, 
+import {
+  LayoutDashboard,
+  FileText,
+  Upload,
+  ShieldCheck,
+  Briefcase,
+  PanelLeftOpen,
   PanelLeftClose,
   Settings,
   LogOut,
@@ -14,7 +14,6 @@ import {
 import { useSessionStore } from '~/stores/session'
 
 const session = useSessionStore()
-const router = useRouter()
 
 const isCollapsed = ref(true)
 const isAnimatingSidebar = ref(false)
@@ -25,12 +24,14 @@ const ADMIN_NAV = [
   { label: 'Documents', to: '/documents', icon: FileText },
   { label: 'Upload Center', to: '/upload', icon: Upload },
   { label: 'Audit Logs', to: '/audit', icon: ShieldCheck },
-  { label: 'User Management', to: '/users', icon: Users },
+  { label: 'Employee Management', to: '/employees', icon: Briefcase },
 ]
 
 const handleSignOut = () => {
+  // session.signOut() -> authService.logout() đã tự điều hướng tới /login
+  // (hard redirect) sau khi clear cookie; router.push thừa ở đây gây double
+  // navigation: soft route change chạy trước, rồi hard reload đè lên sau.
   session.signOut()
-  router.push('/login')
 }
 
 const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')

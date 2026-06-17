@@ -88,6 +88,9 @@ class ProviderCaptioner:
 
     async def caption_with_metadata(self, text: str) -> CaptionResult:
         source_text = (text or "").strip()
+        if not source_text:
+            _METRICS.record(used_fallback=True)
+            return CaptionResult(text="(no content)", used_fallback=True)
         used_fallback = False
         # Guard: do not call AI for empty chunks — an empty prompt causes the model to
         # return a "please provide content" meta-response that gets stored as the caption.

@@ -10,13 +10,16 @@ from pydantic import BaseModel
 
 from app.api.auth import require_internal_token
 from app.core.config import HrSettings, get_settings as load_hr_settings
+from app.domain.leave_policy import get_policy, registry_payload
 from app.domain.repositories.hr_repository import HrRepository
 from app.domain.repositories.leave_write_repository import (
     ApproverNotConfigured,
     InsufficientLeaveBalance,
     LeaveRequestConflict,
+    LeaveRequestDuplicate,
     LeaveRequestForbidden,
     LeaveRequestNotFound,
+    LeaveRequestOverlapWarning,
     LeaveWriteRepository,
 )
 
@@ -93,7 +96,9 @@ class HrProfileRequest(BaseModel):
 
 
 # ──────────────────────────── LEAVE WRITE ────────────────────────────
-LeaveType = Literal["annual", "sick", "personal"]
+# leave_type validate ĐỘNG theo Leave Type Registry (4 rổ) thay vì Literal cứng —
+# nguồn sự thật ở app/domain/leave_policy.py. Giá trị lạ -> 422 (xem _validate_leave_type).
+LeaveType = str
 
 
 async def get_write_repo(
@@ -124,6 +129,8 @@ class LeaveCreateRequest(BaseModel):
     end_date: str
     reason: str = ""
     idempotency_key: Optional[str] = None
+    # User đã xem cảnh báo chồng ngày và vẫn muốn tạo -> bỏ qua LeaveRequestOverlapWarning.
+    confirm_overlap: bool = False
 
 
 class LeaveUpdateRequest(BaseModel):
@@ -153,9 +160,35 @@ def _map_leave_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=403, detail="không có quyền với đơn này")
     if isinstance(exc, InsufficientLeaveBalance):
         return HTTPException(status_code=409, detail="không đủ hạn mức phép")
+    if isinstance(exc, LeaveRequestDuplicate):
+        # Trùng toàn bộ -> CHẶN (FE không cho "vẫn tạo"). detail object để FE nhận diện.
+        return HTTPException(status_code=409, detail={
+            "code": "leave_duplicate",
+            "message": str(exc),
+            "existing": [_existing_summary(exc.existing)] if exc.existing else [],
+        })
+    if isinstance(exc, LeaveRequestOverlapWarning):
+        # Chồng ngày khác nội dung -> CẢNH BÁO (FE cho phép xác nhận tạo tiếp).
+        return HTTPException(status_code=409, detail={
+            "code": "leave_overlap",
+            "message": str(exc),
+            "existing": [_existing_summary(e) for e in exc.existing],
+        })
     if isinstance(exc, LeaveRequestConflict):
         return HTTPException(status_code=409, detail="đơn không ở trạng thái hợp lệ")
     return HTTPException(status_code=500, detail="leave write error")
+
+
+def _existing_summary(req: dict[str, Any]) -> dict[str, Any]:
+    """Tóm tắt đơn đang đè (chỉ data của chính user) cho FE hiển thị cảnh báo."""
+    return {
+        "request_id": req.get("id"),
+        "leave_type": req.get("leave_type"),
+        "start_date": req.get("start_date"),
+        "end_date": req.get("end_date"),
+        "status": req.get("status"),
+        "reason": req.get("reason"),
+    }
 
 
 def _validate_dates(start_date: str, end_date: str) -> None:
@@ -168,6 +201,26 @@ def _validate_dates(start_date: str, end_date: str) -> None:
         raise HTTPException(status_code=422, detail="start_date/end_date phải là YYYY-MM-DD")
     if start > end:
         raise HTTPException(status_code=422, detail="start_date phải <= end_date")
+
+
+def _validate_leave_type(leave_type: str, start_date: str, end_date: str) -> None:
+    """Loại nghỉ phải hợp lệ (theo registry) + tôn trọng định mức MỖI ĐƠN của rổ sự
+    kiện (vd kết hôn ≤ 3 ngày, con kết hôn ≤ 1). Sai -> 422."""
+    import datetime as _dt
+
+    policy = get_policy(leave_type)
+    if policy is None:
+        valid = ", ".join(p["code"] for p in registry_payload())
+        raise HTTPException(status_code=422, detail=f"leave_type không hợp lệ. Hợp lệ: {valid}")
+    if policy.per_event_cap is not None:
+        start = _dt.date.fromisoformat(start_date)
+        end = _dt.date.fromisoformat(end_date)
+        days = (end - start).days + 1
+        if days > policy.per_event_cap:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{policy.label_vi} tối đa {policy.per_event_cap} ngày/lần (đơn này {days} ngày).",
+            )
 
 
 def _created_payload(req: dict[str, Any]) -> dict[str, Any]:
@@ -213,6 +266,7 @@ async def create_leave_request(
     publisher: Any = Depends(get_publisher),
 ) -> dict[str, Any]:
     _validate_dates(body.start_date, body.end_date)
+    _validate_leave_type(body.leave_type, body.start_date, body.end_date)
     try:
         result = await repo.create_leave_request(
             user_id=body.user_id,
@@ -222,6 +276,7 @@ async def create_leave_request(
             reason=body.reason,
             default_approver=settings.default_approver,
             idempotency_key=body.idempotency_key,
+            confirm_overlap=body.confirm_overlap,
         )
     except Exception as exc:  # noqa: BLE001
         raise _map_leave_error(exc)
@@ -241,6 +296,7 @@ async def update_leave_request(
     publisher: Any = Depends(get_publisher),
 ) -> dict[str, Any]:
     _validate_dates(body.start_date, body.end_date)
+    _validate_leave_type(body.leave_type, body.start_date, body.end_date)
     try:
         result = await repo.update_leave_request(
             user_id=body.user_id,
@@ -611,6 +667,12 @@ async def hr_profile(
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@public_router.get("/hr/leave-types")
+async def list_leave_types() -> dict[str, Any]:
+    """Taxonomy loại nghỉ (4 rổ luật LĐ VN) — nguồn sự thật cho FE + agent lấy động."""
+    return {"leave_types": registry_payload()}
 
 
 @public_router.get("/hr/departments")

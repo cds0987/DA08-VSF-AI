@@ -62,6 +62,7 @@ class StubService:
                 document_id="doc-1",
                 document_name="Doc 1.pdf",
                 caption="Leave policy",
+                child_text="Annual leave is 12 days.",
                 parent_text="Annual leave is 12 days.",
                 heading_path=["Benefits"],
                 score=0.92,
@@ -263,6 +264,7 @@ def test_build_mcp_registers_rag_search_tool_and_query_service_shape(monkeypatch
                 "document_id": "doc-1",
                 "document_name": "Doc 1.pdf",
                 "caption": "Leave policy",
+                "child_text": "Annual leave is 12 days.",
                 "parent_text": "Annual leave is 12 days.",
                 "heading_path": ["Benefits"],
                 "score": 0.92,
@@ -295,6 +297,9 @@ def test_build_mcp_registers_hr_query_tool(monkeypatch) -> None:
             "tools_profile": {
                 "rag_search": {"enabled": "0"},
                 "leave_write": {"enabled": "0"},
+                "resolve_date": {"enabled": "0"},  # built-in default-on -> tắt để cô lập hr_query
+                "leave_approvals": {"enabled": "0"},
+                "leave_types": {"enabled": "0"},
                 "hr_query": {
                     "enabled": "1",
                     "params": {

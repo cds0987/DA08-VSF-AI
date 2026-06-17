@@ -1,13 +1,13 @@
-import re
 from datetime import datetime
 
 from app.domain.repositories.document_access_repository import DocumentAccessRepository
+from app.infrastructure.db.dsn import to_asyncpg_dsn
 from app.infrastructure.db.mock_document_access_repo import can_access_document
 
 
 class PostgresDocumentAccessRepository(DocumentAccessRepository):
     def __init__(self, database_url: str) -> None:
-        self._database_url = _asyncpg_url(database_url)
+        self._database_url = to_asyncpg_dsn(database_url)
         self._pool = None
 
     async def get_allowed_doc_ids(
@@ -91,12 +91,6 @@ class PostgresDocumentAccessRepository(DocumentAccessRepository):
             asyncpg = _import_asyncpg()
             self._pool = await asyncpg.create_pool(self._database_url)
         return self._pool
-
-
-def _asyncpg_url(database_url: str) -> str:
-    """Bỏ phần dialect SQLAlchemy (+asyncpg, +psycopg, ...) -> asyncpg chỉ nhận
-    scheme 'postgresql://' / 'postgres://'. Env trên VM dùng postgresql+psycopg://."""
-    return re.sub(r"^postgresql\+[a-z0-9_]+://", "postgresql://", database_url, count=1)
 
 
 def _import_asyncpg():

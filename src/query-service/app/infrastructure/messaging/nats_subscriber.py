@@ -51,11 +51,33 @@ class NatsSubscriberManager:
         for subject, durable, stream_name in self._SUBSCRIPTIONS:
             try:
                 await self._ensure_subject_stream(jetstream, subject, stream_name)
-                await jetstream.subscribe(subject, durable=durable, cb=callbacks[subject])
+                await self._subscribe(jetstream, subject, durable, callbacks[subject])
             except Exception as exc:  # noqa: BLE001 - degrade gracefully thay vì crash
                 self._logger.warning(
                     "nats_subscribe_skipped subject=%s error=%s", subject, exc,
                 )
+
+    async def _subscribe(self, jetstream, subject: str, durable: str, cb) -> None:
+        """Subscribe có CHẶN redeliver vô hạn: max_deliver + backoff lũy tiến.
+
+        Backstop cho poison-message (lỗi vĩnh viễn) — cùng tầng với phân loại lỗi ở
+        _handle_message. Sự cố 2026-06-16: nak() vô hạn + không backoff -> NAK-storm
+        hàng trăm/giây -> query-service nghẽn. FALLBACK: nếu phiên bản nats-py không nhận
+        ConsumerConfig này, subscribe trần — TUYỆT ĐỐI không để mất subscription."""
+        try:
+            from nats.js.api import ConsumerConfig
+
+            cfg = ConsumerConfig(
+                max_deliver=6,                  # quá 6 lần -> NATS ngừng giao (không lặp vô tận)
+                ack_wait=30,                    # giây
+                backoff=[1, 5, 15, 30, 60],     # giãn cách giữa các lần retry (giây)
+            )
+            await jetstream.subscribe(subject, durable=durable, cb=cb, config=cfg)
+        except Exception as exc:  # noqa: BLE001 - config không hợp lệ KHÔNG được mất subscription
+            self._logger.warning(
+                "nats_subscribe_policy_fallback subject=%s error=%s", subject, exc,
+            )
+            await jetstream.subscribe(subject, durable=durable, cb=cb)
 
     async def _ensure_subject_stream(self, jetstream, subject: str, stream_name: str) -> None:
         """Tạo stream cho subject nếu CHƯA có stream nào phủ nó (idempotent, không đụng
@@ -113,13 +135,53 @@ class NatsSubscriberManager:
         try:
             await handle(payload)
             await msg.ack()
-        except Exception as exc:  # noqa: BLE001 - retry transient repository/SSE failures
-            self._logger.warning("nats_event_processing_failed error=%s", exc)
-            nak = getattr(msg, "nak", None)
-            if callable(nak):
-                await nak()
+        except Exception as exc:  # noqa: BLE001
+            if _is_permanent_error(exc):
+                # Lỗi VĨNH VIỄN (bảng/cột thiếu, syntax, data sai) — retry vô ích, chỉ tạo
+                # NAK-storm (sự cố 2026-06-16). Đẩy DLQ giữ lại để xử lý tay + term() (bỏ
+                # khỏi hàng đợi, KHÔNG redeliver).
+                self._logger.error(
+                    "nats_event_permanent_failure subject=%s error=%s -> DLQ+term",
+                    getattr(msg, "subject", "?"), exc,
+                )
+                await self._to_dlq(msg)
+                term = getattr(msg, "term", None)
+                if callable(term):
+                    await term()
+                else:
+                    await msg.ack()  # client cũ không có term() -> ack để chặn lặp vô tận
             else:
-                raise
+                # Lỗi TẠM THỜI (DB bận, mạng) — nak để retry; max_deliver chặn vô hạn.
+                self._logger.warning("nats_event_processing_failed error=%s", exc)
+                nak = getattr(msg, "nak", None)
+                if callable(nak):
+                    await nak()
+                else:
+                    raise
+
+    async def _to_dlq(self, msg: Any) -> None:
+        """Giữ message lỗi-vĩnh-viễn ở subject <subject>.dlq để xử lý tay + cảnh báo.
+        KHÔNG để mất dữ liệu: chỉ chuyển chỗ, không xóa. Publish lỗi -> chỉ cảnh báo."""
+        try:
+            subject = getattr(msg, "subject", None)
+            if subject and self._connection is not None:
+                await self._connection.publish(f"{subject}.dlq", msg.data)
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning("nats_dlq_publish_failed error=%s", exc)
+
+
+# sqlstate Postgres của lỗi VĨNH VIỄN (retry vô ích): 42=undefined table/col/syntax,
+# 22=data exception, 23=integrity (sau ON CONFLICT vẫn lỗi = data sai). Lỗi TẠM THỜI
+# (08 connection, 40001 serialize, 53300 too-many-conn, 55P03 lock) -> để nak retry.
+_PERMANENT_SQLSTATE_PREFIXES = ("42", "22", "23")
+
+
+def _is_permanent_error(exc: BaseException) -> bool:
+    """True nếu lỗi không thể tự khỏi khi retry -> nên term()+DLQ thay vì nak vô hạn."""
+    if isinstance(exc, InvalidNatsEventPayload):
+        return True
+    code = getattr(exc, "sqlstate", None)  # asyncpg.PostgresError có .sqlstate
+    return bool(code) and code[:2] in _PERMANENT_SQLSTATE_PREFIXES
 
 
 def _import_nats():

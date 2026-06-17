@@ -20,6 +20,11 @@ class UpdateEmployeeUseCase:
         employee_code: str | None,
         job_title: str | None,
         manager_user_id: str | None,
+        full_name: str | None,
+        phone_number: str | None,
+        date_of_birth: datetime.date | None,
+        hire_date: datetime.date | None,
+        department: str | None,
         provided_fields: set[str],
     ) -> EmployeeDTO:
         # 1. Get current employee
@@ -42,6 +47,11 @@ class UpdateEmployeeUseCase:
             employee_code=employee_code,
             job_title=job_title,
             manager_user_id=manager_user_id,
+            full_name=full_name,
+            phone_number=phone_number,
+            date_of_birth=date_of_birth,
+            hire_date=hire_date,
+            department=department,
             provided_fields=provided_fields,
         )
         if not updated:

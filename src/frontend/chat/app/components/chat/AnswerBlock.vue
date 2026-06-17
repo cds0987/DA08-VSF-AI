@@ -4,14 +4,17 @@ import {
   Check,
   ChevronRight,
   Copy,
+  FileText,
   ThumbsDown,
   ThumbsUp,
 } from '@lucide/vue'
-import { cn } from '~/lib/utils'
+import { citationHeadingPath, cn, formatRelevance } from '~/lib/utils'
 import type { ChatMessage, Citation } from '~/types'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import ActionableCard from './ActionableCard.vue'
+import ApprovalReviewCard from './ApprovalReviewCard.vue'
+import ProactiveSuggestionCard from './ProactiveSuggestionCard.vue'
 
 const props = defineProps<{ data: ChatMessage }>()
 const emit = defineEmits<{
@@ -78,7 +81,11 @@ function selectSource(citation: Citation) {
         v-html="renderedContent"
         @click="handleContentClick"
       />
-      <ActionableCard v-if="data.action" :action="data.action" />
+      <template v-for="(act, i) in data.actions" :key="act.idempotency_key || i">
+        <ApprovalReviewCard v-if="act.action_type === 'review_leave_approvals'" />
+        <ProactiveSuggestionCard v-else-if="act.action_type === 'proactive_doc_suggestion'" :action="act" />
+        <ActionableCard v-else :action="act" />
+      </template>
     </div>
 
     <div v-if="data.citations?.length" class="border-t border-slate-100 dark:border-white/5 bg-slate-50/20 dark:bg-background/10">
@@ -102,15 +109,32 @@ function selectSource(citation: Citation) {
           )"
           @click="selectSource(citation)"
         >
-          <div class="truncate text-[13px] font-semibold text-slate-900 dark:text-foreground">
-            {{ citation.ref ?? (index + 1) }}. {{ citation.caption || citation.document }}
+          <div class="flex items-start gap-2">
+            <!-- Nội dung đọc chính: snippet (đoạn literal liên quan); caption chỉ là tóm
+                 tắt cho semantic search nên dùng làm fallback khi chưa có snippet. -->
+            <p class="min-w-0 flex-1 line-clamp-3 text-[13px] font-medium leading-snug text-slate-900 dark:text-foreground">
+              {{ citation.ref ?? (index + 1) }}. {{ citation.snippet || citation.caption || citation.document }}
+            </p>
+            <span
+              v-if="formatRelevance(citation.score)"
+              class="shrink-0 rounded-full bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300"
+              title="Độ liên quan"
+            >
+              {{ formatRelevance(citation.score) }}
+            </span>
           </div>
-          <div class="mt-1 truncate text-[11px] font-medium text-slate-700 dark:text-muted-foreground">
-            {{ citation.document }}
+          <div class="mt-1 flex items-center gap-1 truncate text-[11px] font-medium text-slate-700 dark:text-muted-foreground">
+            <FileText class="h-3 w-3 shrink-0 text-slate-400 dark:text-muted-foreground/70" />
+            <span class="truncate">{{ citation.document }}</span>
+            <span v-if="citationHeadingPath(citation.heading_path, citation.document).length" class="truncate text-slate-500 dark:text-muted-foreground/70">
+              › {{ citationHeadingPath(citation.heading_path, citation.document).join(' › ') }}
+            </span>
           </div>
-          <div v-if="citation.heading_path.length" class="mt-1 truncate text-[11px] font-medium text-slate-600 dark:text-muted-foreground/70">
-            {{ citation.heading_path.join(' › ') }}
-          </div>
+          <!-- Phụ đề: caption tóm tắt, line-clamp 2 dòng + tooltip hover xem đầy đủ. Chỉ
+               hiện khi đã có snippet làm nội dung chính (tránh lặp lại caption). -->
+          <p v-if="citation.snippet && citation.caption" :title="citation.caption" class="mt-1 line-clamp-2 text-[11px] italic leading-snug text-slate-500 dark:text-muted-foreground/80">
+            {{ citation.caption }}
+          </p>
         </button>
       </div>
     </div>

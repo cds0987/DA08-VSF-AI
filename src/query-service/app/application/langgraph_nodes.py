@@ -28,22 +28,13 @@ from app.application.ports import MCPToolClient
 from app.infrastructure.external.mcp_client import MCPCircuitOpenError
 from app.application.shortcuts import (
     classify_shortcut,
-    IDENTITY_ANSWER,
-    CLARIFY_ANSWER,
-    SECURITY_ANSWER,
-    OFFTOPIC_ANSWER,
     EMERGENCY_ANSWER,
     DISTRESS_ANSWER,
     INJURY_ANSWER,
     USER_PROFILE_PLACEHOLDER,
     next_offtopic_answer,
-    IDENTITY_PHRASES,
-    CLARIFY_PHRASES,
-    SECURITY_PHRASES,
-    OFFTOPIC_PHRASES,
-    normalize as _normalize,
 )
-from app.application.tools import TOOL_DEFINITIONS, ACL_WHITELIST
+from app.application.tools import TOOL_DEFINITIONS
 from app.application.prompts import TRIAGE_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -497,23 +488,8 @@ async def act_node(
                     top_k=effective_top_k,
                 )
                 _rag_end_dt = datetime.now(timezone.utc)
-                # Only pass results that meet the relevance threshold to the LLM.
-                # Ngưỡng config-driven (state["rag_score_threshold"]) — trước hardcode 0.70
-                # quá cao cho text-embedding-3-small (chunk liên quan ~0.3-0.6) -> lọc sạch.
-                threshold = state.get("rag_score_threshold", 0.70)
-                qualified = [r for r in results if r.score >= threshold]
-
-                # Adaptive threshold fallback: nếu KHÔNG chunk nào đạt ngưỡng nhưng
-                # rag-service VẪN trả kết quả -> lấy top-3 điểm cao nhất làm ngữ cảnh,
-                # thay vì hard-stop "không tìm thấy" do lọc quá chặt (te3-small cho điểm
-                # chunk liên quan ~0.3-0.6, query ngắn/đa ngữ có thể < ngưỡng). Grounding
-                # vẫn an toàn: prompt buộc trả lời CHỈ từ context + tự nói "không tìm thấy"
-                # nếu context không trả lời được -> weak context KHÔNG ép LLM bịa. CHỈ khi
-                # qdrant trả RỖNG mới hard-stop NO_INFO (nhánh else phía dưới).
-                adaptive_fallback = False
-                if not qualified and results:
-                    qualified = sorted(results, key=lambda r: r.score, reverse=True)[:min(3, len(results))]
-                    adaptive_fallback = True
+                _threshold = state.get("rag_score_threshold", 0.45)
+                qualified = [r for r in results if r.score >= _threshold]
 
                 # Ghi debug event (JSON-safe) vào state để orchestration dựng Langfuse span.
                 # Tất cả giá trị là scalar/list[str/float] — an toàn với checkpointer.
@@ -521,10 +497,8 @@ async def act_node(
                     "query": state["question"],
                     "top_k": effective_top_k,
                     "allowed_count": len(allowed_doc_ids),
-                    "threshold": threshold,
                     "total": len(results),
                     "qualified": len(qualified),
-                    "adaptive_fallback": adaptive_fallback,
                     "scores": [round(r.score, 4) for r in results[:10]],
                     "doc_names": sorted({r.document_name for r in qualified}),
                     "start": _rag_start_dt.isoformat(),
@@ -561,14 +535,31 @@ async def act_node(
                         )
                         for i, r in enumerate(qualified)
                     ]
-                else:
+                elif results:
+                    # Adaptive fallback: có kết quả nhưng dưới ngưỡng -> pass cho LLM tự đánh giá
+                    start_ref = state.get("source_ref_counter", 0)
                     data = json.dumps({
-                        "results": [],
-                        "message": _RAG_NO_INFO_ANSWER,
-                    }, ensure_ascii=False)
+                        "results": [
+                            {
+                                "ref": start_ref + i + 1,
+                                "document_name": r.document_name,
+                                "caption": r.caption,
+                                "parent_text": r.parent_text,
+                                "heading_path": r.heading_path,
+                                "page_number": r.page_number,
+                            }
+                            for i, r in enumerate(results)
+                        ]
+                    })
+                    success = True
+                    new_sources = []  # score < threshold: LLM vẫn có context nhưng không show citations
+                else:
+                    # Hoàn toàn trống: LLM nhận empty results, tự tổng hợp warm NO_INFO
+                    # theo AGENT_SYSTEM_PROMPT (empathize + suggest IT Helpdesk / HR).
+                    # Không set hard_stop_response → flow tiếp tục → think_node → LLM.
+                    data = json.dumps({"results": []}, ensure_ascii=False)
                     success = False
                     new_sources = []
-                    hard_stop_response = _RAG_NO_INFO_ANSWER
 
         elif tool_name == "hr_query":
             # KHÔNG cần intent từ LLM: lấy TOÀN BỘ hồ sơ HR (mcp -> /hr/profile),
@@ -616,7 +607,7 @@ async def act_node(
             "langgraph_act_error",
             extra={"session_id": state["session_id"], "tool": tool_name, "error": str(exc)},
         )
-        data = f"Loi khi thuc thi tool: {exc}"
+        data = f"Lỗi khi thực thi tool: {exc}"
         success = False
         new_sources = []
         if tool_name == "rag_search":
@@ -661,9 +652,12 @@ async def act_node(
         new_state["source_ref_counter"] = state.get("source_ref_counter", 0) + len(new_sources)
     elif tool_name == "rag_search" and not success:
         new_state["sources"] = existing_sources
-        new_state["shortcut_response"] = hard_stop_response or _RAG_NO_INFO_ANSWER
-        new_state["shortcut_outcome"] = "NO_INFO"
-        new_state["phase"] = AgentPhase.DONE
+        if hard_stop_response:
+            # Hard-stop chỉ cho lỗi kỹ thuật: ACL violation, circuit open, exception.
+            # Empty results bình thường không hard-stop → observe → think → LLM xử lý.
+            new_state["shortcut_response"] = hard_stop_response
+            new_state["shortcut_outcome"] = "NO_INFO"
+            new_state["phase"] = AgentPhase.DONE
 
     # Observability accumulator: append rag_search debug event if recorded above.
     if _rag_event is not None:

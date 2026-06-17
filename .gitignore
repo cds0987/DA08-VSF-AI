@@ -29,5 +29,6 @@ infra/localtest/init-db.sql
 deploy/env/secret.env
 # .htpasswd Basic Auth subdomain Langfuse: render từ GitHub Secret mỗi deploy -> KHÔNG commit.
 deploy/nginx/.htpasswd
+deploy/nginx/.htpasswd-qdrant
 .codegraph
 local-stack/

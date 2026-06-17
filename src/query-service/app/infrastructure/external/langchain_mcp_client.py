@@ -14,7 +14,7 @@ connection — it only needs a transient connection for schema discovery.
 import json
 import logging
 from dataclasses import asdict
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -49,11 +49,19 @@ class _HrQueryInput(BaseModel):
 
 # WRITE tools: schema KIỂU (Pydantic) -> qua convert_to_openai_function model THẤY & ĐIỀN
 # args (dict-schema generic bị model gọi rỗng {}). user_id KHÔNG có ở đây — tiêm server-side.
-_LeaveType = Literal["annual", "sick", "personal"]
+_LeaveType = Literal[
+    "annual", "marriage", "child_marriage", "bereavement", "sick", "maternity", "unpaid",
+]
+_LEAVE_TYPE_DESC = (
+    "Loại nghỉ theo luật LĐ VN: annual (phép năm — du lịch/việc riêng thường ngày, trừ "
+    "quỹ phép), marriage (kết hôn, ≤3 ngày), child_marriage (con kết hôn, ≤1 ngày), "
+    "bereavement (tang cha/mẹ/vợ/chồng/con, ≤3 ngày), sick (ốm đau — BHXH), maternity "
+    "(thai sản), unpaid (nghỉ không lương). Việc riêng thường ngày -> annual."
+)
 
 
 class _CreateLeaveInput(BaseModel):
-    leave_type: _LeaveType = Field(description="Loại nghỉ: annual (phép năm), sick (ốm), personal (việc riêng)")
+    leave_type: _LeaveType = Field(description=_LEAVE_TYPE_DESC)
     start_date: str = Field(description="Ngày bắt đầu, định dạng YYYY-MM-DD")
     end_date: str = Field(description="Ngày kết thúc, định dạng YYYY-MM-DD")
     reason: str = Field(default="", description="Lý do nghỉ")
@@ -71,6 +79,26 @@ class _UpdateLeaveInput(BaseModel):
     reason: str = Field(default="", description="Lý do")
 
 
+class _ResolveDateInput(BaseModel):
+    kind: Literal[
+        "today", "tomorrow", "day_after_tomorrow", "weekday", "offset_days", "absolute"
+    ] = Field(description="Loại biểu thức ngày trích từ câu user")
+    weekday: Optional[
+        Literal["thu_2", "thu_3", "thu_4", "thu_5", "thu_6", "thu_7", "chu_nhat"]
+    ] = Field(
+        default=None,
+        description=(
+            "Token thứ tiếng Việt khi kind=weekday: thu_2=Thứ Hai, thu_3=Thứ Ba, "
+            "thu_4=Thứ Tư, thu_5=Thứ Năm, thu_6=Thứ Sáu, thu_7=Thứ Bảy, chu_nhat=Chủ Nhật. "
+            "Vd user nói 'thứ 4' -> 'thu_4'."))
+    week_offset: int = Field(
+        default=0, description="0=tuần này, 1=tuần sau, -1=tuần trước (kind=weekday)")
+    days: Optional[int] = Field(
+        default=None, description="Số ngày kể từ hôm nay khi kind=offset_days (vd 3)")
+    date: str = Field(
+        default="", description="Ngày tuyệt đối YYYY-MM-DD khi kind=absolute")
+
+
 # Tool WRITE cần schema KIỂU để model điền args. Vẫn discover ĐỘNG: chỉ tool nào mcp
 # thực sự expose mới xuất hiện; map này chỉ gắn schema-kiểu cho tool đã biết (như
 # rag_search/hr_query). Tool mới khác vẫn đi đường generic.
@@ -78,6 +106,9 @@ _WRITE_TOOL_SCHEMAS: dict[str, type[BaseModel]] = {
     "create_leave_request": _CreateLeaveInput,
     "cancel_leave_request": _CancelLeaveInput,
     "update_leave_request": _UpdateLeaveInput,
+    # resolve_date: READ/pure-compute nhưng vẫn cần schema-kiểu để model điền args
+    # (dict-schema generic hay bị gọi rỗng {}).
+    "resolve_date": _ResolveDateInput,
 }
 
 
@@ -269,6 +300,7 @@ class LangChainMCPToolsLoader:
                         "document_id": r.document_id,
                         "document_name": r.document_name,
                         "caption": r.caption,
+                        "child_text": r.child_text,
                         "parent_text": r.parent_text,
                         "heading_path": r.heading_path,
                         "score": r.score,

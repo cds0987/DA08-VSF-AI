@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 class Source(BaseModel):
     document_name: str
     caption: str
+    snippet: str = ""
     heading_path: list[str]
     score: float
     source_gcs_uri: str
@@ -18,6 +19,7 @@ class QueryRequest(BaseModel):
     conversation_id: UUID | None = None
     trace_session: str | None = None
     conversation_title: str | None = Field(default=None, max_length=120)
+    document_ids: list[str] | None = None
 
 
 class QueryResponse(BaseModel):

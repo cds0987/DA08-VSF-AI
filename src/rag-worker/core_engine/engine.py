@@ -16,6 +16,7 @@ from core_engine.chunking import Chunker, SectionChunker
 from core_engine.config import HaystackSettings, load_settings
 from core_engine.logging_utils import Stopwatch, log_event
 from core_engine.types import EmbeddingService, VectorRepository
+from core_engine.vectorstore.providers.qdrant.base import _sparse_encode
 from core_engine.vectorstore.types import VectorRecord
 
 
@@ -256,7 +257,11 @@ class HaystackRagEngine:
 
         for parent_index, section in enumerate(sections):
             parent_id = f"{doc.document_id}::p{parent_index}"
-            heading_path = [section.section_title] if section.section_title else []
+            # Section không có heading thật -> heading_path RỖNG (UI đã hiển thị tên tài
+            # liệu riêng; nhồi document_name vào đây gây trùng tên ở citation). section_title
+            # metadata fallback về document_name cho dễ trace, KHÔNG ảnh hưởng UI.
+            has_heading = bool(section.section_title) and section.section_title != "(no heading)"
+            heading_path = [section.section_title] if has_heading else []
 
             caption = (
                 captions_by_index[parent_index] if self.captioner is not None else None
@@ -274,14 +279,14 @@ class HaystackRagEngine:
                         # child_text LUÔN = raw child (trước đây nhầm = caption -> chunk
                         # text bị thay bằng tóm tắt AI). caption giữ riêng ở field "caption".
                         "child_text": child,
-                        "bm25_text": child,
+                        "bm25_text": f"{section.section_title} {child}" if has_heading else child,
                         "parent_id": parent_id,
                         "parent_text": section.parent_text,
                         "document_id": doc.document_id,
                         "document_name": doc.document_name,
                         "file_type": doc.file_type,
                         "page_number": section.section_index,
-                        "section_title": section.section_title,
+                        "section_title": section.section_title if has_heading else doc.document_name,
                         "heading_path": heading_path,
                         "caption": display_caption,
                         "source_uri": source_uri,
@@ -336,9 +341,16 @@ class HaystackRagEngine:
             embed_span,
             {"vectors": len(vectors), "dimension": settings.embed_dimension},
         )
+        sparse_vecs = [_sparse_encode(p["bm25_text"]) for p in payloads]
         records = [
-            VectorRecord(chunk_id=chunk_id, vector=vector, payload=payload)
-            for chunk_id, vector, payload in zip(chunk_ids, vectors, payloads)
+            VectorRecord(
+                chunk_id=chunk_id,
+                vector=vector,
+                payload=payload,
+                sparse_indices=sparse_vecs[i][0],
+                sparse_values=sparse_vecs[i][1],
+            )
+            for i, (chunk_id, vector, payload) in enumerate(zip(chunk_ids, vectors, payloads))
         ]
         write_span = self._span_start(
             trace,

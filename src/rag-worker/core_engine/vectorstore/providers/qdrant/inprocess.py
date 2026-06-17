@@ -46,7 +46,7 @@ class QdrantInProcessProvider(QdrantBase):
                 await asyncio.to_thread(
                     self._client.create_collection,
                     collection_name=self._collection,
-                    vectors_config=self._vectors_config(),
+                    **self._collection_create_kwargs(),
                 )
                 # Payload index keyword cho document_id (filter dedup/delete/scoped search).
                 await asyncio.to_thread(

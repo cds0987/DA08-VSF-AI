@@ -59,8 +59,10 @@ const ADMIN_NAV = [
 ]
 
 const handleSignOut = () => {
+  // Xóa currentConversationId trước khi redirect: sau login lại sẽ hiện chat mới
+  // thay vì nhảy về session cũ (giống ChatGPT/Gemini).
+  chat.clear()
   session.signOut()
-  router.push('/login')
 }
 
 const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
@@ -144,10 +146,10 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
       </div>
     </div>
 
-    <!-- Navigation Area -->
-    <div class="flex flex-col w-full overflow-hidden">
+    <!-- Navigation Area — flex-1 + min-h-0 cho phép ChatHistory cuộn bên trong -->
+    <div class="flex flex-col w-full flex-1 min-h-0 overflow-hidden">
       <div
-        class="flex flex-col w-full px-0 gap-2"
+        class="flex flex-col w-full h-full px-0 gap-2"
       >
         <template v-if="section === 'admin'">
           <!-- Admin Navigation -->
@@ -165,7 +167,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
 
         <template v-else>
           <!-- User View: New Chat, Search & Chat History -->
-          <div class="w-full flex flex-col gap-2">
+          <div class="w-full flex flex-col gap-2 flex-1 min-h-0">
             <!-- New Chat Section -->
             <div class="w-full">
               <Tooltip>
@@ -205,7 +207,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
                   <div
                     :role="isCollapsed ? 'button' : undefined"
                     :tabindex="isCollapsed ? 0 : -1"
-                    class="relative group flex items-center overflow-hidden rounded-lg shrink-0 h-9 transition-all w-full bg-transparent shadow-none cursor-pointer"
+                    class="relative group flex items-center overflow-hidden rounded-lg shrink-0 h-9 transition-all w-full bg-transparent shadow-none cursor-pointer hover:bg-slate-100 dark:hover:bg-sidebar-accent"
                     @click="isCollapsed && handleSearchClick()"
                   >
                     <div class="flex h-9 w-[64px] items-center justify-center shrink-0">
@@ -243,13 +245,11 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
               :is-collapsed="isCollapsed"
             />
 
-            <ChatHistory :is-collapsed="isCollapsed" :query="searchQuery" class="w-full flex flex-col" />
+            <ChatHistory :is-collapsed="isCollapsed" :query="searchQuery" class="w-full flex flex-col flex-1 min-h-0" />
           </div>
         </template>
       </div>
     </div>
-
-    <div class="flex-1" />
 
     <!-- Footer actions & user -->
     <div

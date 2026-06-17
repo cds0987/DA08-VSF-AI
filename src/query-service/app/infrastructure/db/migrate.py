@@ -2,18 +2,39 @@
 import asyncio
 import logging
 import os
-import re
 from pathlib import Path
+
+from app.infrastructure.db.dsn import to_asyncpg_dsn
 
 logger = logging.getLogger(__name__)
 
 # /app/app/infrastructure/db/migrate.py -> parents[3] = /app  (WORKDIR, chứa migrations/)
 MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "migrations"
 
+# Bảng code BẮT BUỘC phải tồn tại sau migrate. Thiếu -> fail-fast NGAY tại query-migrate
+# (deploy đỏ với thông điệp rõ ràng) thay vì lỗi runtime mơ hồ (RAG 0 sources + NAK-storm).
+# Sự cố 2026-06-16: user_access_profile bị quên migration -> chỉ lộ ở smoke-on-prod.
+REQUIRED_TABLES = (
+    "conversations",
+    "messages",
+    "document_access",
+    "notifications",
+    "user_access_profile",
+)
 
-def _asyncpg_dsn(url: str) -> str:
-    """asyncpg chỉ nhận scheme postgresql:// — bỏ dialect SQLAlchemy (+psycopg/+asyncpg)."""
-    return re.sub(r"^postgresql\+[a-z0-9_]+://", "postgresql://", url, count=1)
+
+async def _assert_required_tables(conn) -> None:
+    rows = await conn.fetch(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'query_svc'"
+    )
+    present = {r["table_name"] for r in rows}
+    missing = [t for t in REQUIRED_TABLES if t not in present]
+    if missing:
+        raise RuntimeError(
+            "MIGRATION INCOMPLETE — bảng code cần nhưng KHÔNG có sau migrate: "
+            f"{missing}. Có thể quên file migration. ABORT để chặn drift "
+            "(tránh NAK-storm + RAG 0 sources như sự cố 2026-06-16)."
+        )
 
 
 async def run_migrations(database_url: str) -> None:
@@ -26,7 +47,7 @@ async def run_migrations(database_url: str) -> None:
     if not files:
         raise RuntimeError(f"No query-service migrations found in {MIGRATIONS_DIR}")
 
-    conn = await asyncpg.connect(_asyncpg_dsn(database_url))
+    conn = await asyncpg.connect(to_asyncpg_dsn(database_url))
     try:
         await conn.execute(
             """
@@ -52,6 +73,7 @@ async def run_migrations(database_url: str) -> None:
                     "INSERT INTO query_svc.schema_migrations (filename) VALUES ($1)",
                     sql_file.name,
                 )
+        await _assert_required_tables(conn)
     finally:
         await conn.close()
     logger.info("query-service migrations are current")

@@ -7,12 +7,11 @@
 set -euo pipefail
 cd "${APP_DIR:?thiếu APP_DIR}"
 
-ROLLBACK_SVCS="rag-worker mcp-service hr-service user-service document-service query-service ai-router frontend-chat frontend-admin nginx"
 QUERY_DB_BACKUP=/tmp/query_db_pre_deploy.dump
 DEPLOY_OK=0; ROLLBACK_DONE=0; QUERY_DB_BACKUP_READY=0
-restore_query_db() {
-  [ "$QUERY_DB_BACKUP_READY" = 1 ] || return 0
-  echo "::warning::Khôi phục query_db về snapshot trước deploy"
+# KHÔI PHỤC query_db THỦ CÔNG (admin) khi thực sự cần — KHÔNG còn tự gọi (forward-only).
+# Chạy tay: source deploy/scripts/deploy.sh là sai; thay vào đó admin pg_restore từ $QUERY_DB_BACKUP.
+restore_query_db_manual() {
   docker compose stop query-service >/dev/null 2>&1 || true
   docker exec da08-vsf-app-postgres-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
     -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='query_db' AND pid <> pg_backend_pid();" >/dev/null
@@ -20,29 +19,20 @@ restore_query_db() {
   docker exec da08-vsf-app-postgres-1 createdb -U postgres query_db
   docker exec -i da08-vsf-app-postgres-1 pg_restore -U postgres -d query_db --no-owner --no-privileges < "$QUERY_DB_BACKUP"
 }
-rollback() {
+# FORWARD-ONLY (sau sự cố 2026-06-16). KHÔNG tự lùi image/schema khi deploy fail.
+# VÌ SAO: rollback cũ retag image về bản CŨ + `compose up --force-recreate`, NHƯNG migration
+# đã đẩy schema TIẾN (vd hr_db lên 0006). Image cũ không định vị nổi revision -> hr-migrate
+# exit 255 -> nginx kẹt -> SẬP TOÀN BỘ prod, rồi log báo "production giữ bản trước đó" (SAI).
+# Lùi-nửa-vời TỆ HƠN không lùi. Drift đã được chặn TỪ TRƯỚC ở PRE-FLIGHT (bước 3a), nên tới
+# đây gần như chỉ là lỗi app sau khi đã up -> giữ BẢN MỚI đang chạy + báo động, sửa-tiến.
+on_failure() {
   [ "$ROLLBACK_DONE" = 1 ] && return 0; ROLLBACK_DONE=1
-  [ -s /tmp/rollback_images.txt ] || { echo "::warning::Chưa có điểm rollback (fail sớm) — prod chưa bị đổi."; return 0; }
-  echo "::warning::DEPLOY FAIL -> ROLLBACK database + image về bản trước khi deploy"
-  restore_ok=1
-  if ! restore_query_db; then
-    restore_ok=0
-    echo "::error::Khôi phục query_db thất bại; giữ image query-service/frontend-chat mới để tránh chạy code cũ trên schema mới"
-  fi
-  rollback_svcs="$ROLLBACK_SVCS"
-  while read -r svc img; do
-    if [ "$restore_ok" = 0 ] && { [ "$svc" = query-service ] || [ "$svc" = frontend-chat ]; }; then
-      continue
-    fi
-    [ -n "$img" ] && docker tag "$img" "$DOCKERHUB_USERNAME/$svc:develop" || true
-  done < /tmp/rollback_images.txt
-  if [ "$restore_ok" = 0 ]; then
-    rollback_svcs="rag-worker mcp-service hr-service user-service document-service frontend-admin nginx"
-  fi
-  docker compose up -d --no-build --force-recreate $rollback_svcs || true
-  echo "::warning::ROLLBACK xong — production giữ bản trước đó. Pipeline = FAIL."
+  echo "::error::DEPLOY FAIL — forward-only: KHÔNG tự lùi image/schema (tránh wedge + sập như sự cố cũ)."
+  echo "::error::Production đang ở TRẠNG THÁI VỪA DEPLOY. Xử lý: sửa lỗi rồi DEPLOY LẠI (fix-forward), TUYỆT ĐỐI không vá tay trên VM."
+  echo "::error::Chẩn đoán: docker compose ps; docker compose logs --tail=120 <service>; kiểm tra https://vsfchat.cloud"
+  echo "::error::Có snapshot query_db trước deploy nếu admin cần khôi phục THỦ CÔNG: $QUERY_DB_BACKUP (dùng pg_restore)"
 }
-trap '[ "$DEPLOY_OK" = 1 ] || rollback' EXIT
+trap '[ "$DEPLOY_OK" = 1 ] || on_failure' EXIT
 
 
 
@@ -55,17 +45,30 @@ done
 # gcp-sa.json (org policy chặn tạo SA key). Bỏ check file SA.
 [ "$miss" = 0 ] || { echo "::error::Thiếu cấu hình -> DỪNG deploy"; exit 1; }
 
-echo "==> 2b) Ghi ĐIỂM ROLLBACK = image ID đang chạy (trước khi pull bản mới)"
-: > /tmp/rollback_images.txt
-for svc in $ROLLBACK_SVCS; do
-  img=$(docker inspect -f '{{.Image}}' "da08-vsf-$svc-1" 2>/dev/null || echo "")
-  [ -n "$img" ] && echo "$svc $img" >> /tmp/rollback_images.txt
-done
-echo "  $(wc -l < /tmp/rollback_images.txt) service có điểm rollback"
-
 echo "==> 3) Login Docker Hub + PULL image (KHÔNG build trên VM)"
 echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
 docker compose pull qdrant langfuse-db langfuse nats-bootstrap rag-worker mcp-service hr-service user-service document-service query-migrate query-service ai-router frontend-chat frontend-admin nginx
+
+echo "==> 3a) PRE-FLIGHT migration — image MỚI có định vị được revision DB không? (chặn drift TRƯỚC khi đụng prod)"
+# `alembic current` (READ-ONLY): đọc alembic_version trong DB rồi tra trong lịch sử migration
+# của IMAGE MỚI. Lỗi 'Can't locate revision' = DB tiến trước image (drift) -> hr-migrate sẽ exit
+# 255 ở bước up. Bắt Ở ĐÂY -> ABORT khi CHƯA recreate gì -> stack đang chạy KHÔNG bị đụng,
+# prod GIỮ NGUYÊN bản cũ. Đây chính là ca đã làm sập prod (hr_db=0006, image thiếu 0006).
+preflight_fail=0
+# CHỈ các service dùng alembic. query-migrate KHÔNG nằm đây vì nó chạy migrator riêng
+# (`python -m app.infrastructure.db.migrate`), không có alembic.ini -> `alembic current` sẽ
+# lỗi GIẢ. query-service migrate tự lo state của nó, không thuộc class drift alembic này.
+for m in hr-migrate user-migrate doc-migrate rag-migrate; do
+  if out=$(docker compose run --rm --no-deps "$m" alembic current 2>&1); then
+    echo "  [$m] OK ($(echo "$out" | tr '\n' ' ' | grep -oE '[0-9a-f_]+ \(head\)|[0-9a-z_]+$' | head -1))"
+  else
+    echo "::error::[$m] alembic current FAIL — image mới KHÔNG định vị được revision của DB (drift):"
+    echo "$out" | grep -iE "Can't locate|FAILED|Error|revision" | head -3
+    preflight_fail=1
+  fi
+done
+[ "$preflight_fail" = 0 ] || { echo "::error::PRE-FLIGHT FAIL -> ABORT. Stack đang chạy KHÔNG bị đụng (prod giữ nguyên). Đồng bộ migration code<->DB rồi deploy lại."; exit 1; }
+echo "  PRE-FLIGHT OK — mọi migrate định vị được revision DB, an toàn để recreate."
 
 echo "==> 3b) Dừng query-service và snapshot query_db ngay trước migration"
 docker compose stop query-service >/dev/null 2>&1 || true
@@ -81,6 +84,10 @@ docker compose up -d --no-build qdrant langfuse-db langfuse nats-bootstrap query
        docker logs da08-vsf-user-migrate-1 2>&1 | tail -40 || true; \
        docker logs da08-vsf-nats-bootstrap-1 2>&1 | tail -40 || true; exit 1; }
 docker compose up -d --no-build --force-recreate nginx
+
+# Monitoring (prometheus + grafana) — NON-FATAL: hỏng chỉ mất biểu đồ, KHÔNG chặn deploy app.
+docker compose up -d --no-build prometheus grafana \
+  || echo "::warning::monitoring (prometheus/grafana) up FAILED — biểu đồ ai-router tạm thiếu, app KHÔNG ảnh hưởng"
 
 echo "==> 4b) LANGFUSE readiness PROD bằng KEY THẬT (NON-FATAL — chỉ cảnh báo)"
 lf_warn() { echo "::warning::LANGFUSE prod: $1 — kiểm tra: docker compose logs langfuse"; }
@@ -217,6 +224,24 @@ for path in /healthz / /admin/; do
   fi
 done
 
+# SMOKE EXPOSE LANGFUSE: nginx phải route Host=langfuse.vsfchat.cloud -> 401 (Basic Auth gác).
+# NON-FATAL (::warning::) — langfuse tách khỏi health-gate/rollback nên dashboard hỏng KHÔNG
+# kéo sập / rollback cả app. Chỉ cảnh báo để BẮT khi ai sửa nginx.conf làm vỡ block langfuse
+# (smoke 5b ở trên không test subdomain này -> đây bịt gap "CI xanh mà dashboard chết").
+lfx=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H 'Host: langfuse.vsfchat.cloud' http://localhost/ || echo 000)
+case "$lfx" in
+  401) echo "  [LANGFUSE-EXPOSE] OK: Host=langfuse -> 401 (Basic Auth gac dung)" ;;
+  *)   echo "::warning::SMOKE langfuse-expose: Host=langfuse.vsfchat.cloud tra $lfx (mong 401) — block langfuse trong nginx.conf vo / .htpasswd thieu / auth_basic tat?" ;;
+esac
+
+# SMOKE EXPOSE GRAFANA: tương tự langfuse — Host=grafana.vsfchat.cloud phải 401 (Basic Auth gác).
+# Bịt gap "nginx block grafana vỡ mà CI vẫn xanh". NON-FATAL.
+gfx=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H 'Host: grafana.vsfchat.cloud' http://localhost/ || echo 000)
+case "$gfx" in
+  401) echo "  [GRAFANA-EXPOSE] OK: Host=grafana -> 401 (Basic Auth gac dung)" ;;
+  *)   echo "::warning::SMOKE grafana-expose: Host=grafana.vsfchat.cloud tra $gfx (mong 401) — block grafana nginx vo / .htpasswd thieu?" ;;
+esac
+
 echo "==> 5c) SMOKE LUỒNG-VÀNG — CHỌN LỌC theo service đổi (detect), mô phỏng FE gửi"
 RUN_RAG="${RUN_RAG:-}"
 RUN_HR="${RUN_HR:-}"
@@ -283,7 +308,9 @@ if outcome in (6, "ERROR"):
 if need and src < 1:
     print("  [%s] FAIL: can sources>0 (query->mcp->rag->qdrant tra rong)" % label); sys.exit(1)
 PYEOF
-SMOKE_EMAIL="admin@company.com"; SMOKE_PW="DemoAdminPassword123!"
+# Mật khẩu LẤY TỪ secret (SEED_ADMIN_PASSWORD đã đẩy vào payload) — KHÔNG hardcode trong
+# git (GitGuardian bắt cặp email+password; creds này sống thật trên prod).
+SMOKE_EMAIL="admin@company.com"; SMOKE_PW="${SEED_ADMIN_PASSWORD:-}"
 TOK=$(curl -s --max-time 25 -X POST http://localhost/api/user/auth/login \
         -H 'Content-Type: application/json' \
         -d "{\"email\":\"$SMOKE_EMAIL\",\"password\":\"$SMOKE_PW\"}" \
@@ -309,13 +336,41 @@ if [ "$SMOKE_RAG" = "true" ]; then
   for attempt in $(seq 1 6); do
     if curl -s --max-time 90 -X POST http://localhost/api/query/query \
          -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -H 'X-CI-Smoke: 1' \
-         -d "{\"question\":\"chính sách nghỉ phép của công ty\",\"user_id\":\"$SMOKE_UID\",\"conversation_id\":\"$SMOKE_CONV_RAG\",\"conversation_title\":\"CI smoke RAG\"}" \
+         -d "{\"question\":\"Tài liệu hướng dẫn nhân viên có gì\",\"user_id\":\"$SMOKE_UID\",\"conversation_id\":\"$SMOKE_CONV_RAG\",\"conversation_title\":\"CI smoke RAG\"}" \
          | python3 /tmp/smoke_parse.py "RAG query->mcp->rag (lần $attempt)" 1; then
       rag_ok=1; break
     fi
     echo "  [RAG] lần $attempt chưa có sources (warm-up?) — chờ 15s rồi thử lại..."; sleep 15
   done
   [ "$rag_ok" = 1 ] || { echo "::error::SMOKE RAG FAIL (sau 6 lần retry warm-up)"; docker compose logs --no-color --tail 100 query-service mcp-service rag-worker || true; exit 1; }
+
+  # SMOKE ACL NON-ADMIN: admin BYPASS toàn bộ ACL nên smoke trên KHÔNG kiểm thử đường
+  # quyền theo user_access_profile/department (chính đường đã hỏng vụ 2026-06-16). Đăng
+  # nhập nhân viên thật (role=user) -> đi qua _get_allowed_doc_ids + get_profile. NON-FATAL
+  # (::warning::) vì corpus hiện chỉ có public/internal (chưa có doc "secret" department-gated)
+  # nên chưa thể assert phân quyền chặt; nâng thành fatal khi seed doc "secret" + dữ liệu test.
+  # Mật khẩu nhân viên TỪ secret SEED_EMPLOYEE_PASSWORD (chưa cấu hình -> rỗng -> tự skip).
+  # KHÔNG hardcode trong git. DevOps thêm secret này để kích hoạt smoke non-admin.
+  NV_TOK=""
+  if [ -n "${SEED_EMPLOYEE_PASSWORD:-}" ]; then
+    NV_TOK=$(curl -s --max-time 25 -X POST http://localhost/api/user/auth/login \
+              -H 'Content-Type: application/json' \
+              -d "{\"email\":\"nhanvien@company.com\",\"password\":\"${SEED_EMPLOYEE_PASSWORD}\"}" \
+            | python3 -c 'import sys,json;print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null || echo "")
+  fi
+  if [ -z "$NV_TOK" ]; then
+    echo "::warning::SMOKE ACL non-admin: bỏ qua (SEED_EMPLOYEE_PASSWORD chưa cấu hình hoặc login fail) — không chặn deploy"
+  else
+    NV_UID=$(python3 -c 'import sys,base64,json;t="'"$NV_TOK"'".split(".")[1];t+="="*(-len(t)%4);print(json.loads(base64.urlsafe_b64decode(t)).get("user_id",""))' 2>/dev/null || echo "")
+    if curl -s --max-time 90 -X POST http://localhost/api/query/query \
+         -H "Authorization: Bearer $NV_TOK" -H 'Content-Type: application/json' -H 'X-CI-Smoke: 1' \
+         -d "{\"question\":\"Tài liệu hướng dẫn nhân viên có gì\",\"user_id\":\"$NV_UID\",\"conversation_id\":\"$(python3 -c 'import uuid;print(uuid.uuid4())')\",\"conversation_title\":\"CI smoke RAG nhanvien\"}" \
+         | python3 /tmp/smoke_parse.py "RAG non-admin (nhanvien role=user)" 1; then
+      echo "  [ACL] non-admin RAG OK -> đường user_access_profile/ACL sống"
+    else
+      echo "::warning::SMOKE ACL non-admin: nhanvien RAG sources=0 — KIỂM TRA user_access_profile/ACL (có thể profile chưa propagate)."
+    fi
+  fi
 
   # SMOKE GUARDRAIL (chỉ khi GUARDRAILS_MODE=llm_api): gửi prompt-injection trắng
   # trợn, verify LlmApiInputGuardrail (LLM-judge qua provider) CHẶN -> done event

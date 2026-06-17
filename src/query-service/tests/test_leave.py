@@ -74,8 +74,9 @@ async def test_create_forwards_client_idempotency_key(hr_client: AsyncClient, fa
 
 @pytest.mark.asyncio
 async def test_create_rejects_bad_leave_type(hr_client: AsyncClient, fake_hr):
+    # 'unpaid' giờ HỢP LỆ (rổ 4). Dùng loại không có trong taxonomy để test 422.
     r = await hr_client.post("/leave-requests", json={
-        "leave_type": "unpaid", "start_date": "2026-09-01", "end_date": "2026-09-01",
+        "leave_type": "khong_ton_tai", "start_date": "2026-09-01", "end_date": "2026-09-01",
     })
     assert r.status_code == 422  # Literal validation, chưa gọi hr
     assert fake_hr.calls == []

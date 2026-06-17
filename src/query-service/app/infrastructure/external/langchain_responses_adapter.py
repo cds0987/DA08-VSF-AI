@@ -28,7 +28,7 @@ from langchain_core.tools import BaseTool
 from pydantic import Field
 from openai import AsyncOpenAI
 
-from app.application.prompts import AGENT_SYSTEM_PROMPT as DEFAULT_SYSTEM_PROMPT
+from app.application.prompts import build_agent_system_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -143,12 +143,16 @@ class OpenAIResponsesChatModel(BaseChatModel):
 
         If the message list contains a SystemMessage, use its content as the
         `instructions` (e.g. TRIAGE_SYSTEM_PROMPT for triage_node).
-        Otherwise fall back to DEFAULT_SYSTEM_PROMPT (AGENT_SYSTEM_PROMPT for think_node).
+        Otherwise fall back to build_agent_system_prompt() (AGENT_SYSTEM_PROMPT +
+        today's date, for think_node).
         """
         system_content, rest = self._split_system(messages)
         params: dict = {
             "model": self.model,
-            "instructions": system_content if system_content is not None else DEFAULT_SYSTEM_PROMPT,
+            # Default (think/answer) prompt phải chèn NGÀY HÔM NAY mỗi request để model
+            # quy đổi ngày tương đối ("thứ 6 tuần này") -> YYYY-MM-DD. Triage/các node
+            # truyền sẵn SystemMessage thì dùng nguyên (không cần ngày).
+            "instructions": system_content if system_content is not None else build_agent_system_prompt(),
             "input": self._format_messages(rest),
             "max_output_tokens": self.max_output_tokens,
             "timeout": self.timeout,

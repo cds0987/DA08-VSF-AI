@@ -84,7 +84,9 @@ async def test_engine_payload_child_text_is_raw_not_caption() -> None:
     for r in vectors.upserted:
         assert not r.payload["child_text"].startswith("caption:")  # raw, không phải caption
         assert r.payload["caption"].startswith("caption:")
-        assert r.payload["bm25_text"] == r.payload["child_text"]   # cả hai = raw
+        # bm25_text = "{section_title} {child}" hoặc chính child nếu không có heading
+        assert r.payload["child_text"] in r.payload["bm25_text"]
+        assert not r.payload["bm25_text"].startswith("caption:")
 
 
 @pytest.mark.asyncio

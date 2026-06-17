@@ -1,4 +1,9 @@
-"""Reranker for mcp-service: none, lexical, and llm with safe fallback."""
+"""Reranker for mcp-service: none, lexical, and llm with safe fallback.
+
+NOTE(ops): prod tạm dùng 'lexical' (xem deploy/env/mcp-service.env). Provider 'llm' với
+RERANK_THRESHOLD=0.7 từng lọc sạch hit -> RAG 0 sources -> deploy smoke fail. Lexical
+(overlap ratio) cần threshold thấp. Calibrate lại trước khi bật 'llm'.
+"""
 
 from __future__ import annotations
 
@@ -96,7 +101,10 @@ class LlmReranker:
                 len(hits),
                 exc,
             )
-            return await self._fallback.rerank(query, hits, top_k, threshold)
+            ordered = sorted(hits, key=lambda h: h.score, reverse=True)[:top_k]
+            for hit in ordered:
+                hit.score = 0.5
+            return ordered
 
         scored.sort(key=lambda pair: pair[0], reverse=True)
         return [hit for _, hit in scored[:top_k]]
@@ -139,7 +147,8 @@ class LlmReranker:
         return f"QUERY: {query}\n\nPASSAGES:\n{numbered_passages}"
 
     def _passage_text(self, hit: SearchHit) -> str:
-        return f"{hit.caption}\n{hit.parent_text[: self._passage_chars]}".strip()
+        body = (hit.child_text or hit.parent_text)[: self._passage_chars]
+        return f"{hit.caption}\n{body}".strip()
 
     @staticmethod
     def _normalize_score(value: float) -> float:

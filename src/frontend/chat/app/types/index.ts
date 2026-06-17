@@ -38,6 +38,8 @@ export interface Citation {
   document_id: string
   document: string
   caption: string
+  snippet?: string
+  score?: number
   heading_path: string[]
   page_number?: number | null
   ref?: number
@@ -49,12 +51,14 @@ export interface QueryRequest {
   conversation_id?: string
   trace_session?: string
   conversation_title?: string
+  document_ids?: string[] | null
 }
 
 export interface QuerySource {
   document_id?: string
   document_name: string
   caption: string
+  snippet?: string
   heading_path: string[]
   score: number
   source_gcs_uri?: string
@@ -131,13 +135,22 @@ export interface MessageAttachment {
 }
 
 export interface HRActionPayload {
-  action_type: 'create_leave_request'
-  parameters: {
+  // 'create_leave_request': thẻ tạo đơn (có parameters).
+  // 'review_leave_approvals': thẻ duyệt — FE tự nạp hàng đợi live, không cần parameters.
+  // 'proactive_doc_suggestion': bot gợi ý hỏi về tài liệu mới.
+  action_type: 'create_leave_request' | 'review_leave_approvals' | 'proactive_doc_suggestion'
+  parameters?: {
     leave_type: string
     start_date: string
     end_date: string
     reason: string
   }
+  // Sinh 1 lần khi tạo card (FE) -> chống tạo trùng nếu user bấm Confirm 2 lần / retry.
+  idempotency_key?: string
+  // proactive_doc_suggestion fields
+  document_name?: string
+  doc_id?: string | null
+  suggestions?: Array<{ label: string; query: string }>
 }
 
 export interface ChatMessage {
@@ -152,7 +165,8 @@ export interface ChatMessage {
   timestamp: string
   attachments?: MessageAttachment[]
   error?: string
-  action?: HRActionPayload
+  // Nhiều đơn 1 lượt -> mỗi phần tử là 1 form xác nhận riêng.
+  actions?: HRActionPayload[]
 }
 
 export interface Conversation {

@@ -72,6 +72,19 @@ def current_s3_endpoint_url() -> str:
     return _env("S3_ENDPOINT_URL", "R2_ENDPOINT_URL")
 
 
+def current_storage_uri_scheme() -> str:
+    """Scheme nhãn lineage KHỚP backend thật (dùng chung cho source_uri & artifact_uri).
+
+    boto3 nói giao thức S3 nhưng endpoint mới quyết định dịch vụ: GCS (S3-interop,
+    endpoint googleapis.com) -> `gs`; MinIO/R2/AWS -> `s3`. parse_s3_uri đọc lại được
+    cả hai scheme nên đây chỉ là nhãn — nhưng phải đồng nhất giữa source/artifact để
+    payload vector store không lệch (s3:// vs gs:// trên cùng một bucket GCS).
+    """
+    if "googleapis.com" in current_s3_endpoint_url().lower():
+        return "gs"
+    return "s3"
+
+
 def current_source_bucket() -> str:
     return _env("S3_SOURCE_BUCKET", "R2_BUCKET")
 

@@ -116,7 +116,8 @@ export const useNotificationStore = defineStore('notifications', () => {
   }
 
   async function fetchMissingNotifications() {
-    if (!session.user) return
+    if (!session.user || isFetchingMissing) return
+    isFetchingMissing = true
     
     // Find the latest timestamp we have
     const lastSeenTimestamp = items.value.length > 0 
@@ -144,12 +145,20 @@ export const useNotificationStore = defineStore('notifications', () => {
       }
     } catch (error) {
       logNotificationError('Failed to fetch missing notifications:', error)
+    } finally {
+      isFetchingMissing = false
     }
   }
 
   const handleOnline = () => {
-    isConnected.value = true
+    // Hủy timer đang chờ và reconnect ngay — không cần đợi delay khi biết mạng đã về.
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    reconnectAttempt = 0
     void fetchMissingNotifications()
+    if (!controller) void connect()
   }
 
   const handleOffline = () => {
@@ -206,6 +215,8 @@ export const useNotificationStore = defineStore('notifications', () => {
   }
 
   let initRetryCount = 0
+  let initRetryTimer: ReturnType<typeof setTimeout> | null = null
+  let isFetchingMissing = false
 
   async function init() {
     if (!import.meta.client || !session.user) {
@@ -216,9 +227,10 @@ export const useNotificationStore = defineStore('notifications', () => {
 
     const token = getClientCookie(ACCESS_TOKEN_COOKIE)
     if (!token) {
-      if (initRetryCount < 3) {
+      if (initRetryCount < 3 && !initRetryTimer) {
         initRetryCount++
-        setTimeout(() => {
+        initRetryTimer = setTimeout(() => {
+          initRetryTimer = null
           void init()
         }, 500)
       }
@@ -254,7 +266,11 @@ export const useNotificationStore = defineStore('notifications', () => {
     controller = null
     if (reconnectTimer) clearTimeout(reconnectTimer)
     reconnectTimer = null
+    if (initRetryTimer) clearTimeout(initRetryTimer)
+    initRetryTimer = null
+    initRetryCount = 0
     reconnectAttempt = 0
+    isFetchingMissing = false
     isConnected.value = false
     items.value = []
     unreadCount.value = 0
@@ -263,6 +279,10 @@ export const useNotificationStore = defineStore('notifications', () => {
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
     }
+  }
+
+  function removeItem(id: string) {
+    items.value = items.value.filter((item) => item.id !== id)
   }
 
   return {
@@ -276,5 +296,6 @@ export const useNotificationStore = defineStore('notifications', () => {
     fetchHistory,
     fetchUnreadCount,
     markAsRead,
+    removeItem,
   }
 })

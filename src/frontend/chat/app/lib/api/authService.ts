@@ -64,7 +64,16 @@ const authService = {
     }
     removeClientCookie(ACCESS_TOKEN_COOKIE)
     removeClientCookie(SESSION_COOKIE)
-    if (redirect) window.location.href = '/login'
+    if (redirect) {
+      const base = useRuntimeConfig().app.baseURL || '/'
+      const loginPath = `${base.replace(/\/$/, '')}/login`
+      if (window.location.pathname !== loginPath) {
+        window.location.href = loginPath
+      } else {
+        // Bug 5: đã ở /login — reload để flush Pinia state thay vì bỏ qua hoàn toàn.
+        window.location.reload()
+      }
+    }
   },
 
   isAuthenticated(): boolean {

@@ -163,21 +163,24 @@ def _read_csv_file(path: Path) -> _ParseStep:
 class _HTMLToText(HTMLParser):
     _BLOCK_TAGS = {
         "address", "article", "aside", "blockquote", "br", "div", "dl", "dt", "dd",
-        "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4",
-        "h5", "h6", "header", "hr", "li", "main", "nav", "ol", "p", "pre", "section",
-        "table", "td", "th", "tr", "ul",
+        "fieldset", "figcaption", "figure", "footer", "form", "header", "hr", "li",
+        "main", "nav", "ol", "p", "pre", "section", "table", "td", "th", "tr", "ul",
     }
+    _HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self._parts: list[str] = []
 
     def handle_starttag(self, tag: str, attrs) -> None:
-        if tag.lower() in self._BLOCK_TAGS:
+        t = tag.lower()
+        if t in self._HEADING_TAGS:
+            self._parts.append(f"\n{'#' * int(t[1])} ")
+        elif t in self._BLOCK_TAGS:
             self._parts.append("\n")
 
     def handle_endtag(self, tag: str) -> None:
-        if tag.lower() in self._BLOCK_TAGS:
+        if tag.lower() in self._BLOCK_TAGS or tag.lower() in self._HEADING_TAGS:
             self._parts.append("\n")
 
     def handle_data(self, data: str) -> None:
@@ -215,8 +218,18 @@ def _read_docx_file(path: Path) -> _ParseStep:
             media_images.append(_vision_image(archive.read(name), mime))
     root = ElementTree.fromstring(document_xml)
     ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    _w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    _heading_map = {
+        "heading1": "#", "heading2": "##", "heading3": "###",
+        "heading4": "####", "heading5": "#####", "heading6": "######",
+    }
     paragraphs: list[str] = []
     for paragraph in root.findall(".//w:p", ns):
+        style_el = paragraph.find("w:pPr/w:pStyle", ns)
+        prefix = ""
+        if style_el is not None:
+            style_val = (style_el.get(f"{{{_w}}}val") or "").lower().replace(" ", "")
+            prefix = _heading_map.get(style_val, "")
         parts: list[str] = []
         for node in paragraph.iter():
             tag = node.tag.rsplit("}", 1)[-1]
@@ -228,7 +241,7 @@ def _read_docx_file(path: Path) -> _ParseStep:
                 parts.append("\n")
         text = "".join(parts).strip()
         if text:
-            paragraphs.append(text)
+            paragraphs.append(f"{prefix} {text}" if prefix else text)
     # Ảnh docx không có vị trí trong dòng text ⇒ gắn vào một "trang" cuối.
     return _ParseStep(pages=[_Page(text="\n\n".join(paragraphs), images=media_images)])
 

@@ -65,7 +65,7 @@ def require_admin(user: AuthenticatedUser = Depends(get_current_user)) -> Authen
 def get_conversation_repo():
     settings = get_settings()
     if settings.database_url:
-        return PostgresConversationRepository(settings.database_url)
+        return PostgresConversationRepository(settings.asyncpg_dsn)
     return InMemoryConversationRepository()
 
 
@@ -73,7 +73,7 @@ def get_conversation_repo():
 def get_document_access_repo():
     settings = get_settings()
     if settings.nats_mode.strip().lower() == "nats" and settings.database_url:
-        return PostgresDocumentAccessRepository(settings.database_url)
+        return PostgresDocumentAccessRepository(settings.asyncpg_dsn)
     return InMemoryDocumentAccessRepository()
 
 
@@ -81,7 +81,7 @@ def get_document_access_repo():
 def get_notification_repo():
     settings = get_settings()
     if settings.nats_mode.strip().lower() == "nats" and settings.database_url:
-        return PostgresNotificationRepository(settings.database_url)
+        return PostgresNotificationRepository(settings.asyncpg_dsn)
     return InMemoryNotificationRepository()
 
 
@@ -89,7 +89,7 @@ def get_notification_repo():
 def get_user_access_profile_repo():
     settings = get_settings()
     if settings.nats_mode.strip().lower() == "nats" and settings.database_url:
-        return PostgresUserAccessProfileRepository(settings.database_url)
+        return PostgresUserAccessProfileRepository(settings.asyncpg_dsn)
     return InMemoryUserAccessProfileRepository()
 
 
@@ -246,9 +246,27 @@ def get_langchain_mcp_tools_loader() -> LangChainMCPToolsLoader | None:
 
 
 @lru_cache
-def get_langchain_model() -> OpenAIResponsesChatModel:
-    """LangChain-compatible model wrapping OpenAI Responses API. Used by LangGraph."""
+def get_langchain_model():
+    """Model LangGraph. Kill-switch LLM_MODEL_ADAPTER:
+      - "responses" (default): OpenAI Responses API (cũ, OpenAI-only) -> prod KHÔNG đổi.
+      - "chat": Chat Completions chuẩn -> route được qua ai-router (cân bằng key + fallback).
+    Khi OPENAI_BASE_URL set + adapter "chat": api_key=internal token, model=CAPABILITY name.
+    """
     settings = get_settings()
+    if settings.llm_model_adapter == "chat":
+        from app.infrastructure.external.langchain_chat_adapter import OpenAIChatModel
+
+        routing = bool(settings.openai_base_url)
+        # Route -> Bearer = token nội bộ (router giữ key thật); fallback key thật khi auth off.
+        api_key = (settings.airouter_internal_token or settings.openai_api_key or "") if routing \
+            else (settings.openai_api_key or "")
+        return OpenAIChatModel(
+            api_key=api_key,
+            base_url=settings.openai_base_url,
+            # route -> gửi capability (router chọn model thật); direct -> tên model thật.
+            model=(settings.llm_capability if routing else settings.openai_llm_model),
+            timeout=float(settings.openai_timeout_seconds),
+        )
     return OpenAIResponsesChatModel(
         api_key=settings.openai_api_key or "",
         model=settings.openai_llm_model,

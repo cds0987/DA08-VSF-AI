@@ -29,6 +29,86 @@ function createConversationId() {
   return crypto.randomUUID()
 }
 
+const LEAVE_TYPE_LABEL: Record<string, string> = {
+  annual: 'phép năm',
+  personal: 'việc riêng',
+  marriage: 'kết hôn',
+  child_marriage: 'con kết hôn',
+  bereavement: 'tang lễ',
+  sick: 'nghỉ ốm',
+  maternity: 'thai sản',
+  unpaid: 'không lương',
+}
+
+function newIdempotencyKey(): string {
+  return globalThis.crypto?.randomUUID?.()
+    ?? `idem-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+// Tách action JSON ra khỏi content thô của trợ lý. Dùng CHUNG cho cả luồng stream
+// (lần đầu) lẫn rehydrate từ lịch sử (toChatMessage) -> reload không bị lòi raw JSON.
+// Hỗ trợ NHIỀU đơn 1 lượt: model xuất {action_type, items:[{...},...]} -> mỗi item là
+// 1 form riêng. Vẫn nhận format cũ {action_type, parameters:{...}} (1 đơn).
+// Trả { actions, content }: actions = danh sách payload; content = câu dẫn nhập.
+function extractAction(rawContent: string): { actions?: any[]; content: string } {
+  const trimmed = (rawContent || '').trim()
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(trimmed)
+      // Thẻ duyệt: không cần items/parameters — FE tự nạp hàng đợi live.
+      if (parsed.action_type === 'review_leave_approvals') {
+        const actions = [{ action_type: 'review_leave_approvals', idempotency_key: newIdempotencyKey() }]
+        return { actions, content: buildActionIntro(actions) }
+      }
+      if (parsed.action_type) {
+        const rawItems: any[] = Array.isArray(parsed.items)
+          ? parsed.items
+          : (parsed.parameters ? [parsed.parameters] : [])
+        if (rawItems.length) {
+          // Mỗi đơn 1 idempotency_key riêng (sinh 1 lần lúc dựng card) -> bấm Confirm
+          // nhiều lần / nhiều đơn không tạo trùng nhau.
+          const actions = rawItems.map(p => ({
+            action_type: parsed.action_type,
+            parameters: p,
+            idempotency_key: newIdempotencyKey(),
+          }))
+          return { actions, content: buildActionIntro(actions) }
+        }
+        // action_type hợp lệ nhưng thiếu items/parameters → fallback, không hiện raw JSON
+        return { content: 'Mình đã xử lý yêu cầu của bạn. Bạn có thể hỏi thêm nếu cần nhé.' }
+      }
+    } catch {
+      // JSON không hợp lệ → coi như text thường, hiện nguyên văn
+    }
+  }
+  return { content: rawContent }
+}
+
+function describeLeave(p: any): string {
+  const typeLabel = LEAVE_TYPE_LABEL[p?.leave_type] || p?.leave_type || ''
+  const range = p?.start_date === p?.end_date
+    ? `ngày ${p?.start_date}`
+    : `từ ${p?.start_date} đến ${p?.end_date}`
+  return `nghỉ ${typeLabel} ${range}`.trim()
+}
+
+// Model chỉ trả PURE JSON cho action -> dựng câu dẫn nhập tiếng Việt thân thiện hiển
+// thị phía trên (các) form xác nhận. 1 đơn -> 1 câu; nhiều đơn -> liệt kê.
+function buildActionIntro(actions: { action_type?: string; parameters?: any }[]): string {
+  if (actions.some(a => a.action_type === 'review_leave_approvals')) {
+    return 'Đây là các đơn đang chờ bạn duyệt. Bạn xem rồi bấm **Duyệt** hoặc **Từ chối** cho từng đơn nhé.'
+  }
+  const leaves = actions.filter(a => a.action_type === 'create_leave_request')
+  if (leaves.length === 1) {
+    return `Mình đã chuẩn bị đơn ${describeLeave(leaves[0].parameters)}. Bạn kiểm tra, chỉnh sửa nếu cần rồi bấm **Xác nhận & Gửi** nhé.`
+  }
+  if (leaves.length > 1) {
+    const lines = leaves.map((a, i) => `${i + 1}. ${describeLeave(a.parameters)}`).join('\n')
+    return `Mình đã chuẩn bị ${leaves.length} đơn nghỉ:\n${lines}\n\nBạn kiểm tra từng đơn, chỉnh sửa nếu cần rồi bấm **Xác nhận & Gửi** cho mỗi đơn nhé.`
+  }
+  return 'Mình đã chuẩn bị thông tin bên dưới, bạn kiểm tra rồi xác nhận giúp mình nhé.'
+}
+
 function isConversationId(value: string | null | undefined) {
   return Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value))
 }
@@ -68,6 +148,8 @@ function toCitation(source: QuerySource, id: string): Citation {
     document_id: sourceDocumentId(source),
     document: source.document_name,
     caption: source.caption,
+    snippet: source.snippet,
+    score: source.score,
     heading_path: source.heading_path,
     page_number: source.page_number,
     ref: source.ref,
@@ -76,10 +158,15 @@ function toCitation(source: QuerySource, id: string): Citation {
 
 function toChatMessage(message: ConversationHistoryMessage): ChatMessage {
   const createdAt = new Date(message.created_at)
+  // Trợ lý có thể đã lưu raw JSON action -> parse lại để render form khi reload lịch sử.
+  const extracted = message.role === 'assistant'
+    ? extractAction(message.content)
+    : { content: message.content, actions: undefined as any }
   return {
     id: message.id,
     role: message.role,
-    content: message.content,
+    content: extracted.content,
+    actions: extracted.actions,
     citations: message.sources?.map((source, index) => toCitation(
       source,
       message.id + '-source-' + index,
@@ -140,12 +227,14 @@ export const useChatStore = defineStore('chat', () => {
   const isHistoryLoading = ref(false)
   const isHistoryClearing = ref(false)
   const isUsingHistoryFallback = ref(false)
+  const conversationLoadError = ref<'error' | null>(null)
   const pipeline = ref<number>(-1)
   const streamingText = ref('')
   const thinkingStatus = ref('')
   const traceLog = ref<TraceEntry[]>([])
   const panelCitation = ref<Citation | null>(null)
   const isPanelOpen = ref(false)
+  const pendingProactiveDoc = ref<{ name: string; docId: string | null } | null>(null)
   let abortController: AbortController | null = null
 
   function setInput(val: string) {
@@ -205,10 +294,7 @@ export const useChatStore = defineStore('chat', () => {
       conversations.value.unshift(conversation)
     }
     conversations.value.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    fallbackConversations.value = conversations.value.map((item) => ({
-      ...item,
-      messages: item.messages.map((message) => ({ ...message })),
-    }))
+    persistFallbackHistory()
   }
 
   function ensureConversationId() {
@@ -218,13 +304,20 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function persistFallbackHistory() {
-    fallbackConversations.value = conversations.value.map((item) => ({
-      ...item,
-      messages: item.messages.map((message) => ({ ...message })),
-    }))
+    try {
+      fallbackConversations.value = conversations.value.map((item) => ({
+        ...item,
+        messages: item.messages.map((message) => ({ ...message })),
+      }))
+    } catch (err) {
+      // QuotaExceededError: storage đầy — giữ lịch sử in-memory, bỏ qua persist
+      if (err instanceof DOMException && err.name === 'QuotaExceededError') return
+      throw err
+    }
   }
 
   function activateConversation(conversation: Conversation) {
+    conversationLoadError.value = null
     abortController?.abort()
     abortController = null
     currentConversationId.value = conversation.id
@@ -258,9 +351,43 @@ export const useChatStore = defineStore('chat', () => {
       persistFallbackHistory()
       isUsingHistoryFallback.value = false
       return true
-    } catch {
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        // Không còn trên server → xóa khỏi lịch sử, không hiện cho user
+        conversations.value = conversations.value.filter((item) => item.id !== id)
+        persistFallbackHistory()
+        currentConversationId.value = null
+        messages.value = []
+        return false
+      }
       isUsingHistoryFallback.value = true
+      conversationLoadError.value = 'error'
       return false
+    }
+  }
+
+  // Fetch và sync chi tiết một conversation mà không có UI side effect.
+  // Dùng trong syncHistory để thử từng candidate mà không gây flicker.
+  // Trả về conversation đã sync nếu thành công, 'not-found' nếu server 404,
+  // hoặc 'error' nếu lỗi tạm thời (network, 5xx) — để caller không xóa nhầm.
+  async function syncConversationDetail(
+    id: string,
+  ): Promise<Conversation | 'not-found' | 'error'> {
+    if (!conversations.value.find((item) => item.id === id)) return 'not-found'
+    try {
+      const detail = await queryService.fetchConversation(id)
+      const synced: Conversation = {
+        id: detail.id,
+        title: detail.title,
+        updatedAt: detail.updated_at,
+        bucket: getBucket(new Date(detail.updated_at)),
+        messages: detail.messages.map(toChatMessage),
+      }
+      const index = conversations.value.findIndex((item) => item.id === id)
+      if (index >= 0) conversations.value.splice(index, 1, synced)
+      return synced
+    } catch (err: any) {
+      return err?.response?.status === 404 ? 'not-found' : 'error'
     }
   }
 
@@ -334,19 +461,58 @@ export const useChatStore = defineStore('chat', () => {
         return true
       }
 
-      const selected = (
-        currentConversationId.value
-          ? conversations.value.find((item) => item.id === currentConversationId.value)
-          : null
-      ) || conversations.value[0]
-      if (!serverIds.has(selected.id)) {
-        activateConversation(selected)
+      // Không có session trước (logout hoặc lần đầu): chỉ populate sidebar,
+      // không tự mở conversation — giống ChatGPT/Gemini.
+      if (!currentConversationId.value) {
+        isUsingHistoryFallback.value = false
+        persistFallbackHistory()
+        return true
+      }
+
+      const preferred = conversations.value.find((item) => item.id === currentConversationId.value)
+      if (!preferred) {
+        // ID không còn trong list (bị xóa/hết hạn) → về empty state
+        currentConversationId.value = null
+        isUsingHistoryFallback.value = false
+        persistFallbackHistory()
+        return true
+      }
+
+      if (!serverIds.has(preferred.id)) {
+        activateConversation(preferred)
         persistFallbackHistory()
         isUsingHistoryFallback.value = true
         return true
       }
-      const loaded = await loadConversation(selected.id)
-      if (!loaded) throw new Error('Could not load selected conversation')
+
+      // Optimistic: hiện cached data ngay lập tức, server data replace sau khi fetch xong.
+      activateConversation(preferred)
+
+      // 404 → xóa khỏi list, thử candidate tiếp theo.
+      // 'error' (lỗi tạm thời) → dừng ngay, giữ preferred đang hiện, không demote.
+      const candidates = [
+        preferred,
+        ...conversations.value.filter((item) => item.id !== preferred.id && serverIds.has(item.id)),
+      ]
+      let winner: Conversation | null = null
+      for (const candidate of candidates) {
+        const result = await syncConversationDetail(candidate.id)
+        if (result !== 'not-found' && result !== 'error') {
+          winner = result
+          break
+        }
+        if (result === 'error') break
+        conversations.value = conversations.value.filter((item) => item.id !== candidate.id)
+      }
+
+      if (winner) {
+        // Bug 2: chỉ activate nếu user chưa tự switch sang conversation khác.
+        if (currentConversationId.value === preferred.id) activateConversation(winner)
+        isUsingHistoryFallback.value = false
+      } else {
+        // Bug 3/4: lỗi tạm thời hoặc tất cả 404 — giữ optimistic state, đánh dấu fallback.
+        isUsingHistoryFallback.value = true
+      }
       persistFallbackHistory()
       return true
     } catch {
@@ -417,7 +583,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function ask(q: string, pipelineStages: PipelineStage[]) {
+  async function ask(q: string, pipelineStages: PipelineStage[], docIds?: string[] | null) {
     const question = q.trim()
     if (!question || pipeline.value >= 0) return
 
@@ -463,6 +629,7 @@ export const useChatStore = defineStore('chat', () => {
       conversation_id: currentConversationId.value ?? undefined,
       trace_session: currentConversationId.value ?? undefined,
       conversation_title: conversationTitle,
+      document_ids: docIds ?? undefined,
     }
 
     const PHASE_MAP: Record<string, number> = {
@@ -490,7 +657,12 @@ export const useChatStore = defineStore('chat', () => {
           }
         },
         onmessage(message) {
-          const payload: unknown = JSON.parse(message.data)
+          let payload: unknown
+          try {
+            payload = JSON.parse(message.data)
+          } catch {
+            return
+          }
           if (isTokenEvent(payload)) {
             if (payload.token) {
               hasStartedStreaming = true
@@ -551,25 +723,14 @@ export const useChatStore = defineStore('chat', () => {
         await nextTick()
         const result = donePayload as QueryDoneEvent
         
-        // Attempt to extract JSON action from fullContent if it looks like JSON
-        let actionPayload: any = undefined
-        const trimmedContent = fullContent.trim()
-        if (trimmedContent.startsWith('{') && trimmedContent.endsWith('}')) {
-          try {
-            const parsed = JSON.parse(trimmedContent)
-            if (parsed.action_type && parsed.parameters) {
-              actionPayload = parsed
-            }
-          } catch {
-            // Not a valid JSON or not an action payload, treat as normal text
-          }
-        }
+        // Tách action JSON khỏi content (dùng chung helper với rehydrate lịch sử).
+        const extracted = extractAction(fullContent)
 
         const assistant: ChatMessage = {
           id: 'a-' + Date.now(),
           role: 'assistant',
-          content: actionPayload ? '' : fullContent, // Hide raw JSON if it's an action
-          action: actionPayload,
+          content: extracted.content, // intro nếu là action, raw JSON đã được ẩn
+          actions: extracted.actions,
           citations: result.sources.map((source, index) => toCitation(
             source,
             result.session_id + '-source-' + index,
@@ -623,6 +784,41 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function injectProactiveMessage(documentName: string, docId: string | null = null) {
+    if (!currentConversationId.value) {
+      currentConversationId.value = crypto.randomUUID()
+    }
+    messages.value.push({
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: `Tài liệu **${documentName}** vừa được cập nhật. Mình có thể giúp gì cho bạn?`,
+      timestamp: new Date().toISOString(),
+      actions: [
+        {
+          action_type: 'proactive_doc_suggestion',
+          document_name: documentName,
+          doc_id: docId,
+          suggestions: [
+            { label: 'Tóm tắt tài liệu', query: `Tóm tắt nội dung tài liệu ${documentName}` },
+            { label: 'Hỏi về tài liệu', query: `Tài liệu ${documentName} nói về điều gì?` },
+            { label: 'Điểm mới so với tài liệu cũ', query: `So với các tài liệu trước, ${documentName} có gì mới không?` },
+          ],
+        },
+      ],
+    })
+  }
+
+  function queueProactiveMessage(documentName: string, docId: string | null) {
+    pendingProactiveDoc.value = { name: documentName, docId }
+  }
+
+  function flushProactiveMessage() {
+    if (!pendingProactiveDoc.value) return
+    const { name, docId } = pendingProactiveDoc.value
+    pendingProactiveDoc.value = null
+    injectProactiveMessage(name, docId)
+  }
+
   return {
     input,
     files,
@@ -632,6 +828,7 @@ export const useChatStore = defineStore('chat', () => {
     isHistoryLoading,
     isHistoryClearing,
     isUsingHistoryFallback,
+    conversationLoadError,
     pipeline,
     streamingText,
     thinkingStatus,
@@ -651,5 +848,8 @@ export const useChatStore = defineStore('chat', () => {
     renameConversation,
     ask,
     submitFeedback,
+    injectProactiveMessage,
+    queueProactiveMessage,
+    flushProactiveMessage,
   }
 })

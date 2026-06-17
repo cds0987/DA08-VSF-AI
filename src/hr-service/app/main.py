@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# NOTE(build): buộc rebuild hr-service để image chứa migration 0006 (DB prod đã ở
+# revision 0006 nhưng image rollback thiếu file -> alembic 'Can't locate revision 0006'
+# -> hr-migrate exit 255). Rebuild đồng bộ image với DB.
 import logging
 from contextlib import asynccontextmanager
 
@@ -30,6 +33,13 @@ def create_app() -> FastAPI:
             repo_factory=lambda: PostgresHrRepository(settings.database_url),
             publisher=publisher,
         )
+        # Dev/demo: seed hồ sơ HR cho user test (seed thẳng vào users -> không có
+        # employee row) để sếp thấy tên/email trong hàng đợi duyệt. Best-effort.
+        if settings.is_develop:
+            try:
+                await PostgresHrRepository(settings.database_url).seed_demo_employees()
+            except Exception as exc:  # noqa: BLE001 — seed lỗi KHÔNG được làm sập service
+                logging.getLogger("hr-service").warning("seed_demo_employees skipped: %s", exc)
         try:
             yield
         finally:

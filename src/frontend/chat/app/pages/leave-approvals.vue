@@ -49,7 +49,9 @@ async function approve(req: LeaveRequest) {
 
 async function reject(req: LeaveRequest) {
   if (actingId.value) return
-  const reason = window.prompt('Lý do từ chối (tùy chọn):', '') ?? ''
+  const input = window.prompt('Lý do từ chối (tùy chọn):', '')
+  if (input === null) return  // bấm Cancel -> KHÔNG từ chối (trước đây ?? '' vẫn reject — bug).
+  const reason = input
   actingId.value = req.id
   try {
     await hrService.rejectLeaveRequest(req.id, reason)

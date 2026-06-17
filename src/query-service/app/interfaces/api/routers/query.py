@@ -128,6 +128,7 @@ async def query(
                 conversation_id=str(request.conversation_id) if request.conversation_id else None,
                 trace_session=trace_session,
                 conversation_title=request.conversation_title,
+                document_ids=request.document_ids,
             ):
                 yield format_sse(event)
         finally:

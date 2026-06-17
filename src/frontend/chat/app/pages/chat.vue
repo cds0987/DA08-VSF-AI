@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BookOpen, Database, Search, Wand2 } from '@lucide/vue'
+import { AlertTriangle, BookOpen, Database, Search, Wand2 } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { useDebounceFn } from '@vueuse/core'
 import { useSessionStore } from '~/stores/session'
@@ -22,8 +22,7 @@ const chat = useChatStore()
 const router = useRouter()
 const scrollRef = ref<HTMLDivElement | null>(null)
 const hasConversation = computed(() => chat.messages.length > 0 || chat.pipeline >= 0)
-let requiresInstantScroll = false
-let instantScrollScheduled = false
+let scrollRafId: number | null = null
 
 function scrollToBottom(behavior: ScrollBehavior) {
   scrollRef.value?.scrollTo({
@@ -33,28 +32,17 @@ function scrollToBottom(behavior: ScrollBehavior) {
 }
 
 const smoothScrollToBottom = useDebounceFn(() => {
-  if (requiresInstantScroll || chat.isHistoryLoading) return
-  scrollToBottom("smooth")
+  if (scrollRafId || chat.isHistoryLoading) return
+  scrollToBottom('smooth')
 }, 16)
 
-function markForInstantScroll() {
-  requiresInstantScroll = true
-}
-
 function scheduleInstantScroll() {
-  markForInstantScroll()
-  if (!import.meta.client || instantScrollScheduled) return
-
-  instantScrollScheduled = true
-  // Double rAF to ensure browser has updated DOM and height is available
-  requestAnimationFrame(() => {
+  if (!import.meta.client) return
+  if (scrollRafId) cancelAnimationFrame(scrollRafId)
+  scrollRafId = requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      scrollToBottom("auto")
-      // Short delay to wait for any trailing reactive updates
-      setTimeout(() => {
-        requiresInstantScroll = false
-        instantScrollScheduled = false
-      }, 50)
+      scrollToBottom('auto')
+      scrollRafId = null
     })
   })
 }
@@ -76,6 +64,7 @@ onMounted(async () => {
   }
 
   const synced = await chat.syncHistory()
+  chat.flushProactiveMessage()
   if (!synced) {
     toast.warning('Không thể tải lịch sử từ server. Đang sử dụng bản lưu tạm trên thiết bị.')
   }
@@ -83,29 +72,21 @@ onMounted(async () => {
 
 watch(
   () => chat.isHistoryLoading,
-  (isLoading) => {
-    if (isLoading) {
-      markForInstantScroll()
-      return
-    }
-
-    if (requiresInstantScroll) scheduleInstantScroll()
-  },
-  { flush: "sync" },
+  (isLoading) => { if (!isLoading) scheduleInstantScroll() },
+  { flush: 'sync' },
 )
 
 watch(
   () => chat.currentConversationId,
   () => scheduleInstantScroll(),
-  { flush: "sync" },
+  { flush: 'sync' },
 )
 
 watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText], () => {
-  if (requiresInstantScroll || chat.isHistoryLoading) {
+  if (chat.isHistoryLoading) {
     scheduleInstantScroll()
     return
   }
-
   nextTick(smoothScrollToBottom)
 })
 </script>
@@ -117,6 +98,26 @@ watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText
     >
       <div ref="scrollRef" class="flex-1 overflow-y-auto custom-scrollbar">
         <div class="mx-auto flex min-h-full w-full max-w-[860px] flex-col px-8 pb-32 pt-4">
+          <div
+            v-if="chat.isHistoryLoading && !hasConversation"
+            class="flex flex-1 flex-col items-center justify-center gap-3 text-slate-400 dark:text-muted-foreground"
+          >
+            <div class="h-6 w-6 animate-spin rounded-full border-2 border-slate-200 border-t-slate-500 dark:border-muted dark:border-t-muted-foreground" />
+            <span class="text-sm">Đang tải lịch sử...</span>
+          </div>
+          <div
+            v-if="chat.conversationLoadError === 'error'"
+            class="mb-4 flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800/30 dark:bg-amber-900/10 dark:text-amber-400"
+          >
+            <AlertTriangle class="h-4 w-4 shrink-0" />
+            <span>
+              Không tải được toàn bộ cuộc trò chuyện.
+              <button
+                class="ml-1 cursor-pointer font-medium underline hover:no-underline"
+                @click="() => location.reload()"
+              >Hãy thử tải lại trang này.</button>
+            </span>
+          </div>
           <ChatMessages
             v-if="hasConversation"
             :messages="chat.messages"

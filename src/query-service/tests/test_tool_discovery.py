@@ -183,6 +183,7 @@ async def test_act_node_dispatches_generic_tool():
         session_id="sess-test",
         max_iterations=3,
         recent_messages=[],
+        rag_score_threshold=0.45,
     )
     # Inject an AIMessage with a tool_call to it_ticket.
     ai_msg = AIMessage(
@@ -220,7 +221,7 @@ def _rag_tool_state(question: str = "Quy định nghỉ phép năm là gì?"):
         session_id="sess-test",
         max_iterations=3,
         recent_messages=[],
-        rag_score_threshold=0.70,
+        rag_score_threshold=0.45,
     )
     ai_msg = AIMessage(
         content="",
@@ -236,7 +237,7 @@ def _rag_tool_state(question: str = "Quy định nghỉ phép năm là gì?"):
 
 @pytest.mark.asyncio
 async def test_act_node_rag_weak_results_adaptive_fallback():
-    """Chunk dưới ngưỡng nhưng qdrant CÓ kết quả -> fallback top-3 cho LLM, KHÔNG hard-stop."""
+    """Chunk điểm thấp NHƯNG đạt ngưỡng (0.45) -> đưa vào sources, KHÔNG hard-stop NO_INFO."""
     from app.application.langgraph_nodes import act_node
     from app.infrastructure.external.mcp_client import SearchResult
 
@@ -250,7 +251,7 @@ async def test_act_node_rag_weak_results_adaptive_fallback():
                     caption="Chính sách nghỉ phép",
                     parent_text="Nhân viên được 12 ngày phép năm.",
                     heading_path=[],
-                    score=0.28,  # < ngưỡng 0.70 nhưng vẫn có kết quả
+                    score=0.5,  # >= ngưỡng 0.45 -> đạt, vẫn dùng làm nguồn
                 )
             ]
 
@@ -267,8 +268,9 @@ async def test_act_node_rag_weak_results_adaptive_fallback():
 
 
 @pytest.mark.asyncio
-async def test_act_node_rag_no_results_hard_stops_no_info():
-    """Chỉ khi qdrant trả RỖNG mới hard-stop NO_INFO (không có gì để fallback)."""
+async def test_act_node_rag_no_results_passes_to_llm():
+    """Khi qdrant trả RỖNG, act_node KHÔNG hard-stop — LLM tự tổng hợp warm NO_INFO.
+    Phase giữ nguyên ACTING, route_after_act trả "observe" để flow tiếp tục → think → LLM."""
     from app.application.langgraph_edges import route_after_act
     from app.application.langgraph_nodes import act_node
     from app.application.langgraph_state import AgentPhase
@@ -280,12 +282,11 @@ async def test_act_node_rag_no_results_hard_stops_no_info():
     state = _rag_tool_state()
     result = await act_node(state, mcp_client=_EmptyRagMCP())
 
-    assert result["phase"] == AgentPhase.DONE
-    assert result["shortcut_outcome"] == "NO_INFO"
-    assert result["sources"] == []
-    assert result["shortcut_response"]
+    # Không hard-stop — LLM sẽ nhận ToolMessage({"results":[]}) và tự trả lời warm
+    assert result.get("phase") != AgentPhase.DONE
+    assert result.get("shortcut_outcome") is None
     assert result["tool_results"][0]["success"] is False
-    assert route_after_act({**state, **result}) == "answer"
+    assert route_after_act({**state, **result}) == "observe"
 
 
 # ---------------------------------------------------------------------------

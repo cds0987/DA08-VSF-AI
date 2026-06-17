@@ -18,7 +18,10 @@ from typing import Any
 
 from app.application.use_cases.ingestion import IngestDocumentUseCase
 from app.domain.entities.ingest_job import IngestJob, IngestJobStatus
-from app.infrastructure.external.s3_parser import S3_SOURCE_URI_SCHEMES
+from app.infrastructure.external.s3_parser import (
+    S3_SOURCE_URI_SCHEMES,
+    current_storage_uri_scheme,
+)
 
 MAX_DOCUMENT_ID_LENGTH = 255
 MAX_DOCUMENT_NAME_LENGTH = 512
@@ -38,14 +41,15 @@ def normalize_source_uri(key: str, *, default_bucket: str | None) -> str:
 
     document-service publish key TRẦN (vd `raw/<id>/<file>.pdf`), KHÔNG có scheme.
     S3SourceParser chỉ tự tải khi source_uri bắt đầu bằng s3://|gs:// — key trần sẽ
-    bị coi là path local rồi parse fail. Có `default_bucket` -> ghép s3://bucket/key.
-    Key đã có scheme (BE đã đổi contract) -> giữ nguyên. Không có bucket -> trả nguyên
-    (giữ hành vi cũ: uỷ quyền parser local).
+    bị coi là path local rồi parse fail. Có `default_bucket` -> ghép scheme theo backend
+    thật ({s3|gs}://bucket/key, xem current_storage_uri_scheme) để khớp artifact_uri,
+    tránh lệch s3:// vs gs:// trên cùng bucket GCS. Key đã có scheme (BE đã đổi contract)
+    -> giữ nguyên. Không có bucket -> trả nguyên (giữ hành vi cũ: uỷ quyền parser local).
     """
     if key.startswith(S3_SOURCE_URI_SCHEMES):
         return key
     if default_bucket:
-        return f"s3://{default_bucket.strip('/')}/{key.lstrip('/')}"
+        return f"{current_storage_uri_scheme()}://{default_bucket.strip('/')}/{key.lstrip('/')}"
     return key
 
 

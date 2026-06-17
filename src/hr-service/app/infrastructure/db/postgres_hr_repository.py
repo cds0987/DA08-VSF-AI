@@ -28,13 +28,16 @@ from app.domain.entities.dtos import (
     PayrollDTO,
     PerformanceReviewDTO,
 )
+from app.domain.leave_policy import get_policy
 from app.domain.repositories.hr_repository import HrRepository
 from app.domain.repositories.leave_write_repository import (
     ApproverNotConfigured,
     InsufficientLeaveBalance,
     LeaveRequestConflict,
+    LeaveRequestDuplicate,
     LeaveRequestForbidden,
     LeaveRequestNotFound,
+    LeaveRequestOverlapWarning,
     LeaveWriteRepository,
 )
 from app.infrastructure.db.models import (
@@ -190,6 +193,11 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
         employee_code: str | None,
         job_title: str | None,
         manager_user_id: str | None,
+        full_name: str | None,
+        phone_number: str | None,
+        date_of_birth: datetime.date | None,
+        hire_date: datetime.date | None,
+        department: str | None,
         provided_fields: set[str],
     ) -> Optional[EmployeeDTO]:
         def _update() -> Optional[EmployeeDTO]:
@@ -204,6 +212,16 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
                     record.job_title = job_title
                 if "manager_user_id" in provided_fields:
                     record.manager_user_id = manager_user_id
+                if "full_name" in provided_fields:
+                    record.full_name = full_name
+                if "phone_number" in provided_fields:
+                    record.phone_number = phone_number
+                if "date_of_birth" in provided_fields:
+                    record.date_of_birth = date_of_birth
+                if "hire_date" in provided_fields:
+                    record.hire_date = hire_date
+                if "department" in provided_fields:
+                    record.department = department or ""
 
                 record.updated_at = _now()
                 try:
@@ -232,6 +250,10 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
             employment_status=record.employment_status,
             created_at=record.created_at,
             updated_at=record.updated_at,
+            full_name=record.full_name,
+            phone_number=record.phone_number,
+            date_of_birth=record.date_of_birth,
+            hire_date=record.hire_date,
         )
     async def get_leave_balance(self, user_id: str) -> Optional[LeaveBalanceDTO]:
         def _query() -> Optional[LeaveBalanceDTO]:
@@ -305,6 +327,40 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
 
         await asyncio.to_thread(_upsert)
 
+    async def seed_demo_employees(self) -> None:
+        """Dev/demo: user test (nhanvien/sep) được seed THẲNG vào user_svc.users, bỏ qua
+        event UserCreated -> không có hồ sơ HR -> sếp chỉ thấy user_id. Seed employee row
+        (idempotent) cho 2 user test cố định để hàng đợi duyệt hiện tên/email. Chỉ chạy
+        khi APP_STAGE=develop (gọi từ lifespan)."""
+        import uuid as _uuid
+
+        # user_id TẤT ĐỊNH = uuid5 (khớp seed_user.py + HR_DEFAULT_APPROVER).
+        demo = [
+            ("0ee316e0-075f-530e-914a-884e494f3d4e", "nhanvien@company.com", "Nhân viên Demo", "Engineering", "Nhân viên"),
+            ("2dc14f72-64f6-5361-87aa-15e859f7cf90", "sep@company.com", "Sếp Demo", "Engineering", "Quản lý"),
+        ]
+
+        def _seed() -> None:
+            with self._session() as session:
+                for uid, email, name, dept, title in demo:
+                    session.execute(
+                        sa.text(
+                            "INSERT INTO hr_svc.employees "
+                            "(id, user_id, company_email, full_name, department, job_title, "
+                            " employment_status, account_type) "
+                            "VALUES (:id, :uid, :email, :name, :dept, :title, 'active', 'internal') "
+                            "ON CONFLICT (user_id) DO UPDATE SET "
+                            "  full_name = COALESCE(hr_svc.employees.full_name, EXCLUDED.full_name), "
+                            "  job_title = COALESCE(hr_svc.employees.job_title, EXCLUDED.job_title), "
+                            "  updated_at = now()"
+                        ),
+                        {"id": str(_uuid.uuid4()), "uid": uid, "email": email,
+                         "name": name, "dept": dept, "title": title},
+                    )
+                session.commit()
+
+        await asyncio.to_thread(_seed)
+
     async def get_leave_requests(self, user_id: str) -> List[LeaveRequestDTO]:
         def _query() -> List[LeaveRequestDTO]:
             with self._session() as session:
@@ -330,7 +386,12 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
     async def get_attendance(self, user_id: str) -> Optional[AttendanceDTO]:
         def _query() -> Optional[AttendanceDTO]:
             with self._session() as session:
-                row = session.get(AttendanceRecord, user_id)
+                row = session.execute(
+                    sa.select(AttendanceRecord)
+                    .where(AttendanceRecord.user_id == user_id)
+                    .order_by(AttendanceRecord.period.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
                 if row is None:
                     return None
                 return AttendanceDTO(
@@ -435,7 +496,9 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
                             "INSERT INTO hr_svc.attendance "
                             "(user_id, period, work_days, late_count, absent_count) "
                             "VALUES (:uid, :period, :wd, :late, :absent) "
-                            "ON CONFLICT (user_id) DO NOTHING"
+                            # PK composite (user_id, period) -> conflict target phải khớp,
+                            # KHÔNG có unique constraint trên (user_id) đơn cột.
+                            "ON CONFLICT (user_id, period) DO NOTHING"
                         ),
                         {
                             "uid": user_id,
@@ -556,9 +619,16 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
 
     @staticmethod
     def _adjust_balance(session: Session, owner_id: str, leave_type: str, delta_days: int) -> None:
-        """delta_days > 0 = trừ (duyệt); < 0 = hoàn (hủy/sửa-approved). Chỉ annual/sick
-        đụng balance; personal bỏ qua. Trừ vượt hạn mức -> InsufficientLeaveBalance."""
-        if leave_type not in ("annual", "sick"):
+        """delta_days > 0 = trừ (duyệt); < 0 = hoàn (hủy/sửa-approved).
+
+        Định tuyến quỹ theo Leave Type Registry (4 rổ luật LĐ VN):
+        - deduct_pool="annual" -> trừ quỹ phép năm.
+        - deduct_pool="sick"   -> trừ quỹ nghỉ ốm (BHXH cap).
+        - None (rổ 2 sự kiện / rổ 4 không lương / thai sản) -> KHÔNG trừ quỹ.
+        Trừ vượt quỹ -> InsufficientLeaveBalance."""
+        policy = get_policy(leave_type)
+        pool = policy.deduct_pool if policy else "annual"  # type lạ -> mặc định an toàn
+        if pool is None:
             return
         bal = (
             session.query(LeaveBalanceRecord)
@@ -571,15 +641,15 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
             if delta_days > 0:
                 raise InsufficientLeaveBalance("nhân viên chưa có hồ sơ hạn mức phép")
             return
-        if leave_type == "annual":
+        if pool == "annual":
             new_used = bal.annual_leave_used + delta_days
             if new_used > bal.annual_leave_total:
-                raise InsufficientLeaveBalance("vượt hạn mức phép năm còn lại")
+                raise InsufficientLeaveBalance("vượt quỹ phép năm còn lại")
             bal.annual_leave_used = max(0, new_used)
         else:  # sick
             new_used = bal.sick_leave_used + delta_days
             if new_used > bal.sick_leave_total:
-                raise InsufficientLeaveBalance("vượt hạn mức phép ốm còn lại")
+                raise InsufficientLeaveBalance("vượt quỹ nghỉ ốm còn lại")
             bal.sick_leave_used = max(0, new_used)
         bal.updated_at = _now()
 
@@ -590,6 +660,62 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
             session.query(LeaveRequestRecord)
             .filter(LeaveRequestRecord.idempotency_key == idempotency_key)
             .first()
+        )
+
+    @staticmethod
+    def _norm_reason(reason: Optional[str]) -> str:
+        return (reason or "").strip().casefold()
+
+    def _find_active_duplicate(
+        self,
+        session: Session,
+        *,
+        user_id: str,
+        leave_type: str,
+        start: datetime.date,
+        end: datetime.date,
+        reason: str,
+    ):
+        """Đơn active (pending/approved) TRÙNG TOÀN BỘ: cùng user + loại + đúng khoảng
+        ngày + cùng lý do (chuẩn hoá). Khác bất kỳ field nào -> không phải trùng."""
+        candidates = (
+            session.query(LeaveRequestRecord)
+            .filter(
+                LeaveRequestRecord.user_id == user_id,
+                LeaveRequestRecord.leave_type == leave_type,
+                LeaveRequestRecord.start_date == start,
+                LeaveRequestRecord.end_date == end,
+                LeaveRequestRecord.status.in_(("pending", "approved")),
+            )
+            .all()
+        )
+        target = self._norm_reason(reason)
+        for rec in candidates:
+            if self._norm_reason(rec.reason) == target:
+                return rec
+        return None
+
+    def _find_overlaps(
+        self,
+        session: Session,
+        *,
+        user_id: str,
+        start: datetime.date,
+        end: datetime.date,
+    ) -> list[LeaveRequestRecord]:
+        """Đơn active (pending/approved) của user CHỒNG khoảng ngày [start, end]
+        (rec.start <= end AND rec.end >= start). Dùng để cảnh báo khi user có thể
+        đã quên đặt đơn cùng/đè ngày."""
+        return (
+            session.query(LeaveRequestRecord)
+            .filter(
+                LeaveRequestRecord.user_id == user_id,
+                LeaveRequestRecord.status.in_(("pending", "approved")),
+                LeaveRequestRecord.start_date <= end,
+                LeaveRequestRecord.end_date >= start,
+            )
+            .order_by(LeaveRequestRecord.start_date)
+            .all()
         )
 
     def _new_request(
@@ -633,6 +759,7 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
         reason: str,
         default_approver: str,
         idempotency_key: Optional[str] = None,
+        confirm_overlap: bool = False,
     ) -> dict:
         start, end = _parse_date(start_date), _parse_date(end_date)
 
@@ -641,6 +768,33 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
                 existing = self._find_by_key(session, idempotency_key)
                 if existing is not None:
                     return {"request": _req_to_dict(existing), "created": False}
+                dup = self._find_active_duplicate(
+                    session,
+                    user_id=user_id,
+                    leave_type=leave_type,
+                    start=start,
+                    end=end,
+                    reason=reason,
+                )
+                if dup is not None:
+                    status_vi = "đang chờ duyệt" if dup.status == "pending" else "đã được duyệt"
+                    raise LeaveRequestDuplicate(
+                        f"Bạn đã có một đơn nghỉ y hệt ({status_vi}) cho khoảng ngày này — "
+                        f"không tạo thêm để tránh trùng.",
+                        existing=_req_to_dict(dup),
+                    )
+                # Chồng ngày nhưng khác nội dung: user có thể quên -> cảnh báo, để user
+                # xác nhận (confirm_overlap) thay vì tạo mù hoặc chặn cứng.
+                if not confirm_overlap:
+                    overlaps = self._find_overlaps(
+                        session, user_id=user_id, start=start, end=end
+                    )
+                    if overlaps:
+                        raise LeaveRequestOverlapWarning(
+                            "Bạn đã có đơn nghỉ trùng/đè lên khoảng ngày này. Kiểm tra lại "
+                            "bên dưới — nếu vẫn muốn tạo đơn mới, hãy xác nhận.",
+                            existing=[_req_to_dict(o) for o in overlaps],
+                        )
                 approver = self._resolve_approver(session, user_id, default_approver)
                 rec = self._new_request(
                     session,
@@ -771,9 +925,52 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
                     .order_by(LeaveRequestRecord.created_at.asc())
                     .all()
                 )
-                return [_req_to_dict(row) for row in rows]
+                return [self._enrich_approval(session, row) for row in rows]
 
         return await asyncio.to_thread(_list)
+
+    def _enrich_approval(self, session: Session, row: LeaveRequestRecord) -> dict:
+        """Đính kèm GỢI Ý QUYẾT ĐỊNH cho sếp: số phép còn lại của NV (annual/sick;
+        personal không trừ quỹ -> None) + cờ trùng lịch (đơn active khác của cùng NV
+        đè khoảng ngày). Giúp sếp duyệt nhanh, không phải tra cứu tay."""
+        item = _req_to_dict(row)
+        remaining: int | None = None
+        total: int | None = None
+        bal = session.get(LeaveBalanceRecord, row.user_id)
+        policy = get_policy(row.leave_type)
+        pool = policy.deduct_pool if policy else None
+        if bal is not None and pool == "annual":
+            remaining = bal.annual_leave_total - bal.annual_leave_used
+            total = bal.annual_leave_total
+        elif bal is not None and pool == "sick":
+            remaining = bal.sick_leave_total - bal.sick_leave_used
+            total = bal.sick_leave_total
+        # Rổ 2 (sự kiện) / rổ 4 (không lương) / thai sản: không trừ quỹ -> remaining=None.
+        conflicts = (
+            session.query(LeaveRequestRecord)
+            .filter(
+                LeaveRequestRecord.user_id == row.user_id,
+                LeaveRequestRecord.id != row.id,
+                LeaveRequestRecord.status.in_(("pending", "approved")),
+                LeaveRequestRecord.start_date <= row.end_date,
+                LeaveRequestRecord.end_date >= row.start_date,
+            )
+            .count()
+        )
+        item["employee_leave_remaining"] = remaining
+        item["employee_leave_total"] = total
+        item["has_conflict"] = conflicts > 0
+        # Danh tính nhân viên (từ bảng employees) -> sếp thấy tên/email thay user_id.
+        emp = (
+            session.query(EmployeeRecord)
+            .filter(EmployeeRecord.user_id == row.user_id)
+            .first()
+        )
+        item["employee_name"] = emp.full_name if emp else None
+        item["employee_email"] = emp.company_email if emp else None
+        item["employee_department"] = emp.department if emp else None
+        item["employee_job_title"] = emp.job_title if emp else None
+        return item
 
     async def update_leave_status(
         self,

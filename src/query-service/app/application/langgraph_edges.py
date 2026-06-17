@@ -30,7 +30,10 @@ def route_after_think(state: AgentState) -> str:
     - Has tool_calls? → act_node
     - No tool_calls? → answer_node (final answer)
     """
-    last_msg = state["messages"][-1]
+    messages = state.get("messages") or []
+    if not messages:
+        return "answer"
+    last_msg = messages[-1]
     tool_calls = getattr(last_msg, "tool_calls", None) or []
     if tool_calls:
         return "act"
@@ -41,18 +44,12 @@ def route_after_act(state: AgentState) -> str:
     """
     Conditional edge after act_node.
 
-    rag_search may decide the request must end with a hard NO_INFO response
-    (for example no document access or no qualified sources). In that case,
-    do not loop back into the LLM.
+    Hard-stop (shortcut_outcome set) only for technical errors:
+    ACL violation (no doc access), MCP circuit open, or uncaught exception.
+    Empty results without error fall through to observe → think → LLM.
     """
     if state.get("shortcut_outcome"):
         return "answer"
     return "observe"
 
 
-def route_after_observe(state: AgentState) -> str:
-    """
-    After observing tool result, always go back to think_node.
-    (think_node uses state["force_answer"] to decide whether to call tools or emit the final answer.)
-    """
-    return "think"

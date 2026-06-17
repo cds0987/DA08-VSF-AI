@@ -222,11 +222,14 @@ class LangfuseTracer:
         usage_metadata: dict | None,
         start_dt: datetime,
         end_dt: datetime,
+        router: dict | None = None,
     ) -> None:
         """Tạo 1 generation con (per-node LLM call) gắn vào trace. Best-effort.
 
         Gọi sau mỗi on_chat_model_end event trong astream_events. node = langgraph_node
         (vd 'triage', 'think') từ event metadata. Tái dùng _build_usage để tính cost.
+        router = {key_id, provider, tier, ...} từ ai-router -> gắn metadata để Langfuse lọc
+        "request này dùng key/tier nào" (per-key aggregate tổng hợp ở Grafana).
         """
         if handle is None:
             return
@@ -240,7 +243,7 @@ class LangfuseTracer:
                     "output_tokens": usage_metadata.get("output_tokens", 0),
                     "cached_tokens": cached,
                 })
-            handle.trace.generation(
+            gen_kwargs: dict = dict(
                 name=node or "llm",
                 model=model or "",
                 start_time=start_dt,
@@ -249,6 +252,13 @@ class LangfuseTracer:
                 output=output_text or "",
                 usage=usage,
             )
+            if router:
+                gen_kwargs["metadata"] = {
+                    "router_key_id": router.get("key_id"),
+                    "router_provider": router.get("provider"),
+                    "router_tier": router.get("tier"),
+                }
+            handle.trace.generation(**gen_kwargs)
         except Exception as exc:  # noqa: BLE001
             logger.warning("langfuse_on_llm_failed", extra={"node": node, "error": str(exc)[:200]})
 

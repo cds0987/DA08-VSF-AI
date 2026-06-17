@@ -5,7 +5,8 @@ import json
 
 from app.domain.entities.conversation import ConversationContext, Message
 from app.domain.repositories.conversation_repository import ConversationRepository
-from app.infrastructure.db.postgres_document_access_repo import _asyncpg_url, _import_asyncpg
+from app.infrastructure.db.dsn import to_asyncpg_dsn
+from app.infrastructure.db.postgres_document_access_repo import _import_asyncpg
 
 
 @dataclass
@@ -33,7 +34,7 @@ class StoredConversation:
 
 class PostgresConversationRepository(ConversationRepository):
     def __init__(self, database_url: str) -> None:
-        self._database_url = _asyncpg_url(database_url)
+        self._database_url = to_asyncpg_dsn(database_url)
         self._pool = None
 
     async def get_context(

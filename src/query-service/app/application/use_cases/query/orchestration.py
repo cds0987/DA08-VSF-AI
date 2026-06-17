@@ -144,6 +144,7 @@ class QueryOrchestrationUseCase:
         trace_session: str | None = None,
         conversation_title: str | None = None,
         conversation_id: str | None = None,
+        document_ids: list[str] | None = None,
     ) -> AsyncIterator[dict]:
         """Wrapper mỏng: bọc luồng thật bằng 1 langfuse trace (best-effort, low-level
         client — KHÔNG callback). Tạo trace TRƯỚC _stream_inner để _stream_langgraph có
@@ -166,6 +167,7 @@ class QueryOrchestrationUseCase:
                 question, user,
                 _session_id=pre_session_id,
                 _lang_trace=trace,
+                _document_ids=document_ids,
             ):
                 if event.get("done"):
                     # _usage/_answer là kênh nội bộ (token/model/answer cho langfuse) —
@@ -193,6 +195,7 @@ class QueryOrchestrationUseCase:
         user: AuthenticatedUser,
         _session_id: str | None = None,
         _lang_trace: Any = None,
+        _document_ids: list[str] | None = None,
     ) -> AsyncIterator[dict]:
         started = perf_counter()
         # Dùng session_id được truyền từ stream() (đã tạo trước trace) để trace con
@@ -225,7 +228,8 @@ class QueryOrchestrationUseCase:
         # (e.g. mock mode / no OpenAI key).
         if self._langgraph_agent is not None:
             async for event in self._stream_langgraph(
-                question, user, session_id, started, _lang_trace=_lang_trace
+                question, user, session_id, started, _lang_trace=_lang_trace,
+                document_ids=_document_ids,
             ):
                 yield event
             return
@@ -316,6 +320,7 @@ class QueryOrchestrationUseCase:
         session_id: str,
         started: float,
         _lang_trace: Any = None,
+        document_ids: list[str] | None = None,
     ) -> AsyncIterator[dict]:
         """
         Stream responses using the LangGraph agent.
@@ -331,6 +336,14 @@ class QueryOrchestrationUseCase:
         from langchain_core.messages import HumanMessage, AIMessage as LCAIMessage
 
         allowed_doc_ids = await self._get_allowed_doc_ids(user)
+        # Narrow to request-specified docs (intersect with ACL).
+        # document_ids=None means no filter; user gets all their allowed docs.
+        if document_ids is not None:
+            request_set = set(document_ids)
+            if allowed_doc_ids:
+                allowed_doc_ids = {d for d in allowed_doc_ids if d in request_set}
+            else:
+                allowed_doc_ids = request_set
         effective_department = await self._get_effective_department(user)
 
         # Fetch recent conversation turns for context (follow-up queries like "Ngày mai").
@@ -359,8 +372,8 @@ class QueryOrchestrationUseCase:
             session_id=session_id,
             max_iterations=self._settings.agent_max_iterations,
             recent_messages=recent_lc_messages,
-            rag_score_threshold=self._settings.rag_score_threshold,
             rag_top_k=self._settings.rag_top_k,
+            rag_score_threshold=self._settings.rag_score_threshold,
         )
 
         # Semantic cache — check TRƯỚC astream_events để tránh gọi LLM/tool lãng phí.
@@ -505,10 +518,12 @@ class QueryOrchestrationUseCase:
                                 out_msg = event.get("data", {}).get("output")
                                 output_text = getattr(out_msg, "content", "") or ""
                                 usage_meta_ev = getattr(out_msg, "usage_metadata", None) or {}
-                                model_ev = (
-                                    (getattr(out_msg, "response_metadata", None) or {}).get("model_name")
-                                    or self._settings.openai_llm_model
-                                )
+                                resp_meta_ev = getattr(out_msg, "response_metadata", None) or {}
+                                model_ev = resp_meta_ev.get("model_name") or self._settings.openai_llm_model
+                                # _router (key_id/tier/provider) khi đi qua ai-router -> tag generation
+                                # để Langfuse drill-down "request này dùng key nào" (per-key aggregate
+                                # tổng hợp ở Grafana /metrics, đây chỉ là per-request).
+                                router_ev = resp_meta_ev.get("router") or None
                                 _tracer.on_llm(
                                     _lang_trace,
                                     node=run_info["node"],
@@ -518,6 +533,7 @@ class QueryOrchestrationUseCase:
                                     usage_metadata=usage_meta_ev,
                                     start_dt=run_info["start_dt"],
                                     end_dt=end_dt,
+                                    router=router_ev,
                                 )
                             except Exception:  # noqa: BLE001 — tracing never breaks stream
                                 pass
@@ -895,21 +911,10 @@ class QueryOrchestrationUseCase:
                 yield event
             return
 
-        grounded_results = [
-            result for result in acl_filtered_results if result.score >= self._settings.rag_score_threshold
-        ]
-        if not grounded_results:
-            async for event in self._fallback(
-                user.id, session_id, started, Outcome.NO_INFO,
-                question=question, recent_messages=recent_messages,
-            ):
-                yield event
-            return
-
-        sources = [self._source_payload(result) for result in grounded_results]
+        sources = [self._source_payload(result) for result in acl_filtered_results]
         context_text = "\n\n".join(
             f"[{index + 1}] {result.document_name} / {result.caption}\n{result.parent_text}"
-            for index, result in enumerate(grounded_results)
+            for index, result in enumerate(acl_filtered_results)
         )
         answer_parts: list[str] = []
         async for token in _word_stream(
@@ -917,7 +922,7 @@ class QueryOrchestrationUseCase:
                 question=question,
                 context=context_text,
                 recent_messages=recent_messages,
-                sources=grounded_results,
+                sources=acl_filtered_results,
                 is_hr_answer=False,
                 outcome=Outcome.SUCCESS,
             )
@@ -1141,6 +1146,9 @@ class QueryOrchestrationUseCase:
         return {
             "document_name": result.document_name,
             "caption": result.caption,
+            # snippet = đoạn text literal đã khớp truy vấn -> frontend neo highlight + hiện
+            # trích dẫn (caption chỉ là tóm tắt AI, không khớp nguyên văn trong tài liệu).
+            "snippet": result.child_text,
             "heading_path": result.heading_path,
             "score": result.score,
             "source_gcs_uri": result.source_gcs_uri,

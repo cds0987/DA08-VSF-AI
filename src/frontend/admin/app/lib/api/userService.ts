@@ -1,5 +1,5 @@
 import axiosClient from './axiosClient'
-import type { User } from '~/types'
+import type { CreateUserRequest, CreatedUser, User } from '~/types'
 
 export interface UserListResponse {
   items: User[]
@@ -9,6 +9,11 @@ export interface UserListResponse {
 const userService = {
   async listUsers(params?: { is_active?: boolean; limit?: number; offset?: number }): Promise<UserListResponse> {
     const response = await axiosClient.get<UserListResponse>('/users', { params, service: 'user' })
+    return response.data
+  },
+
+  async createUser(payload: CreateUserRequest): Promise<CreatedUser> {
+    const response = await axiosClient.post<CreatedUser>('/users', payload, { service: 'user' })
     return response.data
   },
 

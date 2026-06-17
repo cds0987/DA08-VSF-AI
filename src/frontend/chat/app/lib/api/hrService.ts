@@ -33,6 +33,7 @@ export function useHRService() {
     end_date: string
     reason: string
     idempotency_key?: string
+    confirm_overlap?: boolean
   }) {
     return await $fetch<{ id: string; status: string; approver_user_id?: string; days_count?: number }>(
       baseUrl,

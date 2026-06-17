@@ -216,6 +216,11 @@ jobs:
           python-version: "3.13"
       - name: Lint Alembic migration chains (all services)
         run: python infra/ci/migration_lint.py src
+      # Chặn DRIFT code<->migration cho query-service (custom SQL migrator, không Alembic):
+      # code tham chiếu query_svc.<bảng> mà không migration nào tạo -> fail. Bắt đúng class
+      # lỗi user_access_profile (sự cố 2026-06-16) mà unit/e2e/migrator cũ đều lọt.
+      - name: Check schema drift (query-service code <-> migrations)
+        run: python infra/ci/schema_drift_check.py src/query-service
 
   # ─────────────────── Phase 1b: CONTRACT PARITY ──────────────────────
   # Guard CONTRACT giữa rag-worker (producer) và mcp-service (consumer): cùng
@@ -250,7 +255,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # secrets.OPENAI_API_KEY (key test mặc định) đã bị REVOKE -> dùng OPENAI_API_KEY_1
+      # (pool router). Compose e2e đổ biến này vào cả query-service (direct) lẫn pool ai-router.
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY_1 }}
       GCS_HMAC_KEY: ${{ secrets.GCS_HMAC_KEY }}
       GCS_HMAC_SECRET: ${{ secrets.GCS_HMAC_SECRET }}
       GCS_BUCKET: vintravel-chatbot-docs-dev
@@ -294,7 +301,26 @@ jobs:
         run: python infra/e2e/run_e2e.py
       - name: Stack logs on failure
         if: failure()
-        run: docker compose -f docker-compose.e2e.yml logs --no-color | tail -400 || true
+        run: |
+          echo "===== query-service + ai-router + mcp-service (router/adapter debug) ====="
+          docker compose -f docker-compose.e2e.yml logs --no-color query-service ai-router mcp-service | tail -350 || true
+          echo "===== phần còn lại (tail 150) ====="
+          docker compose -f docker-compose.e2e.yml logs --no-color | tail -150 || true
+      # Log ĐẦY ĐỦ từng service làm artifact -> KHÔNG bị tail cắt / langfuse chèn (bài học:
+      # `logs | tail -400` bị langfuse migration nhấn chìm log query-service). Tải về xem sau.
+      - name: Per-service e2e logs (artifact)
+        if: always()
+        run: |
+          mkdir -p e2e-logs
+          for s in query-service ai-router mcp-service rag-worker document-service hr-service user-service; do
+            docker compose -f docker-compose.e2e.yml logs --no-color "$s" > "e2e-logs/$s.log" 2>&1 || true
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-service-logs
+          path: e2e-logs
+          retention-days: 7
       - name: Tear down stack
         if: always()
         run: docker compose -f docker-compose.e2e.yml down -v || true
@@ -451,6 +477,7 @@ jobs:
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
           SEED_ADMIN_PASSWORD: ${{ secrets.SEED_ADMIN_PASSWORD }}
+          SEED_EMPLOYEE_PASSWORD: ${{ secrets.SEED_EMPLOYEE_PASSWORD }}
           LANGFUSE_DB_PASSWORD: ${{ secrets.LANGFUSE_DB_PASSWORD }}
           NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
           LANGFUSE_SALT: ${{ secrets.LANGFUSE_SALT }}
@@ -461,8 +488,13 @@ jobs:
           # Basic Auth gác subdomain langfuse.vsfchat.cloud (render -> deploy/nginx/.htpasswd).
           # Optional: thiếu -> dashboard KHÓA (fail-closed), KHÔNG chặn deploy.
           LANGFUSE_BASIC_AUTH_HTPASSWD: ${{ secrets.LANGFUSE_BASIC_AUTH_HTPASSWD }}
-          # deploy/env/secret.env (env_file -> biến container)
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Basic Auth gác subdomain qdrant.vsfchat.cloud (render -> deploy/nginx/.htpasswd-qdrant).
+          # Optional: thiếu -> dashboard KHÓA (fail-closed), KHÔNG chặn deploy.
+          QDRANT_BASIC_AUTH_HTPASSWD: ${{ secrets.QDRANT_BASIC_AUTH_HTPASSWD }}
+          # deploy/env/secret.env (env_file -> biến container). secrets.OPENAI_API_KEY (key cũ)
+          # đã REVOKE -> dùng OPENAI_API_KEY_1 (key thật còn sống trong pool). mcp-service +
+          # rag-worker gọi embeddings/rerank THẲNG OpenAI bằng key này (EMBED/RERANK_BASE_URL trống).
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY_1 }}
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
           MCP_INTERNAL_TOKEN: ${{ secrets.MCP_INTERNAL_TOKEN }}
           HR_INTERNAL_TOKEN: ${{ secrets.HR_INTERNAL_TOKEN }}
@@ -493,9 +525,9 @@ jobs:
           # ngay trong payload để bootstrap khi VM chưa có remote-entry.sh) -> exec remote-entry.sh.
           PAYLOAD="$(mktemp)"
           for v in DOCKERHUB_USERNAME DOCKERHUB_TOKEN POSTGRES_PASSWORD NEW_RELIC_LICENSE_KEY \
-                   SEED_ADMIN_PASSWORD LANGFUSE_DB_PASSWORD NEXTAUTH_SECRET LANGFUSE_SALT \
+                   SEED_ADMIN_PASSWORD SEED_EMPLOYEE_PASSWORD LANGFUSE_DB_PASSWORD NEXTAUTH_SECRET LANGFUSE_SALT \
                    LANGFUSE_ENCRYPTION_KEY LANGFUSE_INIT_USER_PASSWORD LANGFUSE_PUBLIC_KEY \
-                   LANGFUSE_SECRET_KEY LANGFUSE_BASIC_AUTH_HTPASSWD OPENAI_API_KEY JWT_SECRET_KEY \
+                   LANGFUSE_SECRET_KEY LANGFUSE_BASIC_AUTH_HTPASSWD QDRANT_BASIC_AUTH_HTPASSWD OPENAI_API_KEY JWT_SECRET_KEY \
                    MCP_INTERNAL_TOKEN HR_INTERNAL_TOKEN GCS_HMAC_KEY GCS_HMAC_SECRET LANGSMITH_API_KEY \
                    AIROUTER_INTERNAL_TOKEN OPENAI_API_KEY_1 OPENAI_API_KEY_2 OPENAI_API_KEY_3 \
                    OPENAI_API_KEY_4 OPENAI_API_KEY_5 OPENROUTER_API_KEY_1 OPENROUTER_API_KEY_2 \

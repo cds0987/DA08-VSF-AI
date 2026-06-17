@@ -7,7 +7,10 @@ phải khớp đúng cái rag-worker ghi, nếu không sẽ đọc nhầm/đọc
 from __future__ import annotations
 
 import asyncio
+import binascii
+import re
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, List, Sequence
 
@@ -28,6 +31,7 @@ class SearchHit:
     document_id: str = ""
     document_name: str = ""
     caption: str = ""
+    child_text: str = ""
     parent_text: str = ""
     heading_path: List[str] = field(default_factory=list)
     score: float = 0.0
@@ -43,6 +47,7 @@ def _to_hit(payload: dict, score: float) -> SearchHit:
         document_id=str(m.get("document_id", "")),
         document_name=str(m.get("document_name", "")),
         caption=str(m.get("caption", m.get("child_text", ""))),
+        child_text=str(m.get("child_text", "")),
         parent_text=str(m.get("parent_text", "")),
         heading_path=list(m.get("heading_path", []) or []),
         score=float(score) if score is not None else 0.0,
@@ -52,42 +57,19 @@ def _to_hit(payload: dict, score: float) -> SearchHit:
     )
 
 
-def _bm25_rrf(hits: List[SearchHit], query_text: str, k: int = 60) -> List[SearchHit]:
-    """RRF fusion: dense vector rank + BM25 rank trên candidate pool.
-
-    BM25 chạy trên pool đã lấy từ dense search (không cần full-corpus index riêng).
-    Graceful fallback về dense order nếu rank_bm25 chưa cài hoặc query rỗng.
-    """
-    if len(hits) < 2:
-        return hits
-    q_tokens = query_text.lower().split()
-    if not q_tokens:
-        return hits
-    try:
-        from rank_bm25 import BM25Okapi
-    except ImportError:
-        return hits
-
-    corpus = [(h.caption + " " + h.parent_text).lower().split() for h in hits]
-    bm25 = BM25Okapi(corpus)
-    bm25_scores = bm25.get_scores(q_tokens)  # numpy array, same length as hits
-
-    # BM25 rank (1-indexed, ties broken by original dense order)
-    bm25_rank = [0] * len(hits)
-    for rank, orig_i in enumerate(
-        sorted(range(len(hits)), key=lambda i: bm25_scores[i], reverse=True), start=1
-    ):
-        bm25_rank[orig_i] = rank
-
-    # RRF: dense hits already sorted desc, so dense rank = position + 1
-    rrf_scores = [
-        1.0 / (k + (i + 1)) + 1.0 / (k + bm25_rank[i])
-        for i in range(len(hits))
-    ]
-    order = sorted(range(len(hits)), key=lambda i: rrf_scores[i], reverse=True)
-    # Keep original vector scores; RRF scores (~0.015–0.033) would fail a 0.35+
-    # rag_score_threshold in query-service and silently break the RAG path.
-    return [hits[i] for i in order]
+def _sparse_encode(text: str) -> tuple[list[int], list[float]]:
+    tokens = re.findall(r"\w+", text.lower())
+    if not tokens:
+        return [], []
+    counts = Counter(tokens)
+    result: dict[int, float] = {}
+    for token, count in counts.items():
+        idx = binascii.crc32(token.encode()) % (1 << 16)
+        result[idx] = result.get(idx, 0) + count
+    total = sum(result.values())
+    indices = sorted(result)
+    values = [result[i] / total for i in indices]
+    return indices, values
 
 
 def _vector_size(info: object) -> int | None:
@@ -95,12 +77,19 @@ def _vector_size(info: object) -> int | None:
     vectors = getattr(params, "vectors", None)
     if vectors is None:
         return None
-    if hasattr(vectors, "size"):
+    if hasattr(vectors, "size"):  # unnamed vector (old schema)
         return int(vectors.size)
-    if isinstance(vectors, dict) and len(vectors) == 1:
-        only = next(iter(vectors.values()))
-        size = getattr(only, "size", None)
-        return int(size) if size is not None else None
+    if isinstance(vectors, dict):
+        # Named vectors: "dense" is the primary dense vector
+        dense = vectors.get("dense")
+        if dense is not None:
+            size = getattr(dense, "size", None)
+            return int(size) if size is not None else None
+        # Single-entry fallback (any non-sparse named vector)
+        if len(vectors) == 1:
+            only = next(iter(vectors.values()))
+            size = getattr(only, "size", None)
+            return int(size) if size is not None else None
     return None
 
 
@@ -112,6 +101,12 @@ class QdrantReader:
         self._meta = meta_collection_name(settings.collection)
         self._stamp_id = point_id(f"__contract__::{self._index}")
         self._client = None
+        # Cache schema collection (remote) -> chọn truy vấn tương thích ngược:
+        #   "hybrid"        = named dense + sparse (e371bef, collection mới) -> dense+BM25 fusion.
+        #   "dense_named"   = named dense, chưa có sparse                    -> dense theo tên.
+        #   "dense_unnamed" = vector trần (collection CŨ, prod chưa migrate) -> dense trần.
+        # Tránh hybrid query trên collection cũ -> 0 sources (RAG smoke fail).
+        self._mode: str | None = None
 
     # --- client helpers ---------------------------------------------------
     def _remote_client(self):
@@ -227,6 +222,31 @@ class QdrantReader:
             return await self._search_remote(vector, query_text, top_k, document_ids=document_ids)
         return await asyncio.to_thread(self._search_local, vector, query_text, top_k, document_ids)
 
+    @staticmethod
+    def _collection_mode(info) -> str:
+        """'hybrid' nếu collection có sparse vectors config; ngược lại 'dense'.
+
+        Chỉ phân biệt theo SỰ TỒN TẠI của sparse — vì:
+        - Collection hybrid (mới): query prefetch dense+sparse fusion (cần named vectors).
+        - Collection cũ (unnamed, prod chưa migrate): query 'dense' KHÔNG truyền `using`
+          (đã verify trên prod: query không-using -> OK; using='dense' -> 400).
+        Trước đây phân loại 'dense_named' rồi ép using='dense' trên collection unnamed
+        -> 400 -> 0 sources. Bỏ hẳn nhánh đó."""
+        try:
+            sparse = getattr(info.config.params, "sparse_vectors", None)
+        except Exception:  # noqa: BLE001 — info lạ -> an toàn: dense không-using
+            return "dense"
+        return "hybrid" if sparse else "dense"
+
+    async def _remote_mode(self, client) -> str:
+        if self._mode is None:
+            try:
+                info = await client.get_collection(self._index)
+                self._mode = self._collection_mode(info)
+            except Exception:  # noqa: BLE001 — không lấy được info -> an toàn: dense trần
+                self._mode = "dense_unnamed"
+        return self._mode
+
     async def _search_remote(
         self,
         vector: Sequence[float],
@@ -234,16 +254,37 @@ class QdrantReader:
         top_k: int,
         document_ids: Sequence[str] | None = None,
     ) -> List[SearchHit]:
+        from qdrant_client import models
+
         client = self._remote_client()
-        res = await client.query_points(
-            collection_name=self._index,
-            query=list(vector),
-            limit=top_k,
-            with_payload=True,
-            query_filter=self._build_filter(document_ids),
-        )
-        hits = [_to_hit(p.payload, p.score) for p in res.points]
-        return _bm25_rrf(hits, query_text)
+        doc_filter = self._build_filter(document_ids)
+        mode = await self._remote_mode(client)
+
+        if mode == "hybrid":
+            sparse_idx, sparse_val = _sparse_encode(query_text)
+            res = await client.query_points(
+                collection_name=self._index,
+                prefetch=[
+                    models.Prefetch(query=list(vector), using="dense", limit=top_k, filter=doc_filter),
+                    models.Prefetch(
+                        query=models.SparseVector(indices=sparse_idx, values=sparse_val),
+                        using="sparse", limit=top_k, filter=doc_filter,
+                    ),
+                ],
+                query=models.FusionQuery(fusion=models.Fusion.RRF),
+                limit=top_k,
+                with_payload=True,
+            )
+        else:
+            # Collection cũ (unnamed) -> dense, KHÔNG truyền `using` (verify prod: OK).
+            res = await client.query_points(
+                collection_name=self._index,
+                query=list(vector),
+                query_filter=doc_filter,
+                limit=top_k,
+                with_payload=True,
+            )
+        return [_to_hit(p.payload, p.score) for p in res.points]
 
     def _search_local(
         self,
@@ -252,17 +293,33 @@ class QdrantReader:
         top_k: int,
         document_ids: Sequence[str] | None = None,
     ) -> List[SearchHit]:
+        from qdrant_client import models
+
         client = self._local_client()
         try:
+            doc_filter = self._build_filter(document_ids)
+            sparse_idx, sparse_val = _sparse_encode(query_text)
             res = client.query_points(
                 collection_name=self._index,
-                query=list(vector),
+                prefetch=[
+                    models.Prefetch(
+                        query=list(vector),
+                        using="dense",
+                        limit=top_k,
+                        filter=doc_filter,
+                    ),
+                    models.Prefetch(
+                        query=models.SparseVector(indices=sparse_idx, values=sparse_val),
+                        using="sparse",
+                        limit=top_k,
+                        filter=doc_filter,
+                    ),
+                ],
+                query=models.FusionQuery(fusion=models.Fusion.RRF),
                 limit=top_k,
                 with_payload=True,
-                query_filter=self._build_filter(document_ids),
             )
-            hits = [_to_hit(p.payload, p.score) for p in res.points]
-            return _bm25_rrf(hits, query_text)
+            return [_to_hit(p.payload, p.score) for p in res.points]
         finally:
             close = getattr(client, "close", None)
             if callable(close):

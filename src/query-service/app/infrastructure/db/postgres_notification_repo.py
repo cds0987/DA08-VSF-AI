@@ -2,12 +2,13 @@ from datetime import timezone
 
 from app.domain.entities.notification import Notification
 from app.domain.repositories.notification_repository import NotificationRepository
-from app.infrastructure.db.postgres_document_access_repo import _asyncpg_url, _import_asyncpg
+from app.infrastructure.db.dsn import to_asyncpg_dsn
+from app.infrastructure.db.postgres_document_access_repo import _import_asyncpg
 
 
 class PostgresNotificationRepository(NotificationRepository):
     def __init__(self, database_url: str) -> None:
-        self._database_url = _asyncpg_url(database_url)
+        self._database_url = to_asyncpg_dsn(database_url)
         self._pool = None
 
     async def save(

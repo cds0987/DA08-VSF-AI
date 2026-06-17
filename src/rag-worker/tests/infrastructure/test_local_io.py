@@ -88,7 +88,7 @@ def test_local_file_parser_reads_html_source_under_source_root(
         finally:
             parser.close()
 
-        assert parsed.markdown == "Guide\n\nHello world."
+        assert parsed.markdown == "# Guide\n\nHello world."
 
     asyncio.run(scenario())
 

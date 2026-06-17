@@ -9,6 +9,14 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str | None = None
 
+    @property
+    def asyncpg_dsn(self) -> str | None:
+        """DSN đã sạch cho asyncpg (xoá dialect SQLAlchemy). Repo dùng property này,
+        KHÔNG tự cắt chuỗi -> đóng class lỗi DSN +psycopg (sự cố 2026-06-16)."""
+        from app.infrastructure.db.dsn import to_asyncpg_dsn
+
+        return to_asyncpg_dsn(self.database_url) if self.database_url else None
+
     auth_mode: str = "mock"
     jwt_secret_key: str = "your-secret-key-change-in-production"
     jwt_algorithm: str = "HS256"
@@ -19,9 +27,30 @@ class Settings(BaseSettings):
 
     llm_mode: str = "openai"
     openai_api_key: str | None = None
-    openai_llm_model: str = "gpt-5.4-mini"
+    openai_llm_model: str = "gpt-5.4-nano"
     openai_embedding_model: str = "text-embedding-3-small"
     openai_timeout_seconds: int = 30
+
+    # ── AI gateway (ai-router) ────────────────────────────────────────────────
+    # openai_base_url RỖNG -> gọi THẲNG OpenAI (hành vi cũ, kill-switch tức thì). Set
+    # http://ai-router:8010/v1 -> mọi LLM/embedding đi qua router (cân bằng key + cost-per-key).
+    # ACTIVE prod từ 2026-06-17 (LLM_MODEL_ADAPTER=chat). Bài học: router chat_stream từng
+    # trùng keyword 'stream' -> SSE vỡ; đã fix + test regression ở ai-router.
+    # Khi route: api_key = AIROUTER_INTERNAL_TOKEN; `model` gửi đi = CAPABILITY name (router
+    # tự chọn model thật). KHÔNG route: `model` = tên model thật bên dưới.
+    openai_base_url: str | None = None
+    # Token nội bộ gửi cho ai-router (Bearer) khi route. TÁCH khỏi openai_api_key để client
+    # direct CHƯA migrate (intent/guardrail dùng responses.create) vẫn gọi thẳng OpenAI bằng
+    # key thật, còn adapter routed gửi token -> router auth ON không làm gãy 2 client kia.
+    # Rỗng (auth router off, vd e2e) -> fallback openai_api_key (router bỏ qua Bearer).
+    airouter_internal_token: str | None = None
+    # Adapter LangGraph: "responses" (cũ, OpenAI-only) | "chat" (chuẩn, route được qua router).
+    # Default "responses" -> prod KHÔNG đổi cho tới khi parity test xanh + bật "chat" có chủ đích.
+    llm_model_adapter: str = "responses"
+    # Capability name gửi khi route qua ai-router (chỉ dùng khi openai_base_url set).
+    llm_capability: str = "think"          # câu trả lời chính: think (gpt-5.4-nano, fallback deepseek)
+    intent_capability: str = "triage"      # phân loại nhanh
+    guardrail_capability: str = "guardrail"
 
     mcp_mode: str = "mock"
     mcp_service_url: str = "http://localhost:8003"
@@ -78,9 +107,9 @@ class Settings(BaseSettings):
 
     semantic_cache_ttl_seconds: int = 3600
     semantic_cache_threshold: float = 0.90
-    rag_score_threshold: float = 0.45  # 0.35–0.44 là weak context gây hallucination
     rag_result_limit: int = 3
     rag_top_k: int = 8  # số chunk tối đa mỗi lần gọi rag_search (LangGraph path)
+    rag_score_threshold: float = 0.75  # cosine threshold để show citations cho user
     llm_max_output_tokens: int = 1500
     rag_context_max_chars: int = 10000
     query_rate_limit_per_minute: int = 20

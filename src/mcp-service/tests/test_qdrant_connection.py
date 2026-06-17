@@ -45,7 +45,13 @@ def _settings(**overrides) -> McpSettings:
 
 
 def test_available_connection_options_includes_builtin_contributors() -> None:
-    assert available_connection_options() == ["api_key", "basic_auth", "timeout", "url"]
+    assert available_connection_options() == [
+        "api_key",
+        "basic_auth",
+        "check_compatibility",
+        "timeout",
+        "url",
+    ]
 
 
 def test_build_remote_client_kwargs_matches_existing_remote_behavior() -> None:
@@ -62,6 +68,7 @@ def test_build_remote_client_kwargs_matches_existing_remote_behavior() -> None:
         "url": "https://qdrant.example.run.app:443",
         "api_key": "secret",
         "timeout": 12,
+        "check_compatibility": False,
         "headers": {
             "X-Trace": "1",
             "Authorization": basic_auth_header("user:pass"),

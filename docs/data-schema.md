@@ -231,12 +231,17 @@ CREATE TABLE hr_svc.departments (
 CREATE TABLE hr_svc.employees (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id           UUID UNIQUE NOT NULL,       -- logical reference to user_db.user_svc.users.id
+    account_type      VARCHAR(20) NOT NULL DEFAULT 'internal',
     employee_code     VARCHAR(50) UNIQUE,
     company_email     VARCHAR(255) UNIQUE NOT NULL,
     department        VARCHAR(100) NOT NULL,
     job_title         VARCHAR(150),
     manager_user_id   UUID,                      -- logical reference to direct manager's user_id
     employment_status VARCHAR(20) NOT NULL DEFAULT 'active',
+    full_name         VARCHAR(255),
+    phone_number      VARCHAR(30),
+    date_of_birth     DATE,
+    hire_date         DATE,
     created_at        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     updated_at        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
@@ -278,12 +283,13 @@ CREATE INDEX idx_leave_req_approver ON hr_svc.leave_requests(approver_user_id, s
 
 -- Chấm công theo kỳ 'YYYY-MM' — self-access (intent attendance)
 CREATE TABLE hr_svc.attendance (
-    user_id     UUID PRIMARY KEY,
-    period      VARCHAR(7) NOT NULL,        -- 'YYYY-MM'
-    work_days   INTEGER NOT NULL DEFAULT 0,
-    late_count  INTEGER NOT NULL DEFAULT 0,
+    user_id      UUID NOT NULL,
+    period       VARCHAR(7) NOT NULL,        -- 'YYYY-MM'
+    work_days    INTEGER NOT NULL DEFAULT 0,
+    late_count   INTEGER NOT NULL DEFAULT 0,
     absent_count INTEGER NOT NULL DEFAULT 0,
-    updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+    updated_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, period)
 );
 
 -- Onboarding checklist — self-access (intent onboarding), item linh hoạt dạng JSONB
@@ -332,8 +338,8 @@ CREATE INDEX idx_performance_user ON hr_svc.performance_reviews(user_id, period 
 > **Intent đã expose qua `hr_query`:** `leave_balance`, `leave_requests`, `attendance`, `onboarding`, **`payroll`**, **`benefits`**, **`performance`**.
 > **Mô hình truy cập = self-access:** mọi query lọc cứng `WHERE user_id = <token user>`. Intent nhạy cảm (`payroll`/`benefits`/`performance`) **không cần role-gate** vì là data của chính user; hr-service ghi **audit log** mỗi lần truy cập (không log số liệu). Mở rộng manager-xem-cấp-dưới (dùng `employees.manager_user_id`) để dành cho giai đoạn sau — additive, không phá contract hiện tại.
 > `recruitment` **hoãn** — vốn là dữ liệu cross-user (ứng viên), không hợp mô hình self-access.
-> `employee_profile` / `org_structure` **không tạo bảng** — lấy từ JWT claim (user-service sở hữu data đó).
-> Migration: `0001_create_hr_schema` (7 bảng đầu) + `0002_add_benefits_performance` (benefits, performance_reviews).
+> `org_structure` **không tạo bảng** — quan hệ manager/subordinate đọc qua `employees.manager_user_id` (self-join).
+> Migration: `0001_create_hr_schema` (7 bảng đầu) + `0002_add_benefits_performance` (benefits, performance_reviews) + `0003_leave_request_write` (idempotency_key, cancelled_at) + `0004_add_account_type` + `0004_seed_departments` + `0005_add_employee_profile_fields` (full_name, phone_number, date_of_birth, hire_date; fix attendance composite PK).
 
 ---
 

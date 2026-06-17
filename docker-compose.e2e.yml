@@ -468,6 +468,32 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # ai-router — BẬT để e2e CHỨNG MINH luồng trả lời chính route qua router (cân bằng key +
+  # cost-per-key). Auth OFF (không set AIROUTER_INTERNAL_TOKEN) -> query-service gửi key thật
+  # làm Bearer, router bỏ qua + dùng pool OPENAI_API_KEY_1 (= key e2e) gọi OpenAI thật.
+  ai-router:
+    image: ai-router:e2e
+    build:
+      context: ./src/ai-router
+    ports:
+      - "127.0.0.1:8010:8010"
+    environment:
+      AIROUTER_REDIS_URL: redis://redis:6379/1
+      OPENAI_API_KEY_1: ${OPENAI_API_KEY:?set OPENAI_API_KEY in .env}
+      # Auth ON (mirror prod khi secret set) -> test luôn đường credential: query-service phải
+      # gửi đúng token này, nếu plumbing sai = 401 = e2e đỏ = chặn deploy (bắt bug TRƯỚC prod).
+      AIROUTER_INTERNAL_TOKEN: e2e-router-token
+    depends_on:
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
   query-service:
     image: query-service:e2e
     build:
@@ -490,6 +516,14 @@ services:
       LLM_MODE: openai
       OPENAI_LLM_MODEL: gpt-4o-mini
       OPENAI_EMBEDDING_MODEL: text-embedding-3-small
+      # ── BẬT ai-router mode (MIRROR PROD): luồng trả lời chính (LangGraph) qua chat.completions
+      # -> router. Dùng ĐÚNG capability prod = "think" (-> gpt-5.4-nano) để test đúng model prod
+      # sẽ chạy, KHÔNG phải answer/gpt-4o-mini. intent/embed vẫn direct OpenAI (chưa migrate) ->
+      # OPENAI_API_KEY = key THẬT; còn adapter routed gửi AIROUTER_INTERNAL_TOKEN (tách credential).
+      LLM_MODEL_ADAPTER: "chat"
+      OPENAI_BASE_URL: http://ai-router:8010/v1
+      LLM_CAPABILITY: think
+      AIROUTER_INTERNAL_TOKEN: e2e-router-token
       USE_LANGGRAPH: "true"
       AGENT_MAX_ITERATIONS: "3"
       MCP_MODE: real
@@ -522,6 +556,8 @@ services:
         condition: service_completed_successfully
       mcp-service:
         condition: service_started
+      ai-router:
+        condition: service_healthy
       query-migrate:
         condition: service_completed_successfully
       langfuse:

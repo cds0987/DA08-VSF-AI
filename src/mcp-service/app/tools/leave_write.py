@@ -24,7 +24,11 @@ from app.tools.base import register_tool
 
 logger = logging.getLogger("mcp-service")
 
-LeaveType = Literal["annual", "sick", "personal"]
+# 4 rổ luật LĐ VN — khớp Leave Type Registry ở hr-service (app/domain/leave_policy.py).
+# mcp chỉ proxy; hr-service validate cap/quỹ. 'personal' giữ cho tương thích đơn cũ.
+LeaveType = Literal[
+    "annual", "marriage", "child_marriage", "bereavement", "sick", "maternity", "unpaid", "personal",
+]
 
 
 def _mask_user_id(user_id: str) -> str:
