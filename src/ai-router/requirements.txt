@@ -13,4 +13,6 @@ opentelemetry-distro==0.48b0
 opentelemetry-exporter-otlp-proto-grpc==1.27.0
 opentelemetry-instrumentation-fastapi==0.48b0
 opentelemetry-instrumentation-httpx==0.48b0
-setuptools>=70
+# opentelemetry-instrument 0.48b0 cần pkg_resources. setuptools mới ĐÃ BỎ pkg_resources ->
+# pin version cụ thể CÒN pkg_resources (đã gây ModuleNotFoundError -> ai-router DOWN khi bật OTel).
+setuptools==75.6.0
