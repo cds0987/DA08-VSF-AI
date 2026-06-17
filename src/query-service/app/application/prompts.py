@@ -69,8 +69,12 @@ GROUP 1: SAFETY — Emergency, physical injury, serious mental health. Include s
   "compensation", "insurance", or "occupational safety regulation" is an internal policy question → ALLOW,
   unless the user is reporting an immediate real-world emergency or injury happening now.
 
-GROUP 2: META — Questions about conversation history only ("what was my last question", "what did I ask earlier",
-         "nhắc lại câu hỏi trước của tôi").
+GROUP 2: META — Questions about conversation history:
+  (a) Previous question: "what was my last question", "what did I ask earlier", "nhắc lại câu hỏi trước của tôi".
+  (b) Previously cited documents/sources: "tài liệu trên là gì", "các tài liệu bạn vừa dùng",
+      "nguồn tham khảo trong câu trước là gì", "tài liệu được nhắc đến trong câu hỏi X",
+      "các tài liệu đó là gì", any question asking about previously cited documents/sources
+      without introducing a new substantive topic.
 
 GROUP 3: CLARIFY — In scope but too vague, no topic anchor.
   If history is sufficient to understand intent → ALLOW. Generate 1 specific follow-up in Vietnamese

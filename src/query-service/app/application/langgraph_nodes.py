@@ -243,12 +243,43 @@ async def triage_node(state: AgentState, model: BaseChatModel) -> dict:
         }
 
     if canonical == "meta":
-        # Look up the most recent prior user message in conversation history.
+        import re as _re
+        from langchain_core.messages import AIMessage as _AI, HumanMessage as _HM
+        current_q = state["question"].strip()
+        q_lower = current_q.lower()
+
+        _SOURCE_KEYWORDS = (
+            "tài liệu", "nguồn", "source", "trích dẫn", "references",
+            "tài liệu trên", "tài liệu đó", "tài liệu vừa",
+        )
+        is_source_question = any(kw in q_lower for kw in _SOURCE_KEYWORDS)
+
+        if is_source_question:
+            # Extract cited document names injected into the last assistant message in history.
+            cited_names: list[str] = []
+            for msg in reversed(list(state.get("messages") or [])):
+                if isinstance(msg, _AI):
+                    m = _re.search(r"\[Nguồn tham khảo:([^\]]+)\]", str(msg.content or ""))
+                    if m:
+                        cited_names = [n.strip() for n in m.group(1).split(",") if n.strip()]
+                        break
+            if cited_names:
+                meta_answer = (
+                    "Dựa trên câu trả lời trước, các tài liệu được trích dẫn bao gồm:\n"
+                    + "\n".join(f"- {n}" for n in cited_names)
+                )
+            else:
+                meta_answer = "Mình không tìm thấy thông tin tài liệu nào trong lịch sử hội thoại."
+            return {
+                "shortcut_response": meta_answer,
+                "shortcut_outcome": "SUCCESS",
+                "phase": AgentPhase.DONE,
+            }
+
+        # Not a source question — look up the most recent prior user question.
         # Skip any message that equals the current question — the save-ordering fix
         # ensures state["messages"] holds only prior turns, but the guard prevents
         # stale behaviour in edge cases where history is unavailable/stale.
-        from langchain_core.messages import HumanMessage as _HM
-        current_q = state["question"].strip()
         prev_q: str | None = None
         for msg in reversed(list(state.get("messages") or [])):
             if isinstance(msg, _HM):
