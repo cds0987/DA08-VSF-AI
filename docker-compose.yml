@@ -300,6 +300,8 @@ services:
   # ───────────── AI Router (gateway OpenAI-compatible, stateless) ─────────────
   # Đứng GIỮA AI-logic service và provider (OpenAI/OpenRouter). Service trỏ base_url
   # http://ai-router:8010/v1 + dùng OpenAI SDK như cũ (MOSA, zero dependency).
+  # ACTIVE 2026-06-17: query-service route LLM chính qua đây (LLM_MODEL_ADAPTER=chat +
+  # OPENAI_BASE_URL). Rollback tức thì: query-service.env -> LLM_MODEL_ADAPTER=responses.
   # ⚠ AN TOÀN: KHÔNG service nào depends_on ai-router -> ai-router chết KHÔNG kéo sập app.
   # Key auto-discover từ secret.env (OPENAI_API_KEY_{n} / OPENROUTER_API_KEY_{n}); state ở redis.
   ai-router:

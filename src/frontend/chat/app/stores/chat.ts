@@ -146,6 +146,8 @@ function toCitation(source: QuerySource, id: string): Citation {
     document_id: sourceDocumentId(source),
     document: source.document_name,
     caption: source.caption,
+    snippet: source.snippet,
+    score: source.score,
     heading_path: source.heading_path,
     page_number: source.page_number,
     ref: source.ref,
@@ -348,6 +350,31 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  // Fetch và sync chi tiết một conversation mà không có UI side effect.
+  // Dùng trong syncHistory để thử từng candidate mà không gây flicker.
+  // Trả về conversation đã sync nếu thành công, 'not-found' nếu server 404,
+  // hoặc 'error' nếu lỗi tạm thời (network, 5xx) — để caller không xóa nhầm.
+  async function syncConversationDetail(
+    id: string,
+  ): Promise<Conversation | 'not-found' | 'error'> {
+    if (!conversations.value.find((item) => item.id === id)) return 'not-found'
+    try {
+      const detail = await queryService.fetchConversation(id)
+      const synced: Conversation = {
+        id: detail.id,
+        title: detail.title,
+        updatedAt: detail.updated_at,
+        bucket: getBucket(new Date(detail.updated_at)),
+        messages: detail.messages.map(toChatMessage),
+      }
+      const index = conversations.value.findIndex((item) => item.id === id)
+      if (index >= 0) conversations.value.splice(index, 1, synced)
+      return synced
+    } catch (err: any) {
+      return err?.response?.status === 404 ? 'not-found' : 'error'
+    }
+  }
+
   function restoreFallbackHistory() {
     const stored = fallbackConversations.value
     const selectedIndex = currentConversationId.value
@@ -418,19 +445,46 @@ export const useChatStore = defineStore('chat', () => {
         return true
       }
 
-      const selected = (
+      const preferred = (
         currentConversationId.value
           ? conversations.value.find((item) => item.id === currentConversationId.value)
           : null
       ) || conversations.value[0]
-      if (!serverIds.has(selected.id)) {
-        activateConversation(selected)
+      if (!serverIds.has(preferred.id)) {
+        activateConversation(preferred)
         persistFallbackHistory()
         isUsingHistoryFallback.value = true
         return true
       }
-      const loaded = await loadConversation(selected.id)
-      if (!loaded) throw new Error('Could not load selected conversation')
+
+      // Bug 1: hiện cached data ngay lập tức, server data replace sau khi fetch xong.
+      activateConversation(preferred)
+
+      // 404 → xóa khỏi list, thử candidate tiếp theo.
+      // 'error' (lỗi tạm thời) → dừng ngay, giữ preferred đang hiện, không demote.
+      const candidates = [
+        preferred,
+        ...conversations.value.filter((item) => item.id !== preferred.id && serverIds.has(item.id)),
+      ]
+      let winner: Conversation | null = null
+      for (const candidate of candidates) {
+        const result = await syncConversationDetail(candidate.id)
+        if (result !== 'not-found' && result !== 'error') {
+          winner = result
+          break
+        }
+        if (result === 'error') break
+        conversations.value = conversations.value.filter((item) => item.id !== candidate.id)
+      }
+
+      if (winner) {
+        // Bug 2: chỉ activate nếu user chưa tự switch sang conversation khác.
+        if (currentConversationId.value === preferred.id) activateConversation(winner)
+        isUsingHistoryFallback.value = false
+      } else {
+        // Bug 3/4: lỗi tạm thời hoặc tất cả 404 — giữ optimistic state, đánh dấu fallback.
+        isUsingHistoryFallback.value = true
+      }
       persistFallbackHistory()
       return true
     } catch {

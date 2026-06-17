@@ -257,7 +257,11 @@ class HaystackRagEngine:
 
         for parent_index, section in enumerate(sections):
             parent_id = f"{doc.document_id}::p{parent_index}"
-            heading_path = [section.section_title] if section.section_title else []
+            # Section không có heading thật -> heading_path RỖNG (UI đã hiển thị tên tài
+            # liệu riêng; nhồi document_name vào đây gây trùng tên ở citation). section_title
+            # metadata fallback về document_name cho dễ trace, KHÔNG ảnh hưởng UI.
+            has_heading = bool(section.section_title) and section.section_title != "(no heading)"
+            heading_path = [section.section_title] if has_heading else []
 
             caption = (
                 captions_by_index[parent_index] if self.captioner is not None else None
@@ -275,14 +279,14 @@ class HaystackRagEngine:
                         # child_text LUÔN = raw child (trước đây nhầm = caption -> chunk
                         # text bị thay bằng tóm tắt AI). caption giữ riêng ở field "caption".
                         "child_text": child,
-                        "bm25_text": f"{section.section_title} {child}" if section.section_title and section.section_title != "(no heading)" else child,
+                        "bm25_text": f"{section.section_title} {child}" if has_heading else child,
                         "parent_id": parent_id,
                         "parent_text": section.parent_text,
                         "document_id": doc.document_id,
                         "document_name": doc.document_name,
                         "file_type": doc.file_type,
                         "page_number": section.section_index,
-                        "section_title": section.section_title,
+                        "section_title": section.section_title if has_heading else doc.document_name,
                         "heading_path": heading_path,
                         "caption": display_caption,
                         "source_uri": source_uri,

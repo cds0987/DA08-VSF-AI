@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 class Source(BaseModel):
     document_name: str
     caption: str
+    snippet: str = ""
     heading_path: list[str]
     score: float
     source_gcs_uri: str

@@ -38,6 +38,8 @@ export interface Citation {
   document_id: string
   document: string
   caption: string
+  snippet?: string
+  score?: number
   heading_path: string[]
   page_number?: number | null
   ref?: number
@@ -56,6 +58,7 @@ export interface QuerySource {
   document_id?: string
   document_name: string
   caption: string
+  snippet?: string
   heading_path: string[]
   score: number
   source_gcs_uri?: string

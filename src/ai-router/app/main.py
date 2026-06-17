@@ -15,9 +15,10 @@ import json
 import logging
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from ai_router.config import get_settings
+from ai_router.observability import render_prometheus
 from ai_router.router import NoCapacityError, Router, RouterCallError, estimate_tokens
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -51,6 +52,15 @@ async def health() -> dict:
 @app.get("/admin/quota", dependencies=[Depends(require_auth)])
 async def admin_quota() -> dict:
     return await router.snapshot()
+
+
+@app.get("/metrics")
+async def metrics() -> PlainTextResponse:
+    """Prometheus scrape. Per-key gauge (Redis) + leading-indicator counter (fallback/resolve-fail).
+    KHÔNG lộ secret (chỉ key_id/secret_env định danh). Bind 127.0.0.1 + mạng compose nội bộ."""
+    snap = await router.snapshot()
+    return PlainTextResponse(render_prometheus(snap, router.metrics),
+                             media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
 @app.post("/admin/reload", dependencies=[Depends(require_auth)])

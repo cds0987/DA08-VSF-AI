@@ -72,7 +72,12 @@ const error = computed<string | null>(() => {
   const meta = typeOptions.value.find(t => t.value === form.leave_type)
   if (!meta) return 'Loại nghỉ không hợp lệ.'
   if (meta.cap && daysBetween(form.start_date, form.end_date) > meta.cap) {
-    return `${meta.label} tối đa ${meta.cap} ngày/lần.`
+    const dur = daysBetween(form.start_date, form.end_date)
+    // Cảnh báo CÓ HƯỚNG DẪN: nói rõ vượt bao nhiêu + cách tách phần dư sang phép năm,
+    // thay vì chặn cụt khiến user bí (vd "cưới 5 ngày" -> 3 ngày kết hôn + 2 ngày phép năm).
+    return `${meta.label} chỉ được tối đa ${meta.cap} ngày/lần (bạn đang chọn ${dur} ngày). `
+      + `Hãy rút ngày kết thúc về tối đa ${meta.cap} ngày, hoặc tách ${dur - meta.cap} ngày dư `
+      + `thành một đơn Phép năm riêng.`
   }
   return null
 })
