@@ -37,6 +37,8 @@ _ACTIVE_CONVERSATION_TITLE: ContextVar[str | None] = ContextVar("active_conversa
 
 # Numeric enum values match the reference REACT agent convention:
 #   REFUSE=1, CLARIFY=2, NO_INFO=3, OFF_TOPIC=4, SUCCESS=5
+_NO_INFO_FALLBACK = "Mình không tìm thấy thông tin này trong tài liệu nội bộ hiện có."
+
 _OUTCOME_ENUM_MAP: dict[str, int] = {
     "REFUSE": Outcome.REFUSE.value,       # 1
     "CLARIFY": Outcome.CLARIFY.value,     # 2
@@ -748,9 +750,19 @@ class QueryOrchestrationUseCase:
 
                             answer = "".join(answer_accumulator)
 
-                            # If LLM returned nothing at all, emit NO_INFO instead of empty SUCCESS
+                            # If LLM returned nothing at all, emit NO_INFO fallback instead of blank
                             if not answer:
                                 shortcut_outcome = "NO_INFO"
+                                answer = _NO_INFO_FALLBACK
+                                for token in _word_chunks(answer):
+                                    yield {
+                                        "token": token,
+                                        "phase": "generating",
+                                        "agent_mode": "langgraph",
+                                        "session_id": session_id,
+                                        "iterations": last_iteration,
+                                    }
+                                    await asyncio.sleep(0)
 
                         sources = final_state.get("sources", [])
                         # shortcut path: 0 iterations; think path: iterations = number of act/observe runs

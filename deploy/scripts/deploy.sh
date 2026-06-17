@@ -97,28 +97,6 @@ docker compose $OBS up -d --no-build --force-recreate prometheus alertmanager ot
 docker compose $OBS up -d --no-build grafana node-exporter cadvisor tempo loki \
   || echo "::warning::monitor stack (grafana/exporters/tempo/loki) up FAILED — app KHÔNG ảnh hưởng"
 
-# [DIAG TẠM] chẩn cadvisor per-container + mountpoint đĩa qua python trong ai-router (reliable).
-echo "==> [DIAG] monitor targets" || true
-sleep 25  # cho prometheus (vừa recreate) + cadvisor discover container
-docker compose exec -T ai-router python - <<'PY' 2>&1 | grep -a DIAG || echo "[DIAG] exec ai-router FAIL"
-import urllib.request, json, re
-def get(u):
-    try: return urllib.request.urlopen(u, timeout=8).read().decode()
-    except Exception as e: return "ERR %s" % e
-t = get("http://prometheus:9090/api/v1/targets?state=active")
-try:
-    for a in json.loads(t)["data"]["activeTargets"]:
-        j=a["labels"].get("job","?")
-        if j in ("cadvisor","node","otel-collector"):
-            print("[DIAG] target", j, a["health"], (a.get("lastError") or "")[:70])
-except Exception as e: print("[DIAG] prom parse err", e, t[:100])
-c = get("http://cadvisor:8080/metrics")
-ls=[l for l in c.splitlines() if l.startswith("container_cpu_usage_seconds_total{")]
-print("[DIAG] cadvisor cpu series=%d sample=%s" % (len(ls), ls[0][:120] if ls else "NONE"))
-n = get("http://node-exporter:9100/metrics")
-mps=sorted(set(re.findall(r'node_filesystem_size_bytes\{[^}]*mountpoint="([^"]*)"', n)))
-print("[DIAG] node mountpoints:", mps[:12])
-PY
 
 echo "==> 4b) LANGFUSE readiness PROD bằng KEY THẬT (NON-FATAL — chỉ cảnh báo)"
 lf_warn() { echo "::warning::LANGFUSE prod: $1 — kiểm tra: docker compose logs langfuse"; }

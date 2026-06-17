@@ -10,6 +10,7 @@ interface NavItem {
 const props = defineProps<{
   item: NavItem
   isCollapsed: boolean
+  disableTooltip?: boolean
 }>()
 
 const route = useRoute()
@@ -49,7 +50,7 @@ const active = computed(() => {
       </NuxtLink>
     </TooltipTrigger>
     <TooltipContent
-      v-if="isCollapsed"
+      v-if="isCollapsed && !disableTooltip"
       side="right"
       class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
     >

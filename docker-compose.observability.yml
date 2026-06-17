@@ -41,11 +41,16 @@ services:
       - /:/rootfs:ro
       - /var/run:/var/run:ro
       - /sys:/sys:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
       - /var/lib/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
     devices:
       - /dev/kmsg
     privileged: true
+    # GHI CHÚ: trên VM cgroup-v2 này, cAdvisor v0.49 chỉ đọc được cgroup root (/) — KHÔNG ra
+    # metric per-container (đã thử mount cgroup + rw socket, không đổi; giới hạn cadvisor+kernel).
+    # Per-service resource sẽ lấy CHUẨN HƠN từ Phase 2 OTel (mỗi service tự báo). Giữ cadvisor
+    # để khi nâng cấp VM/cadvisor sẽ tự có. VM-level resource đã có từ node-exporter.
     restart: unless-stopped
 
   # Alertmanager — gom alert từ Prometheus -> Slack (webhook đọc từ file secret, fail-open).
