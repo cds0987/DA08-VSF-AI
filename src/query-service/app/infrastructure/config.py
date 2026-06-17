@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     # ── AI gateway (ai-router) ────────────────────────────────────────────────
     # openai_base_url RỖNG -> gọi THẲNG OpenAI (hành vi cũ, kill-switch tức thì). Set
     # http://ai-router:8010/v1 -> mọi LLM/embedding đi qua router (cân bằng key + cost-per-key).
+    # ACTIVE prod từ 2026-06-17 (LLM_MODEL_ADAPTER=chat). Bài học: router chat_stream từng
+    # trùng keyword 'stream' -> SSE vỡ; đã fix + test regression ở ai-router.
     # Khi route: api_key = AIROUTER_INTERNAL_TOKEN; `model` gửi đi = CAPABILITY name (router
     # tự chọn model thật). KHÔNG route: `model` = tên model thật bên dưới.
     openai_base_url: str | None = None
