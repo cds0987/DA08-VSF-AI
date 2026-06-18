@@ -133,7 +133,12 @@ function nextCite() {
 
     <div class="px-5 pb-5 pt-4 text-slate-900 dark:text-foreground">
       <!-- Bước agent đã làm (bền vững, thu gọn) — user xem lại agent đã nghĩ/làm gì -->
-      <MessageSteps v-if="data.trace?.length || data.models?.length" :trace="data.trace ?? []" :models="data.models" />
+      <MessageSteps
+        v-if="data.trace?.length || data.models?.length || data.thoughts?.length"
+        :trace="data.trace ?? []"
+        :models="data.models"
+        :thoughts="data.thoughts"
+      />
       <div
         v-if="data.content"
         class="ai-response-markdown prose prose-base prose-slate dark:prose-invert max-w-none font-medium text-slate-900 dark:text-foreground prose-p:font-medium prose-p:leading-relaxed prose-pre:bg-slate-50 dark:prose-pre:bg-background/50 prose-pre:border prose-pre:border-slate-200 dark:prose-pre:border-white/5 [overflow-wrap:anywhere]"

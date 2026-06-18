@@ -7,6 +7,7 @@ interface Props {
   thinkingStatus?: string
   isThinking?: boolean
   models?: NodeModel[]
+  thoughts?: { node: string; text: string }[]
 }
 
 const props = defineProps<Props>()
@@ -77,6 +78,18 @@ function getResultLabel(entry: TraceEntry): string {
         <Cpu class="h-3 w-3 text-blue-500" />
         {{ NODE_LABEL[m.node] ?? m.node }}: {{ m.model }}
       </span>
+    </div>
+
+    <!-- Suy nghĩ / quyết định của model (live) -->
+    <div v-if="thoughts?.length" class="mb-2 space-y-1">
+      <div
+        v-for="(t, i) in thoughts"
+        :key="i"
+        class="rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-1.5 text-[11.5px] leading-relaxed text-slate-600 dark:border-blue-500/15 dark:bg-blue-500/5 dark:text-muted-foreground"
+      >
+        <span class="font-semibold text-blue-600 dark:text-blue-300">{{ NODE_LABEL[t.node] ?? t.node }}:</span>
+        {{ t.text }}
+      </div>
     </div>
 
     <!-- Thinking indicator (before any tool calls) -->

@@ -3,9 +3,9 @@
 // Khác Pipeline.vue (chỉ live lúc đang stream rồi biến mất), component này gắn vào message
 // -> user có thể mở lại xem agent đã tra tài liệu nào, thấy bao nhiêu kết quả.
 import { Search, Database, CheckCircle2, ChevronRight, Sparkles, Cpu } from '@lucide/vue'
-import type { TraceEntry, NodeModel } from '~/types'
+import type { TraceEntry, NodeModel, Thought } from '~/types'
 
-const props = defineProps<{ trace: TraceEntry[]; models?: NodeModel[] }>()
+const props = defineProps<{ trace: TraceEntry[]; models?: NodeModel[]; thoughts?: Thought[] }>()
 
 const open = ref(false)
 
@@ -49,15 +49,15 @@ function resultLabel(e: TraceEntry): string {
 </script>
 
 <template>
-  <div v-if="trace.length || models?.length" class="mb-2.5">
+  <div v-if="trace.length || models?.length || thoughts?.length" class="mb-2.5">
     <!-- Header toggle -->
     <button
-      v-if="trace.length"
+      v-if="trace.length || thoughts?.length"
       class="group flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-muted-foreground dark:hover:bg-white/5 dark:hover:text-foreground"
       @click="open = !open"
     >
       <Sparkles class="h-3.5 w-3.5 text-blue-500" />
-      <span>Agent đã thực hiện {{ trace.length }} bước</span>
+      <span>{{ trace.length ? `Agent đã thực hiện ${trace.length} bước` : 'Xem suy nghĩ của agent' }}</span>
       <ChevronRight
         class="h-3.5 w-3.5 transition-transform"
         :class="open && 'rotate-90'"
@@ -77,8 +77,20 @@ function resultLabel(e: TraceEntry): string {
       </span>
     </div>
 
+    <!-- Suy nghĩ / quyết định của model -->
+    <div v-if="open && thoughts?.length" class="mt-1.5 space-y-1 pl-1">
+      <div
+        v-for="(t, i) in thoughts"
+        :key="`th-${i}`"
+        class="rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-1.5 text-[11.5px] leading-relaxed text-slate-600 dark:border-blue-500/15 dark:bg-blue-500/5 dark:text-muted-foreground"
+      >
+        <span class="font-semibold text-blue-600 dark:text-blue-300">{{ NODE_LABEL[t.node] ?? t.node }}:</span>
+        {{ t.text }}
+      </div>
+    </div>
+
     <!-- Steps -->
-    <div v-if="open" class="mt-1.5 space-y-1 pl-1">
+    <div v-if="open && trace.length" class="mt-1.5 space-y-1 pl-1">
       <div
         v-for="(e, i) in trace"
         :key="i"

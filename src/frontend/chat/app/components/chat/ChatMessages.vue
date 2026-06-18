@@ -14,6 +14,7 @@ defineProps<{
   thinkingStatus?: string
   traceLog?: TraceEntry[]
   modelsUsed?: NodeModel[]
+  thoughts?: { node: string; text: string }[]
 }>()
 
 const emit = defineEmits<{
@@ -41,6 +42,7 @@ const emit = defineEmits<{
       :trace-log="traceLog ?? []"
       :thinking-status="thinkingStatus"
       :models="modelsUsed"
+      :thoughts="thoughts"
       :is-thinking="pipeline >= 0 && pipeline < pipelineStages.length"
     />
     <StreamingBlock

@@ -328,8 +328,10 @@ async def triage_node(state: AgentState, model: BaseChatModel) -> dict:
             "phase": AgentPhase.DONE,
         }
 
-    # ALLOW (and any unrecognised label) — proceed to think_node
-    return {}
+    # ALLOW (and any unrecognised label) — proceed to think_node.
+    # Trả route + reason ra state để orchestration phát "model nghĩ gì" (lý do phân loại)
+    # cho UI minh bạch tư duy.
+    return {"triage_route": canonical, "triage_reason": reason}
 
 
 # ---------------------------------------------------------------------------

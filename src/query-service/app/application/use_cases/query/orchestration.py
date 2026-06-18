@@ -585,9 +585,20 @@ class QueryOrchestrationUseCase:
                     if node == "triage":
                         # JSON phân loại nội bộ — KHÔNG đẩy ra SSE/frontend
                         continue
-                    # split_answer: think là planner (reasoning/quyết tool) — KHÔNG stream
-                    # draft của nó ra UI; chỉ answer node mới stream câu trả lời cuối.
+                    # split_answer: think là planner — KHÔNG trộn draft vào câu trả lời cuối,
+                    # nhưng ĐẨY ra kênh "thought" để UI hiện "model đang nghĩ gì" live (tách
+                    # khỏi answer). Model gọi-tool có thể phát ít/không phát (reasoning ẩn).
                     if self._settings.agent_split_answer and node == "think":
+                        _ttok = event["data"]["chunk"].content
+                        if _ttok:
+                            yield {
+                                "phase": "thought",
+                                "node": "think",
+                                "text": _ttok,
+                                "session_id": session_id,
+                                "agent_mode": "langgraph",
+                                "iterations": last_iteration,
+                            }
                         continue
                     token = event["data"]["chunk"].content
                     if token:
@@ -696,6 +707,19 @@ class QueryOrchestrationUseCase:
                         if span is not None and _tracer is not None:
                             output = event.get("data", {}).get("output") or {}
                             _tracer.span_end(span, output_data=_node_output_summary(output))
+                        # Emit "thought" lý do phân loại của triage -> UI hiện "model nghĩ gì".
+                        if run_name == "triage":
+                            t_out = (event.get("data") or {}).get("output") or {}
+                            if isinstance(t_out, dict) and t_out.get("triage_reason"):
+                                yield {
+                                    "phase": "thought",
+                                    "node": "triage",
+                                    "text": str(t_out.get("triage_reason"))[:300],
+                                    "route": t_out.get("triage_route"),
+                                    "session_id": session_id,
+                                    "agent_mode": "langgraph",
+                                    "iterations": last_iteration,
+                                }
                         # Emit observing event from act node output (ToolMessage with real results)
                         if run_name == "act":
                             out = (event.get("data") or {}).get("output") or {}

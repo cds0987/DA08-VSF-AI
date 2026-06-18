@@ -284,6 +284,7 @@ export const useChatStore = defineStore('chat', () => {
   const thinkingStatus = ref('')
   const traceLog = ref<TraceEntry[]>([])
   const modelsUsed = ref<{ node: string; model: string }[]>([])
+  const thoughts = ref<{ node: string; text: string }[]>([])
   const panelCitation = ref<Citation | null>(null)
   const isPanelOpen = ref(false)
   const pendingProactiveDoc = ref<{ name: string; docId: string | null } | null>(null)
@@ -420,6 +421,7 @@ export const useChatStore = defineStore('chat', () => {
         if (c?.trace?.length) s.trace = c.trace
         if (c?.reasoning) s.reasoning = c.reasoning
         if (c?.models?.length) s.models = c.models
+        if (c?.thoughts?.length) s.thoughts = c.thoughts
       })
       const synced: Conversation = {
         id: detail.id,
@@ -613,6 +615,7 @@ export const useChatStore = defineStore('chat', () => {
     thinkingStatus.value = ''
     traceLog.value = []
     modelsUsed.value = []
+    thoughts.value = []
     pipeline.value = 0
     let fullContent = ''
     let completed = false
@@ -676,6 +679,19 @@ export const useChatStore = defineStore('chat', () => {
               const m = { node: payload.node, model: payload.model }
               if (!modelsUsed.value.some(x => x.node === m.node && x.model === m.model)) {
                 modelsUsed.value.push(m)
+              }
+              return
+            }
+
+            // thought: model nghĩ gì / quyết định gì. think token-stream -> gộp vào dòng
+            // think hiện tại; triage reason -> 1 dòng riêng.
+            if (payload.phase === 'thought' && payload.node && payload.text) {
+              if (payload.node === 'think') {
+                const last = thoughts.value[thoughts.value.length - 1]
+                if (last && last.node === 'think') last.text += payload.text
+                else thoughts.value.push({ node: 'think', text: payload.text })
+              } else {
+                thoughts.value.push({ node: payload.node, text: payload.text })
               }
               return
             }
@@ -774,6 +790,8 @@ export const useChatStore = defineStore('chat', () => {
           trace: traceLog.value.length ? traceLog.value.map(e => ({ ...e })) : undefined,
           // Model thật từng node đã chạy (minh bạch vận hành).
           models: modelsUsed.value.length ? modelsUsed.value.map(m => ({ ...m })) : undefined,
+          // Dòng suy nghĩ/quyết định của model.
+          thoughts: thoughts.value.length ? thoughts.value.map(t => ({ ...t })) : undefined,
         }
         assistant.fallback = result.fallback === true
 
@@ -891,6 +909,7 @@ export const useChatStore = defineStore('chat', () => {
     thinkingStatus,
     traceLog,
     modelsUsed,
+    thoughts,
     panelCitation,
     isPanelOpen,
     setInput,
