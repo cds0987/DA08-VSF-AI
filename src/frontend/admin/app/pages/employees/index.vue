@@ -166,7 +166,7 @@ const isPolling = ref(false)
 const managerOptions = ref<EmployeeItem[]>([])
 const loadManagerOptions = async () => {
   try {
-    const res = await hrService.listEmployees({ limit: 200, offset: 0 })
+    const res = await hrService.listEmployees({ limit: 200, offset: 0, status: 'active' })
     managerOptions.value = res.items
   } catch {
     managerOptions.value = []
