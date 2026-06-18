@@ -207,6 +207,7 @@ def _validate_dates(start_date: str, end_date: str) -> None:
         raise HTTPException(status_code=422, detail="start_date không được là ngày đã qua")
 
 
+
 def _validate_leave_type(leave_type: str, start_date: str, end_date: str) -> None:
     """Loại nghỉ phải hợp lệ (theo registry) + tôn trọng định mức MỖI ĐƠN của rổ sự
     kiện (vd kết hôn ≤ 3 ngày, con kết hôn ≤ 1). Sai -> 422."""
