@@ -97,6 +97,10 @@ class McpSettings:
     top_k_candidates: int
     rerank_top_k: int
     rerank_threshold: float
+    # Graceful fallback: router (embed_base_url) down -> gọi THẲNG OpenAI bằng key dự phòng.
+    # Trống = TẮT (giữ hành vi cũ). Bật khi flip embed_base_url -> ai-router để search KHÔNG sập.
+    embed_fallback_base_url: str = ""
+    embed_fallback_api_key: str = ""
     basic_auth: str = ""
     timeout: int | None = None
     options: Mapping[str, Any] = field(default_factory=dict)
@@ -188,6 +192,8 @@ def load_settings(path: str | os.PathLike[str] | None = None) -> McpSettings:
         timeout=(int(str(params.get("timeout")).strip()) if str(params.get("timeout") or "").strip() else None),
         embed_base_url=str(embedder.get("base_url") or "").strip(),
         embed_api_key=str(embedder.get("api_key") or "").strip(),
+        embed_fallback_base_url=str(embedder.get("fallback_base_url") or "").strip(),
+        embed_fallback_api_key=str(embedder.get("fallback_api_key") or "").strip(),
         rerank_impl=str(reranker.get("impl") or "none").strip().lower(),
         rerank_model=str(reranker.get("model") or "").strip(),
         rerank_base_url=str(reranker.get("base_url") or "").strip(),

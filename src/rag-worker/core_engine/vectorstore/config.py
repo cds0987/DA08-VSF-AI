@@ -62,6 +62,9 @@ class VectorStoreConfig:
     basic_auth: str = ""
     timeout: int | None = None
     options: Mapping[str, Any] = field(default_factory=dict)
+    # BM25 hybrid: named vector "dense" + "sparse" (khớp search mcp). Default OFF = schema cũ
+    # (vector trần) -> KHÔNG đụng collection prod hiện tại. Bật cùng đợt đổi model (collection mới).
+    hybrid: bool = False
 
     @property
     def deployment(self) -> str:
@@ -138,4 +141,5 @@ class VectorStoreConfig:
             url=os.getenv("VECTOR_DB_URL", os.getenv("QDRANT_URL", "")),
             api_key=os.getenv("VECTOR_DB_API_KEY", os.getenv("QDRANT_API_KEY", "")),
             basic_auth=os.getenv("VECTOR_DB_BASIC_AUTH", os.getenv("QDRANT_BASIC_AUTH", "")),
+            hybrid=os.getenv("VECTOR_HYBRID", "").strip().lower() in {"1", "true", "yes", "on"},
         )
