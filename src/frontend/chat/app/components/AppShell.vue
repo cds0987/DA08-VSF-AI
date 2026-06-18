@@ -83,6 +83,11 @@ const maskedEmail = computed(() => {
   if (!domain) return email
   return `${local.slice(0, 3)}*****@${domain}`
 })
+
+const userInitials = computed(() => {
+  if (session.user?.initials) return session.user.initials
+  return (session.user?.email ?? '').slice(0, 2).toUpperCase()
+})
 </script>
 
 <template>
@@ -324,7 +329,7 @@ const maskedEmail = computed(() => {
               <div
                 class="flex shrink-0 items-center justify-center rounded-full bg-blue-600 font-bold text-white border-2 border-blue-500 shadow-md transform-gpu transition-all hover:scale-105 h-9 w-9 text-xs"
               >
-                {{ session.user?.initials }}
+                {{ userInitials }}
               </div>
             </div>
             <div
@@ -332,9 +337,6 @@ const maskedEmail = computed(() => {
               :class="isCollapsed ? 'opacity-0' : 'opacity-100'"
             >
               <div class="truncate text-sm font-semibold text-slate-900 dark:text-sidebar-foreground leading-tight">
-                {{ session.user?.name || maskedEmail }}
-              </div>
-              <div v-if="session.user?.name" class="truncate text-[11px] text-slate-400 dark:text-muted-foreground leading-tight">
                 {{ maskedEmail }}
               </div>
             </div>
