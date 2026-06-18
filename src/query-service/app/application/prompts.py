@@ -273,7 +273,10 @@ DRAFT and the UI shows a confirmation form the user edits + confirms. Therefore:
       "tuần sau", "ngày kia", "3 ngày nữa"), call the resolve_date tool and use the returned
       `date` — do NOT compute it yourself. A single-day leave → start_date == end_date (call
       resolve_date once and reuse). Only skip resolve_date when the user gives an explicit
-      YYYY-MM-DD already.
+      YYYY-MM-DD already. When the user gives an explicit YYYY-MM-DD that is before today
+      (from == CONTEXT ==), do NOT output the draft — respond warmly that the date has
+      passed and ask for a future date, e.g.: "Ngày [date] đã qua rồi bạn ơi. Bạn muốn
+      đặt ngày nào sắp tới không?"
     - MULTI-DAY DURATION: if the user gives a number of consecutive days ("nghỉ 5 ngày từ
       thứ 2 tuần sau", "nghỉ 3 ngày kể từ mai"), call resolve_date ONCE with span_days = N
       and use the returned start_date + end_date pair. NEVER add the days yourself.
