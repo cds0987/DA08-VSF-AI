@@ -42,6 +42,8 @@ TIER_DEFS: dict[str, TierDef] = {
     "free_or": TierDef("free_or", Provider.OPENROUTER, True, "requests_per_day", OPENROUTER_RPM),
     "paid": TierDef("paid", Provider.OPENROUTER, False, "none", OPENROUTER_RPM),
     "embed_oai": TierDef("embed_oai", Provider.OPENAI, None, "none", None),
+    # Embeddings qua OpenRouter (qwen3-embedding-4b): tách túi cost, không cap token.
+    "embed_or": TierDef("embed_or", Provider.OPENROUTER, None, "none", OPENROUTER_RPM),
 }
 
 

@@ -6078,5 +6078,22 @@
       "text"
     ],
     "endpoint": "embeddings"
+  },
+  {
+    "id": "qwen/qwen3-embedding-4b",
+    "provider": "qwen",
+    "name_native": "qwen3-embedding-4b",
+    "name_or": "qwen/qwen3-embedding-4b",
+    "endpoint": "embeddings",
+    "context_length": 33000,
+    "is_free": false,
+    "price_in_per_mtok": 0.02,
+    "price_out_per_mtok": 0.02,
+    "price_in_with_fee": 0.02,
+    "price_out_with_fee": 0.02,
+    "supports_tools": false,
+    "input_modalities": [
+      "text"
+    ]
   }
 ]
