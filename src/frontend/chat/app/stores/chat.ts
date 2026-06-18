@@ -743,6 +743,8 @@ export const useChatStore = defineStore('chat', () => {
           sessionId: result.session_id,
           traceId: result.trace_id,
           timestamp: new Date().toLocaleString(),
+          // Gắn các bước agent đã làm (đã loại pending) -> hiển thị bền vững dưới câu trả lời.
+          trace: traceLog.value.length ? traceLog.value.map(e => ({ ...e })) : undefined,
         }
         assistant.fallback = result.fallback === true
 

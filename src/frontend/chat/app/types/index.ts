@@ -168,6 +168,9 @@ export interface ChatMessage {
   interrupted?: boolean
   // Nhiều đơn 1 lượt -> mỗi phần tử là 1 form xác nhận riêng.
   actions?: HRActionPayload[]
+  // Các bước agent đã thực hiện (tool calls + kết quả) — hiển thị bền vững dưới câu trả lời
+  // để user xem lại agent đã nghĩ/làm gì. Chỉ có ở message sinh trong phiên (history không lưu).
+  trace?: TraceEntry[]
 }
 
 export interface Conversation {
