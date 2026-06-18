@@ -596,6 +596,23 @@ async def compute_health(runtime: RuntimeState) -> HealthReport:
     )
 
 
+def hybrid_enabled_from_env() -> bool:
+    """VECTOR_HYBRID env -> bool. Một nguồn duy nhất cho CẢ 2 nhánh bootstrap."""
+    return os.getenv("VECTOR_HYBRID", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def apply_hybrid_from_env(vector_config: VectorStoreConfig) -> VectorStoreConfig:
+    """Áp VECTOR_HYBRID (env-driven) lên vector_config. Nhánh config.yaml dùng
+    to_vector_store_config() KHÔNG map hybrid -> mặc định False -> worker upsert vector
+    UNNAMED vào collection named dense+sparse (auto_migrate tạo theo from_env hybrid=True)
+    -> Qdrant 400 "Not existing vector name". Override để 2 nhánh ĐỒNG NHẤT.
+    Xem [[rag-worker-bootstrap-two-branches]]."""
+    want = hybrid_enabled_from_env()
+    if vector_config.hybrid == want:
+        return vector_config
+    return replace(vector_config, hybrid=want)
+
+
 def bootstrap_runtime() -> RuntimeState:
     configure_logging(logging.getLevelNamesMapping().get(os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO))
     logger = logging.getLogger(__name__)
@@ -652,13 +669,8 @@ def bootstrap_runtime() -> RuntimeState:
         validate_ai_config(ai_settings, settings)
         validate_vector_config(vector_config)
 
-    # VECTOR_HYBRID env-driven -> áp cho CẢ 2 nhánh bootstrap. Nhánh config.yaml dùng
-    # to_vector_store_config() KHÔNG map hybrid -> mặc định False -> worker upsert vector
-    # UNNAMED vào collection named dense+sparse (auto_migrate tạo theo from_env hybrid=True)
-    # -> Qdrant 400 "Not existing vector name". Xem [[rag-worker-bootstrap-two-branches]].
-    _hybrid_env = os.getenv("VECTOR_HYBRID", "").strip().lower() in {"1", "true", "yes", "on"}
-    if vector_config.hybrid != _hybrid_env:
-        vector_config = replace(vector_config, hybrid=_hybrid_env)
+    # VECTOR_HYBRID env-driven -> áp cho CẢ 2 nhánh bootstrap (xem helper).
+    vector_config = apply_hybrid_from_env(vector_config)
 
     reasons: list[str] = []
     startup_reasons: list[str] = []
