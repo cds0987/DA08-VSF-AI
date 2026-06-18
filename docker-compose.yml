@@ -371,10 +371,10 @@ services:
       <<: *newrelic
       NEW_RELIC_APP_NAME: vsf-rag-worker
       DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/rag_db
-      # MỌI AI qua ai-router: EMBED_API_KEY = AIROUTER_INTERNAL_TOKEN (router giữ key thật
-      # OpenAI/OpenRouter). caption/ocr KẾ THỪA key này -> cùng token. ${} substitute từ deploy
-      # env (như POSTGRES_PASSWORD); env_file không substitute. Thay key OpenRouter direct cũ.
-      EMBED_API_KEY: ${AIROUTER_INTERNAL_TOKEN:-}
+      # 2 KEY RIÊNG (1 key 2 chỗ = sai): embed->OpenRouter cần OpenRouter key; ocr/caption->OpenAI
+      # cần OpenAI key. ${} substitute từ deploy env (như POSTGRES_PASSWORD); env_file không substitute.
+      EMBED_API_KEY: ${OPENROUTER_API_KEY_1:-}
+      CAPTION_API_KEY: ${OPENAI_API_KEY_1:-}
     depends_on:
       nats:
         condition: service_started
