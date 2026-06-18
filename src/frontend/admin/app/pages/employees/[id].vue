@@ -63,10 +63,13 @@ const allEmployees = ref<EmployeeItem[]>([])
 
 const loadManagers = async () => {
   try {
-    const res = await hrService.listEmployees({ limit: 200, offset: 0, status: 'active' })
+    // limit phải <= 100: backend /hr/admin/employees giới hạn le=100, truyền lớn hơn
+    // (trước đây 200) sẽ bị 422 -> danh sách manager rỗng -> dropdown chỉ còn "No manager".
+    const res = await hrService.listEmployees({ limit: 100, offset: 0, status: 'active' })
     allEmployees.value = res.items.filter(e => e.id !== employeeId)
-  } catch {
-    // non-critical, leave list empty
+  } catch (error) {
+    // Không nuốt im lặng: log để lỗi nạp danh sách manager không bị ẩn như bug 422 cũ.
+    console.error('Failed to load manager options:', error)
   }
 }
 
