@@ -70,7 +70,7 @@ services:
   # (mcp-service) nói chuyện qua http://qdrant:6333 nội bộ. Bỏ phụ thuộc Qdrant Cloud /
   # qdrant-base external + nginx basic-auth. Data bền qua volume qdrant_data.
   qdrant:
-    image: qdrant/qdrant:v1.18.0
+    image: qdrant/qdrant:v1.12.4
     volumes:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
