@@ -54,5 +54,8 @@ triage(model triage) → think(model think, planner)
 - **Phase 4** verify ai-router parser bắt `reasoning_tokens`; kill-switch fallback.
 
 ## 5. Trạng thái
-- [x] Phase 0 — khung + standard + test (12 passed)
-- [ ] Phase 1 · [ ] Phase 2 · [ ] Phase 3 · [ ] Phase 4
+- [x] Phase 0 — khung + standard + test (12 passed); CI develop xanh (unit/e2e/build)
+- [x] Phase 1 — `reasoning_oai`/`reasoning_or` + `MosaChatModel` + `build_node_chat_model`
+      + `tests/test_mosa_adapters.py` (11 ca, tổng 23 passed). Reasoning model bỏ
+      temperature/top_p, thêm reasoning_effort; usage giữ reasoning_tokens.
+- [ ] Phase 2 · [ ] Phase 3 · [ ] Phase 4
