@@ -283,6 +283,7 @@ export const useChatStore = defineStore('chat', () => {
   const streamingText = ref('')
   const thinkingStatus = ref('')
   const traceLog = ref<TraceEntry[]>([])
+  const modelsUsed = ref<{ node: string; model: string }[]>([])
   const panelCitation = ref<Citation | null>(null)
   const isPanelOpen = ref(false)
   const pendingProactiveDoc = ref<{ name: string; docId: string | null } | null>(null)
@@ -418,6 +419,7 @@ export const useChatStore = defineStore('chat', () => {
           : cachedMsgs.find((m) => m.role === 'assistant' && m.content === s.content && (m.trace?.length || m.reasoning))
         if (c?.trace?.length) s.trace = c.trace
         if (c?.reasoning) s.reasoning = c.reasoning
+        if (c?.models?.length) s.models = c.models
       })
       const synced: Conversation = {
         id: detail.id,
@@ -610,6 +612,7 @@ export const useChatStore = defineStore('chat', () => {
     streamingText.value = ''
     thinkingStatus.value = ''
     traceLog.value = []
+    modelsUsed.value = []
     pipeline.value = 0
     let fullContent = ''
     let completed = false
@@ -665,6 +668,16 @@ export const useChatStore = defineStore('chat', () => {
               streamingText.value += payload.token
               pipeline.value = pipelineStages.length
               thinkingStatus.value = ''
+            }
+
+            // model_used: ghi nhận model THẬT từng node đã chạy. Xử lý TRƯỚC guard
+            // hasStartedStreaming vì model_used của answer node phát SAU khi token bắt đầu.
+            if (payload.phase === 'model_used' && payload.node && payload.model) {
+              const m = { node: payload.node, model: payload.model }
+              if (!modelsUsed.value.some(x => x.node === m.node && x.model === m.model)) {
+                modelsUsed.value.push(m)
+              }
+              return
             }
 
             // Once answer tokens start, late phase events must not switch the UI
@@ -759,6 +772,8 @@ export const useChatStore = defineStore('chat', () => {
           timestamp: new Date().toLocaleString(),
           // Gắn các bước agent đã làm (đã loại pending) -> hiển thị bền vững dưới câu trả lời.
           trace: traceLog.value.length ? traceLog.value.map(e => ({ ...e })) : undefined,
+          // Model thật từng node đã chạy (minh bạch vận hành).
+          models: modelsUsed.value.length ? modelsUsed.value.map(m => ({ ...m })) : undefined,
         }
         assistant.fallback = result.fallback === true
 
@@ -875,6 +890,7 @@ export const useChatStore = defineStore('chat', () => {
     streamingText,
     thinkingStatus,
     traceLog,
+    modelsUsed,
     panelCitation,
     isPanelOpen,
     setInput,

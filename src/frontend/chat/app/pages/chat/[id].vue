@@ -132,6 +132,7 @@ watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText
             :streaming-text="chat.streamingText"
             :thinking-status="chat.thinkingStatus"
             :trace-log="chat.traceLog"
+            :models-used="chat.modelsUsed"
             @open-citation="chat.handleOpenCitation"
             @feedback="submitFeedback"
             @retry="messageId => chat.retryMessage(messageId, PIPELINE_STAGES)"

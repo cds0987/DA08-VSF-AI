@@ -88,9 +88,11 @@ export interface QueryTokenEvent {
   // reasoning: token "đang nghĩ" của think node (planner) — hiện ở panel thinking, KHÔNG
   // phải câu trả lời cuối.
   reasoning?: string
-  phase?: 'thinking' | 'acting' | 'observing' | 'generating'
+  // phase 'model_used': node vừa chạy xong 1 model -> {node, model} để hiện minh bạch vận hành.
+  phase?: 'thinking' | 'acting' | 'observing' | 'generating' | 'model_used'
   status?: string
   node?: string
+  model?: string
   tool?: string
   tool_args?: Record<string, unknown>
   tool_result_summary?: { count?: number; docs?: string[]; raw?: string }
@@ -176,6 +178,13 @@ export interface ChatMessage {
   trace?: TraceEntry[]
   // Nội dung "đang suy nghĩ" của planner (think node) — lưu để xem lại trong MessageSteps.
   reasoning?: string
+  // Model thật từng node đã chạy (minh bạch vận hành) — hiện badge dưới câu trả lời.
+  models?: NodeModel[]
+}
+
+export interface NodeModel {
+  node: string
+  model: string
 }
 
 export interface Conversation {
