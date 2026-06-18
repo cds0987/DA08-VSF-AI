@@ -29,6 +29,15 @@ def test_reasoning_oai_no_effort_when_none_or_invalid():
     assert "reasoning_effort" not in a.transform_params({"temperature": 0}, reasoning_effort="bogus")
 
 
+def test_reasoning_oai_drops_effort_when_tools_present():
+    # chat.completions: tools + reasoning_effort -> OpenAI 400 (gpt-5.4-mini/o-series).
+    a = get_adapter("reasoning_oai")
+    with_tools = a.transform_params({"tools": [{"type": "function"}]}, reasoning_effort="medium")
+    assert "reasoning_effort" not in with_tools
+    no_tools = a.transform_params({}, reasoning_effort="medium")
+    assert no_tools["reasoning_effort"] == "medium"
+
+
 def test_reasoning_or_strips_sampling_and_streams_reasoning():
     a = get_adapter("reasoning_or")
     out = a.transform_params({"temperature": 0.0, "top_p": 1, "reasoning_effort": "high"})
@@ -89,14 +98,13 @@ def test_mosa_bind_tools_preserves_adapter_config():
 # ----------------------------------------------------------------- build factory
 def test_build_node_model_routed_uses_capability():
     m = build_node_chat_model("think", api_key="x", base_url="http://ai-router:8010/v1")
-    assert m.adapter_name == "reasoning_oai"
-    assert m.reasoning_effort == "medium"
-    assert m.model == "think"           # routed -> field model = capability
+    assert m.adapter_name == "standard"   # default an toàn (xem profiles.yaml)
+    assert m.model == "think"             # routed -> field model = capability
 
 
 def test_build_node_model_direct_uses_real_model():
-    m = build_node_chat_model("think", api_key="x", base_url=None)
-    assert m.model == "o3-mini"          # direct -> model thật từ profiles.models[0]
+    m = build_node_chat_model("think", api_key="x", base_url=None, direct_model="gpt-4o-mini")
+    assert m.model == "gpt-4o-mini"       # direct -> direct_model khi profiles.models rỗng
 
 
 def test_build_node_model_triage_is_standard():

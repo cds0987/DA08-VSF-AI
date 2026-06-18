@@ -29,7 +29,10 @@ class ReasoningOpenAIAdapter(NodeLLMAdapter):
         for k in _UNSUPPORTED:
             out.pop(k, None)
         eff = self._normalise_effort(reasoning_effort)
-        if eff is not None:
+        # chat.completions: tools + reasoning_effort KHÔNG được hỗ trợ cho gpt-5.4-mini/o-series
+        # (OpenAI 400 -> "use /v1/responses"). Có tools -> BỎ reasoning_effort (model vẫn
+        # reason mặc định, chỉ không tinh chỉnh được effort khi gọi tool trên chat API).
+        if eff is not None and not out.get("tools"):
             out["reasoning_effort"] = eff
         else:
             out.pop("reasoning_effort", None)

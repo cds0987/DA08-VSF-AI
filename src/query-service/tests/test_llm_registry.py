@@ -100,13 +100,13 @@ def test_profiles_yaml_loads_expected_nodes():
     assert {"triage", "think", "answer"} <= set(profiles)
 
 
-def test_think_node_profile_is_reasoning():
+def test_think_node_profile_default_standard():
+    # Mặc định an toàn: think=standard (chat.completions + tools KHÔNG dùng reasoning_effort).
     prof = get_node_profile("think")
     assert isinstance(prof, NodeProfile)
     assert prof.capability == "think"
-    assert prof.reasoning_effort == "medium"
-    # adapter của think là reasoning_oai trong manifest (Phase 1 mới đăng ký class này).
-    assert prof.adapter == "reasoning_oai"
+    assert prof.adapter == "standard"
+    assert prof.make_adapter().name == "standard"
 
 
 def test_triage_node_profile():

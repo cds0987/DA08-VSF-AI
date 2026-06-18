@@ -71,6 +71,19 @@ triage(model triage) → think(model think, planner)
       kill-switch: `MosaChatModel.adapter` fallback `standard` khi adapter_name lỗi (không crash node)
       + `tests/test_mosa_killswitch.py` (3 ca).
 
+### ⚠️ Phát hiện từ e2e (quan trọng — ngoài probe o3-mini)
+Capability `think` resolve ra **gpt-5.4-mini**; think node **bind tools**. OpenAI trả:
+> 400: *Function tools with reasoning_effort are not supported for gpt-5.4-mini in
+> /v1/chat/completions. Please use /v1/responses instead.*
+
+→ Trên **chat.completions**, tổ hợp **tools + reasoning_effort** KHÔNG được hỗ trợ (o-series/
+gpt-5.4-mini). Xử lý:
+- **profiles.yaml mặc định mọi node = `standard`** (gửi temperature, KHÔNG reasoning_effort)
+  = đúng hành vi cũ → e2e xanh. Reasoning là **opt-in** khi đã sẵn sàng.
+- **reasoning_oai tự bỏ reasoning_effort khi có `tools`** (phòng hờ khi opt-in).
+- Muốn dùng reasoning_effort cho think (có tool): phải đi **/v1/responses**, hoặc chỉ áp
+  reasoning_effort cho **answer node** (không bind tools).
+
 **Tổng kết:** 5/5 phase xong. Test mới: query-service 37 ca (registry 12, adapters 11, graph 8,
 trace 3, killswitch 3) + ai-router 3 ca. Full suite query-service: 228 passed.
 

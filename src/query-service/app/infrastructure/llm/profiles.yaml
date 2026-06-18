@@ -21,18 +21,21 @@ nodes:
     capability: triage
     reasoning_effort: low
 
-  # Node CHÍNH (planner/reasoning): chọn tool + tổng hợp -> reasoning model.
+  # Node CHÍNH (planner): chọn tool + tổng hợp.
+  # MẶC ĐỊNH 'standard' = hành vi cũ (gửi temperature, KHÔNG reasoning_effort).
+  # ⚠️ KHÔNG để reasoning_oai ở đây nếu think còn bind tools trên chat.completions:
+  # OpenAI 400 "Function tools with reasoning_effort not supported ... use /v1/responses".
+  # Muốn dùng reasoning cho think: hoặc qua /v1/responses, hoặc bỏ effort (adapter tự bỏ
+  # khi có tools — xem reasoning_oai). Đổi adapter ở đây sau khi eval parity xanh.
   think:
-    adapter: reasoning_oai
+    adapter: standard
     capability: think
-    models: [o3-mini]
-    reasoning_effort: medium
 
-  # Sinh câu trả lời cuối (stream token) -> tách riêng để có model + effort riêng.
+  # Sinh câu trả lời cuối (stream token). answer KHÔNG bind tools -> an toàn dùng reasoning
+  # khi bật split + trỏ capability `answer` sang model reasoning. Mặc định standard.
   answer:
     adapter: standard
     capability: answer
-    reasoning_effort: medium
 
   # Guardrail LLM-judge (input/output).
   guardrail:
