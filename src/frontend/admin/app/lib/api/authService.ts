@@ -58,7 +58,7 @@ const authService = {
   async logout(redirect = true): Promise<void> {
     if (!import.meta.client) return
     try {
-      await axiosClient.post('/auth/logout', {}, { service: 'user', withCredentials: true })
+      await axiosClient.post('/auth/admin/logout', {}, { service: 'user', withCredentials: true })
     } catch {
       // best-effort — clear cookies regardless
     }

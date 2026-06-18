@@ -56,6 +56,11 @@ class FakeRefreshUseCase:
         )()
 
 
+class FakeLogoutUseCase:
+    async def execute(self, refresh_token: str) -> None:
+        return None
+
+
 class FakeListUsersUseCase:
     async def execute(
         self,
@@ -191,6 +196,69 @@ def test_refresh_returns_rotated_refresh_token() -> None:
         "token_type": "bearer",
     }
     assert response.cookies.get("refresh_token") == "new-refresh-token"
+
+
+def test_admin_login_sets_isolated_admin_refresh_cookie() -> None:
+    # Admin phải dùng cookie refresh RIÊNG, KHÔNG ghi đè cookie refresh_token của chat.
+    app.dependency_overrides[dependencies.get_login_use_case] = (
+        lambda: FakeAdminLoginUseCase()
+    )
+
+    response = TestClient(app).post(
+        "/auth/admin/login",
+        json={"email": "admin@company.com", "password": "secret"},
+    )
+
+    assert response.status_code == 200
+    assert response.cookies.get("eka.admin.refresh_token") == "refresh-token"
+    assert response.cookies.get("refresh_token") is None
+
+
+def test_admin_refresh_reads_and_rotates_admin_cookie() -> None:
+    app.dependency_overrides[dependencies.get_refresh_token_use_case] = (
+        lambda: FakeRefreshUseCase()
+    )
+
+    response = TestClient(app).post(
+        "/auth/admin/refresh",
+        cookies={"eka.admin.refresh_token": "old-admin-refresh"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "access_token": "new-access-token",
+        "token_type": "bearer",
+    }
+    assert response.cookies.get("eka.admin.refresh_token") == "new-refresh-token"
+
+
+def test_admin_refresh_ignores_chat_cookie() -> None:
+    # Chỉ có cookie chat (refresh_token) -> admin refresh phải 401, không dùng ké session chat.
+    app.dependency_overrides[dependencies.get_refresh_token_use_case] = (
+        lambda: FakeRefreshUseCase()
+    )
+
+    response = TestClient(app).post(
+        "/auth/admin/refresh",
+        cookies={"refresh_token": "chat-refresh"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_admin_logout_clears_admin_cookie() -> None:
+    app.dependency_overrides[dependencies.get_logout_use_case] = (
+        lambda: FakeLogoutUseCase()
+    )
+
+    response = TestClient(app).post(
+        "/auth/admin/logout",
+        cookies={"eka.admin.refresh_token": "admin-refresh"},
+    )
+
+    assert response.status_code == 204
+    # Cookie admin bị xóa (max-age=0); cookie chat không nằm trong response.
+    assert "eka.admin.refresh_token" in response.headers.get("set-cookie", "")
 
 
 def test_me_returns_current_user_shape() -> None:
