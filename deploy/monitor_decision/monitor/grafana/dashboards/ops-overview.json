@@ -1,23 +1,25 @@
 {
   "title": "VSF AI Operations — Overview (7 câu hỏi)",
   "uid": "vsf-ops-overview",
-  "tags": ["ops", "overview", "ai-router"],
+  "tags": ["vsf-ai", "ops", "overview"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
   "templating": { "list": [] },
   "links": [
-    { "title": "AI Router detail ↗", "type": "dashboards", "tags": ["ai-router"], "asDropdown": false, "targetBlank": false }
+    { "title": "Spokes ↗", "type": "dashboards", "tags": ["vsf-ai"], "asDropdown": true, "targetBlank": false },
+    { "title": "Langfuse (runtime/query) ↗", "type": "link", "url": "https://langfuse.vsfchat.cloud", "targetBlank": true }
   ],
   "panels": [
     { "id": 100, "type": "row", "title": "① Hệ thống có khỏe không?", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 } },
     {
       "id": 1, "type": "stat", "title": "AI Router",
-      "description": "up = Prometheus scrape được ai-router. 0 = down (app có thể vẫn chạy kill-switch).",
+      "description": "up = Prometheus scrape được ai-router. 0 = down (app có thể vẫn chạy kill-switch). Click -> spoke.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 1 },
+      "links": [ { "title": "AI Router — Key×Model ↗", "url": "/d/ai-router-main?${__url_time_range}" } ],
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
       "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } } ], "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
       "targets": [ { "expr": "up{job=\"ai-router\"}", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
@@ -26,7 +28,7 @@
       "id": 2, "type": "stat", "title": "Alert đang kêu",
       "description": "Số alert firing (Prometheus ALERTS). >0 = có việc cần xử lý (xem vùng ⑦).",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 1 },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
       "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 3 } ] } } },
       "targets": [ { "expr": "count(ALERTS{alertstate=\"firing\"}) or vector(0)", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
@@ -35,18 +37,39 @@
       "id": 3, "type": "stat", "title": "Số key AI đang đăng ký",
       "description": "airouter_keys_total. Hụt so với kỳ vọng = secret render thiếu.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 },
+      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 1 },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "#388bfd" } } },
       "targets": [ { "expr": "airouter_keys_total", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
     },
     {
       "id": 4, "type": "stat", "title": "Fallback rate (5m)",
       "description": "% request rơi khỏi tier ưu tiên. Cao = drift + tốn tiền.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
+      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 1 },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "area" },
       "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 0.1 }, { "color": "red", "value": 0.3 } ] } } },
       "targets": [ { "expr": "(sum(rate(airouter_fallback_total[5m])) or vector(0)) / clamp_min(sum(rate(airouter_resolve_total[5m])) or vector(0), 1)", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 18, "type": "stat", "title": "Qdrant",
+      "description": "up{job=qdrant}. Click -> Qdrant Vector Store spoke.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 1 },
+      "links": [ { "title": "Qdrant — Vector Store ↗", "url": "/d/qdrant-vector?${__url_time_range}" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } } ], "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+      "targets": [ { "expr": "up{job=\"qdrant\"}", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 19, "type": "stat", "title": "Embedding (drift)",
+      "description": "increase(airouter_model_unmatched_total[6h]) cho capability=embed + tải embed. Click -> AI Router lọc embed.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 1 },
+      "links": [ { "title": "AI Router (embed) ↗", "url": "/d/ai-router-main?var-capability=embed&${__url_time_range}" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } } },
+      "targets": [ { "expr": "sum(increase(airouter_model_unmatched_total{capability=\"embed\"}[6h])) or vector(0)", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
     },
 
     { "id": 700, "type": "row", "title": "⑦ Cần làm gì ngay — Alert đang kêu", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 } },
