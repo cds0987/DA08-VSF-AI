@@ -124,6 +124,27 @@ async def _embed_selftest(retries: int = 6, delay: float = 5.0) -> bool:
     return False
 
 
+async def _chat_selftest(retries: int = 6, delay: float = 5.0) -> bool:
+    """Verify đường CHAT (ocr/caption) qua ai-router ổn trước khi enqueue. Embed pass nhưng
+    ocr 401 transient (ai-router recreate giữa 2 call) -> ocr job KHÔNG retry -> fail. Gác CẢ
+    chat path: chỉ reingest khi ai-router auth ổn cho cả embeddings LẪN chat/completions."""
+    import asyncio as _a
+
+    from core_engine.ai.base import OCR, load_ai_settings
+    from core_engine.ai.openai_provider import OpenAIProvider
+    provider = OpenAIProvider(load_ai_settings())
+    for i in range(1, retries + 1):
+        try:
+            await provider.chat("ping", capability=OCR, max_tokens=1)
+            print(f"  chat(ocr) self-test OK sau {i} lần.")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            print(f"  chat(ocr) self-test lần {i}/{retries} lỗi: {str(exc)[:140]}")
+            if i < retries:
+                await _a.sleep(delay)
+    return False
+
+
 def _reset_db_status(database_url: str, dry_run: bool) -> int:
     from sqlalchemy import create_engine, delete, func, select, update
     from sqlalchemy.orm import Session
@@ -178,11 +199,16 @@ async def _run(dry_run: bool, prefix: str, limit: int | None) -> int:
         print("  [refuse] cần --yes (hoặc _AUTOMIGRATE_YES=1) cho lần chạy thật.", file=sys.stderr)
         return 2
 
-    # 1) EMBED SELF-TEST (chống race 401 sau --force-recreate): chỉ reingest khi embed THẬT chạy.
+    # 1) SELF-TEST CẢ embed LẪN chat(ocr) qua ai-router (chống race 401 sau --force-recreate):
+    #    chỉ reingest khi ai-router auth ổn cho CẢ 2 đường -> ocr job không dính transient 401.
     if not dry_run:
         if not await _embed_selftest():
-            print("  [abort] embed self-test FAIL sau nhiều lần -> KHÔNG enqueue job doomed. "
-                  "Kiểm EMBED_API_KEY/OpenRouter rồi deploy lại (hook tự chạy lại).", file=sys.stderr)
+            print("  [abort] embed self-test FAIL -> KHÔNG enqueue. Kiểm ai-router/embed, deploy lại.",
+                  file=sys.stderr)
+            return 1
+        if not await _chat_selftest():
+            print("  [abort] chat(ocr) self-test FAIL -> KHÔNG enqueue. Kiểm ai-router/ocr, deploy lại.",
+                  file=sys.stderr)
             return 1
 
     # 2) Xóa collection đích nếu tồn tại nhưng RỖNG / SAI schema (artifact cũ 'default' unnamed)
