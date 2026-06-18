@@ -67,8 +67,16 @@ def _qdrant_request(method: str, path: str) -> dict:
         return {"status": "error", "error": str(exc)}
 
 
+def _qdrant_reachable() -> bool:
+    """Qdrant có trả lời không. Dùng để TRÁNH reingest oan khi Qdrant tạm unreachable
+    (deploy đang khởi động): unreachable != collection trống."""
+    resp = _qdrant_request("GET", "/collections")
+    return resp.get("status") == "ok"
+
+
 def _collection_ready(name: str) -> bool:
-    """True nếu collection tồn tại VÀ có điểm (đã ingest xong) -> không cần migrate."""
+    """True nếu collection tồn tại VÀ có điểm (đã ingest xong) -> không cần migrate.
+    Chỉ gọi khi đã biết Qdrant reachable."""
     resp = _qdrant_request("GET", f"/collections/{name}")
     if resp.get("status") != "ok":
         return False
@@ -111,6 +119,12 @@ async def _run(dry_run: bool, prefix: str, limit: int | None) -> int:
     print(f"  Target collection: {target}")
     print(f"  embed_model/dim  : {config.embed_model} / {config.dimension}")
     print(f"  hybrid (BM25)    : {getattr(config, 'hybrid', False)}")
+
+    # SAFETY: Qdrant unreachable -> ABORT (đừng nhầm 'trống' rồi reingest oan).
+    if not _qdrant_reachable():
+        print(f"  [abort] Qdrant ({_qdrant_url()}) KHÔNG reachable -> không migrate (an toàn).",
+              file=sys.stderr)
+        return 1
 
     if _collection_ready(target):
         print(f"  -> Collection '{target}' đã sẵn (có điểm) => NO-OP (config không đổi).")

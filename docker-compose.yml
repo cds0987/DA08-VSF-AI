@@ -371,6 +371,10 @@ services:
       <<: *newrelic
       NEW_RELIC_APP_NAME: vsf-rag-worker
       DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/rag_db
+      # Embed qua OpenRouter (qwen3-embedding-4b): EMBED_API_KEY = OPENROUTER_API_KEY_1.
+      # ${} substitute từ deploy env (như POSTGRES_PASSWORD). env_file không substitute nên
+      # đặt ở đây. CHỈ rag-worker (blue-green) — mcp giữ OpenAI key cho text-embedding-3-small.
+      EMBED_API_KEY: ${OPENROUTER_API_KEY_1:-}
     depends_on:
       nats:
         condition: service_started

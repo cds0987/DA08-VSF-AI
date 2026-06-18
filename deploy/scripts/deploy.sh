@@ -99,6 +99,19 @@ docker compose $OBS up -d --no-build grafana node-exporter tempo loki \
 # Dọn cadvisor cũ (đã gỡ khỏi stack) nếu còn chạy orphan.
 docker rm -f da08-vsf-cadvisor-1 >/dev/null 2>&1 || true
 
+# ── Auto-migration on embed-config change (NON-FATAL, IDEMPOTENT) ───────────────────────
+# Đổi EMBED_MODEL/DIMENSION -> index_id collection MỚI -> script detect + enqueue reingest
+# toàn corpus (rag-worker tự tạo collection đúng schema). Deploy thường: collection đã sẵn
+# -> NO-OP. Qdrant chưa reachable -> ABORT an toàn (KHÔNG reingest oan). Hỏng KHÔNG chặn deploy.
+echo "==> 4aa) Auto-migration embed-config (NON-FATAL, idempotent)"
+sleep 8   # cho rag-worker + qdrant kịp sẵn sau up -d
+if docker exec -w /app da08-vsf-rag-worker-1 \
+     python scripts/auto_migrate_on_config_change.py --yes; then
+  echo "  auto-migration OK (NO-OP nếu collection đã sẵn)."
+else
+  echo "::warning::auto-migration skip/abort (Qdrant chưa sẵn / config không đổi / lỗi). Chạy tay nếu cần: docker exec -w /app da08-vsf-rag-worker-1 python scripts/auto_migrate_on_config_change.py --yes"
+fi
+
 
 echo "==> 4b) LANGFUSE readiness PROD bằng KEY THẬT (NON-FATAL — chỉ cảnh báo)"
 lf_warn() { echo "::warning::LANGFUSE prod: $1 — kiểm tra: docker compose logs langfuse"; }
