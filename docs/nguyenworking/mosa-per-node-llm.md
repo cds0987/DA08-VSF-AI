@@ -66,7 +66,13 @@ triage(model triage) → think(model think, planner)
 - [x] Phase 3 — log/trace per-node: helper `_model_trace_fields` nhúng {adapter, model_id,
       reasoning_effort} vào log `langgraph_triage_start` / `langgraph_think` / `langgraph_answer`
       (kèm session_id) → biết chính xác node nào chạy model nào. `tests/test_node_trace.py` (3 ca).
-- [ ] Phase 4
+- [x] Phase 4 — ai-router `extract_usage` bắt `reasoning_tokens` (+ field `Usage.reasoning_tokens`,
+      KHÔNG cộng lại vào cost vì đã nằm trong output_tokens) + `tests/test_parser_reasoning.py` (3 ca);
+      kill-switch: `MosaChatModel.adapter` fallback `standard` khi adapter_name lỗi (không crash node)
+      + `tests/test_mosa_killswitch.py` (3 ca).
+
+**Tổng kết:** 5/5 phase xong. Test mới: query-service 37 ca (registry 12, adapters 11, graph 8,
+trace 3, killswitch 3) + ai-router 3 ca. Full suite query-service: 228 passed.
 
 ### Cách bật tách answer (sau khi eval parity xanh)
 ```

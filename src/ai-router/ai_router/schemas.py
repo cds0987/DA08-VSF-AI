@@ -92,4 +92,8 @@ class Usage(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+    # reasoning_tokens: phần reasoning của output (o-series/deepseek). LƯU Ý: đã NẰM TRONG
+    # output_tokens (OpenAI completion_tokens gộp reasoning) -> KHÔNG cộng lại khi tính cost;
+    # trường này chỉ để observability (tách phần reasoning).
+    reasoning_tokens: int = 0
     cost_usd: float | None = None            # OpenRouter trả thật; OpenAI = None -> tự tính

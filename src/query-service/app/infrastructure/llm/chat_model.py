@@ -31,7 +31,15 @@ class MosaChatModel(OpenAIChatModel):
     @property
     def adapter(self) -> NodeLLMAdapter:
         if self._adapter_cache is None or self._adapter_cache.name != self.adapter_name:
-            self._adapter_cache = get_adapter(self.adapter_name)
+            try:
+                self._adapter_cache = get_adapter(self.adapter_name)
+            except KeyError:
+                # Kill-switch: adapter_name lỗi (manifest sai) -> 'standard' thay vì crash node.
+                import logging
+                logging.getLogger(__name__).warning(
+                    "mosa_adapter_unregistered name=%s -> fallback standard", self.adapter_name
+                )
+                self._adapter_cache = get_adapter("standard")
         return self._adapter_cache
 
     # ------------------------------------------------------------------ params
