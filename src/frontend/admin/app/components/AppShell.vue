@@ -35,6 +35,14 @@ const handleSignOut = () => {
 }
 
 const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
+
+const maskedEmail = computed(() => {
+  const email = session.user?.email
+  if (!email) return ''
+  const [local, domain] = email.split('@')
+  if (!domain) return email
+  return `${local.slice(0, 3)}*****@${domain}`
+})
 </script>
 
 <template>
@@ -186,7 +194,10 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
               :class="isCollapsed ? 'opacity-0' : 'opacity-100'"
             >
               <div class="truncate text-sm font-semibold text-slate-900 leading-tight">
-                {{ session.user?.name }}
+                {{ session.user?.name || maskedEmail }}
+              </div>
+              <div v-if="session.user?.name" class="truncate text-[11px] text-slate-400 leading-tight">
+                {{ maskedEmail }}
               </div>
             </div>
             <ChevronsUpDown 
