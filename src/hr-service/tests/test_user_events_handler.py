@@ -12,6 +12,7 @@ import pytest
 
 from app.infrastructure.user_events_subscriber import (
     USER_EVENT_SUBJECTS,
+    _ensure_user_events_stream,
     handle_user_event,
     start_user_events_subscriber,
 )
@@ -197,9 +198,33 @@ class FakeConnection:
         self.drained = True
 
 
+class _FakeStreamConfig:
+    def __init__(self, subjects):
+        self.subjects = list(subjects)
+
+
+class _FakeStreamInfo:
+    def __init__(self, subjects):
+        self.config = _FakeStreamConfig(subjects)
+
+
 class FakeJetStream:
-    def __init__(self) -> None:
+    def __init__(self, existing_subjects=None) -> None:
         self.subscriptions: list[tuple[str, str]] = []
+        self._existing_subjects = existing_subjects  # None = stream không tồn tại
+        self.updated_to: set | None = None
+        self.added: tuple | None = None
+
+    async def stream_info(self, name):
+        if self._existing_subjects is None:
+            raise RuntimeError("stream not found")
+        return _FakeStreamInfo(self._existing_subjects)
+
+    async def update_stream(self, config):
+        self.updated_to = set(config.subjects)
+
+    async def add_stream(self, name=None, subjects=None):
+        self.added = (name, list(subjects) if subjects else [])
 
     async def subscribe(self, subject: str, durable: str, cb) -> None:
         self.subscriptions.append((subject, durable))
@@ -251,5 +276,71 @@ def test_subscriber_only_registers_user_subjects() -> None:
     try:
         assert [subject for subject, _ in jetstream.subscriptions] == list(USER_EVENT_SUBJECTS)
         assert all(not subject.startswith("hr.") for subject, _ in jetstream.subscriptions)
+    finally:
+        _run(handle.close())
+
+
+# ─────────── _ensure_user_events_stream ───────────
+
+def test_ensure_user_events_stream_updates_missing_subject() -> None:
+    """Stream tồn tại thiếu user.deleted -> update_stream bổ sung."""
+    js = FakeJetStream(existing_subjects=["user.created", "user.updated", "user.deactivated"])
+    _run(_ensure_user_events_stream(js))
+    assert js.added is None
+    assert js.updated_to is not None
+    assert "user.deleted" in js.updated_to
+    for s in USER_EVENT_SUBJECTS:
+        assert s in js.updated_to
+
+
+def test_ensure_user_events_stream_creates_when_not_found() -> None:
+    """Stream chưa tồn tại -> add_stream với đủ subject."""
+    js = FakeJetStream(existing_subjects=None)
+    _run(_ensure_user_events_stream(js))
+    assert js.added is not None
+    name, subjects = js.added
+    assert name == "USER_EVENTS"
+    for s in USER_EVENT_SUBJECTS:
+        assert s in subjects
+
+
+def test_ensure_user_events_stream_noop_when_complete() -> None:
+    """Stream đã đủ 4 subject -> không update."""
+    js = FakeJetStream(existing_subjects=list(USER_EVENT_SUBJECTS))
+    _run(_ensure_user_events_stream(js))
+    assert js.updated_to is None
+    assert js.added is None
+
+
+def test_subscriber_resilient_per_subject_on_subscribe_error() -> None:
+    """1 subject subscribe lỗi không chặn các subject còn lại."""
+
+    class _PartialJetStream(FakeJetStream):
+        def __init__(self):
+            super().__init__(existing_subjects=list(USER_EVENT_SUBJECTS))
+
+        async def subscribe(self, subject: str, durable: str, cb) -> None:
+            if subject == "user.deleted":
+                raise RuntimeError("consumer already exists")
+            self.subscriptions.append((subject, durable))
+
+    jetstream = _PartialJetStream()
+    connection = FakeConnection(jetstream)
+
+    handle = _run(
+        start_user_events_subscriber(
+            FakeSettings(),  # type: ignore[arg-type]
+            repo_factory=RecordingRepo,
+            publisher=None,
+            nats_module=FakeNatsModule(connection),
+        )
+    )
+    try:
+        subscribed = [s for s, _ in jetstream.subscriptions]
+        assert "user.created" in subscribed
+        assert "user.updated" in subscribed
+        assert "user.deactivated" in subscribed
+        # user.deleted bị lỗi subscribe nhưng các subject khác vẫn chạy
+        assert "user.deleted" not in subscribed
     finally:
         _run(handle.close())

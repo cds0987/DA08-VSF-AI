@@ -72,10 +72,25 @@ class UserEventPublisher:
 async def _ensure_streams(js) -> None:
     for name, subjects in JETSTREAM_STREAMS.items():
         try:
-            await js.stream_info(name)
+            info = await js.stream_info(name)
         except Exception:
             try:
                 await js.add_stream(name=name, subjects=subjects)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("failed to ensure NATS stream %s: %s", name, exc)
                 raise
+            continue
+        # Stream đã tồn tại: bổ sung subject còn thiếu (vd user.deleted thêm sau khi
+        # stream USER_EVENTS đã được tạo với 3 subject cũ). Best-effort: lỗi update
+        # chỉ log warning (stream cũ vẫn chạy cho subject cũ), KHÔNG raise.
+        try:
+            current = set(getattr(getattr(info, "config", None), "subjects", None) or [])
+            wanted = set(subjects)
+            if not wanted.issubset(current):
+                from nats.js.api import StreamConfig  # noqa: PLC0415
+
+                merged = sorted(current | wanted)
+                await js.update_stream(StreamConfig(name=name, subjects=merged))
+                logger.info("updated NATS stream %s subjects -> %s", name, merged)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("failed to update NATS stream %s subjects: %s", name, exc)
