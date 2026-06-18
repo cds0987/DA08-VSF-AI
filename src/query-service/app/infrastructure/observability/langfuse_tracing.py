@@ -49,15 +49,21 @@ class LangfuseTracer:
     ) -> _TraceHandle | None:
         """Tạo 1 trace cho 1 lượt query. Trả None nếu lỗi (query vẫn chạy bình thường)."""
         try:
+            email = (getattr(user, "email", None) or "").strip()
+            uuid = getattr(user, "id", None)
             metadata: dict[str, Any] = {
                 "role": getattr(user, "role", None),
                 "department": getattr(user, "department", None),
+                "email": email or None,
+                "user_uuid": uuid,          # cross-ref DB user_svc.users.id khi cần
             }
             if conversation_title:
                 metadata["conversation_title"] = conversation_title
             trace = self._client.trace(
                 name="rag-query",
-                user_id=getattr(user, "id", None),
+                # user_id = EMAIL (đọc được ở Langfuse Users) -> trace theo username KHÔNG cần tra DB.
+                # Rỗng email -> fallback UUID để không mất gắn user.
+                user_id=email or uuid,
                 session_id=session_id,
                 input=question,
                 metadata=metadata,
