@@ -30,3 +30,7 @@ class UserRepository(ABC):
     async def set_active(self, user_id: str, is_active: bool) -> Optional[User]:
         raise NotImplementedError
 
+    @abstractmethod
+    async def delete(self, user_id: str) -> bool:
+        raise NotImplementedError
+

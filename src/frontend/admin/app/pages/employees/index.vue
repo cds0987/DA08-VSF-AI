@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import {
+  AlertTriangle,
   Briefcase,
   ChevronLeft,
   ChevronRight,
-  Eye,
   Loader2,
   Power,
   PowerOff,
+  Trash2,
   UserPlus,
   X,
 } from '@lucide/vue'
@@ -57,18 +58,12 @@ const fetchEmployees = async () => {
   }
 }
 
-const toggleAccountStatus = async (emp: EmployeeItem) => {
-  const account = usersById.value[emp.user_id]
-  if (!account) return
+// Reactivate chạy trực tiếp (không cần xác nhận). Deactivate và Delete đi qua modal xác nhận.
+const reactivateAccount = async (emp: EmployeeItem) => {
   togglingUserId.value = emp.user_id
   try {
-    if (account.is_active) {
-      await userService.deactivateUser(emp.user_id)
-      toast.success(`${emp.full_name || emp.company_email} deactivated`)
-    } else {
-      await userService.reactivateUser(emp.user_id)
-      toast.success(`${emp.full_name || emp.company_email} reactivated`)
-    }
+    await userService.reactivateUser(emp.user_id)
+    toast.success(`${emp.full_name || emp.company_email} reactivated`)
     await fetchEmployees()
   } catch (error) {
     const status = getApiStatus(error)
@@ -76,6 +71,41 @@ const toggleAccountStatus = async (emp: EmployeeItem) => {
     else toast.error(getApiErrorMessage(error, 'Failed to update account status'))
   } finally {
     togglingUserId.value = null
+  }
+}
+
+const onPowerClick = (emp: EmployeeItem) => {
+  const account = usersById.value[emp.user_id]
+  if (!account) return
+  if (account.is_active) confirmAction.value = { type: 'deactivate', emp }
+  else void reactivateAccount(emp)
+}
+
+// --- confirm modal (deactivate / delete) ---
+const confirmAction = ref<{ type: 'deactivate' | 'delete'; emp: EmployeeItem } | null>(null)
+const confirmLoading = ref(false)
+
+const proceedConfirm = async () => {
+  if (!confirmAction.value) return
+  const { type, emp } = confirmAction.value
+  confirmLoading.value = true
+  try {
+    if (type === 'delete') {
+      await userService.deleteUser(emp.user_id)
+      toast.success(`${emp.full_name || emp.company_email} deleted`)
+    } else {
+      await userService.deactivateUser(emp.user_id)
+      toast.success(`${emp.full_name || emp.company_email} deactivated`)
+    }
+    confirmAction.value = null
+    await fetchEmployees()
+  } catch (error) {
+    const status = getApiStatus(error)
+    if (status === 403) toast.error('Access denied: admin role required')
+    else if (status === 409) toast.error(getApiErrorMessage(error, 'Action not allowed'))
+    else toast.error(getApiErrorMessage(error, type === 'delete' ? 'Failed to delete employee' : 'Failed to deactivate account'))
+  } finally {
+    confirmLoading.value = false
   }
 }
 
@@ -127,11 +157,11 @@ const formErrors = reactive({ email: '', password: '' })
 const isSubmitting = ref(false)
 const isPolling = ref(false)
 
-// Danh sách nhân viên active để chọn Manager trong form tạo
+// Toàn bộ nhân viên/admin trong Employee Management để chọn Manager (kể cả đã deactivate)
 const managerOptions = ref<EmployeeItem[]>([])
 const loadManagerOptions = async () => {
   try {
-    const res = await hrService.listEmployees({ status: 'active', limit: 200, offset: 0 })
+    const res = await hrService.listEmployees({ limit: 200, offset: 0 })
     managerOptions.value = res.items
   } catch {
     managerOptions.value = []
@@ -345,26 +375,25 @@ const pollAndApplyProfile = async (userId: string, profilePayload: UpdateEmploye
                 <span v-else class="text-muted-foreground">—</span>
               </td>
               <td class="px-4 py-2.5 text-right" @click.stop>
-                <div class="flex items-center justify-end gap-1">
-                  <NuxtLink
-                    :to="`/employees/${emp.id}`"
-                    title="View employee detail"
-                    class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground transition hover:bg-accent hover:text-foreground"
-                  >
-                    <Eye class="h-3.5 w-3.5" />
-                    View
-                  </NuxtLink>
+                <div class="flex items-center justify-end gap-0.5">
                   <button
                     v-if="usersById[emp.user_id]"
                     :disabled="togglingUserId === emp.user_id"
-                    class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-50"
+                    class="inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors cursor-pointer disabled:opacity-50"
                     :class="usersById[emp.user_id].is_active ? 'text-destructive hover:bg-destructive/10' : 'text-emerald-600 hover:bg-emerald-50'"
                     :title="usersById[emp.user_id].is_active ? 'Deactivate account' : 'Reactivate account'"
-                    @click="toggleAccountStatus(emp)"
+                    @click="onPowerClick(emp)"
                   >
                     <Loader2 v-if="togglingUserId === emp.user_id" class="h-3.5 w-3.5 animate-spin" />
                     <PowerOff v-else-if="usersById[emp.user_id].is_active" class="h-3.5 w-3.5" />
                     <Power v-else class="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    class="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors cursor-pointer hover:bg-destructive/10 hover:text-destructive"
+                    title="Delete employee"
+                    @click="confirmAction = { type: 'delete', emp }"
+                  >
+                    <Trash2 class="h-3.5 w-3.5" />
                   </button>
                 </div>
               </td>
@@ -396,6 +425,63 @@ const pollAndApplyProfile = async (userId: string, profilePayload: UpdateEmploye
         </div>
       </div>
     </div>
+
+    <!-- confirm deactivate / delete -->
+    <Teleport to="body">
+      <div
+        v-if="confirmAction"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+        @click.self="confirmLoading || (confirmAction = null)"
+      >
+        <div class="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl">
+          <div class="flex items-start gap-3">
+            <div
+              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+              :class="confirmAction.type === 'delete' ? 'bg-destructive/10 text-destructive' : 'bg-amber-100 text-amber-600'"
+            >
+              <AlertTriangle class="h-5 w-5" />
+            </div>
+            <div class="min-w-0">
+              <h2 class="text-[15px] font-semibold text-foreground">
+                {{ confirmAction.type === 'delete' ? 'Delete employee?' : 'Deactivate account?' }}
+              </h2>
+              <p class="mt-1 text-[12.5px] text-muted-foreground">
+                <template v-if="confirmAction.type === 'delete'">
+                  Permanently delete
+                  <span class="font-medium text-foreground">{{ confirmAction.emp.full_name || confirmAction.emp.company_email }}</span>
+                  — account and HR profile will be removed. This cannot be undone.
+                </template>
+                <template v-else>
+                  Deactivate
+                  <span class="font-medium text-foreground">{{ confirmAction.emp.full_name || confirmAction.emp.company_email }}</span>?
+                  They will lose access until reactivated.
+                </template>
+              </p>
+            </div>
+          </div>
+          <div class="mt-5 flex justify-end gap-2">
+            <button
+              type="button"
+              class="rounded-md border border-border px-3 py-1.5 text-[12.5px] font-medium hover:bg-accent cursor-pointer disabled:opacity-60"
+              :disabled="confirmLoading"
+              @click="confirmAction = null"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12.5px] font-medium text-white cursor-pointer disabled:opacity-60"
+              :class="confirmAction.type === 'delete' ? 'bg-destructive hover:bg-destructive/90' : 'bg-amber-600 hover:bg-amber-700'"
+              :disabled="confirmLoading"
+              @click="proceedConfirm"
+            >
+              <Loader2 v-if="confirmLoading" class="h-3.5 w-3.5 animate-spin" />
+              {{ confirmAction.type === 'delete' ? 'Delete' : 'Deactivate' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- polling overlay -->
     <Teleport to="body">

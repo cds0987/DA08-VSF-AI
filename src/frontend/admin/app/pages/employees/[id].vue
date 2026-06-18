@@ -63,7 +63,8 @@ const allEmployees = ref<EmployeeItem[]>([])
 
 const loadManagers = async () => {
   try {
-    const res = await hrService.listEmployees({ status: 'active', limit: 200, offset: 0 })
+    // Toàn bộ nhân viên/admin (kể cả đã deactivate) trừ chính người đang sửa.
+    const res = await hrService.listEmployees({ limit: 200, offset: 0 })
     allEmployees.value = res.items.filter(e => e.id !== employeeId)
   } catch {
     // non-critical, leave list empty

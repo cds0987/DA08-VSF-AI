@@ -84,6 +84,9 @@ class StatefulFakeRepo(HrRepository):
     async def update_employee(self, *args, **kwargs):
         return None
 
+    async def delete_employee_by_user_id(self, user_id: str) -> bool:
+        return False
+
     async def upsert_employee_from_user(self, user_id, email, department, is_active) -> None:
         return None
 

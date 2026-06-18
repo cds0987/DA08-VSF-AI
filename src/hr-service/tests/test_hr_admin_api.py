@@ -38,6 +38,11 @@ class FakeHrRepository(HrRepository):
     async def get_performance(self, u): return None
     async def aclose(self): pass
 
+    async def delete_employee_by_user_id(self, user_id):
+        before = len(self.employees)
+        self.employees = [e for e in self.employees if e.user_id != user_id]
+        return len(self.employees) < before
+
     async def list_employees(self, department, employment_status, limit, offset):
         return self.employees, len(self.employees)
 
