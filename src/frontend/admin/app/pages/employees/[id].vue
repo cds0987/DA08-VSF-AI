@@ -81,8 +81,13 @@ onMounted(async () => {
   ])
 })
 
+const saveErrors = reactive({ full_name: '', department: '' })
+
 const saveEmployee = async () => {
   if (!employee.value) return
+  saveErrors.full_name = !form.full_name.trim() ? 'Full name is required' : ''
+  saveErrors.department = !form.department ? 'Department is required' : ''
+  if (saveErrors.full_name || saveErrors.department) return
   isSaving.value = true
   try {
     const payload = {
@@ -187,14 +192,16 @@ const managerLabel = (emp: EmployeeItem) =>
 
             <div class="flex gap-3">
               <div class="flex-1">
-                <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-full-name">Full Name</label>
+                <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-full-name">Full Name <span class="text-destructive">*</span></label>
                 <input
                   id="emp-full-name"
                   v-model="form.full_name"
                   type="text"
                   placeholder="e.g. Nguyễn Văn A"
-                  class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                  class="w-full rounded-md border bg-background px-3 py-1.5 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                  :class="saveErrors.full_name ? 'border-destructive' : 'border-input'"
                 >
+                <p v-if="saveErrors.full_name" class="mt-1 text-[11px] text-destructive">{{ saveErrors.full_name }}</p>
               </div>
               <div class="flex-1">
                 <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-phone">Phone Number</label>
@@ -230,16 +237,18 @@ const managerLabel = (emp: EmployeeItem) =>
             </div>
 
             <div>
-              <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-department">Department</label>
+              <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-department">Department <span class="text-destructive">*</span></label>
               <select
                 id="emp-department"
                 v-model="form.department"
-                class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                class="w-full rounded-md border bg-background px-3 py-1.5 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                :class="saveErrors.department ? 'border-destructive' : 'border-input'"
               >
                 <option value="">— No department —</option>
                 <option v-for="d in allDepartments" :key="d" :value="d">{{ d }}</option>
                 <option v-if="form.department && !allDepartments.includes(form.department)" :value="form.department">{{ form.department }}</option>
               </select>
+              <p v-if="saveErrors.department" class="mt-1 text-[11px] text-destructive">{{ saveErrors.department }}</p>
             </div>
 
             <div>

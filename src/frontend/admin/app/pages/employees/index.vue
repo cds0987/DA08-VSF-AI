@@ -165,7 +165,7 @@ const form = reactive({
   job_title: '',
   manager_user_id: '',
 })
-const formErrors = reactive({ email: '', password: '' })
+const formErrors = reactive({ email: '', password: '', full_name: '', department: '' })
 const isSubmitting = ref(false)
 const isPolling = ref(false)
 
@@ -205,18 +205,30 @@ const resetForm = () => {
   form.manager_user_id = ''
   formErrors.email = ''
   formErrors.password = ''
+  formErrors.full_name = ''
+  formErrors.department = ''
 }
 
 const validateForm = () => {
   let ok = true
   formErrors.email = ''
   formErrors.password = ''
+  formErrors.full_name = ''
+  formErrors.department = ''
   if (!form.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
     formErrors.email = 'Valid email required'
     ok = false
   }
   if (form.password.length < 8) {
     formErrors.password = 'Password must be at least 8 characters'
+    ok = false
+  }
+  if (!form.full_name.trim()) {
+    formErrors.full_name = 'Full name is required'
+    ok = false
+  }
+  if (!form.department) {
+    formErrors.department = 'Department is required'
     ok = false
   }
   return ok
@@ -594,14 +606,16 @@ const pollAndApplyProfile = async (userId: string, profilePayload: UpdateEmploye
 
               <div class="flex gap-3">
                 <div class="flex-1">
-                  <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-full-name">Full Name</label>
+                  <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-full-name">Full Name <span class="text-destructive">*</span></label>
                   <input
                     id="emp-full-name"
                     v-model="form.full_name"
                     type="text"
                     placeholder="e.g. Nguyễn Văn A"
-                    class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded-md border bg-background px-3 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-primary/20"
+                    :class="formErrors.full_name ? 'border-destructive' : 'border-input'"
                   >
+                  <p v-if="formErrors.full_name" class="mt-1 text-[11px] text-destructive">{{ formErrors.full_name }}</p>
                 </div>
                 <div class="flex-1">
                   <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-phone">Phone Number</label>
@@ -637,15 +651,17 @@ const pollAndApplyProfile = async (userId: string, profilePayload: UpdateEmploye
               </div>
 
               <div>
-                <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-department">Department</label>
+                <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-department">Department <span class="text-destructive">*</span></label>
                 <select
                   id="emp-department"
                   v-model="form.department"
-                  class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded-md border bg-background px-3 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-primary/20"
+                  :class="formErrors.department ? 'border-destructive' : 'border-input'"
                 >
                   <option value="">— No department —</option>
                   <option v-for="d in allDepartments" :key="d" :value="d">{{ d }}</option>
                 </select>
+                <p v-if="formErrors.department" class="mt-1 text-[11px] text-destructive">{{ formErrors.department }}</p>
               </div>
 
               <div class="flex gap-3">
