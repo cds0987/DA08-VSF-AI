@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from app.application.use_cases.users.set_user_active_use_case import SetUserActiveUseCase
 from app.domain.entities.user import User, UserRole
 from app.infrastructure.messaging.user_event_emitter import NatsUserEventEmitter
-from app.infrastructure.messaging.user_event_publisher import build_user_event
+from app.infrastructure.messaging.user_event_publisher import _ensure_streams, build_user_event
 
 
 def _run(coro):
@@ -192,3 +192,86 @@ def test_backfill_fails_fast_when_publish_raises() -> None:
         assert "publish failed" in str(exc)
     else:  # pragma: no cover - fail-fast contract
         raise AssertionError("backfill_users should fail fast when publish raises")
+
+
+# ─────────── _ensure_streams: reconcile USER_EVENTS subjects ───────────
+
+class _FakeStreamConfig:
+    def __init__(self, subjects):
+        self.subjects = list(subjects)
+
+
+class _FakeStreamInfo:
+    def __init__(self, subjects):
+        self.config = _FakeStreamConfig(subjects)
+
+
+class _FakeJsExisting:
+    """Giả lập stream USER_EVENTS đã tồn tại với 3 subject cũ (chưa có user.deleted)."""
+
+    def __init__(self):
+        self.updated_to = None
+        self.added = None
+
+    async def stream_info(self, name):
+        return _FakeStreamInfo(["user.created", "user.updated", "user.deactivated"])
+
+    async def update_stream(self, config):
+        self.updated_to = set(config.subjects)
+
+    async def add_stream(self, name=None, subjects=None):  # pragma: no cover
+        self.added = (name, subjects)
+
+
+class _FakeJsNoStream:
+    """Giả lập chưa có stream."""
+
+    def __init__(self):
+        self.added = None
+
+    async def stream_info(self, name):
+        raise RuntimeError("stream not found")
+
+    async def add_stream(self, name=None, subjects=None):
+        self.added = (name, list(subjects))
+
+    async def update_stream(self, config):  # pragma: no cover
+        pass
+
+
+def test_ensure_streams_updates_existing_stream_with_missing_subject() -> None:
+    """Stream đã tồn tại thiếu user.deleted -> update_stream bổ sung, không add_stream."""
+    js = _FakeJsExisting()
+    _run(_ensure_streams(js))
+    assert js.added is None, "không được tạo stream mới khi đã tồn tại"
+    assert js.updated_to is not None, "phải gọi update_stream"
+    assert "user.deleted" in js.updated_to
+    assert "user.created" in js.updated_to
+    assert "user.updated" in js.updated_to
+    assert "user.deactivated" in js.updated_to
+
+
+def test_ensure_streams_creates_stream_when_not_found() -> None:
+    """Stream chưa tồn tại -> add_stream với đủ 4 subject, không update_stream."""
+    js = _FakeJsNoStream()
+    _run(_ensure_streams(js))
+    assert js.added is not None, "phải gọi add_stream"
+    name, subjects = js.added
+    assert name == "USER_EVENTS"
+    for subject in ("user.created", "user.updated", "user.deactivated", "user.deleted"):
+        assert subject in subjects
+
+
+def test_ensure_streams_noop_when_subjects_already_complete() -> None:
+    """Stream đã đủ 4 subject -> không gọi update_stream."""
+
+    class _FakeJsFull(_FakeJsExisting):
+        async def stream_info(self, name):
+            return _FakeStreamInfo(
+                ["user.created", "user.updated", "user.deactivated", "user.deleted"]
+            )
+
+    js = _FakeJsFull()
+    _run(_ensure_streams(js))
+    assert js.updated_to is None, "đã đủ subject thì không được update"
+    assert js.added is None
