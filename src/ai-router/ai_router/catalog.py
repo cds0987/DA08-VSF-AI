@@ -7,11 +7,16 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 
 from .schemas import ModelEntry, Provider
 
 logger = logging.getLogger("ai_router.catalog")
+
+# Đuôi snapshot ngày provider hay gắn: "-2026-03-17" hoặc "-20260423". Strip để GOM model
+# (gpt-5.4-mini-2026-03-17 -> gpt-5.4-mini). KHÔNG fuzzy (quyết định: chỉ strip date).
+_DATE_RE = re.compile(r"-(\d{4}-\d{2}-\d{2}|\d{8})$")
 
 
 class Catalog:
@@ -25,6 +30,25 @@ class Catalog:
 
     def get(self, model_id: str) -> ModelEntry | None:
         return self._by_id.get(model_id) or self._by_native.get(model_id)
+
+    def canonicalize(self, raw_id: str) -> tuple[str, str]:
+        """Chuẩn hoá model id provider trả về -> id CANONICAL trong catalog.
+
+        Trả (canonical_id, kind) với kind ∈ {exact, date_strip, unmatched}:
+          - exact      : khớp thẳng catalog (by_id hoặc by_native).
+          - date_strip : bỏ đuôi ngày rồi mới khớp (gpt-5.4-mini-2026-03-17 -> openai/gpt-5.4-mini).
+          - unmatched  : không có trong catalog -> trả bản đã strip date (cờ drift cho caller).
+        KHÔNG fuzzy (tránh đoán sai giá). Caller phát metric khi 'unmatched'.
+        """
+        hit = self._by_id.get(raw_id) or self._by_native.get(raw_id)
+        if hit:
+            return hit.id, "exact"
+        stripped = _DATE_RE.sub("", raw_id)
+        if stripped != raw_id:
+            hit = self._by_id.get(stripped) or self._by_native.get(stripped)
+            if hit:
+                return hit.id, "date_strip"
+        return stripped, "unmatched"
 
     def all(self) -> list[ModelEntry]:
         return list(self._by_id.values())
@@ -58,8 +82,15 @@ class Catalog:
         return out
 
     def cost(self, model_id: str, in_tok: int, out_tok: int, with_fee: bool = True) -> float | None:
-        """USD ước tính cho 1 call (dùng khi provider không trả cost, vd OpenAI). PLAN §5.7."""
+        """USD ước tính cho 1 call (dùng khi provider không trả cost, vd OpenAI). PLAN §5.7.
+
+        Chịu được id có đuôi ngày: get() trượt -> thử bản canonical (strip-date) trước khi bỏ cuộc
+        -> bản dated KHÔNG còn về cost $0."""
         m = self.get(model_id)
+        if not m:
+            canon, kind = self.canonicalize(model_id)
+            if kind != "unmatched":
+                m = self.get(canon)
         if not m:
             return None
         pin = m.price_in_with_fee if with_fee else m.price_in_per_mtok

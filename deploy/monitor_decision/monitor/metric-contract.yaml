@@ -19,6 +19,8 @@ namespaces:
       - { name: airouter_resolve_total,      type: counter, labels: [capability, tier, provider] }
       - { name: airouter_fallback_total,     type: counter, labels: [capability, tier] }
       - { name: airouter_resolve_fail_total, type: counter, labels: [capability, reason] }
+      # ── drift catalog: model provider trả KHÔNG có trong catalog (WS-A) -> cần rebuild catalog ──
+      - { name: airouter_model_unmatched_total, type: counter, labels: [model, capability] }
       # ── per-key gauge (Redis snapshot) ──
       - { name: airouter_key_tokens_today,   type: gauge, labels: [key_id, secret_env, provider, tier] }
       - { name: airouter_key_remaining,      type: gauge, labels: [key_id, secret_env, provider, tier] }
