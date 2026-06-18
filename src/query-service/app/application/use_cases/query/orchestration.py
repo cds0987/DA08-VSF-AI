@@ -772,12 +772,9 @@ class QueryOrchestrationUseCase:
                                     await asyncio.sleep(0)
 
                         sources = final_state.get("sources", [])
-                        # Chỉ giữ sources có ref được LLM thực sự cite trong answer [N].
-                        # Sources retrieve nhưng không được dùng sẽ bị drop khỏi citations.
-                        if answer and sources:
-                            cited_refs = {int(m) for m in re.findall(r'\[(\d+)\]', answer)}
-                            if cited_refs:
-                                sources = [s for s in sources if s.get('ref') in cited_refs]
+                        # Verify citation: chỉ giữ source được LLM cite [N] trong answer.
+                        # Answer không cite gì -> sources rỗng -> không show card thừa.
+                        sources = _keep_cited_sources(answer, sources)
                         # shortcut path: 0 iterations; think path: iterations = number of act/observe runs
                         final_iteration = 0 if shortcut_response else max(last_iteration, 1)
                         # If think-path but no tool was called → LLM answered from general knowledge → NO_INFO.
@@ -1335,6 +1332,19 @@ def _is_fallback_answer(answer: str) -> bool:
     """
     normalized = _normalize_text(answer)
     return "khong tim thay thong tin" in normalized
+
+
+def _keep_cited_sources(answer: str, sources: list) -> list:
+    """Chỉ giữ source có `ref` được LLM cite [N] trong answer.
+
+    - answer cite [1][3] -> giữ source ref 1,3 (bỏ chunk retrieve nhưng không dùng).
+    - answer không cite gì (vd "không tìm thấy") -> trả [] -> không show card thừa.
+    Ref không khớp source nào (LLM bịa số) tự bị loại vì không có trong sources.
+    """
+    if not sources:
+        return sources
+    cited_refs = {int(m) for m in re.findall(r"\[(\d+)\]", answer or "")}
+    return [s for s in sources if s.get("ref") in cited_refs]
 
 
 def _is_clarifying_answer(answer: str) -> bool:

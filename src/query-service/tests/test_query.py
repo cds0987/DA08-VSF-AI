@@ -140,3 +140,39 @@ async def test_query_persists_to_conversation(hr_client: AsyncClient):
     detail = await hr_client.get(f"/conversations/{conversation_id}")
     assert detail.status_code == 200
     assert len(detail.json()["messages"]) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Citation verify — chỉ giữ source được LLM cite [N] trong answer
+# ---------------------------------------------------------------------------
+
+from app.application.use_cases.query.orchestration import _keep_cited_sources
+
+
+def _sources(*refs: int) -> list[dict]:
+    return [{"ref": r, "document_name": f"doc{r}"} for r in refs]
+
+
+def test_keep_cited_sources_filters_to_cited_only():
+    """Answer cite [1][3] -> chỉ giữ source ref 1 và 3."""
+    answer = "Nghỉ phép năm 12 ngày [1]. Kỷ luật: cảnh cáo đến sa thải [3]."
+    kept = _keep_cited_sources(answer, _sources(1, 2, 3, 4, 5))
+    assert {s["ref"] for s in kept} == {1, 3}
+
+
+def test_keep_cited_sources_empty_when_no_citation():
+    """Answer 'không tìm thấy' (không [N]) -> sources rỗng, không show card thừa."""
+    answer = "Mình chưa tìm thấy thông tin về luật công ty VSF trong tài liệu hiện có."
+    assert _keep_cited_sources(answer, _sources(1, 2, 3)) == []
+
+
+def test_keep_cited_sources_ignores_hallucinated_ref():
+    """LLM bịa [9] khi chỉ có 3 source -> ref 9 bị loại, giữ [2] hợp lệ."""
+    answer = "Theo quy định [2] và tài liệu [9]."
+    kept = _keep_cited_sources(answer, _sources(1, 2, 3))
+    assert {s["ref"] for s in kept} == {2}
+
+
+def test_keep_cited_sources_handles_empty_sources():
+    """Không có source -> trả nguyên (rỗng), không lỗi."""
+    assert _keep_cited_sources("bất kỳ [1]", []) == []
