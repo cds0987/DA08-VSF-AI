@@ -7,9 +7,12 @@ Dùng khi `config.url` có giá trị (Qdrant Cloud hoặc self-hosted server). 
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from collections.abc import Awaitable, Callable
 from typing import Sequence
+
+logger = logging.getLogger(__name__)
 
 from core_engine.vectorstore.providers.qdrant.base import (
     QdrantBase,
@@ -100,10 +103,37 @@ class QdrantRemoteProvider(QdrantBase):
         async def op() -> None:
             await self._ensure()
             for index in range(0, len(points), self._upsert_batch):
-                await self._client.upsert(
-                    collection_name=self._collection,
-                    points=points[index : index + self._upsert_batch],
-                )
+                try:
+                    await self._client.upsert(
+                        collection_name=self._collection,
+                        points=points[index : index + self._upsert_batch],
+                    )
+                except Exception as exc:  # DIAG upsert 400 "Not existing vector name": log body THẬT
+                    p0 = points[index]
+                    try:
+                        vkeys = (
+                            {k: type(v).__name__ for k, v in p0.vector.items()}
+                            if isinstance(p0.vector, dict)
+                            else f"LIST(unnamed,len={len(p0.vector)})"
+                        )
+                        body = p0.model_dump_json()
+                        body = body[:280] + ("...sparse..." + body[body.find('"sparse"'):body.find('"sparse"') + 120] if '"sparse"' in body else "")
+                    except Exception as e2:
+                        vkeys, body = f"vkeys-err:{e2}", "??"
+                    try:
+                        info = await self._client.get_collection(self._collection)
+                        live_vec = str(info.config.params.vectors)[:200]
+                        live_sparse = str(info.config.params.sparse_vectors)[:200]
+                    except Exception as e3:
+                        live_vec = live_sparse = f"info-err:{e3}"
+                    logger.error(
+                        "DIAG qdrant_upsert_fail coll=%s hybrid=%s prefer_grpc=%s err=%s\n"
+                        "  point0.vector=%s\n  point0.body=%s\n  LIVE collection.vectors=%s\n  LIVE sparse_vectors=%s",
+                        self._collection, self.config.hybrid,
+                        getattr(self._client, "_prefer_grpc", "?"), exc,
+                        vkeys, body, live_vec, live_sparse,
+                    )
+                    raise
 
         await self._retry_on_missing_collection(op)
 
