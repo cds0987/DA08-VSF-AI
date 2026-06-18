@@ -145,22 +145,22 @@
 
     { "id": 400, "type": "row", "title": "④ Chi phí theo Model (khoảng đang xem)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 } },
     {
-      "id": 15, "type": "barchart", "title": "Cost theo MODEL — khoảng đang xem ($)",
+      "id": 15, "type": "bargauge", "title": "Cost theo MODEL — khoảng đang xem ($)",
       "description": "sum by(model)(increase(airouter_cost_usd_total)) — deepseek/paid KHÔNG còn $0.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "color": { "mode": "fixed", "fixedColor": "#1f6feb" } } },
-      "options": { "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "min": 0, "color": { "mode": "continuous-BlPu" } } },
       "targets": [ { "expr": "sum by (model) (increase(airouter_cost_usd_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[$__range]))", "legendFormat": "{{model}}", "format": "time_series", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
     },
     {
-      "id": 16, "type": "bargauge", "title": "Quota còn lại theo key",
-      "description": "airouter_key_remaining — mỗi key 1 thanh (đọc được ngay, không chồng đường). Thấp = sắp cạn.",
+      "id": 16, "type": "bargauge", "title": "Free-tier quota còn lại theo key (%)",
+      "description": "remaining / limit — % quota NGÀY (free-tier) còn lại. Dùng % để so được oai (token/ngày) vs or (request/ngày) khác đơn vị. Paid không có trần ngày -> không hiện.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
       "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "fieldConfig": { "defaults": { "min": 0, "color": { "mode": "continuous-RdYlGr" } } },
-      "targets": [ { "expr": "airouter_key_remaining{key_id=~\"$key\"}", "instant": true, "legendFormat": "{{key_id}}", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "color": { "mode": "thresholds" }, "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 0.2 }, { "color": "green", "value": 0.5 } ] } } },
+      "targets": [ { "expr": "airouter_key_remaining{key_id=~\"$key\"} / clamp_min(airouter_key_limit{key_id=~\"$key\"}, 1)", "instant": true, "legendFormat": "{{key_id}} ({{tier}})", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
     },
 
     { "id": 500, "type": "row", "title": "⑤ Sức khỏe & drift", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 34 } },
