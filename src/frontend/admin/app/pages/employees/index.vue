@@ -92,13 +92,18 @@ const proceedConfirm = async () => {
   try {
     if (type === 'delete') {
       await userService.deleteUser(emp.user_id)
+      // Xoá row ngay khỏi local state: HR xoá async qua event user.deleted
+      // nên fetchEmployees() sẽ vẫn thấy row ~1-2s. Optimistic removal tránh
+      // trạng thái broken (power button mất, manager "No manager").
+      employees.value = employees.value.filter(e => e.user_id !== emp.user_id)
+      total.value = Math.max(0, total.value - 1)
       toast.success(`${emp.full_name || emp.company_email} deleted`)
     } else {
       await userService.deactivateUser(emp.user_id)
       toast.success(`${emp.full_name || emp.company_email} deactivated`)
     }
     confirmAction.value = null
-    await fetchEmployees()
+    if (type !== 'delete') await fetchEmployees()
   } catch (error) {
     const status = getApiStatus(error)
     if (status === 403) toast.error('Access denied: admin role required')
