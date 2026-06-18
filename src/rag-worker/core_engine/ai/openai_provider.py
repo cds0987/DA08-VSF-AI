@@ -87,7 +87,7 @@ class OpenAIProvider(AIProvider):
             try:
                 return await client.embeddings.create(**kwargs)
             except Exception as exc:  # noqa: BLE001 - SDK-specific mapping stays in adapter
-                raise self._map_error(exc) from exc
+                raise self._map_error(exc, cfg.base_url) from exc
 
         res = await retry_async(_call, max_retries=self._s.max_retries)
         # API trả theo `index` — sort lại để chắc chắn khớp thứ tự input.
@@ -119,7 +119,7 @@ class OpenAIProvider(AIProvider):
                     max_tokens=max_tokens,
                 )
             except Exception as exc:  # noqa: BLE001 - SDK-specific mapping stays in adapter
-                raise self._map_error(exc) from exc
+                raise self._map_error(exc, cfg.base_url) from exc
 
         res = await retry_async(_call, max_retries=self._s.max_retries)
         return (res.choices[0].message.content or "").strip()
@@ -160,7 +160,7 @@ class OpenAIProvider(AIProvider):
                     max_tokens=max_tokens,
                 )
             except Exception as exc:  # noqa: BLE001 - SDK-specific mapping stays in adapter
-                raise self._map_error(exc) from exc
+                raise self._map_error(exc, cfg.base_url) from exc
 
         res = await retry_async(_call, max_retries=self._s.max_retries)
         return (res.choices[0].message.content or "").strip()
@@ -171,7 +171,7 @@ class OpenAIProvider(AIProvider):
         return len(vec)
 
     @staticmethod
-    def _map_error(exc: Exception) -> Exception:
+    def _map_error(exc: Exception, base_url: str | None = None) -> Exception:
         try:
             from openai import (
                 APIConnectionError,
@@ -187,6 +187,11 @@ class OpenAIProvider(AIProvider):
             )
         except ModuleNotFoundError:
             return exc
+
+        # 401 từ GATEWAY NỘI BỘ ai-router lúc startup/recreate = TRANSIENT (token đúng nhưng
+        # ai-router chưa load auth kịp) -> retry. Phân biệt với 401 provider thật (permanent).
+        if isinstance(exc, AuthenticationError) and base_url and "ai-router" in base_url:
+            return TransientAIError(f"ai-router gateway auth transient: {exc}")
 
         if isinstance(
             exc,

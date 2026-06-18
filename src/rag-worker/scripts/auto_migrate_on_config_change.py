@@ -54,8 +54,12 @@ def _qdrant_headers() -> dict[str, str]:
     return headers
 
 
-def _qdrant_request(method: str, path: str) -> dict:
-    req = urllib.request.Request(_qdrant_url() + path, method=method, headers=_qdrant_headers())
+def _qdrant_request(method: str, path: str, body: dict | None = None) -> dict:
+    data = json.dumps(body).encode() if body is not None else None
+    headers = _qdrant_headers()
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(_qdrant_url() + path, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
             raw = r.read()
@@ -101,6 +105,22 @@ def _schema_ok(name: str, hybrid: bool) -> bool:
 def _delete_collection(name: str) -> bool:
     resp = _qdrant_request("DELETE", f"/collections/{name}")
     return resp.get("status") in ("ok", "acknowledged")
+
+
+def _create_collection(name: str, dim: int, hybrid: bool) -> bool:
+    """Tạo collection ĐÚNG SCHEMA ngay (deterministic) sau khi xóa -> worker upsert vào đúng
+    chỗ, không phụ thuộc path bootstrap tạo nhầm unnamed. hybrid -> named dense + sparse."""
+    if hybrid:
+        body = {"vectors": {"dense": {"size": int(dim), "distance": "Cosine"}},
+                "sparse_vectors": {"sparse": {}}}
+    else:
+        body = {"vectors": {"size": int(dim), "distance": "Cosine"}}
+    r1 = _qdrant_request("PUT", f"/collections/{name}", body)
+    ok = r1.get("status") in ("ok", "acknowledged") or r1.get("result") is True
+    # payload index document_id (filter scoped-search/dedup cần; Qdrant Cloud bắt buộc).
+    _qdrant_request("PUT", f"/collections/{name}/index?wait=true",
+                    {"field_name": "document_id", "field_schema": "keyword"})
+    return bool(ok)
 
 
 async def _embed_selftest(retries: int = 6, delay: float = 5.0) -> bool:
@@ -216,9 +236,16 @@ async def _run(dry_run: bool, prefix: str, limit: int | None) -> int:
     hybrid = bool(getattr(config, "hybrid", False))
     exists = _qdrant_request("GET", f"/collections/{target}").get("status") == "ok"
     if exists and (not _collection_ready(target) or not _schema_ok(target, hybrid)):
-        print(f"  -> Collection '{target}' rỗng/sai-schema -> XÓA để tạo lại đúng.")
+        print(f"  -> Collection '{target}' rỗng/sai-schema -> XÓA + tạo lại ĐÚNG schema (hybrid={hybrid}).")
         if not dry_run:
             _delete_collection(target)
+            ok = _create_collection(target, config.dimension, hybrid)
+            print(f"  -> Tạo collection mới (named dense+sparse): {'OK' if ok else 'FAIL'}")
+    elif not exists:
+        print(f"  -> Collection '{target}' chưa có -> tạo ĐÚNG schema (hybrid={hybrid}) trước reingest.")
+        if not dry_run:
+            ok = _create_collection(target, config.dimension, hybrid)
+            print(f"  -> Tạo collection: {'OK' if ok else 'FAIL'}")
 
     rag_db_url = os.environ.get("DATABASE_URL", "")
     if rag_db_url:
