@@ -124,7 +124,10 @@ watch([departmentFilter, statusFilter], () => {
 })
 watch(offset, () => void fetchEmployees())
 
-onMounted(() => void fetchEmployees())
+onMounted(() => {
+  void fetchEmployees()
+  void hrService.listDepartments().then(d => { allDepartments.value = d }).catch(() => {})
+})
 
 const prevPage = () => { if (offset.value >= limit.value) offset.value -= limit.value }
 const nextPage = () => { if (offset.value + limit.value < total.value) offset.value += limit.value }
@@ -168,14 +171,12 @@ const isPolling = ref(false)
 
 // Toàn bộ nhân viên/admin trong Employee Management để chọn Manager (kể cả đã deactivate)
 const managerOptions = ref<EmployeeItem[]>([])
+const allDepartments = ref<string[]>([])
 const loadManagerOptions = async () => {
   try {
-    // limit phải <= 100: backend /hr/admin/employees giới hạn le=100, truyền lớn hơn
-    // (trước đây 200) sẽ bị 422 -> danh sách manager rỗng -> dropdown chỉ còn "No manager".
     const res = await hrService.listEmployees({ limit: 100, offset: 0, status: 'active' })
     managerOptions.value = res.items
   } catch (error) {
-    // Không nuốt im lặng: log để lỗi nạp danh sách manager không bị ẩn như bug 422 cũ.
     console.error('Failed to load manager options:', error)
     managerOptions.value = []
   }
@@ -637,13 +638,14 @@ const pollAndApplyProfile = async (userId: string, profilePayload: UpdateEmploye
 
               <div>
                 <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-department">Department</label>
-                <input
+                <select
                   id="emp-department"
                   v-model="form.department"
-                  type="text"
-                  placeholder="e.g. Engineering"
                   class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-primary/20"
                 >
+                  <option value="">— No department —</option>
+                  <option v-for="d in allDepartments" :key="d" :value="d">{{ d }}</option>
+                </select>
               </div>
 
               <div class="flex gap-3">

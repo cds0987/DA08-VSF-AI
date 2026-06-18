@@ -58,24 +58,27 @@ const syncForm = () => {
   form.manager_user_id = employee.value.manager_user_id ?? ''
 }
 
+// --- department select ---
+const allDepartments = ref<string[]>([])
+
 // --- manager select ---
 const allEmployees = ref<EmployeeItem[]>([])
 
 const loadManagers = async () => {
   try {
-    // limit phải <= 100: backend /hr/admin/employees giới hạn le=100, truyền lớn hơn
-    // (trước đây 200) sẽ bị 422 -> danh sách manager rỗng -> dropdown chỉ còn "No manager".
     const res = await hrService.listEmployees({ limit: 100, offset: 0, status: 'active' })
     allEmployees.value = res.items.filter(e => e.id !== employeeId)
   } catch (error) {
-    // Không nuốt im lặng: log để lỗi nạp danh sách manager không bị ẩn như bug 422 cũ.
     console.error('Failed to load manager options:', error)
   }
 }
 
 onMounted(async () => {
   await loadEmployee()
-  await loadManagers()
+  await Promise.all([
+    loadManagers(),
+    hrService.listDepartments().then(d => { allDepartments.value = d }).catch(() => {}),
+  ])
 })
 
 const saveEmployee = async () => {
@@ -228,13 +231,15 @@ const managerLabel = (emp: EmployeeItem) =>
 
             <div>
               <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-department">Department</label>
-              <input
+              <select
                 id="emp-department"
                 v-model="form.department"
-                type="text"
-                placeholder="e.g. Engineering"
                 class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
               >
+                <option value="">— No department —</option>
+                <option v-for="d in allDepartments" :key="d" :value="d">{{ d }}</option>
+                <option v-if="form.department && !allDepartments.includes(form.department)" :value="form.department">{{ form.department }}</option>
+              </select>
             </div>
 
             <div>
