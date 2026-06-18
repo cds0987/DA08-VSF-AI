@@ -123,9 +123,10 @@ def _create_collection(name: str, dim: int, hybrid: bool) -> bool:
     return bool(ok)
 
 
-async def _embed_selftest(retries: int = 6, delay: float = 5.0) -> bool:
-    """Gọi THẬT provider embed (chống race 401: env EMBED_API_KEY chưa hiệu lực ngay sau
-    --force-recreate). Retry tới khi OK; fail hết -> KHÔNG enqueue job doomed."""
+async def _embed_selftest(retries: int = 18, delay: float = 6.0) -> bool:
+    """Gọi THẬT provider embed (chống warmup: ai-router force-recreate sau deploy mất ~40-60s
+    mới ổn -> embeddings flaky/NoneType/401 trong cửa sổ đó). Retry kiên nhẫn (~108s) tới khi
+    OK; fail hết -> KHÔNG enqueue job doomed."""
     import asyncio as _a
 
     from core_engine.ai.base import load_ai_settings
