@@ -28,10 +28,11 @@ const isAnimatingSidebar = ref(false)
 const isHoveringLogo = ref(false)
 
 function setSidebarCollapsed(value: boolean) {
+  // Trong lúc transition width (300ms), các icon trượt dưới con trỏ đứng yên
+  // -> browser bắn pointerenter giả -> tooltip mở. Set isAnimatingSidebar để
+  // truyền :disabled cho Tooltip, vô hiệu hóa hoàn toàn trong thời gian này.
   isAnimatingSidebar.value = true
   isCollapsed.value = value
-  // Blur any focused sidebar element so Radix Tooltip's focus handler can't fire
-  ;(document.activeElement as HTMLElement)?.blur()
   setTimeout(() => { isAnimatingSidebar.value = false }, 350)
 }
 const searchQuery = ref('')
@@ -180,7 +181,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
           <div class="w-full flex flex-col gap-2 flex-1 min-h-0">
             <!-- New Chat Section -->
             <div class="w-full">
-              <Tooltip>
+              <Tooltip :disabled="isAnimatingSidebar" :ignore-non-keyboard-focus="true">
                 <TooltipTrigger asChild>
                   <button
                     @click="handleNewChat"
@@ -201,7 +202,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
                   </button>
                 </TooltipTrigger>
                 <TooltipContent
-                  v-if="isCollapsed && !isAnimatingSidebar"
+                  v-if="isCollapsed"
                   side="right"
                   class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
                 >
@@ -212,7 +213,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
 
             <!-- Search -->
             <div class="w-full">
-              <Tooltip>
+              <Tooltip :disabled="isAnimatingSidebar" :ignore-non-keyboard-focus="true">
                 <TooltipTrigger asChild>
                   <div
                     :role="isCollapsed ? 'button' : undefined"
@@ -240,7 +241,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
                   </div>
                 </TooltipTrigger>
                 <TooltipContent
-                  v-if="isCollapsed && !isAnimatingSidebar"
+                  v-if="isCollapsed"
                   side="right"
                   class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
                 >
@@ -274,7 +275,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
 
       <!-- Standalone Settings Button -->
       <Dialog>
-        <Tooltip>
+        <Tooltip :disabled="isAnimatingSidebar" :ignore-non-keyboard-focus="true">
           <TooltipTrigger asChild>
             <DialogTrigger asChild>
               <button
@@ -295,7 +296,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
             </DialogTrigger>
           </TooltipTrigger>
           <TooltipContent
-            v-if="isCollapsed && !isAnimatingSidebar"
+            v-if="isCollapsed"
             side="right"
             class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
           >

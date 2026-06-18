@@ -81,7 +81,7 @@ async function handleDismiss(event: MouseEvent, item: NotificationItem) {
 </script>
 
 <template>
-  <Tooltip>
+  <Tooltip :disabled="disableTooltip" :ignore-non-keyboard-focus="true">
     <TooltipTrigger as-child>
       <div class="w-full">
         <DropdownMenu v-model:open="isOpen">
@@ -185,7 +185,7 @@ async function handleDismiss(event: MouseEvent, item: NotificationItem) {
       </div>
     </TooltipTrigger>
     <TooltipContent
-      v-if="isCollapsed && !disableTooltip"
+      v-if="isCollapsed"
       side="right"
       class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
     >
