@@ -167,9 +167,9 @@ jobs:
           cache: pip
           cache-dependency-path: src/${{ matrix.service }}/requirements.txt
       - name: Install deps
-        # httpx: starlette/fastapi TestClient cần (vài service có trong test mà
-        # KHÔNG khai trong requirements runtime) -> cài thêm cho test, không bloat image.
-        run: python -m pip install --upgrade pip && pip install -r requirements.txt httpx
+        # httpx: starlette/fastapi TestClient cần. pytest: ai-router KHÔNG khai trong
+        # requirements runtime (lean image) -> cài thêm cho test. Idempotent với service đã có.
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt httpx pytest
       - name: Run unit + behavior tests (infra off)
         env:
           APP_ENV: development
