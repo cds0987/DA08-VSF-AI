@@ -63,7 +63,10 @@ triage(model triage) → think(model think, planner)
       OFF để e2e không đổi); answer passthrough ACTION JSON; orchestration lọc token think khi
       split. `tests/test_graph_split.py` (8 ca). **act_node CHÍNH LÀ executor nối MCP** (giữ tên
       `act` để không phá hợp đồng SSE với frontend).
-- [ ] Phase 3 · [ ] Phase 4
+- [x] Phase 3 — log/trace per-node: helper `_model_trace_fields` nhúng {adapter, model_id,
+      reasoning_effort} vào log `langgraph_triage_start` / `langgraph_think` / `langgraph_answer`
+      (kèm session_id) → biết chính xác node nào chạy model nào. `tests/test_node_trace.py` (3 ca).
+- [ ] Phase 4
 
 ### Cách bật tách answer (sau khi eval parity xanh)
 ```
