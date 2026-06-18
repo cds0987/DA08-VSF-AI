@@ -36,11 +36,12 @@ def _state(question: str) -> dict:
 
 
 async def test_clear_policy_question_routes_allow():
-    # Câu policy đã rõ ("chính sách nghỉ phép hàng năm") → ALLOW: node trả {} để
-    # rơi xuống think_node, KHÔNG đặt shortcut_outcome=CLARIFY.
+    # Câu policy đã rõ → ALLOW: rơi xuống think_node (KHÔNG có shortcut_outcome).
+    # Node trả triage_route/reason để UI hiện "model nghĩ gì".
     model = _FakeChatModel('{"route":"ALLOW","reason":"internal policy question"}')
     result = await triage_node(_state("Chính sách nghỉ phép hàng năm là gì?"), model)
-    assert result == {}
+    assert result.get("triage_route") == "allow"
+    assert "shortcut_outcome" not in result
 
 
 async def test_vague_question_routes_clarify():
@@ -72,10 +73,11 @@ async def test_clarify_without_question_uses_fallback():
 
 
 async def test_malformed_json_defaults_to_allow():
-    # Parse lỗi → ALLOW (không bao giờ từ chối nhầm câu hợp lệ).
+    # Parse lỗi → ALLOW (không bao giờ từ chối nhầm câu hợp lệ), không có shortcut_outcome.
     model = _FakeChatModel("not-a-json")
     result = await triage_node(_state("Chính sách công tác phí?"), model)
-    assert result == {}
+    assert result.get("triage_route") == "allow"
+    assert "shortcut_outcome" not in result
 
 
 async def test_legacy_label_off_topic_aliases_to_refuse():
