@@ -91,10 +91,14 @@ const proceedConfirm = async () => {
   confirmLoading.value = true
   try {
     if (type === 'delete') {
-      await userService.deleteUser(emp.user_id)
-      // Xoá row ngay khỏi local state: HR xoá async qua event user.deleted
-      // nên fetchEmployees() sẽ vẫn thấy row ~1-2s. Optimistic removal tránh
-      // trạng thái broken (power button mất, manager "No manager").
+      const isOrphan = !usersById.value[emp.user_id]
+      if (isOrphan) {
+        // Orphan: không có user account → xóa trực tiếp HR profile qua hr-service
+        await hrService.deleteEmployee(emp.id)
+      } else {
+        // Normal: xóa user account → HR profile được dọn async qua event user.deleted
+        await userService.deleteUser(emp.user_id)
+      }
       employees.value = employees.value.filter(e => e.user_id !== emp.user_id)
       total.value = Math.max(0, total.value - 1)
       toast.success(`${emp.full_name || emp.company_email} deleted`)

@@ -298,6 +298,35 @@ def test_list_employees_filter_by_department():
     app.dependency_overrides.clear()
 
 
+def test_delete_employee_removes_profile():
+    """DELETE /hr/admin/employees/{id} xóa HR profile và trả 204."""
+    fake_repo = FakeHrRepository()
+    app.dependency_overrides[require_admin_jwt] = mock_require_admin_jwt
+    app.dependency_overrides[get_repo] = lambda: fake_repo
+
+    client = TestClient(app)
+    response = client.delete("/hr/admin/employees/emp-1")
+
+    assert response.status_code == 204
+    assert fake_repo.employees == []
+
+    app.dependency_overrides.clear()
+
+
+def test_delete_employee_not_found_returns_404():
+    """DELETE /hr/admin/employees/{id} trả 404 khi không tìm thấy profile."""
+    fake_repo = FakeHrRepository()
+    app.dependency_overrides[require_admin_jwt] = mock_require_admin_jwt
+    app.dependency_overrides[get_repo] = lambda: fake_repo
+
+    client = TestClient(app)
+    response = client.delete("/hr/admin/employees/nonexistent")
+
+    assert response.status_code == 404
+
+    app.dependency_overrides.clear()
+
+
 def test_list_employees_total_reflects_filter():
     """total trong response phản ánh số bản ghi sau filter, không phải sau limit."""
     class TotalRepo(FakeHrRepository):

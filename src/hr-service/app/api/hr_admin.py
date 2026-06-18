@@ -122,6 +122,17 @@ async def get_employee(
         raise HTTPException(status_code=404, detail="Employee not found")
     return EmployeeItem(**employee.__dict__)
 
+@admin_router.delete("/employees/{employee_id}", status_code=204)
+async def delete_employee(
+    employee_id: str,
+    repo: HrRepository = Depends(get_repo),
+) -> None:
+    employee = await repo.get_employee(employee_id)
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    await repo.delete_employee_by_user_id(employee.user_id)
+
+
 @admin_router.patch("/employees/{employee_id}", response_model=EmployeeItem)
 async def update_employee(
     employee_id: str,
