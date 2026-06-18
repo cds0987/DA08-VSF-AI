@@ -3,14 +3,9 @@ import axios, {
   type AxiosInstance,
   type InternalAxiosRequestConfig,
 } from 'axios'
-import type { ApiError, LoginResponse } from '~/types'
-import {
-  ACCESS_TOKEN_COOKIE,
-  SESSION_COOKIE,
-  getClientCookie,
-  removeClientCookie,
-  setClientCookie,
-} from '../cookie'
+import type { ApiError } from '~/types'
+import { ACCESS_TOKEN_COOKIE, getClientCookie, setClientCookie } from '../cookie'
+import { handleRefreshFailure, refreshAccessToken } from './authRefresh'
 
 export interface CustomInternalAxiosRequestConfig extends InternalAxiosRequestConfig {
   _retry?: boolean
@@ -20,51 +15,6 @@ export interface CustomInternalAxiosRequestConfig extends InternalAxiosRequestCo
 const axiosClient: AxiosInstance = axios.create({
   timeout: 30000,
 })
-
-// Đường dẫn /login phải tôn trọng NUXT_APP_BASE_URL — window.location.href
-// tuyệt đối '/login' sẽ nhảy ra ngoài base path nếu app deploy dưới sub-path.
-function getLoginPath(): string {
-  const base = useRuntimeConfig().app.baseURL || '/'
-  return `${base.replace(/\/$/, '')}/login`
-}
-
-// Dedup các lệnh refresh-token đồng thời: nhiều request 401 cùng lúc (vd nhiều
-// tab, hoặc nhiều API call song song khi access token hết hạn) chỉ nên gọi
-// /auth/refresh một lần — gọi nhiều lần dễ đua nhau làm rotate refresh token
-// và khiến request đến sau bị fail oan, dẫn tới logout giả.
-let refreshPromise: Promise<string | null> | null = null
-
-async function refreshAccessToken(): Promise<string | null> {
-  if (!refreshPromise) {
-    refreshPromise = (async () => {
-      try {
-        const runtimeConfig = useRuntimeConfig()
-        const gatewayUrl = String(runtimeConfig.public.apiGatewayUrl || '').replace(/\/$/, '')
-        const userPrefix = runtimeConfig.public.userServicePath || '/api/user'
-
-        const refreshHeaders: Record<string, string> = {}
-        const gatewayAuth = runtimeConfig.public.gatewayBasicAuth
-        if (gatewayAuth) {
-          refreshHeaders['Authorization-Gateway'] = gatewayAuth
-        }
-
-        // Browser gửi HttpOnly refresh token cookie tự động nhờ withCredentials
-        const refreshRes = await axios.post<LoginResponse>(
-          `${gatewayUrl}${userPrefix}/auth/refresh`,
-          {},
-          { headers: refreshHeaders, withCredentials: true, timeout: 10000 },
-        )
-        return refreshRes.data.access_token || null
-      } catch (refreshError) {
-        console.error('Refresh token failed:', refreshError)
-        return null
-      } finally {
-        refreshPromise = null
-      }
-    })()
-  }
-  return refreshPromise
-}
 
 axiosClient.interceptors.request.use(
   (config: CustomInternalAxiosRequestConfig) => {
@@ -127,17 +77,8 @@ axiosClient.interceptors.response.use(
         return axiosClient(originalRequest)
       }
 
-      if (import.meta.client) {
-        removeClientCookie(ACCESS_TOKEN_COOKIE)
-        removeClientCookie(SESSION_COOKIE)
-        const loginPath = getLoginPath()
-        if (window.location.pathname !== loginPath) {
-          // Thông báo trước khi redirect để user không bị mất trắng context
-          const { toast } = await import('vue-sonner')
-          toast.warning('Phiên đăng nhập đã hết hạn. Đang chuyển về trang đăng nhập...')
-          setTimeout(() => { window.location.href = loginPath }, 1500)
-        }
-      }
+      // Refresh thất bại thật sự -> logout dùng chung với các đường request khác.
+      await handleRefreshFailure()
     }
 
     switch (status) {

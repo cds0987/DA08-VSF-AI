@@ -1,5 +1,6 @@
 import type { ApiError } from '~/types'
 import { ACCESS_TOKEN_COOKIE, getClientCookie } from '../cookie'
+import { withTokenRefresh } from './authRefresh'
 
 export class HRServiceError extends Error {
   constructor(
@@ -35,37 +36,47 @@ export function useHRService() {
     idempotency_key?: string
     confirm_overlap?: boolean
   }) {
-    return await $fetch<{ id: string; status: string; approver_user_id?: string; days_count?: number }>(
-      baseUrl,
-      { method: 'POST', headers: getHRServiceAuthHeaders(), body: payload },
+    return withTokenRefresh(() =>
+      $fetch<{ id: string; status: string; approver_user_id?: string; days_count?: number }>(
+        baseUrl,
+        { method: 'POST', headers: getHRServiceAuthHeaders(), body: payload },
+      )
     )
   }
 
   async function cancelLeaveRequest(id: string) {
-    return await $fetch<{ id: string; status: string }>(
-      `${baseUrl}/${encodeURIComponent(id)}/cancel`,
-      { method: 'POST', headers: getHRServiceAuthHeaders() },
+    return withTokenRefresh(() =>
+      $fetch<{ id: string; status: string }>(
+        `${baseUrl}/${encodeURIComponent(id)}/cancel`,
+        { method: 'POST', headers: getHRServiceAuthHeaders() },
+      )
     )
   }
 
   async function fetchPendingApprovals() {
-    const res = await $fetch<{ items: any[]; count: number }>(`${baseUrl}/pending-approval`, {
-      headers: getHRServiceAuthHeaders(),
-    })
+    const res = await withTokenRefresh(() =>
+      $fetch<{ items: any[]; count: number }>(`${baseUrl}/pending-approval`, {
+        headers: getHRServiceAuthHeaders(),
+      })
+    )
     return res.items ?? []
   }
 
   async function approveLeaveRequest(id: string) {
-    return await $fetch<{ id: string; status: string }>(
-      `${baseUrl}/${encodeURIComponent(id)}/approve`,
-      { method: 'POST', headers: getHRServiceAuthHeaders() },
+    return withTokenRefresh(() =>
+      $fetch<{ id: string; status: string }>(
+        `${baseUrl}/${encodeURIComponent(id)}/approve`,
+        { method: 'POST', headers: getHRServiceAuthHeaders() },
+      )
     )
   }
 
   async function rejectLeaveRequest(id: string, reason = '') {
-    return await $fetch<{ id: string; status: string }>(
-      `${baseUrl}/${encodeURIComponent(id)}/reject`,
-      { method: 'POST', headers: getHRServiceAuthHeaders(), body: { reason } },
+    return withTokenRefresh(() =>
+      $fetch<{ id: string; status: string }>(
+        `${baseUrl}/${encodeURIComponent(id)}/reject`,
+        { method: 'POST', headers: getHRServiceAuthHeaders(), body: { reason } },
+      )
     )
   }
 

@@ -10,6 +10,7 @@ import {
   getQueryServiceAuthHeaders,
   useQueryService,
 } from '~/lib/api/queryService'
+import { handleRefreshFailure, refreshAccessToken } from '~/lib/api/authRefresh'
 
 const RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 30000]
 
@@ -202,8 +203,18 @@ export const useNotificationStore = defineStore('notifications', () => {
     } catch (error) {
       if (!currentController.signal.aborted) {
         if (error instanceof QueryServiceError && error.status === 401) {
-          started = false
-          stopped = true
+          // Access token hết hạn: thử refresh MỘT lần (dedup chung toàn app). Nếu được
+          // thì reconnect (connect() đọc lại token mới từ cookie); nếu refresh thất bại
+          // thật sự mới logout — tránh để notification stream chết oan khi refresh token
+          // còn hợp lệ.
+          const token = await refreshAccessToken()
+          if (token) {
+            scheduleReconnect()
+          } else {
+            started = false
+            stopped = true
+            await handleRefreshFailure()
+          }
         } else {
           scheduleReconnect()
         }

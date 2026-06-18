@@ -1,13 +1,12 @@
-import axios from 'axios'
 import type {
   ApiError,
   ConversationDetailResponse,
   ConversationListResponse,
-  LoginResponse,
   NotificationItem,
   NotificationList,
 } from '~/types'
-import { ACCESS_TOKEN_COOKIE, getClientCookie, setClientCookie } from '../cookie'
+import { ACCESS_TOKEN_COOKIE, getClientCookie } from '../cookie'
+import { withTokenRefresh } from './authRefresh'
 
 export class QueryServiceError extends Error {
   constructor(
@@ -47,33 +46,6 @@ export function useQueryService() {
   const gatewayUrl = String(config.public.apiGatewayUrl || '').replace(/\/$/, '')
   const queryPath = config.public.queryServicePath || '/api/query'
   const baseUrl = `${gatewayUrl}${queryPath}`
-
-  async function doRefresh(): Promise<void> {
-    const userPath = String(config.public.userServicePath || '/api/user')
-    const headers: Record<string, string> = {}
-    const gatewayAuth = config.public.gatewayBasicAuth
-    if (gatewayAuth) headers['Authorization-Gateway'] = String(gatewayAuth)
-    const res = await axios.post<LoginResponse>(
-      `${gatewayUrl}${userPath}/auth/refresh`,
-      {},
-      { headers, withCredentials: true },
-    )
-    if (res.data.access_token) {
-      setClientCookie(ACCESS_TOKEN_COOKIE, res.data.access_token)
-    }
-  }
-
-  async function withTokenRefresh<T>(fn: () => Promise<T>): Promise<T> {
-    try {
-      return await fn()
-    } catch (e: unknown) {
-      if ((e as { status?: number })?.status === 401) {
-        await doRefresh()
-        return fn()
-      }
-      throw e
-    }
-  }
 
   async function fetchHistory(limit = 20, offset = 0, unreadOnly = false, since?: string) {
     return withTokenRefresh(() =>
@@ -124,12 +96,14 @@ export function useQueryService() {
   }
 
   async function fetchConversation(id: string, limit = 500, offset = 0) {
-    return await $fetch<ConversationDetailResponse>(
-      `${baseUrl}/conversations/${encodeURIComponent(id)}`,
-      {
-        headers: getQueryServiceAuthHeaders(),
-        query: { limit, offset },
-      },
+    return withTokenRefresh(() =>
+      $fetch<ConversationDetailResponse>(
+        `${baseUrl}/conversations/${encodeURIComponent(id)}`,
+        {
+          headers: getQueryServiceAuthHeaders(),
+          query: { limit, offset },
+        },
+      )
     )
   }
 
@@ -143,12 +117,14 @@ export function useQueryService() {
   }
 
   async function deleteConversation(id: string) {
-    return await $fetch<{ message: string }>(
-      `${baseUrl}/conversations/${encodeURIComponent(id)}`,
-      {
-        method: 'DELETE',
-        headers: getQueryServiceAuthHeaders(),
-      },
+    return withTokenRefresh(() =>
+      $fetch<{ message: string }>(
+        `${baseUrl}/conversations/${encodeURIComponent(id)}`,
+        {
+          method: 'DELETE',
+          headers: getQueryServiceAuthHeaders(),
+        },
+      )
     )
   }
 

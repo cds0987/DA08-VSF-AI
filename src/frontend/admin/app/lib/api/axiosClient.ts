@@ -49,9 +49,10 @@ async function refreshAccessToken(): Promise<string | null> {
           refreshHeaders['Authorization-Gateway'] = gatewayAuth
         }
 
-        // Browser gửi HttpOnly refresh token cookie tự động nhờ withCredentials
+        // Admin dùng endpoint + cookie refresh RIÊNG (eka.admin.refresh_token) để độc lập
+        // hoàn toàn với chat. Browser gửi HttpOnly cookie tự động nhờ withCredentials.
         const refreshRes = await axios.post<LoginResponse>(
-          `${gatewayUrl}${userPrefix}/auth/refresh`,
+          `${gatewayUrl}${userPrefix}/auth/admin/refresh`,
           {},
           { headers: refreshHeaders, withCredentials: true },
         )
@@ -95,7 +96,7 @@ axiosClient.interceptors.request.use(
     }
 
     if (import.meta.client) {
-      const isAuthEndpoint = config.url?.includes('/auth/login') || config.url?.includes('/auth/refresh') || config.url?.includes('/auth/token')
+      const isAuthEndpoint = config.url?.includes('/auth/login') || config.url?.includes('/auth/admin/login') || config.url?.includes('/auth/refresh') || config.url?.includes('/auth/admin/refresh') || config.url?.includes('/auth/token')
 
       if (!isAuthEndpoint) {
         const token = getClientCookie(ACCESS_TOKEN_COOKIE)
@@ -117,6 +118,9 @@ axiosClient.interceptors.response.use(
     const detail = error.response?.data?.detail || 'Đã có lỗi xảy ra'
 
     if (status === 401 && !originalRequest._retry && !originalRequest.url?.includes('/auth/login') && !originalRequest.url?.includes('/auth/refresh')) {
+      // Lưu ý: '/auth/admin/refresh' không chứa chuỗi '/auth/refresh' nên cũng được phép
+      // vào nhánh này, nhưng lệnh refresh dùng axios trần (không qua interceptor) nên
+      // không xảy ra vòng lặp refresh.
       originalRequest._retry = true
 
       const access_token = await refreshAccessToken()

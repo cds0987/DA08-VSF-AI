@@ -21,6 +21,7 @@ import {
   getQueryServiceAuthHeaders,
   useQueryService,
 } from '~/lib/api/queryService'
+import { handleRefreshFailure, refreshAccessToken } from '~/lib/api/authRefresh'
 
 const HISTORY_KEY = 'eka.chat.conversations'
 
@@ -617,8 +618,10 @@ export const useChatStore = defineStore('chat', () => {
       generating: 3,
     }
 
-    try {
-      await fetchEventSource(`${queryService.baseUrl}/query`, {
+    // Tách thân stream ra hàm riêng để có thể retry MỘT lần khi 401 xảy ra TRƯỚC khi
+    // stream bắt đầu. getQueryServiceAuthHeaders() được đọc lại mỗi lần gọi nên sau khi
+    // refresh (cookie mới) retry sẽ dùng token mới.
+    const runStream = () => fetchEventSource(`${queryService.baseUrl}/query`, {
         method: 'POST',
         headers: {
           ...getQueryServiceAuthHeaders(),
@@ -696,6 +699,30 @@ export const useChatStore = defineStore('chat', () => {
           throw error
         },
       })
+
+    try {
+      try {
+        await runStream()
+      } catch (error) {
+        // CHỈ retry khi 401 xảy ra TRƯỚC khi stream phát token đầu tiên — không bao giờ
+        // replay giữa chừng vì sẽ duplicate câu trả lời / trạng thái conversation.
+        if (
+          error instanceof QueryServiceError
+          && error.status === 401
+          && !hasStartedStreaming
+          && !completed
+          && !controller.signal.aborted
+        ) {
+          const token = await refreshAccessToken()
+          if (!token) {
+            await handleRefreshFailure()
+            throw error
+          }
+          await runStream()
+        } else {
+          throw error
+        }
+      }
 
       if (donePayload) {
         await nextTick()
