@@ -568,6 +568,10 @@ class QueryOrchestrationUseCase:
                     if node == "triage":
                         # JSON phân loại nội bộ — KHÔNG đẩy ra SSE/frontend
                         continue
+                    # split_answer: think là planner (reasoning/quyết tool) — KHÔNG stream
+                    # draft của nó ra UI; chỉ answer node mới stream câu trả lời cuối.
+                    if self._settings.agent_split_answer and node == "think":
+                        continue
                     token = event["data"]["chunk"].content
                     if token:
                         answer_accumulator.append(token)

@@ -274,15 +274,51 @@ def get_langchain_model():
     )
 
 
+def get_node_model(node: str):
+    """MosaChatModel cho 1 node (triage/think/answer) theo profiles.yaml.
+
+    Chỉ dùng ở nhánh adapter 'chat' (route được qua ai-router). Route -> field model =
+    capability của node; direct -> model thật (openai_llm_model)."""
+    from app.infrastructure.llm.chat_model import build_node_chat_model
+
+    settings = get_settings()
+    routing = bool(settings.openai_base_url)
+    api_key = (settings.airouter_internal_token or settings.openai_api_key or "") if routing \
+        else (settings.openai_api_key or "")
+    return build_node_chat_model(
+        node,
+        api_key=api_key,
+        base_url=settings.openai_base_url,
+        timeout=float(settings.openai_timeout_seconds),
+        max_output_tokens=settings.llm_max_output_tokens,
+        direct_model=settings.openai_llm_model,
+    )
+
+
 @lru_cache
 def get_langgraph_agent():
     """
     Cached compiled LangGraph agent. Built once per process.
     Only constructed when use_langgraph=True, otherwise returns None.
+
+    Adapter 'chat': mỗi node 1 MosaChatModel riêng (MOSA per-node) + tùy chọn tách answer.
+    Adapter 'responses' (legacy): 1 model dùng chung (back-compat, không đổi hành vi cũ).
     """
     settings = get_settings()
     if not settings.use_langgraph:
         return None
+    if settings.llm_model_adapter.strip().lower() == "chat":
+        models = {
+            "triage": get_node_model("triage"),
+            "think": get_node_model("think"),
+            "answer": get_node_model("answer"),
+        }
+        return build_langgraph_agent(
+            models=models,
+            mcp_client=get_mcp_client(),
+            tools_loader=get_langchain_mcp_tools_loader(),
+            split_answer=settings.agent_split_answer,
+        )
     return build_langgraph_agent(
         model=get_langchain_model(),
         mcp_client=get_mcp_client(),

@@ -58,4 +58,17 @@ triage(model triage) → think(model think, planner)
 - [x] Phase 1 — `reasoning_oai`/`reasoning_or` + `MosaChatModel` + `build_node_chat_model`
       + `tests/test_mosa_adapters.py` (11 ca, tổng 23 passed). Reasoning model bỏ
       temperature/top_p, thêm reasoning_effort; usage giữ reasoning_tokens.
-- [ ] Phase 2 · [ ] Phase 3 · [ ] Phase 4
+- [x] Phase 2 — per-node model (triage/think/answer) qua `get_node_model`; `build_langgraph_agent`
+      nhận `models` dict; tách answer node sinh-chữ-riêng (flag `AGENT_SPLIT_ANSWER`, mặc định
+      OFF để e2e không đổi); answer passthrough ACTION JSON; orchestration lọc token think khi
+      split. `tests/test_graph_split.py` (8 ca). **act_node CHÍNH LÀ executor nối MCP** (giữ tên
+      `act` để không phá hợp đồng SSE với frontend).
+- [ ] Phase 3 · [ ] Phase 4
+
+### Cách bật tách answer (sau khi eval parity xanh)
+```
+# query-service.env
+AGENT_SPLIT_ANSWER=true
+```
+Khi đó: think=planner (model `think`, reasoning), answer=generator (model `answer`, stream token).
+Mặc định OFF: think tự sinh câu trả lời như cũ — chỉ khác là triage/think đã tách model riêng.
