@@ -84,30 +84,73 @@ def _collection_ready(name: str) -> bool:
     return bool(count and int(count) > 0)
 
 
+def _schema_ok(name: str, hybrid: bool) -> bool:
+    """Schema collection có ĐÚNG kỳ vọng không: hybrid -> phải có named 'dense' + sparse.
+    Sai schema (vd 'default' unnamed do artifact cũ) -> cần XÓA để _ensure tạo lại đúng."""
+    resp = _qdrant_request("GET", f"/collections/{name}")
+    if resp.get("status") != "ok":
+        return True  # chưa tồn tại -> sẽ tạo mới, không cần xóa
+    params = resp.get("result", {}).get("config", {}).get("params", {})
+    vectors = params.get("vectors") or {}
+    has_sparse = bool(params.get("sparse_vectors"))
+    if hybrid:
+        return isinstance(vectors, dict) and "dense" in vectors and has_sparse
+    return True
+
+
+def _delete_collection(name: str) -> bool:
+    resp = _qdrant_request("DELETE", f"/collections/{name}")
+    return resp.get("status") in ("ok", "acknowledged")
+
+
+async def _embed_selftest(retries: int = 6, delay: float = 5.0) -> bool:
+    """Gọi THẬT provider embed (chống race 401: env EMBED_API_KEY chưa hiệu lực ngay sau
+    --force-recreate). Retry tới khi OK; fail hết -> KHÔNG enqueue job doomed."""
+    import asyncio as _a
+
+    from core_engine.ai.base import load_ai_settings
+    from core_engine.ai.openai_provider import OpenAIProvider
+    s = load_ai_settings()
+    provider = OpenAIProvider(s)
+    for i in range(1, retries + 1):
+        try:
+            vec = await provider.embed(["ping"])
+            print(f"  embed self-test OK (dim={len(vec[0])}) sau {i} lần.")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            print(f"  embed self-test lần {i}/{retries} lỗi: {str(exc)[:140]}")
+            if i < retries:
+                await _a.sleep(delay)
+    return False
+
+
 def _reset_db_status(database_url: str, dry_run: bool) -> int:
     from sqlalchemy import create_engine, delete, func, select, update
     from sqlalchemy.orm import Session
 
     from app.infrastructure.db.models import DocumentRecord, IngestJobRecord
 
+    # Reset CẢ completed LẪN failed -> queued (failed = lần migrate trước lỗi transient,
+    # phải re-queue để thử lại; nếu chỉ reset completed thì doc failed kẹt mãi).
+    _RESET = ["completed", "failed"]
     engine = create_engine(database_url, future=True, pool_size=2, max_overflow=0)
     with Session(engine) as session:
-        completed = session.execute(
-            select(func.count()).where(DocumentRecord.status == "completed")
+        n = session.execute(
+            select(func.count()).where(DocumentRecord.status.in_(_RESET))
         ).scalar_one()
         if dry_run:
-            print(f"  [dry-run] would reset {completed} docs -> queued")
-            return completed
+            print(f"  [dry-run] would reset {n} docs (completed/failed) -> queued")
+            return n
         session.execute(
-            update(DocumentRecord).where(DocumentRecord.status == "completed")
+            update(DocumentRecord).where(DocumentRecord.status.in_(_RESET))
             .values(status="queued", chunk_count=0, error_message=None)
         )
         session.execute(
             delete(IngestJobRecord).where(IngestJobRecord.status.in_(["completed", "failed"]))
         )
         session.commit()
-    print(f"  rag_db: {completed} docs -> queued")
-    return completed
+    print(f"  rag_db: {n} docs (completed/failed) -> queued")
+    return n
 
 
 async def _run(dry_run: bool, prefix: str, limit: int | None) -> int:
@@ -134,6 +177,22 @@ async def _run(dry_run: bool, prefix: str, limit: int | None) -> int:
     if not dry_run and not os.environ.get("_AUTOMIGRATE_YES"):
         print("  [refuse] cần --yes (hoặc _AUTOMIGRATE_YES=1) cho lần chạy thật.", file=sys.stderr)
         return 2
+
+    # 1) EMBED SELF-TEST (chống race 401 sau --force-recreate): chỉ reingest khi embed THẬT chạy.
+    if not dry_run:
+        if not await _embed_selftest():
+            print("  [abort] embed self-test FAIL sau nhiều lần -> KHÔNG enqueue job doomed. "
+                  "Kiểm EMBED_API_KEY/OpenRouter rồi deploy lại (hook tự chạy lại).", file=sys.stderr)
+            return 1
+
+    # 2) Xóa collection đích nếu tồn tại nhưng RỖNG / SAI schema (artifact cũ 'default' unnamed)
+    #    -> _ensure ở reingest tạo lại ĐÚNG (hybrid named dense+sparse).
+    hybrid = bool(getattr(config, "hybrid", False))
+    exists = _qdrant_request("GET", f"/collections/{target}").get("status") == "ok"
+    if exists and (not _collection_ready(target) or not _schema_ok(target, hybrid)):
+        print(f"  -> Collection '{target}' rỗng/sai-schema -> XÓA để tạo lại đúng.")
+        if not dry_run:
+            _delete_collection(target)
 
     rag_db_url = os.environ.get("DATABASE_URL", "")
     if rag_db_url:
