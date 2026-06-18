@@ -312,6 +312,10 @@ services:
       - ./deploy/env/secret.env
     environment:
       AIROUTER_REDIS_URL: redis://redis:6379/1
+      # BỎ internal token: ai-router chỉ ROUTE AI nội bộ (bind 127.0.0.1 + compose network, KHÔNG
+      # ra Internet) -> auth không cần. Rỗng -> _auth() return sớm (bỏ qua). Dứt điểm 401 "invalid
+      # internal token" (worker cache client key stale / lệch token lúc deploy). Override env_file.
+      AIROUTER_INTERNAL_TOKEN: ""
       # OTel auto-instrument: 1=BẬT. Gốc lỗi DOWN trước = pkg_resources thiếu (setuptools mới bỏ);
       # đã pin setuptools==75.6.0. Entrypoint workers=1. ai-router trong health gate -> hỏng = deploy ĐỎ.
       VSF_OTEL_ENABLED: "1"

@@ -108,14 +108,9 @@ sleep 8   # cho rag-worker + qdrant kịp sẵn sau up -d
 if AM_OUT=$(docker exec -w /app da08-vsf-rag-worker-1 \
      python scripts/auto_migrate_on_config_change.py --yes 2>&1); then AM_OK=1; else AM_OK=0; fi
 echo "$AM_OUT"
-if echo "$AM_OUT" | grep -q "enqueued="; then
-  # auto_migrate XÓA collection cũ + enqueue reingest -> RESTART rag-worker để re-init FRESH
-  # state: collection vừa xóa -> _ensure tạo lại ĐÚNG schema (hybrid) khi upsert job đầu. Tránh
-  # race "stale _ready" -> worker upsert vào collection ĐÃ XÓA -> Qdrant 404 -> job fail.
-  echo "==> 4ab) Reingest triggered -> restart rag-worker (fresh state, tránh 404 collection-deleted)"
-  docker compose up -d --no-build --force-recreate rag-worker >/dev/null 2>&1 \
-    || echo "::warning::restart rag-worker lỗi"
-fi
+# KHÔNG restart rag-worker: auto_migrate đã XÓA + TỰ TẠO lại collection hybrid ĐÚNG (cùng tên)
+# -> worker (state _ready cũ, cùng collection name) upsert vào collection ĐÃ TỒN TẠI -> không 404.
+# Restart từng gây cửa sổ auth-race (ai-router chưa ổn ngay sau recreate) -> ocr 401 transient.
 [ "$AM_OK" = 1 ] && echo "  auto-migration OK (NO-OP nếu collection đã sẵn)." \
   || echo "::warning::auto-migration skip/abort (Qdrant chưa sẵn / config không đổi / lỗi)."
 

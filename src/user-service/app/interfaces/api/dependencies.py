@@ -14,6 +14,7 @@ from app.application.use_cases.auth.logout_use_case import LogoutUseCase
 from app.application.use_cases.auth.refresh_token_use_case import RefreshTokenUseCase
 from app.application.use_cases.auth.verify_token_use_case import VerifyTokenUseCase
 from app.application.use_cases.users.create_user_use_case import CreateUserUseCase
+from app.application.use_cases.users.delete_user_use_case import DeleteUserUseCase
 from app.application.use_cases.users.list_users_use_case import ListUsersUseCase
 from app.application.use_cases.users.set_user_active_use_case import SetUserActiveUseCase
 from app.core.config import Settings, get_settings
@@ -182,6 +183,14 @@ def get_set_user_active_use_case(
     event_emitter: "NatsUserEventEmitter | None" = Depends(get_user_event_emitter),
 ) -> SetUserActiveUseCase:
     return SetUserActiveUseCase(user_repository, audit_logger, event_emitter=event_emitter)
+
+
+def get_delete_user_use_case(
+    user_repository: PostgresUserRepository = Depends(get_user_repository),
+    audit_logger: PostgresAuditLogRepository = Depends(get_audit_logger),
+    event_emitter: "NatsUserEventEmitter | None" = Depends(get_user_event_emitter),
+) -> DeleteUserUseCase:
+    return DeleteUserUseCase(user_repository, audit_logger, event_emitter=event_emitter)
 
 
 async def get_current_user(

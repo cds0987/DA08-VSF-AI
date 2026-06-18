@@ -80,6 +80,17 @@ class PostgresUserRepository(UserRepository):
         await self.session.refresh(model)
         return _to_entity(model)
 
+    async def delete(self, user_id: str) -> bool:
+        result = await self.session.execute(
+            select(UserModel).where(UserModel.id == _uuid(user_id)),
+        )
+        model = result.scalar_one_or_none()
+        if model is None:
+            return False
+        await self.session.delete(model)
+        await self.session.commit()
+        return True
+
 
 class PostgresLoginStateRepository:
     def __init__(self, session: AsyncSession) -> None:

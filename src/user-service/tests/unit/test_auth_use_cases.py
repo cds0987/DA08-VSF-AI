@@ -85,6 +85,9 @@ class InMemoryUsers:
         self.users[user_id] = updated
         return updated
 
+    async def delete(self, user_id: str) -> bool:
+        return self.users.pop(user_id, None) is not None
+
 
 class InMemoryLoginState:
     def __init__(self) -> None:
