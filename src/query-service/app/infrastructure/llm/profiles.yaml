@@ -1,0 +1,45 @@
+# MOSA LLM profiles — map mỗi node gọi LLM của LangGraph -> adapter + cấu hình model.
+#
+# HOT-CONFIG: sửa file này để đổi model/adapter/effort cho từng node, KHÔNG sửa code.
+# Thiếu file / sai cú pháp / node không khai báo / adapter chưa đăng ký -> loader tự
+# fallback an toàn về adapter 'standard' (xem loader.py) -> KHÔNG làm vỡ service.
+#
+# - adapter:          tên đã @register (standard | reasoning_oai | reasoning_or)
+# - capability:       chuỗi gửi cho ai-router khi route (OPENAI_BASE_URL set) -> router map -> model thật
+# - models:           danh sách model THẬT của node (dùng khi gọi trực tiếp / để tài liệu hoá)
+# - reasoning_effort: low | medium | high (chỉ adapter reasoning_* dùng; standard bỏ qua)
+version: 1
+
+defaults:
+  adapter: standard
+  reasoning_effort: null
+
+nodes:
+  # Phân loại nhanh, rẻ -> model thường, effort thấp.
+  triage:
+    adapter: standard
+    capability: triage
+    reasoning_effort: low
+
+  # Node CHÍNH (planner/reasoning): chọn tool + tổng hợp -> reasoning model.
+  think:
+    adapter: reasoning_oai
+    capability: think
+    models: [o3-mini]
+    reasoning_effort: medium
+
+  # Sinh câu trả lời cuối (stream token) -> tách riêng để có model + effort riêng.
+  answer:
+    adapter: standard
+    capability: answer
+    reasoning_effort: medium
+
+  # Guardrail LLM-judge (input/output).
+  guardrail:
+    adapter: standard
+    capability: guardrail
+
+  # LLM-rerank (mcp-service đọc cùng manifest concept; ở đây để query-service tham chiếu).
+  rerank:
+    adapter: standard
+    capability: rerank

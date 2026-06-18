@@ -28,3 +28,5 @@ langsmith>=0.1.0
 # Model-price catalog: runtime CHỈ đọc model_prices.json đã bundle vào image (xem
 # Dockerfile stage price-builder + requirements-build.txt). KHÔNG cần hf/pyarrow ở runtime.
 newrelic>=9.0.0
+# MOSA LLM profiles (app/infrastructure/llm/profiles.yaml) — manifest node->adapter.
+PyYAML>=6.0
