@@ -27,3 +27,15 @@ export function formatRelevance(score?: number | null): string {
   const pct = Math.round(Math.max(0, Math.min(1, score)) * 100)
   return `${pct}%`
 }
+
+/** Vài chữ đầu nội dung cho chip citation (gợi tò mò). Cắt theo ranh giới từ,
+ * ngắn (~18 ký tự). Rỗng -> "Nguồn". */
+export function citationTeaser(text?: string | null): string {
+  if (!text) return 'Nguồn'
+  const clean = text.replace(/\s+/g, ' ').trim()
+  if (!clean) return 'Nguồn'
+  if (clean.length <= 18) return clean
+  const cut = clean.slice(0, 18)
+  const lastSpace = cut.lastIndexOf(' ')
+  return (lastSpace > 8 ? cut.slice(0, lastSpace) : cut).trimEnd() + '…'
+}
