@@ -201,6 +201,11 @@ def _validate_dates(start_date: str, end_date: str) -> None:
         raise HTTPException(status_code=422, detail="start_date/end_date phải là YYYY-MM-DD")
     if start > end:
         raise HTTPException(status_code=422, detail="start_date phải <= end_date")
+    from zoneinfo import ZoneInfo
+    today = _dt.datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date()
+    if start < today:
+        raise HTTPException(status_code=422, detail="start_date không được là ngày đã qua")
+
 
 
 def _validate_leave_type(leave_type: str, start_date: str, end_date: str) -> None:

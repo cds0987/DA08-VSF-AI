@@ -18,7 +18,9 @@ def test_weekday_this_week():
 
 def test_weekday_next_and_prev_week():
     assert compute("weekday", weekday="thu_4", week_offset=1, today=TODAY)["date"] == "2026-06-24"
-    assert compute("weekday", weekday="thu_4", week_offset=-1, today=TODAY)["date"] == "2026-06-10"
+    # tuần trước là ngày đã qua -> past-date guard trả error
+    result = compute("weekday", weekday="thu_4", week_offset=-1, today=TODAY)
+    assert "error" in result and result.get("past_date") is True
 
 
 def test_today_tomorrow_day_after():
@@ -64,3 +66,40 @@ def test_invalid_inputs_return_error():
     assert "error" in compute("weekday", weekday="thu_9", today=TODAY)  # token lạ
     assert "error" in compute("absolute", date="not-a-date", today=TODAY)
     assert "error" in compute("xyz", today=TODAY)                 # kind lạ
+
+
+def test_absolute_multiple_formats():
+    # DD/MM/YYYY và DD-MM-YYYY được parse đúng
+    assert compute("absolute", date="30/4/2027", today=TODAY)["date"] == "2027-04-30"
+    assert compute("absolute", date="30-04-2027", today=TODAY)["date"] == "2027-04-30"
+    assert compute("absolute", date="30.4.2027", today=TODAY)["date"] == "2027-04-30"
+    assert compute("absolute", date="3/4/2027", today=TODAY)["date"] == "2027-04-03"
+
+
+def test_absolute_missing_year_returns_error():
+    # DD/MM không có năm -> error hỏi năm
+    result = compute("absolute", date="30/4", today=TODAY)
+    assert "error" in result
+    assert "năm nào" in result["error"]
+    assert "past_date" not in result  # không phải past_date, chỉ thiếu năm
+
+
+def test_absolute_past_date_returns_error():
+    # Ngày đã qua -> past-date guard
+    result = compute("absolute", date="30/4/2026", today=TODAY)
+    assert "error" in result
+    assert result.get("past_date") is True
+    assert "đã qua" in result["error"]
+    # Gợi ý năm sau
+    assert "30/04/2027" in result["error"]
+
+
+def test_absolute_past_date_iso_returns_error():
+    # YYYY-MM-DD đã qua cũng bị chặn
+    result = compute("absolute", date="2026-01-15", today=TODAY)
+    assert "error" in result and result.get("past_date") is True
+
+
+def test_today_is_not_blocked():
+    # Hôm nay không bị chặn (d < today là False khi d == today)
+    assert compute("today", today=TODAY)["date"] == "2026-06-16"

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import logging
+import re
 from collections.abc import Mapping
 from typing import Any, Literal, Optional
 from zoneinfo import ZoneInfo
@@ -41,6 +42,11 @@ _VI_WEEKDAY_TO_ISO: dict[str, int] = {
     "thu_7": 5,   # Thứ Bảy  = Saturday
     "chu_nhat": 6,  # Chủ Nhật = Sunday
 }
+
+# Regex cho kind="absolute": nhận nhiều định dạng ngày người dùng hay gõ
+_ISO_RE = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})$")          # YYYY-MM-DD
+_DMY_FULL_RE = re.compile(r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$")  # DD/MM/YYYY
+_DM_ONLY_RE = re.compile(r"^(\d{1,2})[/\-.](\d{1,2})$")          # DD/MM (thiếu năm)
 
 
 def _today() -> _dt.date:
@@ -80,12 +86,47 @@ def compute(
         d = monday + _dt.timedelta(days=iso, weeks=int(week_offset or 0))
     elif kind == "absolute":
         s = (date or "").strip()
-        try:
-            d = _dt.date.fromisoformat(s)
-        except ValueError:
-            return {"error": f"date không hợp lệ (cần YYYY-MM-DD): {s!r}"}
+        d = None
+        m = _ISO_RE.match(s)
+        if m:
+            try:
+                d = _dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            except ValueError:
+                return {"error": f"Ngày không hợp lệ: {s!r}"}
+        if d is None:
+            m = _DMY_FULL_RE.match(s)
+            if m:
+                try:
+                    d = _dt.date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+                except ValueError:
+                    return {"error": f"Ngày không hợp lệ: {s!r}"}
+        if d is None:
+            m = _DM_ONLY_RE.match(s)
+            if m:
+                day_str, month_str = m.group(1), m.group(2)
+                return {"error": (
+                    f"Bạn muốn nghỉ ngày {day_str}/{month_str} năm nào? "
+                    f"Nếu là năm tới thì sẽ là {day_str}/{month_str}/{today.year + 1}."
+                )}
+        if d is None:
+            return {"error": f"Không nhận ra định dạng ngày: {s!r}. Vui lòng dùng DD/MM/YYYY."}
     else:
         return {"error": f"kind không hợp lệ: {kind!r}"}
+    # Past-date guard — áp dụng cho mọi kind
+    if d < today:
+        try:
+            suggested = _dt.date(d.year + 1, d.month, d.day)
+            hint = f" Bạn có muốn đặt ngày {suggested.strftime('%d/%m/%Y')} không?"
+        except ValueError:
+            hint = ""
+        return {
+            "error": (
+                f"Ngày {d.strftime('%d/%m/%Y')} đã qua "
+                f"(hôm nay {today.strftime('%d/%m/%Y')}).{hint}"
+            ),
+            "past_date": True,
+            "today": today.isoformat(),
+        }
     out: dict[str, Any] = {
         "date": d.isoformat(),
         "weekday_vi": _WEEKDAY_VI[d.weekday()],
