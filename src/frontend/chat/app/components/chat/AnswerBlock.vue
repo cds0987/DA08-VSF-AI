@@ -250,6 +250,35 @@ function leavePopover() {
         </TooltipContent>
       </Tooltip>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="hoveredCitation"
+        :style="{ position: 'absolute', zIndex: '9999', width: '300px', top: popoverStyle.top, left: popoverStyle.left }"
+        class="rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-card shadow-lg p-3 pointer-events-auto"
+        @mouseenter="keepPopover"
+        @mouseleave="leavePopover"
+      >
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-[10px] font-bold uppercase tracking-widest text-slate-400">Source {{ hoveredCitation.ref }}</span>
+          <span
+            v-if="formatRelevance(hoveredCitation.score)"
+            class="rounded-full bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300"
+          >{{ formatRelevance(hoveredCitation.score) }}</span>
+        </div>
+        <p class="line-clamp-3 text-[12px] font-medium leading-snug text-slate-800 dark:text-foreground mb-1.5">
+          {{ hoveredCitation.snippet || hoveredCitation.caption }}
+        </p>
+        <div class="flex items-center gap-1 text-[11px] text-slate-500 dark:text-muted-foreground">
+          <FileText class="h-3 w-3 shrink-0" />
+          <span class="truncate font-medium">{{ hoveredCitation.document }}</span>
+          <template v-if="citationHeadingPath(hoveredCitation.heading_path, hoveredCitation.document).length">
+            <span>›</span>
+            <span class="truncate">{{ citationHeadingPath(hoveredCitation.heading_path, hoveredCitation.document).join(' › ') }}</span>
+          </template>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -269,32 +298,3 @@ function leavePopover() {
   --tw-prose-pre-code: var(--foreground);
 }
 </style>
-
-<Teleport to="body">
-  <div
-    v-if="hoveredCitation"
-    :style="{ position: 'absolute', zIndex: '9999', width: '300px', top: popoverStyle.top, left: popoverStyle.left }"
-    class="rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-card shadow-lg p-3 pointer-events-auto"
-    @mouseenter="keepPopover"
-    @mouseleave="leavePopover"
-  >
-    <div class="flex items-center justify-between mb-1.5">
-      <span class="text-[10px] font-bold uppercase tracking-widest text-slate-400">Source {{ hoveredCitation.ref }}</span>
-      <span
-        v-if="formatRelevance(hoveredCitation.score)"
-        class="rounded-full bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300"
-      >{{ formatRelevance(hoveredCitation.score) }}</span>
-    </div>
-    <p class="line-clamp-3 text-[12px] font-medium leading-snug text-slate-800 dark:text-foreground mb-1.5">
-      {{ hoveredCitation.snippet || hoveredCitation.caption }}
-    </p>
-    <div class="flex items-center gap-1 text-[11px] text-slate-500 dark:text-muted-foreground">
-      <FileText class="h-3 w-3 shrink-0" />
-      <span class="truncate font-medium">{{ hoveredCitation.document }}</span>
-      <template v-if="citationHeadingPath(hoveredCitation.heading_path, hoveredCitation.document).length">
-        <span>›</span>
-        <span class="truncate">{{ citationHeadingPath(hoveredCitation.heading_path, hoveredCitation.document).join(' › ') }}</span>
-      </template>
-    </div>
-  </div>
-</Teleport>
