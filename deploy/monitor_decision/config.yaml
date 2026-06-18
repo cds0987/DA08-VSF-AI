@@ -32,7 +32,7 @@ monitor:
     - { id: ops-overview,   file: monitor/grafana/dashboards/ops-overview.json, nav: 1, title: "Tổng quan hệ thống" }
     - { id: ai-router,      file: monitor/grafana/dashboards/ai-router.json,    nav: 2, title: "AI Router" }
     - { id: qdrant-vector,  file: monitor/grafana/dashboards/qdrant.json,       nav: 3, title: "Qdrant — Vector Store" }
-  alert_groups: [ai-router, infra]                   # monitor/alerts/*.rules.yml
+  alert_groups: [ai-router, qdrant, infra]           # monitor/alerts/*.rules.yml
 
 decision:
   # Nguồn sự thật strategy = routing.yaml của ai-router (router hot-reload nó). KHÔNG copy

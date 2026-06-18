@@ -1,0 +1,30 @@
+# Alert rules cho Qdrant (WS-H). Metric từ qdrant:6333/metrics (job qdrant).
+# Ngưỡng DEFAULT; devops chỉnh tay (sửa file + git deploy -> Prometheus reload).
+groups:
+  - name: qdrant
+    rules:
+      # ── P1: Qdrant chết (scrape fail) -> RAG retrieval gãy ───────────────────
+      - alert: QdrantDown
+        expr: up{job="qdrant"} == 0
+        for: 2m
+        labels:
+          severity: P1
+          service: qdrant
+        annotations:
+          summary: "Qdrant không scrape được (down 2m)"
+          description: "Prometheus mất target qdrant:6333. Vector search/upsert có thể đang gãy -> RAG trả NO_INFO."
+          runbook: "runbook/qdrant-down"
+
+      # ── P2: Tỉ lệ lỗi REST cao -> truy vấn/ghi vector hỏng ───────────────────
+      - alert: QdrantRestErrorHigh
+        expr: |
+          sum(rate(rest_responses_fail_total[5m]))
+          / clamp_min(sum(rate(rest_responses_total[5m])), 1) > 0.05
+        for: 10m
+        labels:
+          severity: P2
+          service: qdrant
+        annotations:
+          summary: "Qdrant REST error rate > 5% (10m)"
+          description: "Nhiều request REST lỗi -> kiểm tra collection/đĩa/RAM Qdrant."
+          runbook: "runbook/qdrant-errors"

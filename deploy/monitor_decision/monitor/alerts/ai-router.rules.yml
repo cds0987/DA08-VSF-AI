@@ -56,6 +56,19 @@ groups:
           description: "Key {{ $labels.key_id }} / {{ $labels.secret_env }} sắp cạn quota ngày. Chuẩn bị xoay key trước khi tụt hết sang fallback."
           runbook: "runbook/quota-burndown"
 
+      # ── P2: Model lạ — provider trả model KHÔNG có trong catalog (WS-A drift) ─
+      # -> cost có thể về $0 (OpenAI) + Langfuse phân mảnh. Rebuild build_catalog.
+      - alert: AiRouterModelUnmatched
+        expr: increase(airouter_model_unmatched_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: P2
+          service: ai-router
+        annotations:
+          summary: "Model {{ $labels.model }} không có trong catalog (capability {{ $labels.capability }})"
+          description: "Provider trả model id không khớp catalog -> canonicalize chỉ strip-date. Chạy lại scripts/build_catalog.py để cập nhật giá + gom model."
+          runbook: "runbook/model-unmatched"
+
       # ── P2: Key kẹt cooldown (circuit-breaker sau 429) kéo dài ───────────────
       - alert: AiRouterKeyCooldownStuck
         expr: airouter_key_cooldown == 1
