@@ -225,26 +225,41 @@ def verify_ingest(records: list[dict], token: str) -> None:
         pending = {d for d, (st, _) in statuses.items() if st in ("queued", "processing")}
         failed = {d: msg for d, (st, msg) in statuses.items() if st == "failed"}
         if statuses and not pending and failed:
-            # TODO(e371bef hybrid-search): từ khi bật dense+sparse named vectors, vài doc
-            # ingest FAIL ÂM THẦM (error_message rỗng) trong Qdrant. TẠM bỏ các doc fail-rỗng
-            # này khỏi gate (cap nhỏ) để không chặn deploy; chủ rag-worker fix sau. Lỗi THẬT
-            # (có message, vd 401 OpenAI) hoặc fail-rỗng quá nhiều -> vẫn hard-fail.
-            real = {d: m for d, m in failed.items() if (m or "").strip()}
-            silent = {d for d, m in failed.items() if not (m or "").strip()}
-            if real or len(silent) > 3:
-                lines = "\n".join(f"    - {d}: {m[:200]}" for d, m in list(failed.items())[:5])
-                raise SystemExit(
-                    f"[3] INGEST FAILED sớm: {len(ids)}/{len(expected)} indexed, "
-                    f"{len(failed)} doc status=failed:\n{lines}"
-                )
-            print(f"  ⚠ WARN: {len(silent)} doc ingest fail ÂM THẦM (hybrid-search e371bef) "
-                  f"-> tạm bỏ khỏi gate: {sorted(silent)}")
-            expected = expected - silent
-            if expected <= ids:
-                print(f"  INGEST OK (trừ {len(silent)} doc hybrid-search gap)")
-                return
+            # STRICT: bất kỳ doc nào status=failed (kể cả error_message rỗng) -> hard-fail NGAY.
+            # Trước đây nới lỏng bỏ qua "silent fail" (e371bef hybrid) để né chặn deploy -> CHE
+            # regression: bug worker upsert unnamed lệch schema named lọt ra prod. Bug đã fix (áp
+            # VECTOR_HYBRID cho CẢ 2 nhánh bootstrap); giữ STRICT để bắt tái phát.
+            lines = "\n".join(f"    - {d}: {(m or '<rỗng>')[:200]}" for d, m in list(failed.items())[:8])
+            raise SystemExit(
+                f"[3] INGEST FAILED: {len(ids)}/{len(expected)} indexed, "
+                f"{len(failed)} doc status=failed:\n{lines}"
+            )
         time.sleep(5)
     raise SystemExit(f"[3] VERIFY TIMEOUT {timeout}s: {last}/{len(expected)} doc")
+
+
+def verify_hybrid_schema() -> None:
+    """VECTOR_HYBRID=true -> mọi collection ingest PHẢI là named 'dense' + sparse 'sparse'.
+
+    Ingest "xanh" mà schema unnamed = bug nhánh config.yaml quên áp VECTOR_HYBRID (worker
+    hybrid=False -> tạo+upsert unnamed, tự nhất quán nên không fail). Assert schema bắt đúng
+    nó (ở prod auto_migrate tạo named -> worker unnamed -> 400; ở đây schema check là proxy).
+    """
+    if os.environ.get("VECTOR_HYBRID", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        return
+    cols = [c["name"] for c in _qdrant("GET", "/collections")["result"]["collections"]
+            if not c["name"].endswith("__meta")]
+    for c in cols:
+        params = _qdrant("GET", f"/collections/{c}")["result"]["config"]["params"]
+        vectors = params.get("vectors") or {}
+        sparse = params.get("sparse_vectors") or {}
+        named_dense = isinstance(vectors, dict) and "dense" in vectors
+        if not (named_dense and "sparse" in sparse):
+            shown = list(vectors) if isinstance(vectors, dict) else "UNNAMED(single)"
+            raise SystemExit(
+                f"[3b] HYBRID SCHEMA SAI ở '{c}': vectors={shown} sparse={list(sparse)} "
+                f"(VECTOR_HYBRID=true nhưng KHÔNG named dense+sparse -> bug 2-nhánh bootstrap)")
+    print(f"  HYBRID SCHEMA OK: {cols} đều named dense+sparse")
 
 
 # ─────────────────────────────── Langfuse verify ───────────────────────────
@@ -447,6 +462,7 @@ def main() -> int:
         except Exception:  # noqa: BLE001
             pass
         print("==> 3) verify ingest (Qdrant)"); verify_ingest(records, token)
+        print("==> 3b) verify hybrid schema (named dense+sparse)"); verify_hybrid_schema()
         print("==> 4) verify rag-worker trace (Langfuse)"); lf1 = verify_trace("ingest", lf0)
         print("==> 5) query RAG"); query("RAG", token, uid, "công ty có chính sách nghỉ phép thế nào", True)
         print("==> 6) query HR"); query("HR", token, uid, "Tôi còn bao nhiêu ngày phép?", False)

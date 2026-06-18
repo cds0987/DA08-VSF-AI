@@ -70,6 +70,35 @@ async def handle_user_event(
             )
 
 
+async def _ensure_user_events_stream(js) -> None:
+    """Đảm bảo stream USER_EVENTS chứa đủ USER_EVENT_SUBJECTS.
+
+    Stream có thể được tạo trước khi có subject mới (vd user.deleted thêm sau).
+    Nếu thiếu: update_stream để bổ sung. Best-effort: lỗi chỉ log warning.
+    """
+    wanted = set(USER_EVENT_SUBJECTS)
+    try:
+        info = await js.stream_info(STREAM_NAME)
+        current = set(getattr(getattr(info, "config", None), "subjects", None) or [])
+        if not wanted.issubset(current):
+            try:
+                from nats.js.api import StreamConfig  # noqa: PLC0415
+
+                merged = sorted(current | wanted)
+                await js.update_stream(StreamConfig(name=STREAM_NAME, subjects=merged))
+                logger.info("updated NATS stream %s subjects -> %s", STREAM_NAME, merged)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("failed to update NATS stream %s subjects: %s", STREAM_NAME, exc)
+    except Exception:
+        # Stream chưa tồn tại: User Service sẽ tạo khi publish lần đầu.
+        # Subscribe sẽ lỗi per-subject và được log riêng — không crash toàn bộ.
+        try:
+            await js.add_stream(name=STREAM_NAME, subjects=sorted(wanted))
+            logger.info("created NATS stream %s", STREAM_NAME)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("failed to create NATS stream %s: %s", STREAM_NAME, exc)
+
+
 @dataclass
 class SubscriberHandle:
     connection: object | None
@@ -125,8 +154,12 @@ async def start_user_events_subscriber(
 
         if settings.nats_jetstream_enabled:
             js = nc.jetstream()
+            await _ensure_user_events_stream(js)
             for subject in USER_EVENT_SUBJECTS:
-                await js.subscribe(subject, durable=f"{DURABLE}_{subject.replace('.', '_')}", cb=_cb)
+                try:
+                    await js.subscribe(subject, durable=f"{DURABLE}_{subject.replace('.', '_')}", cb=_cb)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("failed to subscribe user event subject %s: %s", subject, exc)
         else:
             for subject in USER_EVENT_SUBJECTS:
                 await nc.subscribe(subject, cb=_cb)

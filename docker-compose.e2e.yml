@@ -353,6 +353,9 @@ services:
       AI_PROVIDER: openai
       EMBED_MODEL: text-embedding-3-small
       EMBED_DIMENSION: "1536"
+      # Exercise đường HYBRID (named dense+sparse) trong e2e -> bắt bug nhánh config.yaml
+      # quên áp VECTOR_HYBRID (worker upsert unnamed lệch schema). run_e2e assert schema.
+      VECTOR_HYBRID: "true"
       CAPTION_MODEL: gpt-4o-mini
       CAPTION_ENABLED: "true"
       RERANK_PROVIDER: none

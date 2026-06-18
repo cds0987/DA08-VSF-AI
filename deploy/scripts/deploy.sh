@@ -77,6 +77,24 @@ docker exec da08-vsf-app-postgres-1 pg_dump -U postgres -d query_db -Fc > "$QUER
 [ -s "$QUERY_DB_BACKUP" ] || { echo "::error::Không tạo được query_db backup"; exit 1; }
 QUERY_DB_BACKUP_READY=1
 
+# 3z) Qdrant ONE-TIME storage WIPE (token-gated, idempotent). Đổi token ở deploy/qdrant-wipe.token
+# -> wipe volume qdrant_data ĐÚNG 1 LẦN. Dùng khi nâng major Qdrant KHÔNG forward-compat storage
+# (vd v1.12->v1.18 panic `unknown variant on_disk`). Token trùng marker -> no-op (deploy thường an toàn).
+WIPE_TOKEN_FILE="$APP_DIR/deploy/qdrant-wipe.token"
+WIPE_MARKER="/var/tmp/da08-qdrant-wipe-applied"
+if [ -f "$WIPE_TOKEN_FILE" ]; then
+  WANT="$(tr -d '[:space:]' < "$WIPE_TOKEN_FILE")"
+  HAVE="$(cat "$WIPE_MARKER" 2>/dev/null || true)"
+  if [ -n "$WANT" ] && [ "$WANT" != "$HAVE" ]; then
+    echo "==> 3z) Qdrant WIPE storage (token=$WANT): stop + xóa volume (nâng version không forward-compat)"
+    docker compose rm -sf qdrant >/dev/null 2>&1 || true
+    WIPE_VOL="$(docker volume ls -q | grep -E 'qdrant_data$' | head -1 || true)"
+    if [ -n "$WIPE_VOL" ]; then docker volume rm "$WIPE_VOL" >/dev/null 2>&1 || true; fi
+    echo "$WANT" > "$WIPE_MARKER"
+    echo "   Qdrant volume wiped (${WIPE_VOL:-none}) -> v1.18 khởi động FRESH; rag-worker re-ingest qwen hybrid."
+  fi
+fi
+
 echo "==> 4) Up image đã pull (query/rag/hr migrations chạy one-shot và fail-fast)"
 docker compose up -d --no-build qdrant langfuse-db langfuse nats-bootstrap query-migrate rag-worker mcp-service hr-service user-service document-service query-service ai-router frontend-chat frontend-admin \
   || { echo "::error::compose up FAILED — dump migration + nats-bootstrap logs:"; \
