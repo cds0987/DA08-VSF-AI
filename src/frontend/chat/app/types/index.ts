@@ -85,6 +85,9 @@ export interface TraceEntry {
 
 export interface QueryTokenEvent {
   token?: string
+  // reasoning: token "đang nghĩ" của think node (planner) — hiện ở panel thinking, KHÔNG
+  // phải câu trả lời cuối.
+  reasoning?: string
   phase?: 'thinking' | 'acting' | 'observing' | 'generating'
   status?: string
   node?: string
@@ -171,6 +174,8 @@ export interface ChatMessage {
   // Các bước agent đã thực hiện (tool calls + kết quả) — hiển thị bền vững dưới câu trả lời
   // để user xem lại agent đã nghĩ/làm gì. Chỉ có ở message sinh trong phiên (history không lưu).
   trace?: TraceEntry[]
+  // Nội dung "đang suy nghĩ" của planner (think node) — lưu để xem lại trong MessageSteps.
+  reasoning?: string
 }
 
 export interface Conversation {

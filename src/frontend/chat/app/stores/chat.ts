@@ -405,12 +405,26 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const detail = await queryService.fetchConversation(id)
       const updatedAt = detail.updated_at
+      const serverMsgs = detail.messages.map(toChatMessage)
+      // `trace` (các bước agent) + `reasoning` chỉ sống ở client — backend history KHÔNG lưu.
+      // Khôi phục từ cache localStorage theo vị trí + content -> mở lại/đổi hội thoại KHÔNG
+      // mất "Agent đã thực hiện N bước" của các câu trả lời cũ.
+      const cachedMsgs = fallbackConversations.value.find((c) => c.id === id)?.messages ?? []
+      serverMsgs.forEach((s, i) => {
+        if (s.role !== 'assistant') return
+        const sameSlot = cachedMsgs[i]?.role === 'assistant' && cachedMsgs[i]?.content === s.content
+        const c = sameSlot
+          ? cachedMsgs[i]
+          : cachedMsgs.find((m) => m.role === 'assistant' && m.content === s.content && (m.trace?.length || m.reasoning))
+        if (c?.trace?.length) s.trace = c.trace
+        if (c?.reasoning) s.reasoning = c.reasoning
+      })
       const synced: Conversation = {
         id: detail.id,
         title: detail.title,
         updatedAt,
         bucket: getBucket(new Date(updatedAt)),
-        messages: detail.messages.map(toChatMessage),
+        messages: serverMsgs,
       }
       const index = conversations.value.findIndex((item) => item.id === id)
       if (index >= 0) conversations.value.splice(index, 1, synced)
