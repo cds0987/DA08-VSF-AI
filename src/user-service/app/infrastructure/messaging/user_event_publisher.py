@@ -10,7 +10,7 @@ from uuid import uuid4
 logger = logging.getLogger(__name__)
 
 # Theo infra/nats/subjects.md — USER_EVENTS.
-USER_EVENT_SUBJECTS = ("user.created", "user.updated", "user.deactivated")
+USER_EVENT_SUBJECTS = ("user.created", "user.updated", "user.deactivated", "user.deleted")
 JETSTREAM_STREAMS = {"USER_EVENTS": list(USER_EVENT_SUBJECTS)}
 
 

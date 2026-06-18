@@ -26,6 +26,10 @@ const userService = {
     const response = await axiosClient.patch(`/users/${userId}/reactivate`, {}, { service: 'user' })
     return response.data
   },
+
+  async deleteUser(userId: string): Promise<void> {
+    await axiosClient.delete(`/users/${userId}`, { service: 'user' })
+  },
 }
 
 export default userService

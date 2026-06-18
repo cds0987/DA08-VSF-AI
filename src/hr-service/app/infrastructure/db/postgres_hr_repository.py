@@ -236,6 +236,31 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
 
         return await asyncio.to_thread(_update)
 
+    async def delete_employee_by_user_id(self, user_id: str) -> bool:
+        """Hard delete toàn bộ dữ liệu HR của một user. Xoá các bảng phụ trước
+        (leave_requests có FK -> employees.id) rồi mới xoá employee. Idempotent."""
+        def _delete() -> bool:
+            with self._session() as session:
+                # Dọn dữ liệu phụ theo user_id để tránh orphan/FK (leave_requests FK employees.id).
+                for model in (
+                    LeaveRequestRecord,
+                    LeaveBalanceRecord,
+                    AttendanceRecord,
+                    OnboardingRecord,
+                    BenefitsRecord,
+                    PerformanceReviewRecord,
+                    PayrollSummaryRecord,
+                ):
+                    session.execute(sa.delete(model).where(model.user_id == user_id))
+
+                result = session.execute(
+                    sa.delete(EmployeeRecord).where(EmployeeRecord.user_id == user_id)
+                )
+                session.commit()
+                return (result.rowcount or 0) > 0
+
+        return await asyncio.to_thread(_delete)
+
     @staticmethod
     def _to_employee_dto(record: EmployeeRecord) -> EmployeeDTO:
         return EmployeeDTO(

@@ -2,11 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.application.exceptions import ConflictError, NotFoundError, PermissionDeniedError
 from app.application.use_cases.users.create_user_use_case import CreateUserUseCase
+from app.application.use_cases.users.delete_user_use_case import DeleteUserUseCase
 from app.application.use_cases.users.list_users_use_case import ListUsersUseCase
 from app.application.use_cases.users.set_user_active_use_case import SetUserActiveUseCase
 from app.domain.entities.user import User
 from app.interfaces.api.dependencies import (
     get_create_user_use_case,
+    get_delete_user_use_case,
     get_list_users_use_case,
     get_set_user_active_use_case,
     require_admin,
@@ -110,6 +112,36 @@ async def reactivate_user(
     use_case: SetUserActiveUseCase = Depends(get_set_user_active_use_case),
 ) -> UserActiveResponse:
     return await _set_active(user_id, True, request, actor, use_case)
+
+
+@router.delete("/{user_id}", status_code=204)
+async def delete_user(
+    user_id: str,
+    request: Request,
+    actor: User = Depends(require_admin),
+    use_case: DeleteUserUseCase = Depends(get_delete_user_use_case),
+) -> None:
+    try:
+        await use_case.execute(
+            actor=actor,
+            user_id=user_id,
+            ip_address=request.client.host if request.client else None,
+        )
+    except PermissionDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin only",
+        ) from exc
+    except ConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except NotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        ) from exc
 
 
 async def _set_active(

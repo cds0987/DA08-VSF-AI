@@ -56,6 +56,10 @@ class HrRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def delete_employee_by_user_id(self, user_id: str) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
     async def get_leave_balance(self, user_id: str) -> Optional[LeaveBalanceDTO]:
         raise NotImplementedError
 

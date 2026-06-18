@@ -21,6 +21,7 @@ class RecordingRepo:
     def __init__(self) -> None:
         self.ensured: list[str] = []
         self.upserts: list[tuple[str, str, str, bool, str]] = []
+        self.deleted: list[str] = []
 
     async def ensure_leave_balance(
         self, user_id: str, annual_total: int = 12, sick_total: int = 10
@@ -33,6 +34,10 @@ class RecordingRepo:
     ) -> None:
         self.upserts.append((user_id, email, department, is_active, account_type))
 
+
+    async def delete_employee_by_user_id(self, user_id: str) -> bool:
+        self.deleted.append(user_id)
+        return True
 
     async def aclose(self) -> None:  # pragma: no cover - không dùng ở handler test
         return None
@@ -119,6 +124,25 @@ def test_user_deactivated_defaults_inactive_when_flag_missing() -> None:
     # is_active vắng -> suy ra từ subject deactivated.
     _run(handle_user_event("user.deactivated", {"user_id": "u-3"}, repo))
     assert repo.upserts == [("u-3", "", "", False, "internal")]
+
+
+def test_user_deleted_removes_employee_no_upsert_no_publish() -> None:
+    repo = RecordingRepo()
+    publisher = RecordingPublisher()
+    payload = {"user_id": "u-del", "email": "z@z.z", "department": "HR", "is_active": False}
+    _run(handle_user_event("user.deleted", payload, repo, publisher))
+    assert repo.deleted == ["u-del"]
+    assert repo.upserts == []  # không upsert hồ sơ cho user đã xoá
+    assert repo.ensured == []
+    assert publisher.events == []  # không publish profile khi xoá
+
+
+def test_user_deleted_is_idempotent() -> None:
+    repo = RecordingRepo()
+    payload = {"user_id": "u-del", "email": "z@z.z", "department": "HR", "is_active": False}
+    _run(handle_user_event("user.deleted", payload, repo))
+    _run(handle_user_event("user.deleted", payload, repo))
+    assert repo.deleted == ["u-del", "u-del"]  # gọi lại an toàn, no-op ở DB layer
 
 
 def test_missing_user_id_raises_fast() -> None:

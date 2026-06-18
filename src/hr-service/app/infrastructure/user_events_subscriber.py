@@ -11,7 +11,7 @@ from app.domain.repositories.hr_repository import HrRepository
 
 logger = logging.getLogger("hr-service.user_events")
 
-USER_EVENT_SUBJECTS = ("user.created", "user.updated", "user.deactivated")
+USER_EVENT_SUBJECTS = ("user.created", "user.updated", "user.deactivated", "user.deleted")
 STREAM_NAME = "USER_EVENTS"
 DURABLE = "HR_USER_LIFECYCLE"
 
@@ -35,6 +35,13 @@ async def handle_user_event(
     user_id = str(payload["user_id"]).strip()
     if not user_id:
         raise ValueError("user event missing user_id")
+
+    if subject == "user.deleted":
+        # Hard delete: xoá hồ sơ employee + dữ liệu HR theo user_id. Idempotent
+        # (thiếu hàng = no-op). Không upsert, không publish profile.
+        await repo.delete_employee_by_user_id(user_id)
+        return
+
     email = str(payload.get("email", ""))
     department = str(payload.get("department", ""))
     account_type = str(payload.get("account_type", "internal") or "internal")

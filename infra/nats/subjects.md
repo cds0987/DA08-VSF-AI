@@ -46,11 +46,12 @@ The business fields documented below remain top-level fields, so existing DTOs c
 | `user.created` | JetStream publish/subscribe durable | User Service | HR Service | `USER_EVENTS` | at-least-once, durable, explicit ack | `event_id`; fallback `user_id + "user.created"` |
 | `user.updated` | JetStream publish/subscribe durable | User Service | HR Service | `USER_EVENTS` | at-least-once, durable, explicit ack | `event_id`; fallback `user_id` with latest `occurred_at` |
 | `user.deactivated` | JetStream publish/subscribe durable | User Service | HR Service | `USER_EVENTS` | at-least-once, durable, explicit ack | `event_id`; fallback `user_id + "user.deactivated"` |
+| `user.deleted` | JetStream publish/subscribe durable | User Service | HR Service | `USER_EVENTS` | at-least-once, durable, explicit ack | `event_id`; fallback `user_id + "user.deleted"` |
 | `rag.search` | Core NATS request-reply | MCP Service tool `rag_search` | RAG Worker | none | synchronous, timeout 10s | request-scoped; no persistence |
 
 ## Error And Retry Rules
 
-- JetStream events (`doc.ingest`, `doc.status`, `doc.access`, `hr.employee_profile.updated`, `notify.doc_new`, `user.created`, `user.updated`, `user.deactivated`) are at-least-once. Consumers must be idempotent.
+- JetStream events (`doc.ingest`, `doc.status`, `doc.access`, `hr.employee_profile.updated`, `notify.doc_new`, `user.created`, `user.updated`, `user.deactivated`, `user.deleted`) are at-least-once. Consumers must be idempotent.
 - Consumers deduplicate by `event_id` when present. If metadata is missing during transition, use the fallback key listed in the overview.
 - Consumers must ack only after durable side effects complete.
 - If processing fails with a retryable error, do not ack; JetStream will redeliver based on consumer config.
@@ -255,7 +256,7 @@ Payload example:
 
 Required fields: `event_id`, `event_version`, `occurred_at`, `doc_id`, `document_name`, `classification`, `allowed_departments`, `allowed_user_ids`.
 
-## `user.created` / `user.updated` / `user.deactivated`
+## `user.created` / `user.updated` / `user.deactivated` / `user.deleted`
 
 Purpose: User Service phát vòng đời tài khoản. HR Service lắng nghe để tự cấp phát /
 cập nhật hồ sơ nhân sự (leave_balance mặc định, employees department/email/status) —
@@ -294,6 +295,9 @@ Required fields: `event_id`, `event_version`, `occurred_at`, `user_id`, `email`,
 
 - `user.updated`: cùng payload; HR cập nhật department/email/status.
 - `user.deactivated`: cùng payload với `is_active=false`; HR set `employment_status='inactive'`.
+- `user.deleted`: phát khi Admin hard-delete tài khoản qua `DELETE /users/{id}` (sau khi xoá DB
+  user-service thành công). Cùng payload; HR Service **xoá** hồ sơ employee + dữ liệu HR theo
+  `user_id` (idempotent: thiếu hàng = no-op). Không upsert, không publish `hr.employee_profile.updated`.
 - Backfill go-live: User Service replay `user.created` cho toàn bộ user hiện có (one-shot, idempotent nhờ HR consumer dedupe + upsert).
 
 ## `rag.search`
