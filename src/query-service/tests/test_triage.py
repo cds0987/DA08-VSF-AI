@@ -83,3 +83,40 @@ async def test_legacy_label_off_topic_aliases_to_refuse():
     model = _FakeChatModel('{"route":"off_topic","reason":"legacy label"}')
     result = await triage_node(_state("Giá vàng hôm nay?"), model)
     assert result["shortcut_outcome"] == "OFF_TOPIC"
+
+
+async def test_meta_sources_with_cited_names_includes_followup():
+    # META/sources khi lịch sử có [Nguồn tham khảo:...] → liệt kê tên + mời hỏi tiếp.
+    from types import SimpleNamespace as SN
+    from langchain_core.messages import AIMessage
+
+    ai_msg = AIMessage(
+        content="Đây là thông tin HR.\n[Nguồn tham khảo: HR_Policy.pdf, CNHC_Handbook.pdf]"
+    )
+    state = {
+        "question": "10 file trên là file gì vậy",
+        "session_id": "sess-test",
+        "messages": [ai_msg],
+    }
+    model = _FakeChatModel('{"route":"META","meta_type":"sources","reason":"numeric file reference"}')
+    result = await triage_node(state, model)
+    assert result["shortcut_outcome"] == "SUCCESS"
+    assert "HR_Policy.pdf" in result["shortcut_response"]
+    assert "CNHC_Handbook.pdf" in result["shortcut_response"]
+    # Phải có lời mời hỏi tiếp
+    assert "tra cứu" in result["shortcut_response"]
+
+
+async def test_meta_sources_without_cited_names_asks_for_clarification():
+    # META/sources khi không tìm thấy [Nguồn tham khảo:] → mời user chỉ rõ file.
+    state = {
+        "question": "10 file trên là file gì vậy",
+        "session_id": "sess-test",
+        "messages": [],
+    }
+    model = _FakeChatModel('{"route":"META","meta_type":"sources","reason":"numeric file reference"}')
+    result = await triage_node(state, model)
+    assert result["shortcut_outcome"] == "SUCCESS"
+    assert "không tìm thấy" in result["shortcut_response"]
+    # Phải mời user làm rõ
+    assert "file" in result["shortcut_response"].lower() or "tài liệu" in result["shortcut_response"].lower()

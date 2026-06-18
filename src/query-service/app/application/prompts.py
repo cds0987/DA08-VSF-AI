@@ -70,14 +70,18 @@ GROUP 1: SAFETY — Emergency, physical injury, serious mental health. Include s
   unless the user is reporting an immediate real-world emergency or injury happening now.
 
 GROUP 2: META — Questions about conversation history. Include meta_type:
-  (a) meta_type "question": asking about a previous user question ("what was my last question",
-      "nhắc lại câu hỏi trước của tôi", "what did I ask earlier").
+  (a) meta_type "question": ONLY when the user explicitly asks about their OWN previous question
+      ("what was my last question", "nhắc lại câu hỏi trước của tôi", "what did I ask earlier",
+      "câu tôi hỏi lúc nãy là gì"). Do NOT use this for references to files or documents.
   (b) meta_type "sources": any reference to files/documents/sources that appeared in a
       previous answer — including demonstrative/numeric references without new topic:
-      "5 file này là gì vậy", "file ở trên đó", "mấy cái đó là gì", "các tài liệu vừa nêu",
-      "tài liệu trên là gì", "nguồn tham khảo là gì", "tài liệu nào được dùng",
-      "kể tên các tài liệu đó đi", "mấy tài liệu bạn vừa dùng là gì".
-      When in doubt between ALLOW and META for a source reference → META.
+      "5 file này là gì vậy", "10 file trên là file gì", "file ở trên đó", "mấy cái đó là gì",
+      "các tài liệu vừa nêu", "tài liệu trên là gì", "nguồn tham khảo là gì",
+      "tài liệu nào được dùng", "kể tên các tài liệu đó đi", "mấy tài liệu bạn vừa dùng là gì".
+      CRITICAL: Any pattern "[NUMBER] file/tài liệu [trên/này/kia/đó/vừa rồi]" ALWAYS →
+      meta_type "sources", even when the exact number may not match visible citation count
+      (the user sees more entries in the UI than unique file names). Never route these as
+      meta_type "question". When in doubt between ALLOW and META for a source reference → META.
 
 GROUP 3: CLARIFY — In scope but too vague, no topic anchor.
   If history is sufficient to understand intent → ALLOW. Generate 1 specific follow-up in Vietnamese
@@ -120,6 +124,7 @@ Examples:
 {"route":"SAFETY","safety_type":"distress","reason":"self-harm signal"}  ← "Tôi không muốn sống nữa"
 {"route":"META","meta_type":"question","reason":"asking about prior user question"}  ← "Câu hỏi trước của tôi là gì"
 {"route":"META","meta_type":"sources","reason":"demonstrative reference to previously cited files"}  ← "5 file này là gì vậy"
+{"route":"META","meta_type":"sources","reason":"numeric+demonstrative reference to files in prior answer"}  ← "10 file trên là file gì vậy"
 {"route":"META","meta_type":"sources","reason":"reference to cited sources in prior answer"}  ← "file ở trên đó"
 {"route":"META","meta_type":"sources","reason":"asking which documents were cited"}  ← "mấy tài liệu bạn vừa dùng là gì"
 {"route":"ALLOW","reason":"language/capability question — assistant will respond and switch language"}  ← "bạn nói tiếng anh được không?"

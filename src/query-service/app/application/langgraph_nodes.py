@@ -265,12 +265,18 @@ async def triage_node(state: AgentState, model: BaseChatModel) -> dict:
                     if m:
                         cited_names = [n.strip() for n in m.group(1).split(",") if n.strip()]
                         break
-            meta_answer = (
-                "Dựa trên câu trả lời trước, các tài liệu được trích dẫn bao gồm:\n"
-                + "\n".join(f"- {n}" for n in cited_names)
-                if cited_names
-                else "Mình không tìm thấy thông tin tài liệu nào trong lịch sử hội thoại."
-            )
+            if cited_names:
+                meta_answer = (
+                    "Dựa trên câu trả lời trước, các tài liệu được trích dẫn bao gồm:\n"
+                    + "\n".join(f"- {n}" for n in cited_names)
+                    + "\n\nBạn muốn biết thêm về nội dung của tài liệu nào? "
+                    "Mình có thể tra cứu chi tiết cho bạn nhé."
+                )
+            else:
+                meta_answer = (
+                    "Mình không tìm thấy tài liệu nào được trích dẫn trong lịch sử hội thoại gần đây. "
+                    "Bạn có thể cho mình biết bạn đang hỏi về file/tài liệu nào không?"
+                )
         else:
             # meta_type == "question" — look up the most recent prior user question.
             # Skip any message that equals the current question — the save-ordering fix
