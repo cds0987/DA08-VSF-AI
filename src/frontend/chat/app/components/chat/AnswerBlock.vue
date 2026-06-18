@@ -8,7 +8,7 @@ import {
   ThumbsDown,
   ThumbsUp,
 } from '@lucide/vue'
-import { citationHeadingPath, cn, formatRelevance } from '~/lib/utils'
+import { citationHeadingPath, citationTeaser, cn, formatRelevance } from '~/lib/utils'
 import type { ChatMessage, Citation } from '~/types'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
@@ -41,16 +41,21 @@ function resolveRef(n: number): Citation | undefined {
 const renderedContent = computed(() => {
   if (!props.data.content) return ''
   const rawHtml = md.render(props.data.content)
-  // Gộp run các marker [N] liền nhau (cho phép khoảng trắng giữa) -> 1 chip logo VSF.
-  const withRefs = rawHtml.replace(/(?:\[\d+\]\s*)+/g, (run) => {
+  const esc = (t: string) => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!))
+  // Gộp run [N] liền nhau -> 1 chip logo VSF. Đẩy dấu câu cuối câu RA TRƯỚC chip
+  // (chip đứng SAU dấu chấm, không phải trước).
+  const withRefs = rawHtml.replace(/(\s*)((?:\[\d+\]\s*)+)([.,;:!?…]*)/g, (_m, lead, run, punct) => {
     const refs = [...run.matchAll(/\[(\d+)\]/g)]
       .map(m => parseInt(m[1]))
       .filter(n => resolveRef(n))  // bỏ ref LLM bịa (không khớp source)
-    if (!refs.length) return ''
+    if (!refs.length) return punct  // ref bịa -> bỏ marker, GIỮ dấu câu
+    const first = resolveRef(refs[0])!
+    const teaser = esc(citationTeaser(first.caption || first.snippet))
     const extra = refs.length > 1
       ? `<span class="ml-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">+${refs.length - 1}</span>`
       : ''
-    return `<span class="citation-ref cursor-pointer select-none inline-flex items-center gap-0.5 align-baseline rounded-full bg-slate-100 dark:bg-white/10 pl-0.5 pr-1.5 py-0.5 mx-0.5 hover:bg-slate-200 dark:hover:bg-white/20" data-refs="${refs.join(',')}"><img src="/logo.png" alt="" class="h-3.5 w-3.5 rounded-full object-cover"/>${extra}</span>`
+    const chip = `<span class="citation-ref cursor-pointer select-none inline-flex items-center gap-1 align-baseline rounded-full bg-slate-100 dark:bg-white/10 pl-0.5 pr-1.5 py-0.5 mx-0.5 hover:bg-slate-200 dark:hover:bg-white/20" data-refs="${refs.join(',')}"><img src="/logo.png" alt="" class="h-3.5 w-3.5 rounded-full object-cover"/><span class="text-[11px] font-medium text-slate-600 dark:text-slate-300">${teaser}</span>${extra}</span>`
+    return `${punct}${lead || ' '}${chip}`
   })
   return DOMPurify.sanitize(withRefs, { ADD_ATTR: ['data-refs'] })
 })
@@ -282,5 +287,13 @@ function nextCite() {
   --tw-prose-kbd: var(--foreground);
   --tw-prose-code: var(--foreground);
   --tw-prose-pre-code: var(--foreground);
+}
+
+/* Chip render qua v-html nên scoped CSS cần :deep(). Prose ép img -> block + margin
+ * dọc lớn làm chip kéo cao thành viên nang; override về inline để chip gọn. */
+.ai-response-markdown :deep(.citation-ref img) {
+  display: inline-block;
+  margin: 0;
+  vertical-align: middle;
 }
 </style>
