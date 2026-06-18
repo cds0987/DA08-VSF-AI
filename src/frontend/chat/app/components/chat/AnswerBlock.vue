@@ -28,6 +28,10 @@ const copied = ref(false)
 const isSourcesOpen = ref(false)
 const selectedSourceId = ref<string | null>(null)
 
+const hoveredCitation = ref<Citation | null>(null)
+const popoverStyle = ref({ top: '0px', left: '0px' })
+let hideTimer: ReturnType<typeof setTimeout> | null = null
+
 const md = new MarkdownIt({ html: true, breaks: true, linkify: true })
 
 const renderedContent = computed(() => {
@@ -64,6 +68,34 @@ function selectSource(citation: Citation) {
   selectedSourceId.value = citation.id
   emit('open-citation', citation)
 }
+
+function handleContentMouseOver(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  if (!target.classList.contains('citation-ref')) return
+  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
+  const refN = parseInt(target.dataset.ref ?? '0')
+  const citation = props.data.citations?.find(c => c.ref === refN)
+    ?? props.data.citations?.[refN - 1]
+  if (!citation) return
+  const rect = target.getBoundingClientRect()
+  popoverStyle.value = {
+    top: `${rect.bottom + window.scrollY + 6}px`,
+    left: `${Math.min(rect.left + window.scrollX, window.innerWidth - 308)}px`,
+  }
+  hoveredCitation.value = citation
+}
+
+function handleContentMouseLeave() {
+  hideTimer = setTimeout(() => { hoveredCitation.value = null }, 200)
+}
+
+function keepPopover() {
+  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
+}
+
+function leavePopover() {
+  hideTimer = setTimeout(() => { hoveredCitation.value = null }, 200)
+}
 </script>
 
 <template>
@@ -83,6 +115,8 @@ function selectSource(citation: Citation) {
         class="ai-response-markdown prose prose-base prose-slate dark:prose-invert max-w-none font-medium text-slate-900 dark:text-foreground prose-p:font-medium prose-p:leading-relaxed prose-pre:bg-slate-50 dark:prose-pre:bg-background/50 prose-pre:border prose-pre:border-slate-200 dark:prose-pre:border-white/5 [overflow-wrap:anywhere]"
         v-html="renderedContent"
         @click="handleContentClick"
+        @mouseover="handleContentMouseOver"
+        @mouseleave="handleContentMouseLeave"
       />
       <!-- Network interruption — ChatGPT style: no content received, show subtle placeholder -->
       <p
@@ -235,3 +269,32 @@ function selectSource(citation: Citation) {
   --tw-prose-pre-code: var(--foreground);
 }
 </style>
+
+<Teleport to="body">
+  <div
+    v-if="hoveredCitation"
+    :style="{ position: 'absolute', zIndex: '9999', width: '300px', top: popoverStyle.top, left: popoverStyle.left }"
+    class="rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-card shadow-lg p-3 pointer-events-auto"
+    @mouseenter="keepPopover"
+    @mouseleave="leavePopover"
+  >
+    <div class="flex items-center justify-between mb-1.5">
+      <span class="text-[10px] font-bold uppercase tracking-widest text-slate-400">Source {{ hoveredCitation.ref }}</span>
+      <span
+        v-if="formatRelevance(hoveredCitation.score)"
+        class="rounded-full bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300"
+      >{{ formatRelevance(hoveredCitation.score) }}</span>
+    </div>
+    <p class="line-clamp-3 text-[12px] font-medium leading-snug text-slate-800 dark:text-foreground mb-1.5">
+      {{ hoveredCitation.snippet || hoveredCitation.caption }}
+    </p>
+    <div class="flex items-center gap-1 text-[11px] text-slate-500 dark:text-muted-foreground">
+      <FileText class="h-3 w-3 shrink-0" />
+      <span class="truncate font-medium">{{ hoveredCitation.document }}</span>
+      <template v-if="citationHeadingPath(hoveredCitation.heading_path, hoveredCitation.document).length">
+        <span>›</span>
+        <span class="truncate">{{ citationHeadingPath(hoveredCitation.heading_path, hoveredCitation.document).join(' › ') }}</span>
+      </template>
+    </div>
+  </div>
+</Teleport>
