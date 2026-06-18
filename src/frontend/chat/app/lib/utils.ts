@@ -27,3 +27,12 @@ export function formatRelevance(score?: number | null): string {
   const pct = Math.round(Math.max(0, Math.min(1, score)) * 100)
   return `${pct}%`
 }
+
+/** Nhãn chip citation inline = chủ đề/section của đoạn. Lấy heading cụ thể nhất
+ * (đã lọc "(no heading)" + trùng tên file qua citationHeadingPath). Không có
+ * heading -> "Tài liệu nội bộ". Cap 24 ký tự, hover xem đầy đủ. */
+export function citationChipLabel(headingPath: string[], documentName?: string | null): string {
+  const path = citationHeadingPath(headingPath, documentName)
+  const topic = path.length ? path[path.length - 1] : 'Tài liệu nội bộ'
+  return topic.length > 24 ? topic.slice(0, 23) + '…' : topic
+}

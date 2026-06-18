@@ -2,14 +2,13 @@
 import {
   AlertTriangle,
   Check,
-  ChevronRight,
   Copy,
   FileText,
   RefreshCw,
   ThumbsDown,
   ThumbsUp,
 } from '@lucide/vue'
-import { citationHeadingPath, cn, formatRelevance } from '~/lib/utils'
+import { citationChipLabel, citationHeadingPath, cn, formatRelevance } from '~/lib/utils'
 import type { ChatMessage, Citation } from '~/types'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
@@ -25,8 +24,6 @@ const emit = defineEmits<{
 }>()
 
 const copied = ref(false)
-const isSourcesOpen = ref(false)
-const selectedSourceId = ref<string | null>(null)
 
 const hoveredCitation = ref<Citation | null>(null)
 const popoverStyle = ref({ top: '0px', left: '0px' })
@@ -37,24 +34,25 @@ const md = new MarkdownIt({ html: true, breaks: true, linkify: true })
 const renderedContent = computed(() => {
   if (!props.data.content) return ''
   const rawHtml = md.render(props.data.content)
-  const withRefs = rawHtml.replace(
-    /\[(\d+)\]/g,
-    (_, n) => `<sup class="citation-ref cursor-pointer select-none rounded bg-blue-100 dark:bg-blue-900/40 px-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-800/60" data-ref="${n}">[${n}]</sup>`,
-  )
+  const esc = (t: string) => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!))
+  const withRefs = rawHtml.replace(/\[(\d+)\]/g, (_, n) => {
+    const refN = parseInt(n)
+    const c = props.data.citations?.find(x => x.ref === refN) ?? props.data.citations?.[refN - 1]
+    if (!c) return ''  // ref LLM bịa (không khớp source) -> bỏ marker khỏi text
+    const label = esc(citationChipLabel(c.heading_path, c.document))
+    return `<span class="citation-ref cursor-pointer select-none inline-flex items-center gap-1 align-baseline rounded-md bg-slate-100 dark:bg-white/10 px-1.5 py-0.5 mx-0.5 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/20" data-ref="${refN}"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v5h5"/></svg>${label}</span>`
+  })
   return DOMPurify.sanitize(withRefs, { ADD_ATTR: ['data-ref'] })
 })
 
 function handleContentClick(e: MouseEvent) {
-  const target = e.target as HTMLElement
-  if (target.classList.contains('citation-ref')) {
-    const refN = parseInt(target.dataset.ref ?? '0')
-    const citation = props.data.citations?.find(c => c.ref === refN)
-      ?? props.data.citations?.[refN - 1]
-    if (citation) {
-      isSourcesOpen.value = true
-      selectSource(citation)
-    }
-  }
+  // closest: click có thể trúng <svg>/text con bên trong chip
+  const chip = (e.target as HTMLElement).closest('.citation-ref') as HTMLElement | null
+  if (!chip) return
+  const refN = parseInt(chip.dataset.ref ?? '0')
+  const citation = props.data.citations?.find(c => c.ref === refN)
+    ?? props.data.citations?.[refN - 1]
+  if (citation) emit('open-citation', citation)
 }
 
 function copyToClipboard() {
@@ -64,20 +62,15 @@ function copyToClipboard() {
   setTimeout(() => { copied.value = false }, 1500)
 }
 
-function selectSource(citation: Citation) {
-  selectedSourceId.value = citation.id
-  emit('open-citation', citation)
-}
-
 function handleContentMouseOver(e: MouseEvent) {
-  const target = e.target as HTMLElement
-  if (!target.classList.contains('citation-ref')) return
+  const chip = (e.target as HTMLElement).closest('.citation-ref') as HTMLElement | null
+  if (!chip) return
   if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
-  const refN = parseInt(target.dataset.ref ?? '0')
+  const refN = parseInt(chip.dataset.ref ?? '0')
   const citation = props.data.citations?.find(c => c.ref === refN)
     ?? props.data.citations?.[refN - 1]
   if (!citation) return
-  const rect = target.getBoundingClientRect()
+  const rect = chip.getBoundingClientRect()
   popoverStyle.value = {
     top: `${rect.bottom + window.scrollY + 6}px`,
     left: `${Math.min(rect.left + window.scrollX, window.innerWidth - 308)}px`,
@@ -130,57 +123,6 @@ function leavePopover() {
         <ProactiveSuggestionCard v-else-if="act.action_type === 'proactive_doc_suggestion'" :action="act" />
         <ActionableCard v-else :action="act" />
       </template>
-    </div>
-
-    <div v-if="data.citations?.length" class="border-t border-slate-100 dark:border-white/5 bg-slate-50/20 dark:bg-background/10">
-      <button
-        class="flex w-full items-center justify-between px-5 py-3 text-[12.5px] font-medium text-slate-800 dark:text-foreground/80 hover:bg-slate-100/80 dark:hover:bg-white/5"
-        @click="isSourcesOpen = !isSourcesOpen"
-      >
-        <span class="inline-flex items-center gap-2">
-          <ChevronRight :class="cn('h-3.5 w-3.5 text-slate-400 dark:text-muted-foreground transition-transform', isSourcesOpen && 'rotate-90')" />
-          {{ data.citations.length }} Sources
-        </span>
-        <span class="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-muted-foreground">Transparency</span>
-      </button>
-      <div v-if="isSourcesOpen" class="grid gap-2 border-t border-slate-100 dark:border-white/5 bg-slate-50/40 dark:bg-background/40 p-3 sm:grid-cols-2">
-        <button
-          v-for="(citation, index) in data.citations"
-          :key="citation.id"
-          :class="cn(
-            'rounded-xl border p-3 text-left transition-colors',
-            selectedSourceId === citation.id ? 'border-blue-200 dark:border-blue-900 bg-blue-50/80 dark:bg-blue-900/20' : 'border-slate-200 dark:border-white/10 bg-white dark:bg-card hover:border-slate-300 dark:hover:border-white/20',
-          )"
-          @click="selectSource(citation)"
-        >
-          <div class="flex items-start gap-2">
-            <!-- Nội dung đọc chính: snippet (đoạn literal liên quan); caption chỉ là tóm
-                 tắt cho semantic search nên dùng làm fallback khi chưa có snippet. -->
-            <p class="min-w-0 flex-1 line-clamp-3 text-[13px] font-medium leading-snug text-slate-900 dark:text-foreground">
-              {{ citation.ref ?? (index + 1) }}. {{ citation.snippet || citation.caption || citation.document }}
-            </p>
-            <span
-              v-if="formatRelevance(citation.score)"
-              class="shrink-0 rounded-full bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300"
-              title="Độ liên quan"
-            >
-              {{ formatRelevance(citation.score) }}
-            </span>
-          </div>
-          <div class="mt-1 flex items-center gap-1 truncate text-[11px] font-medium text-slate-700 dark:text-muted-foreground">
-            <FileText class="h-3 w-3 shrink-0 text-slate-400 dark:text-muted-foreground/70" />
-            <span class="truncate">{{ citation.document }}</span>
-            <span v-if="citationHeadingPath(citation.heading_path, citation.document).length" class="truncate text-slate-500 dark:text-muted-foreground/70">
-              › {{ citationHeadingPath(citation.heading_path, citation.document).join(' › ') }}
-            </span>
-          </div>
-          <!-- Phụ đề: caption tóm tắt, line-clamp 2 dòng + tooltip hover xem đầy đủ. Chỉ
-               hiện khi đã có snippet làm nội dung chính (tránh lặp lại caption). -->
-          <p v-if="citation.snippet && citation.caption" :title="citation.caption" class="mt-1 line-clamp-2 text-[11px] italic leading-snug text-slate-500 dark:text-muted-foreground/80">
-            {{ citation.caption }}
-          </p>
-        </button>
-      </div>
     </div>
 
     <div class="flex items-center gap-1 px-5 py-2">
