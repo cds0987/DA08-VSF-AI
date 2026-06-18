@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// Bao gồm: bước tool, model từng node, và suy nghĩ/quyết định của model (minh bạch tư duy).
 // Hiển thị BỀN VỮNG các bước agent đã thực hiện (tool calls + kết quả) dưới mỗi câu trả lời.
 // Khác Pipeline.vue (chỉ live lúc đang stream rồi biến mất), component này gắn vào message
 // -> user có thể mở lại xem agent đã tra tài liệu nào, thấy bao nhiêu kết quả.
