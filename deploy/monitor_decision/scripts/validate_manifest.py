@@ -115,6 +115,25 @@ def main() -> int:
             if o.get("type") == "grafana" and o.get("ref") not in ids:
                 err(f"tree[{node.get('id')}].observe: grafana ref '{o.get('ref')}' không khớp dashboard id nào")
 
+    # 5b. trace-contract (WS-F): khóa cấu trúc hợp đồng trace -------------------
+    tc_path = os.path.join(ROOT, "monitor", "trace-contract.yaml")
+    if os.path.isfile(tc_path):
+        tc = _load_yaml(tc_path)
+        if not tc.get("correlation_key"):
+            err("trace-contract: thiếu 'correlation_key' (khóa nối 2 backend)")
+        for sect in ("trace_fields", "generation_fields"):
+            if "required" not in (tc.get(sect) or {}):
+                err(f"trace-contract: '{sect}.required' thiếu")
+        # model PHẢI nằm trong generation_fields.required (đảm bảo canonical được gác)
+        if "model" not in ((tc.get("generation_fields") or {}).get("required") or []):
+            err("trace-contract: generation_fields.required PHẢI có 'model' (canonical)")
+        backends = tc.get("backends") or {}
+        for b in ("langfuse", "langsmith"):       # GIỮ CẢ 2, mỗi cái 1 việc
+            cfg_b = backends.get(b) or {}
+            for k in ("role", "flow", "drill_key"):
+                if k not in cfg_b:
+                    err(f"trace-contract.backends.{b}: thiếu '{k}'")
+
     # 6. decision -------------------------------------------------------------
     dec = cfg.get("decision") or {}
     for key in ("strategy_source", "control_plane"):
