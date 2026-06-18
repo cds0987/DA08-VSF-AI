@@ -80,6 +80,7 @@ jobs:
             user-service: 'src/user-service/**'
             document-service: 'src/document-service/**'
             query-service: 'src/query-service/**'
+            ai-router: 'src/ai-router/**'      # gộp build chung (hết race vs ai-router.yml riêng)
             query-service-integration:
               - 'src/query-service/app/application/langgraph_nodes.py'
               - 'src/query-service/app/application/langgraph_agent.py'
@@ -102,7 +103,7 @@ jobs:
           CH='${{ steps.f.outputs.changes }}'
           # SKIP validate: dispatch tick skip_tests, hoặc [skip-tests] trong commit message.
           SKIP='${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.skip_tests == 'true') || contains(github.event.head_commit.message, '[skip-tests]') }}'
-          ALL='["rag-worker","mcp-service","hr-service","user-service","document-service","query-service"]'
+          ALL='["rag-worker","mcp-service","hr-service","user-service","document-service","query-service","ai-router"]'
           # FORCE all khi chạy tay hoặc workflow tự đổi
           if [ "$EV" = "workflow_dispatch" ] || echo "$CH" | jq -e 'any(.[]; .=="wf")' >/dev/null; then
             FORCE=true; SVC="$ALL"
@@ -122,7 +123,7 @@ jobs:
             rls=$(has '.=="langsmith"')
             # rag-langfuse: integration THUẦN rag-worker với Langfuse thật -> rag-worker đổi.
             rrwlf=$(has '.=="rag-worker"')
-            rd=$(has '.=="rag-worker" or .=="mcp-service" or .=="hr-service" or .=="user-service" or .=="document-service" or .=="query-service" or .=="frontend" or .=="nginx" or .=="base"')
+            rd=$(has '.=="rag-worker" or .=="mcp-service" or .=="hr-service" or .=="user-service" or .=="document-service" or .=="query-service" or .=="ai-router" or .=="frontend" or .=="nginx" or .=="base"')
           fi
           # Bỏ qua validate nhưng GIỮ build + deploy.
           if [ "$SKIP" = "true" ]; then

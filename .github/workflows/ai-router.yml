@@ -1,13 +1,10 @@
-name: ai-router (test + build + push)
+name: ai-router (test + build + push) — MANUAL/PR only
 
-# CI ĐỘC LẬP cho ai-router — KHÔNG dính e2e gate của deploy-develop.yml (đang đỏ kinh niên
-# do hr-service/migration). Chỉ chạy khi src/ai-router/** đổi. Test -> build -> push image.
+# GỘP build vào deploy-develop.yml (ai-router nay nằm trong detect/build-push matrix chung)
+# -> deploy `needs` build-push ai-router -> HẾT race image stale (trước: 2 workflow song song,
+# deploy pull image ai-router cũ vì ai-router.yml build chưa xong). Giữ workflow_dispatch để
+# test/build thủ công khi cần. KHÔNG auto-build trên push develop nữa (tránh build đôi).
 on:
-  push:
-    branches: [develop]
-    paths:
-      - "src/ai-router/**"
-      - ".github/workflows/ai-router.yml"
   workflow_dispatch:
 
 concurrency:
