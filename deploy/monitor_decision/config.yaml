@@ -4,6 +4,24 @@
 # cho nav-tree (Vue portal), theme, hợp đồng metric, và tham chiếu control-plane.
 version: 1
 
+# ── Module descriptor (MOSA) — monitor_decision tự mô tả thành 1 COMPONENT cắm vào
+#    "hệ tổng" (admin FE portal /admin/ops/* sau này). Hệ tổng CẮM = +1 entry trỏ tới
+#    file này; THÁO = xóa entry. Hôm nay consumer chính là Grafana auto-provision; FE
+#    tương lai đọc CÙNG manifest, không phải làm lại. ─────────────────────────────────
+module:
+  id: monitor_decision
+  title: "Monitor & Decision"
+  version: 1
+  mount: /admin/ops                  # nơi hệ tổng (FE) nhúng — chưa có FE thì để sẵn
+  manifest: config.yaml              # self-ref: file này LÀ sub-registry của module
+  health: /api/ops/health            # endpoint hệ tổng kiểm tra sống/chết (FE v2)
+  provides: [monitor, decision, control]
+  requires_datasources: [prometheus, tempo, loki]
+  contracts:                          # hợp đồng producer↔consumer (CI gác drift)
+    - monitor/metric-contract.yaml    # metric: tên+label ổn định cho panel
+    - monitor/trace-contract.yaml     # trace/span: field canonical + phân vai backend
+  fail_isolation: true               # module chết KHÔNG kéo app
+
 # UI: trắng – xanh dương, đỏ chỉ dành cho alert (yêu cầu thiết kế).
 theme: { mode: light, accent: blue }
 

@@ -1,0 +1,34 @@
+# trace-contract — HỢP ĐỒNG trace/span (MOSA, song song metric-contract).
+# Producer (query-service, rag-worker) phát span/generation theo field canonical dưới đây;
+# consumer (Grafana drill-link, FE portal) đọc field này để nối/tra. Đổi field = qua review.
+#
+# Triết lý: GIỮ CẢ Langfuse + LangSmith (mỗi cái 1 việc), nhưng dữ liệu ĐỒNG NHẤT —
+# cùng field, cùng model CANONICAL, cùng khóa nối `conversation_id`. Nguồn ngữ nghĩa đầy đủ:
+# trỏ tới observability-semantic-conventions.md (KHÔNG nhân bản — chống drift).
+version: 1
+semantic_conventions_ref: ../../../docs/nguyenworking/observability-semantic-conventions.md
+
+# ── Khóa nối chung: 1 request tra được ở CẢ 2 backend bằng khóa này ──
+correlation_key: conversation_id
+
+# ── Field BẮT BUỘC mọi trace (root) ──
+trace_fields:
+  required: [conversation_id, service, flow]     # flow ∈ query | ingest
+  optional: [user_id, session_id]
+
+# ── Field BẮT BUỘC mọi generation/LLM-span (model PHẢI canonical, xem metric airouter) ──
+generation_fields:
+  required: [capability, model, key_id, tier, provider, status]
+  optional: [tokens_in, tokens_out, cost_usd, latency_ms]
+  notes: "model = id CANONICAL (đã strip-date qua ai-router catalog). KHÔNG dùng snapshot có date."
+
+# ── Phân vai backend (mỗi 'lang' 1 việc) — consumer sinh drill-link đúng nơi theo flow ──
+backends:
+  langfuse:
+    role: runtime
+    flow: query                                  # trace LLM hội thoại runtime + cost per-key
+    drill_key: conversation_id
+  langsmith:
+    role: ingest
+    flow: ingest                                 # trace pipeline ingest + eval/dataset
+    drill_key: document_id
