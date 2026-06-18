@@ -112,7 +112,8 @@ def test_think_node_profile_default_standard():
 def test_triage_node_profile():
     prof = get_node_profile("triage")
     assert prof.adapter == "standard"
-    assert prof.reasoning_effort == "low"
+    # capability = think (gpt-5.4-mini) để tránh regression phân loại của model rẻ.
+    assert prof.capability == "think"
     assert prof.make_adapter().name == "standard"
 
 

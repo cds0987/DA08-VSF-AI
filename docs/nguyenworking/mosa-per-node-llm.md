@@ -84,6 +84,12 @@ gpt-5.4-mini). Xử lý:
 - Muốn dùng reasoning_effort cho think (có tool): phải đi **/v1/responses**, hoặc chỉ áp
   reasoning_effort cho **answer node** (không bind tools).
 
+### ⚠️ Phát hiện từ deploy smoke (regression triage)
+Đẩy triage sang capability `triage` (gpt-4o-mini) -> model rẻ **phân loại SAI** câu RAG
+("Tài liệu hướng dẫn nhân viên có gì") thành `meta` dù session mới (không có prior answer)
+-> deploy smoke fail. → **triage.capability giữ = `think`** (gpt-5.4-mini) như prod cũ.
+Bài học: KHÔNG hạ model triage khi chưa eval chất lượng phân loại.
+
 **Tổng kết:** 5/5 phase xong. Test mới: query-service 37 ca (registry 12, adapters 11, graph 8,
 trace 3, killswitch 3) + ai-router 3 ca. Full suite query-service: 228 passed.
 

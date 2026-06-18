@@ -15,11 +15,13 @@ defaults:
   reasoning_effort: null
 
 nodes:
-  # Phân loại nhanh, rẻ -> model thường, effort thấp.
+  # Phân loại. ⚠️ capability = think (gpt-5.4-mini) CHỨ KHÔNG phải triage (gpt-4o-mini):
+  # e2e/deploy smoke lộ ra gpt-4o-mini phân loại SAI (RAG -> meta) -> regression. Giữ triage
+  # trên cùng model như think để KHÔNG đổi hành vi prod. Muốn hạ model triage: phải eval
+  # chất lượng phân loại trước rồi đổi capability ở đây.
   triage:
     adapter: standard
-    capability: triage
-    reasoning_effort: low
+    capability: think
 
   # Node CHÍNH (planner): chọn tool + tổng hợp.
   # MẶC ĐỊNH 'standard' = hành vi cũ (gửi temperature, KHÔNG reasoning_effort).

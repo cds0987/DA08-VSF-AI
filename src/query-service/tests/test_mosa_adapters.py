@@ -110,4 +110,4 @@ def test_build_node_model_direct_uses_real_model():
 def test_build_node_model_triage_is_standard():
     m = build_node_chat_model("triage", api_key="x", base_url="http://ai-router:8010/v1")
     assert m.adapter_name == "standard"
-    assert m.model == "triage"
+    assert m.model == "think"   # triage capability = think (tránh regression model rẻ)
