@@ -652,6 +652,14 @@ def bootstrap_runtime() -> RuntimeState:
         validate_ai_config(ai_settings, settings)
         validate_vector_config(vector_config)
 
+    # VECTOR_HYBRID env-driven -> áp cho CẢ 2 nhánh bootstrap. Nhánh config.yaml dùng
+    # to_vector_store_config() KHÔNG map hybrid -> mặc định False -> worker upsert vector
+    # UNNAMED vào collection named dense+sparse (auto_migrate tạo theo from_env hybrid=True)
+    # -> Qdrant 400 "Not existing vector name". Xem [[rag-worker-bootstrap-two-branches]].
+    _hybrid_env = os.getenv("VECTOR_HYBRID", "").strip().lower() in {"1", "true", "yes", "on"}
+    if vector_config.hybrid != _hybrid_env:
+        vector_config = replace(vector_config, hybrid=_hybrid_env)
+
     reasons: list[str] = []
     startup_reasons: list[str] = []
     # langsmith_* là ENV-driven (không nằm trong pipeline config schema). Nhánh có
