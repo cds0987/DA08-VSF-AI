@@ -292,6 +292,44 @@ def test_create_start_after_end_returns_422(ctx):
     assert pub.events == []
 
 
+def _iso(delta_days: int) -> str:
+    """Ngày cách HÔM NAY (giờ VN) delta_days, dạng YYYY-MM-DD. Dùng ngày ĐỘNG cho
+    test past-date để không vỡ theo wall-clock (hardcode ngày tương lai sẽ thành quá
+    khứ theo thời gian → past-date guard bắn 422 ngoài ý muốn)."""
+    import datetime
+    from zoneinfo import ZoneInfo
+    today = datetime.datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date()
+    return (today + datetime.timedelta(days=delta_days)).isoformat()
+
+
+def test_create_past_start_date_returns_422_no_event(ctx):
+    # Xin nghỉ ngày ĐÃ QUA (vd "30/4" khi 30/4 đã trôi) -> 422 ở tầng server authoritative,
+    # KHÔNG tạo đơn, KHÔNG publish event. Chốt chặn này độc lập với resolve_date (UX layer).
+    client, repo, pub, _ = ctx
+    repo.managers[EMP] = MANAGER
+    yesterday = _iso(-1)
+    r = client.post("/hr/leave-requests", json={
+        "user_id": EMP, "leave_type": "annual",
+        "start_date": yesterday, "end_date": yesterday,
+    })
+    assert r.status_code == 422, r.text
+    assert "đã qua" in str(r.json()["detail"])
+    assert pub.events == []
+    assert repo.requests == {}
+
+
+def test_create_today_start_is_allowed(ctx):
+    # Biên: start == hôm nay KHÔNG bị chặn (chỉ chặn start < today).
+    client, repo, pub, _ = ctx
+    repo.managers[EMP] = MANAGER
+    today = _iso(0)
+    r = client.post("/hr/leave-requests", json={
+        "user_id": EMP, "leave_type": "annual",
+        "start_date": today, "end_date": today,
+    })
+    assert r.status_code == 201, r.text
+
+
 def test_create_bad_date_format_returns_422(ctx):
     client, repo, pub, _ = ctx
     repo.managers[EMP] = MANAGER
@@ -383,6 +421,19 @@ def test_update_approved_cancels_refunds_and_recreates(ctx):
     assert repo.balances[EMP]["annual_used"] == 0  # refunded
     subs = pub.subjects()
     assert "hr.leave_request.cancelled" in subs and "hr.leave_request.created" in subs
+
+
+def test_update_to_past_start_date_returns_422(ctx):
+    # Sửa đơn về ngày đã qua cũng bị chặn ở server (validate trước khi chạm repo).
+    client, repo, pub, _ = ctx
+    rid = _create(client, repo, start=_iso(5), end=_iso(6))["id"]
+    yesterday = _iso(-1)
+    r = client.patch(f"/hr/leave-requests/{rid}", json={
+        "user_id": EMP, "leave_type": "annual",
+        "start_date": yesterday, "end_date": yesterday,
+    })
+    assert r.status_code == 422, r.text
+    assert "đã qua" in str(r.json()["detail"])
 
 
 def test_update_not_owner_403(ctx):

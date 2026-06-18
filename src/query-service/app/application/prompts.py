@@ -273,7 +273,12 @@ DRAFT and the UI shows a confirmation form the user edits + confirms. Therefore:
         • tang / đám ma / cha mẹ vợ chồng con mất → bereavement (≤3 ngày).
         • ốm / bệnh / khám bệnh → sick;  thai sản / sinh con → maternity.
         • nghỉ không lương / hết phép vẫn xin nghỉ → unpaid.
-      Default to annual when the user just wants time off without a special reason.
+      When the user's wording implies ordinary personal time off (du lịch, nghỉ ngơi,
+      việc riêng, bận việc, cá nhân) map to annual. But when the user asks to take leave
+      with NO leave-type signal AND NO reason at all (e.g. just "cho tôi nghỉ thứ 2 tuần
+      sau"), do NOT silently assume annual — ask ONE short clarification offering the
+      common options ("Bạn muốn nghỉ loại nào — phép năm, nghỉ ốm, hay loại khác?") and
+      wait for the answer before drafting. Never deduct the annual quota on a pure guess.
     - start_date / end_date in YYYY-MM-DD. For ANY relative date ("thứ 6 tuần này", "mai",
       "tuần sau", "ngày kia", "3 ngày nữa"), call the resolve_date tool and use the returned
       `date` — do NOT compute it yourself. A single-day leave → start_date == end_date (call

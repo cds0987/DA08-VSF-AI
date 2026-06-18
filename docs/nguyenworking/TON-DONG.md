@@ -1,6 +1,6 @@
 # CÒN TỒN ĐỌNG — 3 service (RAG / MCP / HR) + đồng bộ danh tính
 
-**Cập nhật:** 2026-06-13 · Người phụ trách: Nguyen Tran · Branch: `nguyendev` → PR `develop` → deploy VM
+**Cập nhật:** 2026-06-17 · Người phụ trách: Nguyen Tran · Branch: `nguyendev` → PR `develop` → deploy VM
 
 > File này GOM toàn bộ việc **chưa xong**. Cách thi công từng việc xem [CACH-XU-LY.md](CACH-XU-LY.md) (đánh số khớp: T1…T8).
 > Phạm vi quyền: RAG Worker, MCP Service, HR Service + được phép đụng `query-service` (để 3 service chạy thông với agent LangGraph). Service khác (frontend/user/document) ngoài phạm vi trừ khi cần phối hợp.
@@ -10,8 +10,8 @@
 | Service | Runtime | % | Khoảng cách tới Production thật |
 |---------|---------|---|--------------------------------|
 | **RAG Worker** | 🟢 Production, verified E2E + Langfuse | ~97% | Polish chất lượng chunk/caption (log stdout JSON đã xong T3) |
-| **MCP Service** | 🟢 Production, verified `CallToolRequest` | ~88% | Tool WRITE (T4) + network hardening (fail-closed auth đã xong T6) |
-| **HR Service** | 🟡 READ chạy; WRITE chưa code | ~80% | Verify sync trên VM (T1) + WRITE flow (T4); log JSON + test coverage đã xong |
+| **MCP Service** | 🟢 Production, WRITE tool đã merge | ~93% | Network hardening (fail-closed auth + middleware token đã xong T6); còn internal-only routing |
+| **HR Service** | 🟢 READ + WRITE (leave request) đã merge | ~90% | Verify sync trên VM (T1); log JSON + test coverage + WRITE flow đã xong |
 
 "Production thật" = chạy ổn định trên VM `vsf-rag-demo-vm` (35.240.193.13), phục vụ `https://vsfchat.cloud`, đủ tin cậy + quan sát được (New Relic/Langfuse) + xử lý dữ liệu thật, không chỉ demo.
 
@@ -25,6 +25,11 @@
   - **T3** (hr): `configure_logging` JSON ra stdout (idempotent), đồng nhất rag-worker. + `test_logging_utils.py`.
   - **T5** (hr): `test_hr_intents_coverage.py` (+167) — leave/attendance/onboarding happy+NO_INFO, audit path 3 intent nhạy cảm (mask user_id), self-access, Unicode TV. Local hr-service 26/26 pass.
   - **T6** (mcp): `enforce_production_auth()` fail-closed — `app_env=production` mà thiếu `MCP_INTERNAL_TOKEN` → raise (chặn deploy fail-open). + test 6/6 pass.
+- ✅ **T4 ĐÃ CODE & MERGE** (`4f7351a`, `839f2ce` — 2026-06-16): Leave Request WRITE flow đầy đủ.
+  - **HR:** `leave_write_repository.py` + `postgres_hr_repository` impl WRITE (migration mới, không đụng `0001`/`0002`); validate qua `leave_balance`; chống trùng đơn (chặn trùng toàn bộ + cảnh báo chồng ngày — `839f2ce`); publish NATS best-effort. Tests: `test_leave_write_endpoint/repo_postgres/resilience.py` + `test_leave_policy.py`.
+  - **MCP:** tool WRITE `leave_write.py` + 2 tool mới `leave_approvals.py` (duyệt đơn), `leave_types.py` (loại nghỉ) — proxy sang hr với `X-Internal-Token`; dynamic MCP tools. Test `test_leave_write_tool.py`.
+  - Doc impl: `src/hr-service/docs/leave-request-write-implementation.md`.
+- ✅ **T6 middleware token ĐÃ XONG** (cùng đợt leave-write): `src/hr-service/app/api/auth.py` enforce `X-Internal-Token` phía hr; mọi MCP tool gắn token khi gọi hr. → còn lại CHỈ network internal-only routing.
 
 ---
 
@@ -37,9 +42,9 @@
 | **T1** | Verify đồng bộ user→hr→query **trên VM** (code đã merge; CD đã tự gác) | HR/User/Query | 🔴 | ◑ Đã thêm guard CD, chờ deploy chạy xanh + mắt thấy 1 lần | Sai → câu HR cá nhân vẫn NO_INFO; ACL phòng ban rỗng/sai |
 | **T2** | Tuning TRIAGE bớt CLARIFY với câu policy đã rõ | query | 🔴 | ✅ XONG (`3e2ee5a`) — chờ verify CI/VM | — |
 | **T3** | Fix structured log INFO không ra docker stdout | RAG/all | 🟡 | ✅ XONG (`3e2ee5a`) — hr JSON stdout | — |
-| **T4** | Code Leave Request WRITE flow (HR + MCP `create_leave_request`) | HR + MCP | 🟡 | ☐ Chưa (thiết kế xong) | Chưa cho tạo/duyệt đơn nghỉ; cần SA approve contract |
+| **T4** | Code Leave Request WRITE flow (HR + MCP `leave_write`/`leave_approvals`/`leave_types`) | HR + MCP | 🟡 | ✅ XONG (`4f7351a`, `839f2ce`) — tạo/duyệt đơn + chống trùng | — |
 | **T5** | Tăng coverage test hr-service (hiện ~2 file) | HR | 🟡 | ✅ XONG (`3e2ee5a`) — 26/26 pass | — |
-| **T6** | MCP security hardening | MCP | 🟡 | ◑ Một phần — fail-closed auth XONG (`3e2ee5a`); còn middleware enforce + network | Auth MCP↔hr + giới hạn tool khi prod |
+| **T6** | MCP security hardening | MCP | 🟡 | ◑ Phần lớn — fail-closed auth (`3e2ee5a`) + middleware enforce `X-Internal-Token` (`auth.py`) XONG; còn network internal-only | Network: hr-service không route public |
 | **T7** | Đưa env user/document/query vào GitHub secret | Infra | 🟡 | ☐ Chưa | Lệch convention env-từ-git |
 | **T8** | Tuning chất lượng chunk/caption (gap6–gap9) | RAG | 🟢 | ☐ Chưa | Độ chính xác retrieval (không chặn prod) |
 
@@ -65,15 +70,21 @@ Còn lại = quan sát 1 lần cho chắc:
 ### T3 — Log INFO ra docker stdout ✅ XONG (`3e2ee5a`)
 hr-service đã thay `logging.basicConfig` (text) bằng `configure_logging` JSON ra stdout (idempotent), đồng nhất với rag-worker. Thêm `test_logging_utils.py`. → log thường ngày ra đúng nơi, không còn phụ thuộc Langfuse để debug.
 
-### T4 — Leave Request WRITE flow (HR + MCP) 🟡
-Thiết kế đã chốt, **chưa code**. Ràng buộc cứng: **SA approve contract TRƯỚC**; feature-flag OFF mặc định; backward-compatible tuyệt đối; NATS best-effort (KHÔNG fail-closed); KHÔNG đụng migration `0001`/`0002` → thêm migration mới.
+### T4 — Leave Request WRITE flow (HR + MCP) ✅ XONG (`4f7351a`, `839f2ce`)
+Đã code & merge đầy đủ (06-16):
+- **HR:** `leave_write_repository.py` + impl trong `postgres_hr_repository.py` (migration mới, KHÔNG đụng `0001`/`0002`); use case validate qua `leave_balance`; **chống trùng đơn** (chặn trùng toàn bộ, cảnh báo chồng ngày — `839f2ce`); publish NATS best-effort.
+- **MCP:** `leave_write.py` (tạo đơn) + `leave_approvals.py` (duyệt) + `leave_types.py` (loại nghỉ) — proxy hr với `X-Internal-Token`, dynamic tool registration; KHÔNG ảnh hưởng `rag_search`/`hr_query`.
+- **Test:** `test_leave_write_endpoint/repo_postgres/resilience.py`, `test_leave_policy.py` (hr) + `test_leave_write_tool.py` (mcp).
+- Doc: `src/hr-service/docs/leave-request-write-implementation.md`.
+**Còn lại:** verify trên VM với flag ON + đối soát NATS event đơn nghỉ thực tế.
 
 ### T5 — Coverage test hr-service ✅ XONG (`3e2ee5a`)
 Thêm `test_hr_intents_coverage.py` (+167): leave/attendance/onboarding happy+NO_INFO, audit path 3 intent nhạy cảm (payroll/benefits/performance, mask user_id), self-access filter, Unicode tiếng Việt. Local hr-service 26/26 pass.
 
-### T6 — MCP security hardening ◑ MỘT PHẦN (`3e2ee5a`)
+### T6 — MCP security hardening ◑ PHẦN LỚN (`3e2ee5a` + đợt leave-write)
 ✅ **Fail-closed auth** đã xong: `enforce_production_auth()` — `app_env=production` mà thiếu `MCP_INTERNAL_TOKEN` → raise (chặn deploy fail-open), gọi trong `main` trước `build_mcp`. Test 6/6 pass.
-**Còn lại:** middleware auth enforce reject caller (`X-Internal-Token`) ở app layer; network hardening (internal-only, không route public); giới hạn tool theo enabled policy khi prod. Xem `src/mcp-service/docs/security-hardening.md`.
+✅ **Middleware enforce token** đã xong: `src/hr-service/app/api/auth.py` reject caller thiếu/sai `X-Internal-Token` ở app layer phía hr; mọi MCP tool (`hr_query`, `leave_write`, `leave_approvals`, `leave_types`) gắn token khi proxy.
+**Còn lại:** network hardening (hr-service internal-only, không route public); rà giới hạn tool theo enabled policy khi prod. Xem `src/mcp-service/docs/security-hardening.md`.
 
 ### T7 — Env vào GitHub secret 🟡
 rag/mcp/hr đã theo env-từ-git; đồng bộ nốt user/document/query (set qua PyNaCl API). Env phải trỏ Qdrant nội bộ `qdrant:6333` (KHÔNG cloud → 404 crash).
@@ -83,17 +94,38 @@ Polish độ chính xác retrieval. KHÔNG chặn production. Docs gap: `src/rag
 
 ---
 
+## Bug ghi nhận
+
+### B1 — Agent tự mặc định `annual` (phép năm) khi user không nêu loại nghỉ 🟡 (chưa fix)
+**Ghi nhận:** 2026-06-18. Phát hiện trên `https://vsfchat.cloud/chat`.
+**Tái hiện:** user nhắn *"cho tôi nghỉ phép thứ 2 tuần sau nhé"* (không nêu loại/lý do) → agent dựng draft đơn **Phép năm** (`leave_type=annual`), không hỏi lại.
+**Nguyên nhân (by-design, không phải lỗi code):** prompt `TRIAGE/LEAVE CONFIRMATION` ở `src/query-service/app/application/prompts.py:260-266` ép map "việc riêng thường ngày / nghỉ chung chung" → `annual` và dòng 266 *"Default to annual when the user just wants time off without a special reason."* Từ "phép" trong "nghỉ phép" càng đẩy về phép năm.
+**Rủi ro:** tự trừ **quỹ phép năm** khi user chưa chọn loại nghỉ. Giảm nhẹ một phần: UI confirmation form có dropdown cho sửa loại nghỉ trước khi "Xác nhận & Gửi".
+**Quyết định cần chốt (chưa code):** khi loại nghỉ **mơ hồ** thì giữ default `annual` (hiện tại) hay **hỏi lại 1 câu** ("Bạn muốn nghỉ phép năm hay loại khác?"). Nếu chọn hỏi lại → sửa ở prompt (không đụng retrieval/tool), thêm test routing.
+
+### B2 — Thiếu validate ngày quá khứ + range ở tầng server (chỉ `resolve_date` chặn) 🔴 (đã xác minh, chưa fix)
+**Ghi nhận:** 2026-06-18. **Đã xác minh code.**
+**Tái hiện:** xin nghỉ vào ngày **đã qua** (vd `30/04/2026` khi hôm nay 18/06/2026) vẫn tạo được đơn nếu đi đường vòng qua guard.
+**Phân tích (defence-in-depth thủng — chốt chặn chỉ ở 1 tầng model-invoked):**
+- ✅ Chốt DUY NHẤT: `src/mcp-service/app/tools/resolve_date.py:115-129` — ngày `< hôm nay` → `past_date:True` + gợi ý năm sau.
+- ❌ Đường vòng 1 — prompt `src/query-service/app/application/prompts.py:270-271` cho phép **skip `resolve_date`** khi user gõ thẳng `YYYY-MM-DD` → ngày tuyệt đối không qua guard.
+- ❌ Đường vòng 2 — `src/hr-service/app/infrastructure/db/postgres_hr_repository.py:789` `create_leave_request` KHÔNG check `start < today`, **cũng không check `end < start`** (dòng 766/883 `days_count=(end-start).days+1` có thể **âm**). Interface `leave_write_repository.py` không có exception ngày quá khứ / range không hợp lệ.
+- ❌ Đường vòng 3 — UI confirmation form có date-picker sửa tay → chọn về ngày quá khứ, không gì chặn.
+**Hướng fix (chưa code):** thêm validate **authoritative ở hr-service** (`create_leave_request` + `update_leave_request`): reject `start_date < today` (giờ VN) và `end_date < start_date` → exception mới (vd `LeaveRequestInvalidDate`) → routes map 422. + test fail-trước-pass-sau (ngày quá khứ / end<start). Đây mới là chốt thật; `resolve_date` chỉ là UX layer.
+
+---
+
 ## Lộ trình gợi ý
 - ~~**Đợt A:** T1 → T2 → T3~~ → T2/T3 XONG (`3e2ee5a`); còn **T1 (verify VM)** sau khi deploy `develop`.
-- **Đợt B (tin cậy + an toàn):** ~~T5~~ XONG → T6 phần còn lại (middleware + network) → T7 (env secret).
-- **Đợt C (mở rộng WRITE):** T4 — cần SA approve contract trước.
+- **Đợt B (tin cậy + an toàn):** ~~T5~~ ~~T6 middleware~~ XONG → T6 network internal-only → T7 (env secret).
+- ~~**Đợt C (mở rộng WRITE):** T4~~ → T4 XONG (`4f7351a`/`839f2ce`); còn verify VM với flag ON.
 - **Polish:** T8 khi rảnh.
 
-### Còn lại sau `3e2ee5a` (ưu tiên giảm dần)
+### Còn lại sau leave-write (`4f7351a`/`839f2ce`) (ưu tiên giảm dần)
 1. 🔴 **T1** — deploy `develop` → chạy `user-backfill`, mắt thấy admin hỏi HR ra số phép thật trên VM (CD đã tự gác smoke 5c).
-2. 🟡 **T6 (phần còn)** — middleware enforce `X-Internal-Token` + network internal-only.
-3. 🟡 **T7** — env user/document/query → GitHub secret (đồng bộ convention).
-4. 🟡 **T4** — Leave Request WRITE flow (cần SA approve contract trước).
+2. 🟡 **T4 (verify)** — flag ON staging → tạo/duyệt đơn chạy thật + đối soát NATS event đơn nghỉ.
+3. 🟡 **T6 (phần còn)** — network internal-only (hr không route public).
+4. 🟡 **T7** — env user/document/query → GitHub secret (đồng bộ convention).
 5. 🟢 **T8** — chunk/caption tuning (gap6–gap9).
 
 ## Definition of Done (cổng kiểm trước khi đóng task)

@@ -212,11 +212,26 @@ class QueryOrchestrationUseCase:
                 "guardrail_input_blocked",
                 extra={"user_id": user.id, "session_id": session_id, "reason": reason},
             )
+            from app.application.shortcuts import next_offtopic_answer
+            refusal = next_offtopic_answer()
+            await self._save_user_message(user.id, question)
+            for token in _word_chunks(refusal):
+                yield {
+                    "token": token,
+                    "phase": "generating",
+                    "agent_mode": "langgraph",
+                    "session_id": session_id,
+                    "iterations": 0,
+                }
+                await asyncio.sleep(0)
+            await self._save_assistant(user.id, session_id, refusal, [], started)
             yield {
                 "done": True,
                 "outcome": Outcome.REFUSE.value,
                 "sources": [],
                 "session_id": session_id,
+                "agent_mode": "langgraph",
+                "iterations": 0,
                 "guardrail": reason,
             }
             return
