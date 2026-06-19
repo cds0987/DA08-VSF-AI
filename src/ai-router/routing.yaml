@@ -55,22 +55,21 @@ capabilities:
         - qwen/qwen3-next-80b-a3b-instruct:free
         - openai/gpt-oss-120b:free
       paid: deepseek/deepseek-v4-flash
-  think:                            # node CHÍNH: blend gpt-5.4-mini + deepseek-flash (PLAN §11.2)
-    tiers: [free_oai, paid]
+  think:                            # triage + planner + execute. PIN 1 MODEL = deepseek-v4-pro
+                                    # (probe: tools=OK + reasoning=CÓ) -> reasoning THẬT hiện ra
+                                    # ("Lập kế hoạch") + gọi tool được + ỔN ĐỊNH (bỏ blend gpt↔deepseek).
+    tiers: [paid]                   # paid = OpenRouter (deepseek-v4-pro). Xoay KEY, KHÔNG xoay model.
     models:
-      free_oai: openai/gpt-5.4-mini   # lane chính (đổi từ nano)
-      paid: deepseek/deepseek-v4-flash  # lane blend (OpenRouter)
-    selector:                         # ❖ strategy RIÊNG: weighted_banded (override global)
-      impl: weighted_banded
+      paid: deepseek/deepseek-v4-pro
+    selector:
+      impl: banded_rotation
       params:
-        lanes:
-          - { tier: free_oai, weight: 4, band_tokens: 250000 }  # gpt-5.4-mini, xoay 250K
-          - { tier: paid,     weight: 1, band_tokens: 150000 }  # deepseek-flash, xoay 150K
-        save_mode:                    # cạn hết -> gpt-4o-mini (OpenAI)
+        band_tokens: 150000         # dính 1 key tới 150K token -> xoay key kế (cùng model).
+        save_mode:                  # cạn hết key deepseek -> gpt-4o-mini (tránh 503).
           enabled: true
           model: openai/gpt-4o-mini
           tier: free_oai
-          band_tokens: 250000
+          band_tokens: 150000
   rerank:                           # LLM-as-reranker
     tiers: [free_oai, free_or, paid]
     models:
