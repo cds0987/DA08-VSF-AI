@@ -55,6 +55,9 @@ def build_orchestrator_graph(
         return sends
 
     async def orchestrate(state: OrchestratorState) -> dict:
+        if ctx.emit:
+            await ctx.emit({"phase": "thinking", "node": "orchestrate",
+                            "status": "Đang phân tích yêu cầu & lập kế hoạch…"})
         pctx = PlanContext(
             question=state["question"],
             role_catalog=role_catalog,
@@ -63,6 +66,11 @@ def build_orchestrator_graph(
         )
         plan = await planner.plan(pctx)
         logger.info("orchestrate route=%s steps=%d", plan.route, len(plan.steps))
+        # "Suy nghĩ" ra SSE: tóm tắt kế hoạch (route + các bước) cho user thấy agent định làm gì.
+        if ctx.emit:
+            _steps = " → ".join(s.role for s in plan.steps) or "(trả lời trực tiếp)"
+            await ctx.emit({"phase": "thought", "node": "think",
+                            "text": f"Kế hoạch ({plan.route}): {_steps}"})
         return {"plan": plan, "replan_count": 0, "results": {}}
 
     def route_plan(state: OrchestratorState):

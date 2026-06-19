@@ -10,7 +10,7 @@ import json
 
 from app.agents.base import AgentRole, WorkerInput, WorkerOutput
 from app.agents.registry import register_agent
-from app.agents.roles._llm import acomplete
+from app.agents.roles._llm import astream_complete
 
 _SYSTEM = (
     "Bạn là trợ lý nội bộ VinSmartFuture. Dựa CHỈ trên dữ liệu cho sẵn, trả lời đúng "
@@ -32,7 +32,8 @@ class SynthesizeRecommendRole(AgentRole):
         )
 
         model = self.ctx.make_model(self.capability) if self.ctx.make_model else None
-        answer = await acomplete(
+        # STREAM token answer ra SSE qua ctx.emit (node answer cuối) -> UI hiện chữ chạy dần.
+        answer = await astream_complete(
             model,
             system=_SYSTEM,
             user=(
@@ -40,6 +41,7 @@ class SynthesizeRecommendRole(AgentRole):
                 f"Định hướng: {task.direction}\n\n"
                 f"Dữ liệu thu thập:\n{upstream or '(trống)'}"
             ),
+            emit=self.ctx.emit,
         )
         if answer is None:
             return WorkerOutput(

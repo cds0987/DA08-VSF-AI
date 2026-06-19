@@ -394,38 +394,60 @@ class QueryOrchestrationUseCase:
 
         await self._save_user_message(user.id, question)
 
-        try:
-            allowed_doc_ids = await self._get_allowed_doc_ids(user)
-            ctx = RoleContext(
-                mcp_client=self._mcp_client,
-                user_id=user.id,
-                allowed_doc_ids=tuple(allowed_doc_ids),
-                rag_top_k=self._settings.rag_top_k,
-                rag_score_threshold=self._settings.rag_score_threshold,
-                make_model=self._make_model,
-            )
-            graph = build_orchestrator_graph(
-                ctx=ctx,
-                manifest=self._agent_manifest,
-                planner=self._orchestrator_planner,
-                make_model=self._make_model,
-            )
-            yield {"phase": "thinking", "agent_mode": "orchestrator_workers", "session_id": session_id}
-            result = await graph.ainvoke({
-                "question": question,
-                "user_id": user.id,
-                "allowed_doc_ids": list(allowed_doc_ids),
-                "recent_messages": recent_messages,
-            })
-            answer = str(result.get("answer") or "").strip()
-            raw_sources = result.get("sources") or []
-            # retrieved: tổng chunk rag lấy được (kể cả dưới ngưỡng) — pipeline-health cho smoke.
-            retrieved = sum(
-                getattr(o, "retrieved", 0) for o in (result.get("results") or {}).values()
-            )
-        except Exception as exc:  # noqa: BLE001 — fail-closed
-            logger.error("orchestrator_stream_failed: %s", str(exc)[:300], exc_info=True)
-            answer, raw_sources, retrieved = "", [], 0
+        # Emit channel: node/role đẩy progress (Suy nghĩ / bước tool / token answer) vào queue;
+        # ta DRAIN song song với graph.ainvoke -> SSE realtime (thay cho ainvoke "1 cục" trước
+        # đây làm mất hết hiệu ứng). Sentinel báo graph xong để dừng drain.
+        progress_q: asyncio.Queue = asyncio.Queue()
+        _SENTINEL: Any = object()
+        streamed_tokens = False
+        holder: dict[str, Any] = {}
+
+        async def _emit(ev: dict) -> None:
+            await progress_q.put(ev)
+
+        async def _run_graph() -> None:
+            try:
+                allowed_doc_ids = await self._get_allowed_doc_ids(user)
+                ctx = RoleContext(
+                    mcp_client=self._mcp_client,
+                    user_id=user.id,
+                    allowed_doc_ids=tuple(allowed_doc_ids),
+                    rag_top_k=self._settings.rag_top_k,
+                    rag_score_threshold=self._settings.rag_score_threshold,
+                    make_model=self._make_model,
+                    emit=_emit,
+                )
+                graph = build_orchestrator_graph(
+                    ctx=ctx, manifest=self._agent_manifest,
+                    planner=self._orchestrator_planner, make_model=self._make_model,
+                )
+                holder["result"] = await graph.ainvoke({
+                    "question": question, "user_id": user.id,
+                    "allowed_doc_ids": list(allowed_doc_ids),
+                    "recent_messages": recent_messages,
+                })
+            except Exception as exc:  # noqa: BLE001 — fail-closed
+                logger.error("orchestrator_stream_failed: %s", str(exc)[:300], exc_info=True)
+            finally:
+                await progress_q.put(_SENTINEL)
+
+        task = asyncio.create_task(_run_graph())
+        while True:
+            ev = await progress_q.get()
+            if ev is _SENTINEL:
+                break
+            if ev.get("token"):
+                streamed_tokens = True
+            ev.setdefault("agent_mode", "orchestrator_workers")
+            ev.setdefault("session_id", session_id)
+            yield ev
+        await task
+
+        result = holder.get("result") or {}
+        answer = str(result.get("answer") or "").strip()
+        raw_sources = result.get("sources") or []
+        # retrieved: tổng chunk rag lấy được (kể cả dưới ngưỡng) — pipeline-health cho smoke.
+        retrieved = sum(getattr(o, "retrieved", 0) for o in (result.get("results") or {}).values())
 
         if not answer:
             answer = (
@@ -447,14 +469,17 @@ class QueryOrchestrationUseCase:
                 sources.append({**s, "ref": ref})
 
         answer = await self._output_guardrail.redact(answer)
-        for token in _word_chunks(answer):
-            yield {
-                "token": token,
-                "phase": "generating",
-                "agent_mode": "orchestrator_workers",
-                "session_id": session_id,
-            }
-            await asyncio.sleep(0)
+        # Synth ĐÃ stream token (qua emit) -> KHÔNG word-chunk lại. Chưa stream (light route /
+        # fallback / no_info) -> word-chunk câu trả lời cuối để UI vẫn thấy chữ chạy.
+        if not streamed_tokens:
+            for token in _word_chunks(answer):
+                yield {
+                    "token": token,
+                    "phase": "generating",
+                    "agent_mode": "orchestrator_workers",
+                    "session_id": session_id,
+                }
+                await asyncio.sleep(0)
 
         message_id = await self._save_assistant(user.id, session_id, answer, sources, started)
         yield {

@@ -29,6 +29,10 @@ class RagRetrieveRole(AgentRole):
             return WorkerOutput(task.step_id, self.name, "", status="no_info",
                                 error="no document access")
 
+        # Bước tool ra SSE: UI hiện "Tìm kiếm tài liệu" + query.
+        if ctx.emit:
+            await ctx.emit({"phase": "acting", "tool": "rag_search", "tool_args": {"query": query}})
+
         # Retry 1 lần (mcp rag_search intermittent) — giống act_node hiện tại.
         try:
             results = await self._search(query)
@@ -42,6 +46,15 @@ class RagRetrieveRole(AgentRole):
         threshold = ctx.rag_score_threshold
         qualified = [r for r in results if getattr(r, "score", 0) >= threshold]
         used = qualified or results  # dưới ngưỡng vẫn đưa context, chỉ không cite
+        # Kết quả tool ra SSE: số tài liệu + tên (UI hiện bước observing).
+        if ctx.emit:
+            await ctx.emit({
+                "phase": "observing", "tool": "rag_search",
+                "tool_result_summary": {
+                    "count": len(qualified),
+                    "docs": sorted({r.document_name for r in qualified}),
+                },
+            })
         if not used:
             return WorkerOutput(task.step_id, self.name, "", status="no_info")
 

@@ -65,6 +65,9 @@ class RoleContext:
     rag_top_k: int = 5
     rag_score_threshold: float = 0.45
     make_model: Callable[[str], Any] | None = None
+    # emit(ev: dict) -> đẩy progress event ra SSE (Suy nghĩ / bước tool / token answer).
+    # None (test/non-stream) -> role bỏ qua emit. Set bởi _stream_orchestrator mỗi request.
+    emit: Callable[[dict], Any] | None = None
 
 
 class AgentRole(ABC):
