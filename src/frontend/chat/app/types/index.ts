@@ -90,7 +90,8 @@ export interface QueryTokenEvent {
   reasoning?: string
   // phase 'model_used': node vừa chạy xong 1 model. 'thought': model đang nghĩ/quyết định
   // (text) -> hiện "model nghĩ gì / quyết định gì".
-  phase?: 'thinking' | 'acting' | 'observing' | 'generating' | 'model_used' | 'thought'
+  // 'plan': orchestrator phát kế hoạch (steps + depends_on). 'step': 1 node đổi trạng thái.
+  phase?: 'thinking' | 'acting' | 'observing' | 'generating' | 'model_used' | 'thought' | 'plan' | 'step'
   status?: string
   node?: string
   model?: string
@@ -100,6 +101,22 @@ export interface QueryTokenEvent {
   tool_args?: Record<string, unknown>
   tool_result_summary?: { count?: number; docs?: string[]; raw?: string }
   iterations?: number
+  // phase 'plan': danh sách node. phase 'step': step_id của node vừa đổi trạng thái.
+  steps?: AgentPlanStep[]
+  step_id?: number
+}
+
+// Kế hoạch orchestrator-workers: node + DAG (depends_on) -> FE vẽ subagents song song theo level.
+export interface AgentPlanStep {
+  id: number
+  role: string
+  direction?: string
+  depends_on: number[]
+  status?: 'pending' | 'running' | 'ok' | 'no_info' | 'error'
+}
+export interface AgentPlan {
+  route: string
+  steps: AgentPlanStep[]
 }
 
 export interface QueryDoneEvent {
@@ -194,6 +211,8 @@ export interface ChatMessage {
   models?: NodeModel[]
   // Dòng suy nghĩ/quyết định của model (triage reason, reasoning của think) — minh bạch tư duy.
   thoughts?: Thought[]
+  // Kế hoạch orchestrator-workers (node + song song) — lưu để xem lại dưới câu trả lời.
+  plan?: AgentPlan
 }
 
 export interface NodeModel {

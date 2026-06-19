@@ -4,9 +4,10 @@
 // Khác Pipeline.vue (chỉ live lúc đang stream rồi biến mất), component này gắn vào message
 // -> user có thể mở lại xem agent đã tra tài liệu nào, thấy bao nhiêu kết quả.
 import { Search, Database, CheckCircle2, ChevronRight, Sparkles } from '@lucide/vue'
-import type { TraceEntry, NodeModel, Thought } from '~/types'
+import type { TraceEntry, NodeModel, Thought, AgentPlan } from '~/types'
+import AgentPlanView from './AgentPlan.vue'
 
-const props = defineProps<{ trace: TraceEntry[]; models?: NodeModel[]; thoughts?: Thought[] }>()
+const props = defineProps<{ trace: TraceEntry[]; models?: NodeModel[]; thoughts?: Thought[]; plan?: AgentPlan }>()
 
 const open = ref(false)
 
@@ -52,10 +53,10 @@ function resultLabel(e: TraceEntry): string {
 </script>
 
 <template>
-  <div v-if="trace.length || models?.length || thoughts?.length" class="mb-2.5">
+  <div v-if="trace.length || models?.length || thoughts?.length || plan?.steps?.length" class="mb-2.5">
     <!-- Header toggle -->
     <button
-      v-if="trace.length || thoughts?.length"
+      v-if="trace.length || thoughts?.length || plan?.steps?.length"
       class="group flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-muted-foreground dark:hover:bg-white/5 dark:hover:text-foreground"
       @click="open = !open"
     >
@@ -66,6 +67,11 @@ function resultLabel(e: TraceEntry): string {
         :class="open && 'rotate-90'"
       />
     </button>
+
+    <!-- Kế hoạch + subagents song song (orchestrator-workers) -->
+    <div v-if="open && plan?.steps?.length" class="mt-1.5 pl-1">
+      <AgentPlanView :plan="plan" />
+    </div>
 
     <!-- Suy nghĩ / quyết định của model -->
     <div v-if="open && thoughts?.length" class="mt-1.5 space-y-1 pl-1">

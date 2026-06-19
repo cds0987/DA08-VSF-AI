@@ -171,10 +171,11 @@ function nextCite() {
     <div class="px-5 pb-5 pt-4 text-slate-900 dark:text-foreground">
       <!-- Bước agent đã làm (bền vững, thu gọn) — user xem lại agent đã nghĩ/làm gì -->
       <MessageSteps
-        v-if="data.trace?.length || data.models?.length || data.thoughts?.length"
+        v-if="data.trace?.length || data.models?.length || data.thoughts?.length || data.plan?.steps?.length"
         :trace="data.trace ?? []"
         :models="data.models"
         :thoughts="data.thoughts"
+        :plan="data.plan"
       />
       <div
         v-if="data.content"

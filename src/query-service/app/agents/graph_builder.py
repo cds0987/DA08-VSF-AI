@@ -66,11 +66,22 @@ def build_orchestrator_graph(
         )
         plan = await planner.plan(pctx)
         logger.info("orchestrate route=%s steps=%d", plan.route, len(plan.steps))
-        # "Suy nghĩ" ra SSE: tóm tắt kế hoạch (route + các bước) cho user thấy agent định làm gì.
         if ctx.emit:
-            _steps = " → ".join(s.role for s in plan.steps) or "(trả lời trực tiếp)"
-            await ctx.emit({"phase": "thought", "node": "think",
-                            "text": f"Kế hoạch ({plan.route}): {_steps}"})
+            # "Suy nghĩ" = router NGHĨ GÌ (reasoning thật); thiếu -> fallback ngắn theo route.
+            _think = plan.reasoning.strip() if plan.reasoning else (
+                "Trả lời trực tiếp." if plan.route == "light"
+                else "Cần truy xuất dữ liệu rồi tổng hợp."
+            )
+            await ctx.emit({"phase": "thought", "node": "think", "text": _think})
+            # "plan" = cấu trúc node + depends_on -> FE vẽ subagents SONG SONG theo level.
+            await ctx.emit({
+                "phase": "plan", "route": plan.route,
+                "steps": [
+                    {"id": s.id, "role": s.role, "direction": s.direction,
+                     "depends_on": list(s.depends_on)}
+                    for s in plan.steps
+                ],
+            })
         return {"plan": plan, "replan_count": 0, "results": {}}
 
     def route_plan(state: OrchestratorState):
@@ -86,18 +97,26 @@ def build_orchestrator_graph(
             direction=payload.get("direction", ""),
             upstream=payload.get("upstream", {}),
         )
+        # Node bắt đầu chạy -> SSE (FE hiện subagent này "đang chạy" trong lane song song).
+        if ctx.emit:
+            await ctx.emit({"phase": "step", "step_id": task.step_id, "role": task.role,
+                            "direction": task.direction, "status": "running"})
         try:
             role_cls = AGENT_REGISTRY.get(task.role)
         except KeyError as exc:
             out = WorkerOutput(task.step_id, task.role, "", status="error", error=str(exc)[:200])
-            return {"results": {task.step_id: out}}
-        role = role_cls(ctx)
-        try:
-            out = await asyncio.wait_for(role.run(task), timeout=worker_timeout)
-        except asyncio.TimeoutError:
-            out = WorkerOutput(task.step_id, task.role, "", status="error", error="timeout")
-        except Exception as exc:  # noqa: BLE001 — worker lỗi KHÔNG làm vỡ graph
-            out = WorkerOutput(task.step_id, task.role, "", status="error", error=str(exc)[:200])
+        else:
+            role = role_cls(ctx)
+            try:
+                out = await asyncio.wait_for(role.run(task), timeout=worker_timeout)
+            except asyncio.TimeoutError:
+                out = WorkerOutput(task.step_id, task.role, "", status="error", error="timeout")
+            except Exception as exc:  # noqa: BLE001 — worker lỗi KHÔNG làm vỡ graph
+                out = WorkerOutput(task.step_id, task.role, "", status="error", error=str(exc)[:200])
+        # Node xong -> SSE (status thật: ok/no_info/error) để FE đánh dấu hoàn tất/lỗi.
+        if ctx.emit:
+            await ctx.emit({"phase": "step", "step_id": task.step_id, "role": task.role,
+                            "status": out.status})
         return {"results": {task.step_id: out}}
 
     async def join(state: OrchestratorState) -> dict:

@@ -35,8 +35,11 @@ QUY TẮC:
 - LUÔN kết thúc bằng đúng 1 step role "synthesize_recommend" depends_on mọi step dữ liệu.
 - Câu hỏi đơn giản chỉ cần 1 retrieval: 1 step rag_retrieve + 1 step synthesize_recommend.
 
-CHỈ trả JSON đúng schema, không giải thích:
-{"route":"light|heavy","answer_hint":"...","steps":[{"id":1,"role":"...","input":"...","direction":"...","depends_on":[]}]}
+- "reasoning": 1-2 câu NGẮN tiếng Việt nói rõ BẠN HIỂU câu hỏi là gì + VÌ SAO chọn plan này
+  (đây là phần "suy nghĩ" hiển thị cho người dùng — viết tự nhiên, dễ hiểu).
+
+CHỈ trả JSON đúng schema, không giải thích thêm:
+{"route":"light|heavy","reasoning":"...","answer_hint":"...","steps":[{"id":1,"role":"...","input":"...","direction":"...","depends_on":[]}]}
 """
 
 

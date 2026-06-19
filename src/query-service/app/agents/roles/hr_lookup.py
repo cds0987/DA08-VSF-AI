@@ -22,6 +22,9 @@ class HrLookupRole(AgentRole):
 
     async def run(self, task: WorkerInput) -> WorkerOutput:
         ctx = self.ctx
+        if ctx.emit:
+            await ctx.emit({"phase": "acting", "tool": "hr_query",
+                            "tool_args": {"intent": task.direction or "hồ sơ HR"}})
         try:
             raw = await ctx.mcp_client.call_tool("hr_query", {"user_id": ctx.user_id})
         except Exception as exc:  # noqa: BLE001
@@ -36,14 +39,19 @@ class HrLookupRole(AgentRole):
             return WorkerOutput(task.step_id, self.name, "", status="no_info")
 
         profile_json = json.dumps(payload, ensure_ascii=False)
+        if ctx.emit:
+            await ctx.emit({"phase": "observing", "tool": "hr_query",
+                            "tool_result_summary": {"raw": "Đã lấy hồ sơ HR"}})
 
         model = ctx.make_model(self.capability) if ctx.make_model else None
         extracted = await acomplete(
             model,
             system=(
-                "Bạn trích dữ liệu HR. Dựa CHỈ trên hồ sơ cho sẵn, trả phần liên quan tới "
-                "định hướng. Chỉ số liệu/sự thật, KHÔNG diễn giải dài."
+                "Bạn trích dữ liệu HR. Dựa CHỈ trên hồ sơ cho sẵn, trả các phần liên quan tới "
+                "định hướng dưới dạng 'Nhãn: giá trị' (GIỮ tên trường + đơn vị, vd 'Số ngày phép "
+                "còn lại: 12 ngày'). TUYỆT ĐỐI KHÔNG trả số trơ không nhãn. KHÔNG diễn giải dài."
             ),
             user=f"Định hướng: {task.direction or 'tóm tắt hồ sơ'}\n\nHồ sơ HR:\n{profile_json}",
         )
+        # model lỗi/rỗng -> đưa full profile (synth deepseek tự hiểu) thay vì mất ngữ cảnh.
         return WorkerOutput(task.step_id, self.name, extracted or profile_json, status="ok")

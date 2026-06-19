@@ -29,9 +29,10 @@ class RagRetrieveRole(AgentRole):
             return WorkerOutput(task.step_id, self.name, "", status="no_info",
                                 error="no document access")
 
-        # Bước tool ra SSE: UI hiện "Tìm kiếm tài liệu" + query.
+        # Bước tool ra SSE: UI hiện "Tìm kiếm tài liệu" + query (step_id gắn lane song song).
         if ctx.emit:
-            await ctx.emit({"phase": "acting", "tool": "rag_search", "tool_args": {"query": query}})
+            await ctx.emit({"phase": "acting", "tool": "rag_search", "step_id": task.step_id,
+                            "tool_args": {"query": query}})
 
         # Retry 1 lần (mcp rag_search intermittent) — giống act_node hiện tại.
         try:
@@ -49,7 +50,7 @@ class RagRetrieveRole(AgentRole):
         # Kết quả tool ra SSE: số tài liệu + tên (UI hiện bước observing).
         if ctx.emit:
             await ctx.emit({
-                "phase": "observing", "tool": "rag_search",
+                "phase": "observing", "tool": "rag_search", "step_id": task.step_id,
                 "tool_result_summary": {
                     "count": len(qualified),
                     "docs": sorted({r.document_name for r in qualified}),

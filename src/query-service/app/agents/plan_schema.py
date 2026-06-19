@@ -20,6 +20,7 @@ class PlanStep(BaseModel):
 
 class Plan(BaseModel):
     route: Literal["light", "heavy"]
+    reasoning: str = Field(default="", description="Router suy nghĩ gì: hiểu câu hỏi + vì sao plan này (1-2 câu, ngắn)")
     answer_hint: str = Field(default="", description="Gợi ý trả lời khi route=light")
     steps: list[PlanStep] = Field(default_factory=list)
 

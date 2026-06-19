@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Search, Database, Loader2, CheckCircle2, Sparkles } from '@lucide/vue'
-import type { TraceEntry, NodeModel } from '~/types'
+import type { TraceEntry, NodeModel, AgentPlan } from '~/types'
+import AgentPlanView from './AgentPlan.vue'
 
 interface Props {
   traceLog: TraceEntry[]
@@ -8,6 +9,7 @@ interface Props {
   isThinking?: boolean
   models?: NodeModel[]
   thoughts?: { node: string; text: string }[]
+  plan?: AgentPlan | null
 }
 
 const props = defineProps<Props>()
@@ -80,6 +82,11 @@ function getResultLabel(entry: TraceEntry): string {
         <span class="font-semibold text-blue-600 dark:text-blue-300">{{ NODE_LABEL[t.node] ?? t.node }}:</span>
         {{ t.text }}
       </div>
+    </div>
+
+    <!-- Kế hoạch + subagents song song (orchestrator-workers) -->
+    <div v-if="plan?.steps?.length" class="mb-2">
+      <AgentPlanView :plan="plan" />
     </div>
 
     <!-- Thinking indicator (before any tool calls) -->

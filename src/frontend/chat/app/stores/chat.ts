@@ -4,6 +4,7 @@ import { useLocalStorage } from '@vueuse/core'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { useSessionStore } from './session'
 import type {
+  AgentPlan,
   ChatMessage,
   Citation,
   Conversation,
@@ -318,6 +319,7 @@ export const useChatStore = defineStore('chat', () => {
   const traceLog = ref<TraceEntry[]>([])
   const modelsUsed = ref<{ node: string; model: string }[]>([])
   const thoughts = ref<{ node: string; text: string }[]>([])
+  const plan = ref<AgentPlan | null>(null)
   const panelCitation = ref<Citation | null>(null)
   const isPanelOpen = ref(false)
   const pendingProactiveDoc = ref<{ name: string; docId: string | null } | null>(null)
@@ -363,6 +365,7 @@ export const useChatStore = defineStore('chat', () => {
     pipeline.value = -1
     streamingText.value = ''
     traceLog.value = []
+    plan.value = null
     isPanelOpen.value = false
     panelCitation.value = null
     input.value = ''
@@ -465,6 +468,7 @@ export const useChatStore = defineStore('chat', () => {
         if (c?.reasoning) s.reasoning = c.reasoning
         if (c?.models?.length) s.models = c.models
         if (c?.thoughts?.length) s.thoughts = c.thoughts
+        if (c?.plan?.steps?.length) s.plan = c.plan
       })
       const synced: Conversation = {
         id: detail.id,
@@ -659,6 +663,7 @@ export const useChatStore = defineStore('chat', () => {
     traceLog.value = []
     modelsUsed.value = []
     thoughts.value = []
+    plan.value = null
     pipeline.value = 0
     let fullContent = ''
     let completed = false
@@ -736,6 +741,22 @@ export const useChatStore = defineStore('chat', () => {
               } else {
                 thoughts.value.push({ node: payload.node, text: payload.text })
               }
+              return
+            }
+
+            // plan: orchestrator phát kế hoạch -> dựng node (pending) cho FE vẽ lane song song.
+            if (payload.phase === 'plan' && Array.isArray(payload.steps)) {
+              plan.value = {
+                route: payload.route ?? 'heavy',
+                steps: payload.steps.map(s => ({ ...s, status: 'pending' as const })),
+              }
+              return
+            }
+            // step: 1 node đổi trạng thái (running/ok/error). Xử lý TRƯỚC guard vì node synth
+            // báo "done" SAU khi token answer đã bắt đầu.
+            if (payload.phase === 'step' && payload.step_id != null && plan.value) {
+              const st = plan.value.steps.find(s => s.id === payload.step_id)
+              if (st && payload.status) st.status = payload.status as typeof st.status
               return
             }
 
@@ -837,6 +858,8 @@ export const useChatStore = defineStore('chat', () => {
           models: modelsUsed.value.length ? modelsUsed.value.map(m => ({ ...m })) : undefined,
           // Dòng suy nghĩ/quyết định của model.
           thoughts: thoughts.value.length ? thoughts.value.map(t => ({ ...t })) : undefined,
+          // Kế hoạch orchestrator-workers (node + song song) — lưu để xem lại.
+          plan: plan.value ? { route: plan.value.route, steps: plan.value.steps.map(s => ({ ...s })) } : undefined,
         }
         assistant.fallback = result.fallback === true
 
@@ -955,6 +978,7 @@ export const useChatStore = defineStore('chat', () => {
     traceLog,
     modelsUsed,
     thoughts,
+    plan,
     panelCitation,
     isPanelOpen,
     setInput,

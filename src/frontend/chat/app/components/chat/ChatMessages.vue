@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ChatMessage, Citation, NodeModel, PipelineStage, TraceEntry } from '~/types'
+import type { AgentPlan, ChatMessage, Citation, NodeModel, PipelineStage, TraceEntry } from '~/types'
 import UserBubble from './UserBubble.vue'
 import FallbackBlock from './FallbackBlock.vue'
 import AnswerBlock from './AnswerBlock.vue'
@@ -15,6 +15,7 @@ defineProps<{
   traceLog?: TraceEntry[]
   modelsUsed?: NodeModel[]
   thoughts?: { node: string; text: string }[]
+  plan?: AgentPlan | null
 }>()
 
 const emit = defineEmits<{
@@ -43,6 +44,7 @@ const emit = defineEmits<{
       :thinking-status="thinkingStatus"
       :models="modelsUsed"
       :thoughts="thoughts"
+      :plan="plan"
       :is-thinking="pipeline >= 0 && pipeline < pipelineStages.length"
     />
     <StreamingBlock
