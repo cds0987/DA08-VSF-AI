@@ -529,8 +529,10 @@ async def act_node(
                 new_sources = []
                 hard_stop_response = _RAG_NO_ACCESS_ANSWER
             else:
-                # top_k ưu tiên từ LLM tool_args, fallback về giá trị config-driven trong state.
-                effective_top_k = tool_args.get("top_k", state.get("rag_top_k", 5))
+                # top_k LUÔN lấy từ config (BỎ QUA top_k do LLM truyền): deepseek hay truyền
+                # top_k nhỏ/khác nhau -> số kết quả qualified dao động (sources lúc 0 lúc >0,
+                # e2e flaky). Cố định top_k -> retrieval deterministic -> ổn định.
+                effective_top_k = state.get("rag_top_k", 5)
                 _rag_start_dt = datetime.now(timezone.utc)
                 results = await mcp_client.rag_search(
                     query=state["question"],  # raw question — server-injected, like user_id

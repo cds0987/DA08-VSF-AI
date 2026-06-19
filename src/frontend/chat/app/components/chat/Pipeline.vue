@@ -12,6 +12,7 @@ interface Props {
 
 const props = defineProps<Props>()
 
+// think = "Suy nghĩ" (1 khối reasoning trước tool). plan/triage không còn emit (gộp).
 const NODE_LABEL: Record<string, string> = {
   triage: 'Phân loại',
   think: 'Suy nghĩ',
