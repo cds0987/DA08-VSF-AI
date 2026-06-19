@@ -71,6 +71,10 @@ class QueryOrchestrationUseCase:
         user_access_profile_repo=None,
         access_cache=None,
         summarizer=None,
+        agent_mode: str = "react",
+        orchestrator_planner=None,
+        make_model=None,
+        agent_manifest=None,
     ) -> None:
         self._settings = settings
         self._conversation_repo = conversation_repo
@@ -80,6 +84,12 @@ class QueryOrchestrationUseCase:
         self._openai_client = openai_client
         self._summarizer = summarizer
         self._langgraph_agent = langgraph_agent
+        # MOSA Orchestrator-Workers (mode=orchestrator_workers). Mặc định react ->
+        # các field này None -> _stream_inner đi path langgraph/legacy cũ KHÔNG đổi.
+        self._agent_mode = (agent_mode or "react").strip().lower()
+        self._orchestrator_planner = orchestrator_planner
+        self._make_model = make_model
+        self._agent_manifest = agent_manifest
         self._tracer = langfuse_tracer
         self._user_access_profile_repo = user_access_profile_repo
         self._access_cache = access_cache
@@ -242,6 +252,20 @@ class QueryOrchestrationUseCase:
         # state["messages"] contains only prior turns (not the current question).
         # Each path below saves the question right after the context fetch.
 
+        # MOSA Orchestrator-Workers path (mode=orchestrator_workers). Gated CHẶT: chỉ chạy
+        # khi planner + make_model có sẵn (dependencies chỉ build khi manifest mode bật).
+        # Mặc định react -> bỏ qua hoàn toàn -> path langgraph/legacy cũ.
+        if (
+            self._agent_mode == "orchestrator_workers"
+            and self._orchestrator_planner is not None
+            and self._make_model is not None
+        ):
+            async for event in self._stream_orchestrator(
+                question, user, session_id, started, document_ids=_document_ids,
+            ):
+                yield event
+            return
+
         # LangGraph path (canonical) — requires use_langgraph=True and a built agent.
         # Falls through to the legacy direct-orchestration path when no agent is available
         # (e.g. mock mode / no OpenAI key).
@@ -331,6 +355,113 @@ class QueryOrchestrationUseCase:
             outcome=decision.outcome,
         ):
             yield event
+
+    async def _stream_orchestrator(
+        self,
+        question: str,
+        user: AuthenticatedUser,
+        session_id: str,
+        started: float,
+        document_ids: list[str] | None = None,
+    ) -> AsyncIterator[dict]:
+        """MOSA Orchestrator-Workers: router(deepseek-pro) -> workers song song -> synthesize.
+
+        Fail-closed: bất kỳ lỗi nào -> lưu 1 lượt assistant fallback (FE không resend) +
+        done NO_INFO. KHÔNG raise ra ngoài. v1 stream câu trả lời theo word-chunk (chưa token
+        thật từ synthesize) — đủ cho A/B latency; token-streaming để bước sau.
+        """
+        from app.agents.base import RoleContext
+        from app.agents.graph_builder import build_orchestrator_graph
+
+        # Context + memory (provider chọn ở manifest; lỗi -> recent thô).
+        ctx_data = await self._get_context(user.id, recent_k=self._settings.rag_top_k)
+        recent_messages = [(m.role, m.content) for m in ctx_data.recent_messages]
+        try:
+            if self._agent_manifest is not None:
+                from app.agents.memory import recent_buffer, summary_buffer  # noqa: F401
+                from app.agents.registry import MEMORY_REGISTRY
+
+                mem_cfg = self._agent_manifest.memory
+                if MEMORY_REGISTRY.has(mem_cfg.impl):
+                    provider = MEMORY_REGISTRY.get(mem_cfg.impl)(
+                        keep_recent=mem_cfg.keep_recent,
+                        summarize_after=mem_cfg.summarize_after,
+                        make_model=self._make_model,
+                    )
+                    recent_messages = await provider.load(recent_messages)
+        except Exception as exc:  # noqa: BLE001 — memory lỗi KHÔNG chặn trả lời
+            logger.warning("orchestrator_memory_failed: %s", str(exc)[:160])
+
+        await self._save_user_message(user.id, question)
+
+        try:
+            allowed_doc_ids = await self._get_allowed_doc_ids(user)
+            ctx = RoleContext(
+                mcp_client=self._mcp_client,
+                user_id=user.id,
+                allowed_doc_ids=tuple(allowed_doc_ids),
+                rag_top_k=self._settings.rag_top_k,
+                rag_score_threshold=self._settings.rag_score_threshold,
+                make_model=self._make_model,
+            )
+            graph = build_orchestrator_graph(
+                ctx=ctx,
+                manifest=self._agent_manifest,
+                planner=self._orchestrator_planner,
+                make_model=self._make_model,
+            )
+            yield {"phase": "thinking", "agent_mode": "orchestrator_workers", "session_id": session_id}
+            result = await graph.ainvoke({
+                "question": question,
+                "user_id": user.id,
+                "allowed_doc_ids": list(allowed_doc_ids),
+                "recent_messages": recent_messages,
+            })
+            answer = str(result.get("answer") or "").strip()
+            raw_sources = result.get("sources") or []
+        except Exception as exc:  # noqa: BLE001 — fail-closed
+            logger.error("orchestrator_stream_failed: %s", str(exc)[:300], exc_info=True)
+            answer, raw_sources = "", []
+
+        if not answer:
+            answer = (
+                "Mình chưa lấy được thông tin phù hợp lúc này. Bạn thử lại sau hoặc liên hệ "
+                "HR/IT Helpdesk nhé."
+            )
+            outcome_value = Outcome.NO_INFO.value
+            sources: list[dict] = []
+        else:
+            outcome_value = Outcome.SUCCESS.value
+            # Gắn ref [N] cho citation (FE cần), khử trùng theo chunk_id.
+            sources, seen, ref = [], set(), 0
+            for s in raw_sources:
+                cid = s.get("chunk_id")
+                if cid in seen:
+                    continue
+                seen.add(cid)
+                ref += 1
+                sources.append({**s, "ref": ref})
+
+        answer = await self._output_guardrail.redact(answer)
+        for token in _word_chunks(answer):
+            yield {
+                "token": token,
+                "phase": "generating",
+                "agent_mode": "orchestrator_workers",
+                "session_id": session_id,
+            }
+            await asyncio.sleep(0)
+
+        message_id = await self._save_assistant(user.id, session_id, answer, sources, started)
+        yield {
+            "done": True,
+            "sources": sources,
+            "session_id": session_id,
+            "message_id": message_id,
+            "outcome": outcome_value,
+            "agent_mode": "orchestrator_workers",
+            "_answer": answer,
+        }
 
     async def _stream_langgraph(
         self,

@@ -212,7 +212,40 @@ def get_guardrails():
     return build_guardrails(get_settings())
 
 
+def get_agent_manifest():
+    """MOSA agents.yaml manifest (mode/roles/memory). Lỗi -> fallback react (loader tự lo)."""
+    from app.agents.manifest import load_manifest
+
+    return load_manifest()
+
+
+def _effective_agent_mode() -> str:
+    """mode hiệu lực = env AGENT_MODE (override) > agents.yaml. Chỉ bật orchestrator khi
+    use_langgraph + có ai-router base_url (model thật cho router/worker)."""
+    settings = get_settings()
+    mode = (settings.agent_mode or "").strip().lower() or get_agent_manifest().mode
+    if mode == "orchestrator_workers" and not (settings.use_langgraph and settings.openai_base_url):
+        return "react"  # thiếu điều kiện -> fail-safe về path cũ
+    return mode
+
+
+@lru_cache
+def get_orchestrator_planner():
+    """Planner cho mode orchestrator_workers (None nếu không bật) — cache 1 lần/process."""
+    if _effective_agent_mode() != "orchestrator_workers":
+        return None
+    from app.agents import planners, roles  # noqa: F401 — side-effect register
+    from app.agents.registry import PLANNER_REGISTRY
+
+    name = get_agent_manifest().planner
+    if not PLANNER_REGISTRY.has(name):
+        return None
+    return PLANNER_REGISTRY.get(name)()
+
+
 def get_orchestration_use_case() -> QueryOrchestrationUseCase:
+    mode = _effective_agent_mode()
+    planner = get_orchestrator_planner()
     return QueryOrchestrationUseCase(
         settings=get_settings(),
         conversation_repo=get_conversation_repo(),
@@ -227,6 +260,10 @@ def get_orchestration_use_case() -> QueryOrchestrationUseCase:
         user_access_profile_repo=get_user_access_profile_repo(),
         access_cache=get_access_cache(),
         summarizer=get_summarizer(),
+        agent_mode=mode,
+        orchestrator_planner=planner,
+        make_model=(get_node_model if planner is not None else None),
+        agent_manifest=(get_agent_manifest() if planner is not None else None),
     )
 
 
@@ -388,6 +425,7 @@ def reset_state_for_tests() -> None:
     get_langchain_model.cache_clear()
     get_langchain_mcp_tools_loader.cache_clear()
     get_langgraph_agent.cache_clear()
+    get_orchestrator_planner.cache_clear()
     get_observability_tracer.cache_clear()
     get_guardrails.cache_clear()
     get_openai_client.cache_clear()

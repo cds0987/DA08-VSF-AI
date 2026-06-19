@@ -70,6 +70,21 @@ capabilities:
           model: openai/gpt-4o-mini
           tier: free_oai
           band_tokens: 150000
+  worker:                           # subagents song song (Orchestrator-Workers) — fetch+phân tích
+                                    # PIN gpt-5.4-mini (OpenAI). Xoay 5 key ~2.5M token/key/ngày;
+                                    # cạn CẢ 5 key -> degrade gpt-4o-mini (tránh 503). KHÔNG OpenRouter.
+    tiers: [free_oai]
+    models:
+      free_oai: openai/gpt-5.4-mini
+    selector:
+      impl: banded_rotation
+      params:
+        band_tokens: 2500000        # quota/key/ngày -> cạn thì xoay key kế (cùng model)
+        save_mode:
+          enabled: true
+          model: openai/gpt-4o-mini
+          tier: free_oai
+          band_tokens: 2500000
   rerank:                           # LLM-as-reranker
     tiers: [free_oai, free_or, paid]
     models:

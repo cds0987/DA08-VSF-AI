@@ -34,7 +34,7 @@ _SDK_CALL_RE = re.compile(r"\.(responses|chat\.completions|embeddings)\.create\s
 
 # Capability hợp lệ = capabilities trong ai-router/routing.yaml. Hardcode làm HỢP ĐỒNG (chạy
 # được cả khi build query-service biệt lập); nếu thấy routing.yaml thì cross-check chống drift.
-_EXPECTED_CAPABILITIES = {"answer", "triage", "think", "rerank", "guardrail", "summary", "caption", "ocr", "embed"}
+_EXPECTED_CAPABILITIES = {"answer", "triage", "think", "worker", "rerank", "guardrail", "summary", "caption", "ocr", "embed"}
 
 
 def _py_files():

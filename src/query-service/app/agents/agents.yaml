@@ -1,0 +1,30 @@
+# MOSA manifest — multi-agent Orchestrator-Workers cho query-service.
+#
+# HOT-CONFIG: đổi mode/role/memory KHÔNG sửa code. Lỗi/thiếu file -> fallback mode=react
+# (giữ flow LangGraph cũ) -> service KHÔNG vỡ. Xem docs/nguyenworking/orchestrator-workers-spec.md.
+#
+# - mode:        react (cũ, rollback) | orchestrator_workers (mới)
+# - roles:       danh sách role-agent active -> orchestrator đọc làm capability catalog
+#   - name:       phải khớp @register_agent trong roles/
+#   - capability: chuỗi gửi ai-router (routing.yaml): worker (gpt-5.4-mini) | answer (deepseek-flash)
+#   - tools:      tool MCP role được phép gọi (phải có trong mcp tool specs)
+version: 1
+
+mode: react                          # CHƯA bật orchestrator_workers — đổi sau khi M1..M6 xanh
+planner: orchestrator_workers
+
+memory:
+  impl: recent_buffer                # recent_buffer (hiện tại) | summary_buffer | vector
+  keep_recent: 4
+  summarize_after: 8
+
+roles:
+  - {name: rag_retrieve,         capability: worker, tools: [rag_search]}
+  - {name: hr_lookup,            capability: worker, tools: [hr_query]}
+  - {name: analyze,              capability: worker, tools: []}
+  - {name: synthesize_recommend, capability: answer, tools: []}
+  - {name: critic,               capability: worker, tools: [], enabled: false}
+
+max_replan: 1
+max_workers_per_level: 4
+worker_timeout_seconds: 30

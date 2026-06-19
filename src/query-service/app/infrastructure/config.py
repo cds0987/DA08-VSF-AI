@@ -154,6 +154,11 @@ class Settings(BaseSettings):
     # tự phân loại + suy luận + gọi tool. SAFETY vẫn do rule-shortcut (classify_shortcut) giữ.
     # Giảm latency/cost + hết domino triage->think. False = giữ triage riêng (hành vi cũ).
     agent_merged_reason: bool = False
+    # agent_mode: OVERRIDE mode trong agents.yaml (MOSA Orchestrator-Workers). Rỗng = theo
+    # manifest (commit là 'react' = default-off). Đặt AGENT_MODE=orchestrator_workers (env) để
+    # BẬT path mới trên canary/% traffic mà KHÔNG commit -> rollback = bỏ env. Cần use_langgraph
+    # + openai_base_url (ai-router) để có model thật cho router/worker.
+    agent_mode: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -1,11 +1,6 @@
 <script setup lang="ts">
 import {
   SquarePlus,
-  LayoutDashboard,
-  FileText,
-  Upload,
-  ShieldCheck,
-  Users,
   Search,
   PanelLeftOpen,
   PanelLeftClose,
@@ -38,11 +33,6 @@ function setSidebarCollapsed(value: boolean) {
 const searchQuery = ref('')
 const searchInputRef = ref<HTMLInputElement | null>(null)
 
-const section = computed(() => {
-  if (route.path === '/' || route.path.startsWith('/chat')) return 'user'
-  return session.user?.role || 'user'
-})
-
 const handleNewChat = () => {
   chat.clear()
   if (route.path !== '/chat') {
@@ -58,14 +48,6 @@ const handleSearchClick = () => {
     searchInputRef.value?.focus()
   }
 }
-
-const ADMIN_NAV = [
-  { label: 'Dashboard', to: '/', icon: LayoutDashboard },
-  { label: 'Documents', to: '/documents', icon: FileText },
-  { label: 'Upload Center', to: '/upload', icon: Upload },
-  { label: 'Audit Logs', to: '/audit', icon: ShieldCheck },
-  { label: 'User Management', to: '/users', icon: Users },
-]
 
 const handleSignOut = () => {
   // Xóa currentConversationId trước khi redirect: sau login lại sẽ hiện chat mới
@@ -174,24 +156,9 @@ const userInitials = computed(() => {
       <div
         class="flex flex-col w-full h-full px-0 gap-2"
       >
-        <template v-if="section === 'admin'">
-          <!-- Admin Navigation -->
-          <div
-            class="flex flex-col gap-1 w-full"
-          >
-            <SideLink
-              v-for="item in ADMIN_NAV"
-              :key="item.to"
-              :item="item"
-              :is-collapsed="isCollapsed"
-              :disable-tooltip="isAnimatingSidebar"
-            />
-          </div>
-        </template>
-
-        <template v-else>
-          <!-- User View: New Chat, Search & Chat History -->
-          <div class="w-full flex flex-col gap-2 flex-1 min-h-0">
+        <!-- App chat KHÔNG có trang admin (admin là app riêng) -> luôn hiển thị nav chat,
+             kể cả account role admin. Tránh /leave-approvals lật shell sang nav admin. -->
+        <div class="w-full flex flex-col gap-2 flex-1 min-h-0">
             <!-- New Chat Section -->
             <div class="w-full">
               <Tooltip :disabled="isAnimatingSidebar" :ignore-non-keyboard-focus="true">
@@ -272,7 +239,6 @@ const userInitials = computed(() => {
 
             <ChatHistory :is-collapsed="isCollapsed" :query="searchQuery" class="w-full flex flex-col flex-1 min-h-0" />
           </div>
-        </template>
       </div>
     </div>
 
@@ -281,7 +247,6 @@ const userInitials = computed(() => {
       class="flex flex-col gap-1.5 shrink-0 w-full px-0 py-3"
     >
       <NotificationCenter
-        v-if="section !== 'admin'"
         :is-collapsed="isCollapsed"
         :disable-tooltip="isAnimatingSidebar"
       />
