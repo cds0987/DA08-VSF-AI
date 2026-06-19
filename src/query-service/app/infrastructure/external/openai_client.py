@@ -121,3 +121,66 @@ class OpenAIStreamingClient:
 
 def _chunk_text(text: str, size: int = 24) -> list[str]:
     return [text[index : index + size] for index in range(0, len(text), size)] or [""]
+
+
+_SUMMARY_SYSTEM = (
+    "Bạn tóm tắt hội thoại nội bộ. Gộp các lượt sau (và bản tóm tắt trước nếu có) thành "
+    "3-5 câu tiếng Việt, giữ CHỦ ĐỀ và DỮ KIỆN chính (người dùng hỏi gì, đã kết luận gì). "
+    "KHÔNG chép nguyên đoạn tài liệu, KHÔNG bịa thêm. Chỉ trả về đoạn tóm tắt, không lời dẫn."
+)
+
+
+def _extractive_fallback(turns: list[tuple[str, str]], prev_summary: str | None) -> str:
+    """Tóm tắt thô khi không có LLM (mock / no key / lỗi): nối dòng đầu mỗi lượt gần."""
+    parts = [
+        content.strip().split("\n", 1)[0][:80]
+        for _role, content in turns[-4:]
+        if content and content.strip()
+    ]
+    tail = " | ".join(parts)
+    if prev_summary and tail:
+        return f"{prev_summary} | {tail}"
+    return tail or (prev_summary or "")
+
+
+class ConversationSummarizer:
+    """Tóm tắt các lượt hội thoại CŨ (bị đẩy khỏi window) thành 1 đoạn ngắn, bằng model rẻ
+    qua ai-router (capability `summary` -> gpt-4o-mini). Best-effort: lỗi/mock -> extractive."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._client = None
+        self._model = settings.openai_llm_model
+        if settings.llm_mode == "openai" and settings.openai_api_key:
+            from app.infrastructure.external.routed_openai import build_routed_openai, route_model
+
+            self._client, _ = build_routed_openai(settings)
+            self._model = route_model(settings, settings.summary_capability, settings.openai_llm_model)
+
+    async def summarize(
+        self,
+        turns: list[tuple[str, str]],
+        prev_summary: str | None = None,
+    ) -> str:
+        if not turns:
+            return prev_summary or ""
+        if self._client is None:
+            return _extractive_fallback(turns, prev_summary)
+
+        convo = "\n".join(f"{role}: {content}" for role, content in turns)
+        prev = f"Bản tóm tắt trước đó:\n{prev_summary}\n\n" if prev_summary else ""
+        try:
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": _SUMMARY_SYSTEM},
+                    {"role": "user", "content": f"{prev}Các lượt cần gộp vào tóm tắt:\n{convo}"},
+                ],
+                temperature=0,
+                max_completion_tokens=self._settings.summary_max_tokens,
+                stream=False,
+            )
+            out = (response.choices[0].message.content or "").strip()
+            return out or (prev_summary or "")
+        except Exception:
+            return prev_summary or ""

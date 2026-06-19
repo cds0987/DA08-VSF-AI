@@ -134,6 +134,14 @@ class Settings(BaseSettings):
     agent_mode: str = "guarded"
     agent_max_iterations: int = 3
 
+    # --- Conversation memory (sliding window: System + Summary + K lượt gần NGUYÊN VĂN) ---
+    # K lượt gần giữ FULL để follow-up có fidelity; cũ hơn -> gộp vào summary.
+    agent_recent_k: int = 3
+    # Bật/tắt tóm tắt lượt cũ (kill-switch -> về hành vi cũ). Model rẻ qua ai-router.
+    summary_enabled: bool = True
+    summary_capability: str = "summary"  # capability ai-router (routing.yaml) -> gpt-4o-mini
+    summary_max_tokens: int = 256
+
     use_langgraph: bool = True  # LangGraph is the canonical agent; set to false to use legacy orchestration
 
     # MOSA per-node LLM (app/infrastructure/llm/profiles.yaml). Mỗi node (triage/think/

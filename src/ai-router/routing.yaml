@@ -88,6 +88,15 @@ capabilities:
         - qwen/qwen3-next-80b-a3b-instruct:free
         - openai/gpt-oss-120b:free
       paid: deepseek/deepseek-v4-flash
+  summary:                          # tóm tắt hội thoại (memory) — rẻ, không cần reasoning/tool
+    tiers: [free_oai, free_or, paid]
+    models:
+      free_oai: openai/gpt-4o-mini
+      free_or:                        # interchange: model đầu sập -> tự thử model kế
+        - google/gemma-4-31b-it:free
+        - qwen/qwen3-next-80b-a3b-instruct:free
+        - openai/gpt-oss-120b:free
+      paid: deepseek/deepseek-v4-flash
   caption:                          # ảnh -> mô tả (VISION)
     tiers: [free_oai, free_or]
     models:
