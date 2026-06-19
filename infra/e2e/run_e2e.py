@@ -314,15 +314,27 @@ def _parse_sse(raw: bytes, label: str, need_sources: bool) -> None:
         raise SystemExit(f"[{label}] FAIL: không nhận event done (stream crash/treo?)")
     outcome = done.get("outcome")
     src = len(done.get("sources") or [])
+    agent_mode = done.get("agent_mode")
     # DIAGNOSTIC: phases + tool_seen phân biệt 'think không gọi tool' vs 'gọi mà rỗng'.
-    diag = f"phases={phases} tool_seen={tool_seen} answer_chars={answer_chars}"
+    diag = f"agent_mode={agent_mode} phases={phases} tool_seen={tool_seen} answer_chars={answer_chars}"
     print(f"  [{label}] done outcome={outcome} sources={src} {diag}")
     if outcome in (6, "ERROR"):
         raise SystemExit(f"[{label}] FAIL: outcome=ERROR (wiring đứt?) {diag}")
+    # GATE path prod: nếu set EXPECT_AGENT_MODE -> done PHẢI báo đúng path đó. Bắt trường hợp
+    # orchestrator âm thầm fallback react (thiếu điều kiện) -> e2e KHÔNG còn validate path prod.
+    expect_mode = os.environ.get("EXPECT_AGENT_MODE", "").strip().lower()
+    if expect_mode and agent_mode != expect_mode:
+        raise SystemExit(
+            f"[{label}] FAIL: agent_mode={agent_mode!r} != EXPECT {expect_mode!r} "
+            f"-> path prod KHÔNG được kích hoạt (fallback?). {diag}"
+        )
     if need_sources and src < 1:
-        hint = ("think KHÔNG gọi tool (adapter/model không phát tool_call)"
+        hint = ("model KHÔNG gọi tool/retrieve (adapter/model không phát tool_call)"
                 if not tool_seen else "tool gọi RỒI nhưng rag/qdrant trả rỗng (args rỗng?)")
         raise SystemExit(f"[{label}] FAIL: cần sources>0 -> {hint}. {diag}")
+    # Câu hỏi cần dữ liệu mà answer rỗng -> fail-closed đã kích hoạt sai/synthesize trống.
+    if need_sources and answer_chars < 1:
+        raise SystemExit(f"[{label}] FAIL: answer rỗng dù có sources. {diag}")
 
 
 def query(label: str, token: str, uid: str, question: str, need_sources: bool) -> None:

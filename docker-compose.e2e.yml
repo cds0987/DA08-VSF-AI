@@ -483,6 +483,10 @@ services:
     environment:
       AIROUTER_REDIS_URL: redis://redis:6379/1
       OPENAI_API_KEY_1: ${OPENAI_API_KEY:?set OPENAI_API_KEY in .env}
+      # OpenRouter key: capability think/answer/worker(save_mode) route deepseek qua OpenRouter.
+      # Có key -> e2e test ĐÚNG model prod (deepseek-v4-pro/flash). Trống -> save_mode degrade
+      # gpt-4o-mini (vẫn validate wiring orchestrator, chỉ khác model).
+      OPENROUTER_API_KEY_1: ${OPENROUTER_API_KEY_1:-}
       # Auth ON (mirror prod khi secret set) -> test luôn đường credential: query-service phải
       # gửi đúng token này, nếu plumbing sai = 401 = e2e đỏ = chặn deploy (bắt bug TRƯỚC prod).
       AIROUTER_INTERNAL_TOKEN: e2e-router-token
@@ -534,6 +538,10 @@ services:
       AGENT_SPLIT_ANSWER: "true"
       # Gộp triage vào think (1 LLM call, hết domino) — validate luồng gộp trong e2e.
       AGENT_MERGED_REASON: "true"
+      # MOSA Orchestrator-Workers: BẬT trong e2e = validate path mới end-to-end (router deepseek
+      # -> workers gpt-5.4-mini // -> synthesize) với mcp/qdrant/ai-router THẬT. PHẢI khớp
+      # deploy/env/query-service.env (test_e2e_and_prod_agent_mode_consistent). Vỡ -> e2e đỏ -> chặn deploy.
+      AGENT_MODE: orchestrator_workers
       MCP_MODE: real
       MCP_SERVICE_URL: http://mcp-service:8003
       MCP_TIMEOUT_SECONDS: "20"

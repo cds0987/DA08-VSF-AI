@@ -277,6 +277,9 @@ jobs:
       # secrets.OPENAI_API_KEY (key test mặc định) đã bị REVOKE -> dùng OPENAI_API_KEY_1
       # (pool router). Compose e2e đổ biến này vào cả query-service (direct) lẫn pool ai-router.
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY_1 }}
+      # OpenRouter key -> e2e ai-router route deepseek THẬT cho capability think/answer
+      # (orchestrator router/synthesize) = test đúng model prod sẽ chạy.
+      OPENROUTER_API_KEY_1: ${{ secrets.OPENROUTER_API_KEY_1 }}
       GCS_HMAC_KEY: ${{ secrets.GCS_HMAC_KEY }}
       GCS_HMAC_SECRET: ${{ secrets.GCS_HMAC_SECRET }}
       GCS_BUCKET: vintravel-chatbot-docs-dev
@@ -295,6 +298,7 @@ jobs:
         run: |
           cat > .env <<EOF
           OPENAI_API_KEY=${OPENAI_API_KEY}
+          OPENROUTER_API_KEY_1=${OPENROUTER_API_KEY_1}
           GCS_HMAC_KEY=${GCS_HMAC_KEY}
           GCS_HMAC_SECRET=${GCS_HMAC_SECRET}
           GCS_BUCKET=${GCS_BUCKET}
@@ -307,6 +311,10 @@ jobs:
         env:
           GATEWAY_URL: http://localhost
           DOC_URL: http://localhost:8002
+          # GATE path prod: query-service e2e bật AGENT_MODE=orchestrator_workers -> mọi done
+          # event PHẢI báo agent_mode=orchestrator_workers. Nếu fallback react -> e2e đỏ -> chặn
+          # deploy. Đảm bảo CI xanh = kiến trúc orchestrator-workers đã chạy thật end-to-end.
+          EXPECT_AGENT_MODE: orchestrator_workers
           # Qdrant nay in-compose, expose 127.0.0.1:6333 -> run_e2e.py poll/cleanup qua host.
           QDRANT_URL: http://localhost:6333
           LANGFUSE_HOST_PUBLIC: http://localhost:3100

@@ -84,22 +84,39 @@ class _NoGuard:
         return a
 
 
-def test_committed_env_does_not_enable_orchestrator():
-    """GATE prod: deploy/env/query-service.env KHÔNG được commit AGENT_MODE=orchestrator_workers.
-    Bật chỉ qua override runtime trên canary -> tránh vỡ prod khi merge."""
+def _agent_mode_from_env_file(path):
+    for line in path.read_text(encoding="utf-8").splitlines():
+        s = line.strip()
+        if s.startswith("AGENT_MODE") and "=" in s and not s.startswith("#"):
+            return s.split("=", 1)[1].strip().strip('"').strip("'").lower()
+    return ""
+
+
+def _agent_mode_from_compose(path):
+    import re
+    txt = path.read_text(encoding="utf-8")
+    m = re.search(r"^\s*AGENT_MODE:\s*([^\s#]+)", txt, re.MULTILINE)
+    return (m.group(1).strip().strip('"').strip("'").lower() if m else "")
+
+
+def test_e2e_and_prod_agent_mode_consistent():
+    """GATE quan trọng: AGENT_MODE trong docker-compose.e2e.yml PHẢI khớp deploy/env/
+    query-service.env. -> e2e luôn test ĐÚNG path prod chạy. CI xanh = path đó đã validate
+    end-to-end. Nếu lệch (vd prod bật orchestrator nhưng e2e vẫn react) -> CI đỏ -> chặn deploy
+    untested path lên prod."""
     from pathlib import Path
 
-    env = Path(__file__).resolve().parents[3] / "deploy" / "env" / "query-service.env"
-    if not env.exists():
-        pytest.skip("env file không có trong context build này")
-    for line in env.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line.startswith("AGENT_MODE"):
-            val = line.split("=", 1)[1].strip().strip('"').strip("'").lower()
-            assert val != "orchestrator_workers", (
-                "deploy/env/query-service.env BẬT orchestrator_workers — phải để trống/react "
-                "(default-off). Bật qua canary runtime, đừng commit."
-            )
+    root = Path(__file__).resolve().parents[3]
+    env = root / "deploy" / "env" / "query-service.env"
+    compose = root / "docker-compose.e2e.yml"
+    if not (env.exists() and compose.exists()):
+        pytest.skip("env/compose không có trong context build này")
+    prod_mode = _agent_mode_from_env_file(env) or "react"
+    e2e_mode = _agent_mode_from_compose(compose) or "react"
+    assert prod_mode == e2e_mode, (
+        f"AGENT_MODE LỆCH: prod={prod_mode!r} vs e2e={e2e_mode!r}. e2e PHẢI khớp prod để "
+        "CI xanh thực sự chứng minh path prod chạy được."
+    )
 
 
 def test_orchestration_does_not_import_agents_at_module_load():
