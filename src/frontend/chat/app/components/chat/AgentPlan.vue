@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Hiển thị KẾ HOẠCH orchestrator-workers: các node theo LEVEL (depends_on). Node cùng level
 // chạy SONG SONG -> render cùng 1 hàng (nhiều cột) để user thấy subagents chạy song song.
+// (v2 2026-06-19: force-rebuild FE image để deploy UI mới — xem orchestration.py marker.)
 import { Loader2, CheckCircle2, XCircle, Circle, FileSearch, Database, Sparkles, Lightbulb, ShieldCheck } from '@lucide/vue'
 import { computed } from 'vue'
 import type { AgentPlan } from '~/types'

@@ -356,6 +356,9 @@ class QueryOrchestrationUseCase:
         ):
             yield event
 
+    # NOTE(v2 2026-06-19): path orchestrator-workers stream SSE đầy đủ (router reasoning +
+    # plan/step song song + token answer). Force-rebuild marker để CI build image v2 (build
+    # 4c6af49 bị gate chặn do e2e flaky; e2e đã fix ở 412ddd8).
     async def _stream_orchestrator(
         self,
         question: str,
