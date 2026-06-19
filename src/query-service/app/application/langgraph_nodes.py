@@ -490,9 +490,9 @@ async def act_node(
     tool_args = tool_call.get("args", {})
     tool_call_id = tool_call.get("id", f"call_{tool_name}")
 
-    # For rag_search: log the actual query being sent (state["question"]), not the LLM-suggested
-    # tool arg (which is ignored).  This makes traces unambiguous in Langfuse.
-    actual_query = state["question"] if tool_name == "rag_search" else None
+    # For rag_search: log actual query = LLM-refined query when provided, else raw question.
+    _llm_q = (tool_args.get("query") or "").strip() if tool_name == "rag_search" else ""
+    actual_query = (_llm_q or state["question"]) if tool_name == "rag_search" else None
     logger.info(
         "langgraph_act",
         extra={
@@ -533,9 +533,14 @@ async def act_node(
                 # top_k nhỏ/khác nhau -> số kết quả qualified dao động (sources lúc 0 lúc >0,
                 # e2e flaky). Cố định top_k -> retrieval deterministic -> ổn định.
                 effective_top_k = state.get("rag_top_k", 5)
+                # Dùng query LLM tinh chỉnh khi có (strip filler words, thêm synonyms).
+                # Fallback về raw question khi LLM không truyền query.
+                # LLM KHÔNG rút ngắn — nó mở rộng thêm từ khóa, nên an toàn để ưu tiên.
+                llm_query = (tool_args.get("query") or "").strip()
+                search_query = llm_query if llm_query else state["question"]
                 _rag_start_dt = datetime.now(timezone.utc)
                 results = await mcp_client.rag_search(
-                    query=state["question"],  # raw question — server-injected, like user_id
+                    query=search_query,
                     document_ids=list(allowed_doc_ids),
                     top_k=effective_top_k,
                 )
@@ -546,7 +551,7 @@ async def act_node(
                 # Ghi debug event (JSON-safe) vào state để orchestration dựng Langfuse span.
                 # Tất cả giá trị là scalar/list[str/float] — an toàn với checkpointer.
                 _rag_event = {
-                    "query": state["question"],
+                    "query": search_query,
                     "top_k": effective_top_k,
                     "allowed_count": len(allowed_doc_ids),
                     "total": len(results),
