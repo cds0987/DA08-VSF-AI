@@ -458,12 +458,29 @@ export const useChatStore = defineStore('chat', () => {
       // Khôi phục từ cache localStorage theo vị trí + content -> mở lại/đổi hội thoại KHÔNG
       // mất "Agent đã thực hiện N bước" của các câu trả lời cũ.
       const cachedMsgs = fallbackConversations.value.find((c) => c.id === id)?.messages ?? []
+      // Map message-id -> cached message, gom TỪ MỌI hội thoại cache. id message do server cấp
+      // (ổn định) -> khôi phục được kể cả khi conversation id client ≠ server (hội thoại mới).
+      const cachedById = new Map<string, ChatMessage>()
+      for (const conv of fallbackConversations.value)
+        for (const m of (conv.messages || []) as ChatMessage[])
+          if (m.id) cachedById.set(m.id, m)
+      // "có dữ liệu agent client-only" = trace HOẶC reasoning HOẶC thoughts/plan/models
+      // (câu trả lời orchestrator chỉ có thoughts+plan, KHÔNG có trace/reasoning -> trước đây
+      // bị bỏ sót ở fallback content-match nên mất khối "Agent" sau khi nạp lại).
+      const hasAgentTrace = (m?: ChatMessage) => !!(m && (
+        m.trace?.length || m.reasoning || m.thoughts?.length || m.plan?.steps?.length || m.models?.length
+      ))
       serverMsgs.forEach((s, i) => {
         if (s.role !== 'assistant') return
-        const sameSlot = cachedMsgs[i]?.role === 'assistant' && cachedMsgs[i]?.content === s.content
-        const c = sameSlot
-          ? cachedMsgs[i]
-          : cachedMsgs.find((m) => m.role === 'assistant' && m.content === s.content && (m.trace?.length || m.reasoning))
+        // Ưu tiên match theo id (chắc chắn nhất), rồi cùng slot+content, rồi content+có-agent-trace.
+        let c: ChatMessage | undefined = (s.id ? cachedById.get(s.id) : undefined)
+        if (!hasAgentTrace(c)) {
+          const slot = cachedMsgs[i]
+          if (slot?.role === 'assistant' && slot.content === s.content && hasAgentTrace(slot)) c = slot
+        }
+        if (!hasAgentTrace(c)) {
+          c = (cachedMsgs as ChatMessage[]).find((m: ChatMessage) => m.role === 'assistant' && m.content === s.content && hasAgentTrace(m)) || c
+        }
         if (c?.trace?.length) s.trace = c.trace
         if (c?.reasoning) s.reasoning = c.reasoning
         if (c?.models?.length) s.models = c.models
