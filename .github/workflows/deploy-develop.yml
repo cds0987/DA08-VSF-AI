@@ -315,6 +315,9 @@ jobs:
           # event PHẢI báo agent_mode=orchestrator_workers. Nếu fallback react -> e2e đỏ -> chặn
           # deploy. Đảm bảo CI xanh = kiến trúc orchestrator-workers đã chạy thật end-to-end.
           EXPECT_AGENT_MODE: orchestrator_workers
+          # GATE verify node (think 2): query RAG/HR PHẢI thấy SSE node 'verify' -> bắt verify-path
+          # đứt (lỗi runtime) hoặc verify_before_synthesize bị tắt nhầm TRƯỚC khi lên prod.
+          EXPECT_VERIFY: "1"
           # Qdrant nay in-compose, expose 127.0.0.1:6333 -> run_e2e.py poll/cleanup qua host.
           QDRANT_URL: http://localhost:6333
           LANGFUSE_HOST_PUBLIC: http://localhost:3100

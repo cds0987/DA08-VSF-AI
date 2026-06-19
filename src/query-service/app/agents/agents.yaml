@@ -28,3 +28,8 @@ roles:
 max_replan: 1
 max_workers_per_level: 4
 worker_timeout_seconds: 30
+
+# verify_before_synthesize: chèn node verify (deepseek-pro tổng hợp lại + kiểm tra ĐỦ chưa)
+# giữa join -> synthesize. Đủ -> synthesize_recommend; thiếu -> replan (trong max_replan).
+# Đánh đổi latency lấy accuracy (latency che bằng streaming). False = đi thẳng synthesize.
+verify_before_synthesize: true

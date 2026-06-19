@@ -53,3 +53,17 @@ def route_after_act(state: AgentState) -> str:
     return "observe"
 
 
+def route_after_verify(state: AgentState) -> str:
+    """
+    Conditional edge after verify_node (sufficiency gate, agent_verify_sufficiency).
+    - Technical hard-stop (shortcut_outcome set)? → answer
+    - verify quyết "insufficient"? → think (tra cứu thêm, trong max_iterations)
+    - còn lại (sufficient / cap)? → answer (synthesis)
+    """
+    if state.get("shortcut_outcome"):
+        return "answer"
+    if state.get("verify_decision") == "insufficient":
+        return "think"
+    return "answer"
+
+

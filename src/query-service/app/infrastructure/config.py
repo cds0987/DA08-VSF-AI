@@ -154,6 +154,12 @@ class Settings(BaseSettings):
     # tự phân loại + suy luận + gọi tool. SAFETY vẫn do rule-shortcut (classify_shortcut) giữ.
     # Giảm latency/cost + hết domino triage->think. False = giữ triage riêng (hành vi cũ).
     agent_merged_reason: bool = False
+    # agent_verify_sufficiency=True: THÊM node `verify` (deepseek-pro / model `think`) chạy SAU khi
+    # đã gom tool results, TRƯỚC node answer (synthesis). verify "think 2" — tổng hợp lại thông tin
+    # đã thu thập và quyết ĐỦ chưa: đủ -> answer(synthesis); thiếu -> quay lại think tra cứu thêm
+    # (trong giới hạn max_iterations). Đánh đổi latency lấy accuracy (latency che bằng streaming).
+    # Chỉ có hiệu lực khi agent_split_answer=True (cần answer node synthesize). False = hành vi cũ.
+    agent_verify_sufficiency: bool = False
     # agent_mode: OVERRIDE mode trong agents.yaml (MOSA Orchestrator-Workers). Rỗng = theo
     # manifest (commit là 'react' = default-off). Đặt AGENT_MODE=orchestrator_workers (env) để
     # BẬT path mới trên canary/% traffic mà KHÔNG commit -> rollback = bỏ env. Cần use_langgraph

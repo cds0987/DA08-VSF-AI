@@ -35,6 +35,9 @@ class AgentsManifest:
     max_replan: int = 1
     max_workers_per_level: int = 4
     worker_timeout_seconds: int = 30
+    # verify_before_synthesize: chèn node verify (deepseek-pro "think 2") giữa join->synthesize.
+    # Đủ -> synthesize; thiếu -> replan (trong max_replan). False = đi thẳng synthesize (cũ).
+    verify_before_synthesize: bool = False
 
     def enabled_roles(self) -> tuple[RoleSpec, ...]:
         return tuple(r for r in self.roles if r.enabled)
@@ -113,4 +116,5 @@ def load_manifest(path: str | None = None) -> AgentsManifest:
         max_replan=int(data.get("max_replan", 1)),
         max_workers_per_level=int(data.get("max_workers_per_level", 4)),
         worker_timeout_seconds=int(data.get("worker_timeout_seconds", 30)),
+        verify_before_synthesize=bool(data.get("verify_before_synthesize", False)),
     )

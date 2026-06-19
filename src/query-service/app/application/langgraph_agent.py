@@ -13,8 +13,12 @@ Graph topology:
                         → "answer" (off_topic/clarify) → answer_node → END
                         → "think"  (in_scope)
                             → route_after_think
-                              → "act" → act_node → route_after_act → ...
+                              → "act" → act_node → route_after_act → observe → ...
                               → "answer" → answer_node → END
+
+  Khi verify_sufficiency=True (kèm split_answer): observe → verify_node → route_after_verify
+    → "think"  (thiếu thông tin → tra cứu thêm, trong max_iterations)
+    → "answer" (đủ → synthesis). Khi tắt: observe → think (như cũ).
 """
 
 from functools import partial
@@ -26,6 +30,7 @@ from app.application.langgraph_edges import (
     route_after_triage,
     route_after_think,
     route_after_act,
+    route_after_verify,
 )
 from app.application.langgraph_nodes import (
     shortcut_node,
@@ -33,6 +38,7 @@ from app.application.langgraph_nodes import (
     think_node,
     act_node,
     observe_node,
+    verify_node,
     answer_node,
 )
 from app.application.ports import MCPToolClient
@@ -48,6 +54,7 @@ def build_langgraph_agent(
     models: dict[str, BaseChatModel] | None = None,
     split_answer: bool = False,
     merged_reason: bool = False,
+    verify_sufficiency: bool = False,
 ) -> "CompiledGraph":
     """
     Build and compile the LangGraph agent with triage + ReAct loop.
@@ -69,6 +76,13 @@ def build_langgraph_agent(
     triage_model = _m.get("triage") or model
     think_model = _m.get("think") or model
     answer_model = _m.get("answer") or model
+    # verify (sufficiency gate "think 2") mặc định DÙNG model think (deepseek-pro) — đúng yêu cầu
+    # "deepseek pro tổng hợp lại"; cho phép override qua models["verify"] nếu cần.
+    verify_model = _m.get("verify") or think_model
+
+    # verify_node chỉ có nghĩa khi answer node thực sự SYNTHESIZE (split_answer). Khi split=False
+    # answer là marker (think tự sinh text), gate verify->answer sẽ không có câu trả lời -> tắt.
+    enable_verify = bool(verify_sufficiency and split_answer)
 
     workflow = StateGraph(AgentState)
 
@@ -81,6 +95,8 @@ def build_langgraph_agent(
     )
     workflow.add_node("act", partial(act_node, mcp_client=mcp_client))
     workflow.add_node("observe", observe_node)
+    if enable_verify:
+        workflow.add_node("verify", partial(verify_node, model=verify_model))
     # answer: split=True -> gọi answer_model sinh câu trả lời; False -> marker (think tự sinh).
     workflow.add_node(
         "answer",
@@ -132,7 +148,20 @@ def build_langgraph_agent(
             "observe": "observe",
         },
     )
-    workflow.add_edge("observe", "think")
+    # observe → verify (sufficiency gate) → think (tra thêm) / answer (synthesis), HOẶC
+    # observe → think trực tiếp (hành vi cũ khi verify tắt).
+    if enable_verify:
+        workflow.add_edge("observe", "verify")
+        workflow.add_conditional_edges(
+            source="verify",
+            path=route_after_verify,
+            path_map={
+                "think": "think",
+                "answer": "answer",
+            },
+        )
+    else:
+        workflow.add_edge("observe", "think")
 
     # Terminal edges
     workflow.add_edge("shortcut", "answer")

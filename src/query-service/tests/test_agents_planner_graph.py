@@ -93,3 +93,71 @@ async def test_graph_light_skips_workers():
     res = await g.ainvoke({"question": "hello"})
     assert res["answer"] == "Xin chao!"
     assert not res.get("results")  # không gọi worker nào
+
+
+# --------------------------------------------------------------- verify (think 2)
+def test_manifest_verify_flag_enabled_in_prod():
+    # GATE: agents.yaml prod PHẢI bật verify_before_synthesize -> node verify thực sự chạy.
+    assert load_manifest().verify_before_synthesize is True
+
+
+async def test_verify_emits_sse_so_user_sees_activity():
+    """Hiệu ứng SSE của verify: node verify PHẢI phát status (và/hoặc thought) ra emit channel
+    -> FE hiện 'Kiểm tra & tổng hợp' -> user KHÔNG bị 'màn hình im lặng' khi model đang verify."""
+    events: list[dict] = []
+
+    async def emit(ev):
+        events.append(ev)
+
+    ctx = RoleContext(mcp_client=_SlowMCP(), user_id="u1", allowed_doc_ids=("d1",),
+                      rag_top_k=5, rag_score_threshold=0.45,
+                      make_model=_make_model(_PLAN_JSON), emit=emit)
+    g = build_orchestrator_graph(ctx=ctx, manifest=load_manifest(),
+                                 planner=PLANNER_REGISTRY.get("orchestrator_workers")(),
+                                 make_model=_make_model(_PLAN_JSON))
+    res = await g.ainvoke({"question": "Toi con bao nhieu phep va quy dinh?"})
+    assert res["answer"]
+    verify_sse = [e for e in events if e.get("node") == "verify"]
+    assert verify_sse, "verify KHÔNG phát SSE -> user không biết model đang làm gì"
+    assert any(e.get("status") for e in verify_sse), "verify thiếu status indicator cho FE"
+
+
+def _make_model_replan():
+    """think model: lần gọi #2 (verify đầu) trả 'insufficient' -> ép replan; còn lại trả plan."""
+    calls = {"think": 0}
+
+    def mk(cap):
+        if cap == "think":
+            calls["think"] += 1
+            if calls["think"] == 2:   # verify lần đầu -> chưa đủ
+                return _FakeModel('{"sufficient": false, "missing": "quy dinh", "reason": "thieu"}')
+            return _FakeModel(_PLAN_JSON)
+        if cap == "answer":
+            return _FakeModel("TRA LOI tong hop")
+        return _FakeModel("worker output")
+
+    return mk, calls
+
+
+async def test_verify_insufficient_triggers_replan_and_emits_thought():
+    events: list[dict] = []
+
+    async def emit(ev):
+        events.append(ev)
+
+    mk, calls = _make_model_replan()
+    ctx = RoleContext(mcp_client=_SlowMCP(), user_id="u1", allowed_doc_ids=("d1",),
+                      rag_top_k=5, rag_score_threshold=0.45, make_model=mk, emit=emit)
+    g = build_orchestrator_graph(ctx=ctx, manifest=load_manifest(),
+                                 planner=PLANNER_REGISTRY.get("orchestrator_workers")(),
+                                 make_model=mk)
+    res = await g.ainvoke({"question": "Toi con bao nhieu phep va quy dinh?"})
+    assert res["answer"]
+    # replan đã xảy ra: orchestrate chạy lần 2 (think call #3) sau verify insufficient (#2).
+    assert calls["think"] >= 3, f"không thấy replan, think calls={calls['think']}"
+    # SSE: verify phát 'thought' báo chưa đủ -> user thấy lý do model tra cứu thêm.
+    insufficient_thought = [
+        e for e in events
+        if e.get("node") == "verify" and e.get("phase") == "thought" and "chưa đủ" in (e.get("text") or "")
+    ]
+    assert insufficient_thought, "verify insufficient KHÔNG phát thought SSE"

@@ -16,6 +16,7 @@ const NODE_LABEL: Record<string, string> = {
   triage: 'Phân loại',
   think: 'Suy nghĩ',
   plan: 'Lập kế hoạch',
+  verify: 'Kiểm tra & tổng hợp',
   answer: 'Soạn trả lời',
 }
 

@@ -9,6 +9,7 @@ checkpointer). Send payload chỉ mang dữ liệu step (serializable).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any, Callable
 
@@ -24,6 +25,17 @@ from app.agents.registry import AGENT_REGISTRY
 logger = logging.getLogger(__name__)
 
 _SYNTH_ROLE = "synthesize_recommend"
+
+_VERIFY_SYSTEM = (
+    "Bạn là bộ kiểm thông tin của trợ lý nội bộ VinSmartFuture. Dựa trên CÂU HỎI và DỮ LIỆU đã "
+    "thu thập, phán định: dữ liệu ĐÃ ĐỦ để trả lời đầy đủ & chính xác câu hỏi chưa?\n"
+    "- Đủ = trả lời được phần CỐT LÕI với dữ kiện cụ thể (số liệu/chính sách/bước/trạng thái); "
+    "nếu tài liệu nội bộ rõ ràng KHÔNG chứa thông tin thì cũng coi là ĐỦ (để trả lời trung thực "
+    "phần thiếu + gợi ý liên hệ HR/IT, tránh lặp vô ích).\n"
+    "- Thiếu = còn khía cạnh CHÍNH của câu hỏi chưa có dữ liệu mà tra cứu thêm có thể lấp.\n"
+    "KHÔNG tự trả lời câu hỏi. Trả PURE JSON: "
+    '{"sufficient": true|false, "missing": "<ngắn>", "reason": "<ngắn>"}. Phân vân -> sufficient=true.'
+)
 
 
 def build_orchestrator_graph(
@@ -82,7 +94,8 @@ def build_orchestrator_graph(
                     for s in plan.steps
                 ],
             })
-        return {"plan": plan, "replan_count": 0, "results": {}}
+        # GIỮ replan_count (verify tăng lên khi replan) — replan reset results để tra lại từ đầu.
+        return {"plan": plan, "replan_count": state.get("replan_count", 0), "results": {}}
 
     def route_plan(state: OrchestratorState):
         if state["plan"].route == "light":
@@ -122,12 +135,85 @@ def build_orchestrator_graph(
     async def join(state: OrchestratorState) -> dict:
         return {}  # barrier; reducer đã merge results
 
+    enable_verify = bool(getattr(manifest, "verify_before_synthesize", False))
+    # Đích khi mọi step xong: verify (think 2) nếu bật, ngược lại synthesize thẳng.
+    _all_done_target = "verify" if enable_verify else "synthesize"
+
     def route_join(state: OrchestratorState):
         plan = state["plan"]
         done = set((state.get("results") or {}).keys())
         if all(s.id in done for s in plan.steps):
-            return "synthesize"
-        return _pending_sends(state) or "synthesize"
+            return _all_done_target
+        return _pending_sends(state) or _all_done_target
+
+    async def verify(state: OrchestratorState) -> dict:
+        """think 2: deepseek-pro TỔNG HỢP lại dữ liệu đã thu thập + quyết ĐỦ chưa.
+        Đủ -> synthesize; thiếu (còn hạn mức replan) -> orchestrate lại để tra thêm.
+        Fail-open: lỗi/parse hỏng/hết hạn mức -> coi là đủ (không chặn câu trả lời)."""
+        results = state.get("results") or {}
+        data_results = {k: v for k, v in results.items() if v.role != _SYNTH_ROLE}
+        replan_count = state.get("replan_count", 0)
+
+        # Không có dữ liệu / hết hạn mức replan / không có model -> đi synthesize luôn.
+        if not data_results or replan_count >= manifest.max_replan or make_model is None:
+            return {"verify_verdict": "sufficient"}
+
+        if ctx.emit:
+            await ctx.emit({"phase": "thinking", "node": "verify",
+                            "status": "Đang tổng hợp & kiểm tra thông tin đã đủ chưa…"})
+
+        evidence = "\n\n".join(
+            f"[step {k}] {v.output}" for k, v in sorted(data_results.items())
+        )
+        from app.agents.roles._llm import acomplete
+        # capability "think" = deepseek-pro qua ai-router (đúng yêu cầu "deepseek pro tổng hợp lại").
+        _model = make_model("think")
+        _user = f"Câu hỏi: {state['question']}\n\nDữ liệu thu thập:\n{evidence}"
+        # STREAM reasoning live ra SSE (phase=thought, node=verify) -> FE hiện "Kiểm tra & tổng
+        # hợp" chạy dần, user thấy model đang làm gì (không "im lặng"). content (JSON verdict) gom
+        # để parse. Model không hỗ trợ astream / lỗi -> fallback acomplete (non-stream).
+        text: str | None = None
+        if ctx.emit and _model is not None and hasattr(_model, "astream"):
+            try:
+                from langchain_core.messages import HumanMessage, SystemMessage
+                _parts: list[str] = []
+                async for _chunk in _model.astream(
+                    [SystemMessage(content=_VERIFY_SYSTEM), HumanMessage(content=_user)]
+                ):
+                    _rc = (getattr(_chunk, "additional_kwargs", None) or {}).get("reasoning_content")
+                    if _rc:
+                        await ctx.emit({"phase": "thought", "node": "verify", "text": _rc})
+                    _tok = getattr(_chunk, "content", "") or ""
+                    if _tok:
+                        _parts.append(_tok)
+                text = "".join(_parts).strip() or None
+            except Exception as exc:  # noqa: BLE001 — stream lỗi -> non-stream
+                logger.warning("verify stream fail -> acomplete: %s", str(exc)[:120])
+                text = None
+        if text is None:
+            text = await acomplete(_model, system=_VERIFY_SYSTEM, user=_user)
+        verdict = "sufficient"
+        reason = ""
+        if text:
+            try:
+                s, e = text.find("{"), text.rfind("}")
+                data = json.loads(text[s:e + 1])
+                verdict = "insufficient" if not bool(data.get("sufficient", True)) else "sufficient"
+                reason = str(data.get("reason", ""))[:200]
+            except Exception as exc:  # noqa: BLE001 — fail-open
+                logger.warning("verify parse fail -> sufficient: %s", str(exc)[:120])
+        logger.info("verify verdict=%s replan_count=%d reason=%s", verdict, replan_count, reason[:80])
+
+        if verdict == "insufficient":
+            if ctx.emit:
+                await ctx.emit({"phase": "thought", "node": "verify",
+                                "text": f"Thông tin chưa đủ ({reason or 'thiếu khía cạnh chính'}) — tra cứu thêm."})
+            return {"verify_verdict": "insufficient", "replan_count": replan_count + 1}
+        return {"verify_verdict": "sufficient"}
+
+    def route_after_verify(state: OrchestratorState):
+        # insufficient -> orchestrate lại (tra thêm); còn lại -> synthesize.
+        return "orchestrate" if state.get("verify_verdict") == "insufficient" else "synthesize"
 
     async def synthesize(state: OrchestratorState) -> dict:
         plan = state["plan"]
@@ -149,12 +235,19 @@ def build_orchestrator_graph(
     g.add_node("orchestrate", orchestrate)
     g.add_node("worker", worker)
     g.add_node("join", join)
+    if enable_verify:
+        g.add_node("verify", verify)
     g.add_node("synthesize", synthesize)
 
     g.add_edge(START, "orchestrate")
     g.add_conditional_edges("orchestrate", route_plan, ["worker", "synthesize"])
     g.add_edge("worker", "join")
-    g.add_conditional_edges("join", route_join, ["worker", "synthesize"])
+    if enable_verify:
+        g.add_conditional_edges("join", route_join, ["worker", "verify", "synthesize"])
+        # verify (think 2): đủ -> synthesize; thiếu -> orchestrate lại (replan trong max_replan).
+        g.add_conditional_edges("verify", route_after_verify, ["orchestrate", "synthesize"])
+    else:
+        g.add_conditional_edges("join", route_join, ["worker", "synthesize"])
     g.add_edge("synthesize", END)
 
     compiled = g.compile(checkpointer=checkpointer)

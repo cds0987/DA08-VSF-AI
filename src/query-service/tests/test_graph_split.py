@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from app.application.langgraph_nodes import answer_node, _looks_like_action_json
+from app.application.langgraph_nodes import answer_node, verify_node, _looks_like_action_json
 from app.application.langgraph_state import AgentPhase
 from app.application.langgraph_agent import build_langgraph_agent
 
@@ -104,6 +104,52 @@ async def test_answer_shortcut_is_marker_even_when_split():
     assert fake.calls == []
 
 
+# ------------------------------------------------------------------- verify_node
+def _vstate(**over):
+    base = _state(max_iterations=3, question="Chính sách nghỉ phép?")
+    base.update(over)
+    return base
+
+
+async def test_verify_sufficient_routes_to_answer():
+    fake = FakeModel(text='{"sufficient": true, "missing": "", "refined_query": "", "reason": "đủ"}')
+    out = await verify_node(
+        _vstate(messages=[ToolMessage(content='{"results":[{"ref":1}]}', tool_call_id="c1", name="rag_search")]),
+        model=fake,
+    )
+    assert out["verify_decision"] == "sufficient"
+    assert "messages" not in out
+
+
+async def test_verify_insufficient_injects_hint_and_loops():
+    fake = FakeModel(text='{"sufficient": false, "missing": "mức phụ cấp", "refined_query": "phụ cấp công tác", "reason": "thiếu"}')
+    out = await verify_node(
+        _vstate(messages=[ToolMessage(content='{"results":[]}', tool_call_id="c1", name="rag_search")]),
+        model=fake,
+    )
+    assert out["verify_decision"] == "insufficient"
+    assert out["messages"] and "phụ cấp công tác" in out["messages"][0].content
+
+
+async def test_verify_cap_forces_sufficient_without_llm():
+    fake = FakeModel()
+    out = await verify_node(
+        _vstate(iteration=3, messages=[ToolMessage(content="x", tool_call_id="c1", name="rag_search")]),
+        model=fake,
+    )
+    assert out["verify_decision"] == "sufficient"
+    assert fake.calls == []   # đụng cap -> KHÔNG gọi model
+
+
+async def test_verify_fail_open_on_bad_json():
+    fake = FakeModel(text="không phải json")
+    out = await verify_node(
+        _vstate(messages=[ToolMessage(content="x", tool_call_id="c1", name="rag_search")]),
+        model=fake,
+    )
+    assert out["verify_decision"] == "sufficient"   # fail-open
+
+
 # ----------------------------------------------------------------- build wiring
 def test_build_agent_with_models_dict_split():
     agent = build_langgraph_agent(
@@ -126,6 +172,25 @@ def test_build_agent_merged_reason_compiles():
         mcp_client=None, merged_reason=True,
     )
     assert agent.name == "VinSmartFutureAgent"
+
+
+def test_build_agent_verify_sufficiency_compiles():
+    # verify_sufficiency + split_answer: thêm node "verify" (observe -> verify -> think/answer).
+    agent = build_langgraph_agent(
+        models={"think": FakeModel(), "answer": FakeModel()},
+        mcp_client=None, split_answer=True, verify_sufficiency=True,
+    )
+    assert agent.name == "VinSmartFutureAgent"
+    assert "verify" in agent.get_graph().nodes
+
+
+def test_verify_node_disabled_without_split_answer():
+    # verify chỉ có nghĩa khi answer synthesize -> split_answer=False thì KHÔNG thêm node verify.
+    agent = build_langgraph_agent(
+        models={"think": FakeModel(), "answer": FakeModel()},
+        mcp_client=None, split_answer=False, verify_sufficiency=True,
+    )
+    assert "verify" not in agent.get_graph().nodes
 
 
 async def test_act_node_answers_all_tool_call_ids():

@@ -298,6 +298,7 @@ def _parse_sse(raw: bytes, label: str, need_sources: bool) -> None:
     done = None
     phases: list[str] = []           # chuỗi phase: thinking->acting->observing->generating->done
     tool_seen = False                # có event tool/acting -> think ĐÃ gọi rag_search/hr_query
+    nodes_seen: set[str] = set()     # node nào phát SSE (orchestrate/verify/...) -> gate verify
     answer_chars = 0
     for line in raw.decode("utf-8", "replace").splitlines():
         line = line.strip()
@@ -310,6 +311,8 @@ def _parse_sse(raw: bytes, label: str, need_sources: bool) -> None:
         ph = d.get("phase")
         if ph and (not phases or phases[-1] != ph):
             phases.append(ph)
+        if d.get("node"):
+            nodes_seen.add(str(d["node"]))
         if ph in ("acting", "observing") or d.get("tool") or d.get("tool_name"):
             tool_seen = True
         if d.get("token"):
@@ -324,7 +327,7 @@ def _parse_sse(raw: bytes, label: str, need_sources: bool) -> None:
     # không phát field này -> fallback dùng src cho assert (hành vi cũ).
     retrieved = done.get("retrieved")
     agent_mode = done.get("agent_mode")
-    diag = f"agent_mode={agent_mode} retrieved={retrieved} phases={phases} tool_seen={tool_seen} answer_chars={answer_chars}"
+    diag = f"agent_mode={agent_mode} retrieved={retrieved} phases={phases} nodes={sorted(nodes_seen)} tool_seen={tool_seen} answer_chars={answer_chars}"
     print(f"  [{label}] done outcome={outcome} sources={src} {diag}")
     if outcome in (6, "ERROR"):
         raise SystemExit(f"[{label}] FAIL: outcome=ERROR (wiring đứt?) {diag}")
@@ -336,6 +339,16 @@ def _parse_sse(raw: bytes, label: str, need_sources: bool) -> None:
             f"[{label}] FAIL: agent_mode={agent_mode!r} != EXPECT {expect_mode!r} "
             f"-> path prod KHÔNG được kích hoạt (fallback?). {diag}"
         )
+    # GATE verify node (think 2): nếu set EXPECT_VERIFY -> query có retrieval (need_sources)
+    # PHẢI thấy node 'verify' phát SSE. Bắt trường hợp verify-path đứt (vd lỗi runtime trong
+    # node verify) hoặc flag verify_before_synthesize bị tắt nhầm -> e2e đỏ -> chặn lên prod.
+    expect_verify = os.environ.get("EXPECT_VERIFY", "").strip().lower() in ("1", "true", "yes")
+    if expect_verify and need_sources and "verify" not in nodes_seen:
+        raise SystemExit(
+            f"[{label}] FAIL: KHÔNG thấy SSE node 'verify' -> verify-path (think 2) đứt hoặc bị "
+            f"tắt -> user mất hiệu ứng 'Kiểm tra & tổng hợp' + mất gate đủ-thông-tin. {diag}"
+        )
+
     if need_sources:
         # PIPELINE-HEALTH: nếu có field retrieved (path orchestrator) -> assert retrieved>0
         # (embed+qdrant+search chạy thật). Tách khỏi citation: sources=0 do điểm <threshold

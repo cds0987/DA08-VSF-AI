@@ -92,6 +92,12 @@ class AgentState(TypedDict):
     triage_route: str
     triage_reason: str
 
+    # --- Verify decision (sufficiency gate "think 2", agent_verify_sufficiency) ---
+    # verify_node trả: "sufficient" -> answer(synthesis); "insufficient" -> think (tra thêm).
+    # verify_missing/refined: gợi ý cho think khi cần tra cứu thêm.
+    verify_decision: str
+    verify_reason: str
+
     # --- Metadata ---
     session_id: str
     question: str
@@ -136,6 +142,8 @@ def create_initial_state(
         source_ref_counter=0,
         triage_route="",
         triage_reason="",
+        verify_decision="",
+        verify_reason="",
         session_id=session_id,
         question=question,
     )

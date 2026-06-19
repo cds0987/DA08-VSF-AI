@@ -799,6 +799,106 @@ def observe_node(state: AgentState) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Node: verify_node  (sufficiency gate — "think 2", deepseek-pro)
+# ---------------------------------------------------------------------------
+
+async def verify_node(state: AgentState, model: BaseChatModel) -> dict:
+    """
+    verify_node: SAU khi đã gom tool results, TRƯỚC answer — deepseek-pro TỔNG HỢP lại
+    thông tin và quyết ĐỦ chưa để trả lời câu hỏi.
+
+    - sufficient -> route_after_verify đưa sang answer (synthesis).
+    - insufficient -> quay lại think để tra cứu thêm (kèm gợi ý refined_query), trong giới
+      hạn max_iterations. Đến cap thì LUÔN coi là đủ (tránh lặp vô hạn).
+
+    Fail-open: lỗi parse/network -> coi là sufficient (không chặn câu trả lời).
+    Chỉ phân định; KHÔNG viết câu trả lời (việc đó là của answer_node).
+    """
+    from langchain_core.messages import SystemMessage, HumanMessage
+    from app.application.prompts import VERIFY_SYSTEM_PROMPT
+
+    session_id = state["session_id"]
+    iteration = state.get("iteration", 0)
+    max_iterations = state.get("max_iterations", 3)
+
+    # Đến/vượt cap iteration: không tra thêm được nữa -> coi như đủ, để answer trả lời với
+    # thông tin hiện có (answer tự nêu phần thiếu + gợi ý liên hệ theo SYNTHESIS prompt).
+    if iteration >= max_iterations:
+        logger.info(
+            "langgraph_verify_cap",
+            extra={"session_id": session_id, "iteration": iteration},
+        )
+        return {"verify_decision": "sufficient", "verify_reason": "iteration_cap"}
+
+    # Gom toàn bộ tool data đã thu thập trong lượt.
+    tool_blobs = [
+        str(m.content or "")
+        for m in (state.get("messages") or [])
+        if isinstance(m, ToolMessage)
+    ]
+    question = state["question"]
+
+    logger.info(
+        "langgraph_verify_start",
+        extra={"session_id": session_id, "iteration": iteration,
+               "tool_blobs": len(tool_blobs), **_model_trace_fields(model)},
+    )
+
+    if not tool_blobs:
+        # Không có dữ liệu nào -> để think xử lý (hiếm: verify chỉ chạy sau act).
+        return {"verify_decision": "insufficient", "verify_reason": "no_tool_data"}
+
+    human = (
+        "[CÂU HỎI]\n" + question
+        + "\n\n[THÔNG TIN ĐÃ THU THẬP]\n" + "\n\n".join(tool_blobs)
+        + "\n\nHãy phân định ĐỦ hay THIẾU theo OUTPUT FORMAT."
+    )
+    try:
+        response: AIMessage = await model.ainvoke(
+            [SystemMessage(content=VERIFY_SYSTEM_PROMPT), HumanMessage(content=human)]
+        )
+        raw = (response.content or "").strip()
+        if raw.startswith("```"):
+            raw = "\n".join(
+                line for line in raw.splitlines() if not line.strip().startswith("```")
+            ).strip()
+        payload = json.loads(raw)
+        sufficient = bool(payload.get("sufficient", True))
+        missing = str(payload.get("missing", "")).strip()
+        refined = str(payload.get("refined_query", "")).strip()
+        reason = str(payload.get("reason", ""))
+    except Exception as exc:  # noqa: BLE001 — fail-open: không chặn câu trả lời
+        logger.warning(
+            "langgraph_verify_error",
+            extra={"session_id": session_id, "error": str(exc),
+                   "raw": locals().get("raw", "")[:200] if isinstance(locals().get("raw"), str) else ""},
+        )
+        return {"verify_decision": "sufficient", "verify_reason": f"parse_error_fallback: {exc}"}
+
+    logger.info(
+        "langgraph_verify",
+        extra={"session_id": session_id, "sufficient": sufficient, "reason": reason[:120]},
+    )
+
+    if sufficient:
+        return {"verify_decision": "sufficient", "verify_reason": reason}
+
+    # THIẾU -> bơm gợi ý cho think tra cứu thêm (think sẽ append câu hỏi gốc sau đó).
+    hint = (
+        "[KIỂM TRA NỘI BỘ] Thông tin thu thập CHƯA ĐỦ để trả lời. "
+        f"Còn thiếu: {missing or 'một số khía cạnh chính của câu hỏi'}. "
+        + (f"Hãy gọi rag_search để tra cứu thêm về: {refined}." if refined
+           else "Hãy gọi tool để tra cứu thêm thông tin còn thiếu.")
+    )
+    from langchain_core.messages import HumanMessage as _HM
+    return {
+        "verify_decision": "insufficient",
+        "verify_reason": reason,
+        "messages": [_HM(content=hint)],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Node: answer_node
 # ---------------------------------------------------------------------------
 

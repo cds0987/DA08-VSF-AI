@@ -217,36 +217,11 @@ class QueryOrchestrationUseCase:
         session_id = _session_id or str(uuid4())
 
 
-        # Input guardrail — block prompt injection before touching the LLM or MCP.
-        blocked, reason = await self._input_guardrail.scan(question)
-        if blocked:
-            logger.warning(
-                "guardrail_input_blocked",
-                extra={"user_id": user.id, "session_id": session_id, "reason": reason},
-            )
-            from app.application.shortcuts import next_offtopic_answer
-            refusal = next_offtopic_answer()
-            await self._save_user_message(user.id, question)
-            for token in _word_chunks(refusal):
-                yield {
-                    "token": token,
-                    "phase": "generating",
-                    "agent_mode": "langgraph",
-                    "session_id": session_id,
-                    "iterations": 0,
-                }
-                await asyncio.sleep(0)
-            await self._save_assistant(user.id, session_id, refusal, [], started)
-            yield {
-                "done": True,
-                "outcome": Outcome.REFUSE.value,
-                "sources": [],
-                "session_id": session_id,
-                "agent_mode": "langgraph",
-                "iterations": 0,
-                "guardrail": reason,
-            }
-            return
+        # Input guardrail node ĐÃ BỎ: không còn 1 LLM-judge scan riêng trước graph.
+        # Phòng-thủ prompt-injection / off-topic nay GỘP vào think (plan) node — xem mục
+        # "== AN TOÀN & CHỐNG THAO TÚNG ==" trong _CLASSIFY_GUIDANCE (prompts.py). think tự nhận
+        # diện ý đồ thao túng và xử lý (từ chối nhã nhặn) trong cùng 1 lượt suy luận.
+        # Output guardrail (redact PII câu trả lời cuối) VẪN GIỮ ở answer path.
 
         # NOTE: user question is saved AFTER context is fetched so that
         # state["messages"] contains only prior turns (not the current question).
@@ -621,12 +596,13 @@ class QueryOrchestrationUseCase:
         _llm_runs: dict[str, dict] = {}   # run_id → {node, start_dt, input_text}
         _tool_runs: dict[str, dict] = {}  # run_id → {name, input_args, start_dt}
         _active_spans: dict[str, Any] = {}  # run_id → span for node lifecycle
-        _SPAN_NODES = {"triage", "think", "act", "observe", "answer", "shortcut"}
+        _SPAN_NODES = {"triage", "think", "act", "observe", "verify", "answer", "shortcut"}
         _tracer = self._tracer  # LangfuseTracer | None
         # Status text per node — emitted as SSE so the UI can show "AI thinking" indicator
         _NODE_STATUS: dict[str, str] = {
             "triage": "Đang phân tích câu hỏi...",
             "think": "Đang suy nghĩ...",
+            "verify": "Đang tổng hợp & kiểm tra thông tin...",
             "answer": "Đang soạn câu trả lời...",
         }
 
@@ -747,6 +723,22 @@ class QueryOrchestrationUseCase:
                     node = (event.get("metadata") or {}).get("langgraph_node")
                     if node == "triage":
                         # JSON phân loại nội bộ — KHÔNG đẩy ra SSE/frontend
+                        continue
+                    if node == "verify":
+                        # verify trả JSON phân định (sufficient/missing) — KHÔNG leak content ra
+                        # SSE. Nhưng ĐẨY reasoning_content ra "thought" để UI hiện "đang tổng hợp
+                        # & kiểm tra thông tin" live (latency che bằng streaming, như yêu cầu).
+                        _chunk = event["data"]["chunk"]
+                        _rc = (getattr(_chunk, "additional_kwargs", None) or {}).get("reasoning_content")
+                        if _rc:
+                            yield {
+                                "phase": "thought",
+                                "node": "verify",
+                                "text": _rc,
+                                "session_id": session_id,
+                                "agent_mode": "langgraph",
+                                "iterations": last_iteration,
+                            }
                         continue
                     # split_answer: think là planner — KHÔNG trộn draft vào câu trả lời cuối,
                     # nhưng ĐẨY ra kênh "thought" để UI hiện "model đang nghĩ gì" live (tách

@@ -51,6 +51,9 @@ class OrchestratorState(TypedDict, total=False):
 
     # --- Scheduler bookkeeping ---
     replan_count: int
+    # verify_verdict: "sufficient" | "insufficient" do verify node (think 2) đặt -> route
+    # quyết đi synthesize hay replan. Rỗng = chưa qua verify.
+    verify_verdict: str
 
     # --- Output ---
     answer: str
