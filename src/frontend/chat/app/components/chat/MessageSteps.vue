@@ -10,6 +10,7 @@ const props = defineProps<{ trace: TraceEntry[]; models?: NodeModel[]; thoughts?
 
 const open = ref(false)
 
+// Nhãn node cho dòng suy nghĩ. think = "Suy nghĩ" (1 khối reasoning trước khi gọi tool).
 const NODE_LABEL: Record<string, string> = {
   triage: 'Phân loại',
   think: 'Suy nghĩ',

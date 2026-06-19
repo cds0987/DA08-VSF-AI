@@ -433,6 +433,9 @@ class QueryOrchestrationUseCase:
         last_iteration = 0
         # Track if we already emitted the shortcut acting event
         shortcut_acting_emitted = False
+        # CHỈ hiện reasoning của think LẦN ĐẦU (trước khi gọi tool). Reasoning sau-tool là model
+        # xử lý dữ liệu (dài, tiếng Anh, gồm số liệu) -> bỏ để UI gọn, 1 khối "Suy nghĩ".
+        reasoning_done = False
         # Gom usage từ MỌI model call (on_chat_model_end) — gồm cả triage. _collect_usage
         # cũ chỉ đọc final_state["messages"] nên off-topic (triage không vào messages) ra
         # 0 token -> trace $0.00 dù triage vẫn tốn tiền. Accumulator này phủ mọi path.
@@ -502,6 +505,7 @@ class QueryOrchestrationUseCase:
                         }
                     # Emit acting event for act node — use LLM's actual tool decision
                     if node_name == "act":
+                        reasoning_done = True   # dừng hiện reasoning sau-tool (giữ "Suy nghĩ" gọn)
                         tool_info = _extract_tool_call(event)
                         if tool_info:
                             yield {
@@ -580,7 +584,7 @@ class QueryOrchestrationUseCase:
                         # KHÔNG stream content (câu trả lời) vào đây.
                         _chunk = event["data"]["chunk"]
                         _rc = (getattr(_chunk, "additional_kwargs", None) or {}).get("reasoning_content")
-                        if _rc:
+                        if _rc and not reasoning_done:   # chỉ reasoning lần đầu (trước tool)
                             yield {
                                 "phase": "thought",
                                 "node": "think",
@@ -701,27 +705,8 @@ class QueryOrchestrationUseCase:
                         # dòng "Phân loại" riêng nữa. Reasoning của think (deepseek-v4-pro) đã tự
                         # bao gồm việc phân loại câu hỏi -> "Suy nghĩ" thể hiện đủ.
                         # Emit "quyết định" của think (planner) -> UI hiện bước think (kể cả
-                        # khi model ẩn reasoning). node="plan" -> FE đẩy thành dòng riêng.
-                        # node=plan = bước "Lập kế hoạch" (SAU "Suy nghĩ"): nêu cần gì / dùng tool nào.
-                        if run_name == "think":
-                            k_out = (event.get("data") or {}).get("output") or {}
-                            k_msgs = k_out.get("messages") if isinstance(k_out, dict) else None
-                            if k_msgs:
-                                _last = k_msgs[-1]
-                                _tcs = getattr(_last, "tool_calls", None) or []
-                                if _tcs:
-                                    _names = ", ".join(tc.get("name", "") for tc in _tcs if tc.get("name"))
-                                    _ptext = f"Cần dùng công cụ: {_names}"
-                                else:
-                                    _ptext = "Đã đủ thông tin → tổng hợp câu trả lời."
-                                yield {
-                                    "phase": "thought",
-                                    "node": "plan",
-                                    "text": _ptext,
-                                    "session_id": session_id,
-                                    "agent_mode": "langgraph",
-                                    "iterations": last_iteration,
-                                }
+                        # (Bỏ dòng "Lập kế hoạch" node=plan: trùng với bước tool ngay dưới + gây
+                        #  thêm dòng. Chỉ giữ 1 khối "Suy nghĩ" + các bước tool + câu trả lời.)
                         # Emit observing event from act node output (ToolMessage with real results)
                         if run_name == "act":
                             out = (event.get("data") or {}).get("output") or {}
