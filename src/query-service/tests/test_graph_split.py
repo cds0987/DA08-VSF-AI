@@ -117,3 +117,48 @@ def test_build_agent_with_models_dict_split():
 def test_build_agent_back_compat_single_model():
     agent = build_langgraph_agent(model=FakeModel(), mcp_client=None)
     assert agent.name == "VinSmartFutureAgent"
+
+
+def test_build_agent_merged_reason_compiles():
+    # merged_reason: route_entry "triage" map thẳng sang think (bỏ node triage LLM).
+    agent = build_langgraph_agent(
+        models={"think": FakeModel(), "answer": FakeModel()},
+        mcp_client=None, merged_reason=True,
+    )
+    assert agent.name == "VinSmartFutureAgent"
+
+
+async def test_act_node_answers_all_tool_call_ids():
+    # deepseek-v4-pro trả NHIỀU tool_calls -> act phải trả ToolMessage cho MỌI id
+    # (nếu không -> 400 "tool_call_ids did not have response").
+    from app.application.langgraph_nodes import act_node
+    from langchain_core.messages import ToolMessage as TM
+
+    class _FakeMCP:
+        async def rag_search(self, query, document_ids, top_k):
+            return []
+        async def call_tool(self, name, args):
+            return {}
+
+    ai = AIMessage(content="", tool_calls=[
+        {"name": "rag_search", "args": {}, "id": "call_A"},
+        {"name": "hr_query", "args": {}, "id": "call_B"},
+    ])
+    state = {
+        "messages": [HumanMessage(content="q"), ai], "question": "q",
+        "allowed_doc_ids": ["d1"], "user_id": "u1", "session_id": "s1",
+        "phase": AgentPhase.ACTING, "rag_top_k": 5, "rag_score_threshold": 0.45,
+        "source_ref_counter": 0, "sources": [], "tool_results": [],
+        "tool_call_signatures": [], "rag_search_events": [],
+    }
+    out = await act_node(state, _FakeMCP())
+    ids = {m.tool_call_id for m in out["messages"] if isinstance(m, TM)}
+    assert ids == {"call_A", "call_B"}
+
+
+def test_agent_prompt_has_classify_guidance():
+    # Gộp: think tự phân loại -> prompt phải có hướng dẫn classify (off-topic/mơ hồ/meta).
+    from app.application.prompts import build_agent_system_prompt
+    p = build_agent_system_prompt()
+    assert "TỰ PHÂN LOẠI" in p
+    assert "NGOÀI PHẠM VI" in p

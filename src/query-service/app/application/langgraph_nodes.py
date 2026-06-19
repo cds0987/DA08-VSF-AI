@@ -669,6 +669,18 @@ async def act_node(
         name=tool_name,
     )
 
+    # MULTI tool_calls/lượt (deepseek-v4-pro hay trả nhiều): chỉ thực thi cái ĐẦU, nhưng PHẢI
+    # trả ToolMessage cho MỌI tool_call_id còn lại -> nếu không, lần gọi LLM sau (nhất là
+    # OpenAI/save_mode) báo 400 "tool_call_ids did not have response messages". Stub cái thừa.
+    extra_tool_messages: list = []
+    for _tc in (last_msg.tool_calls or [])[1:]:
+        _eid = _tc.get("id") or f"call_{_tc.get('name', 'tool')}"
+        extra_tool_messages.append(ToolMessage(
+            content=json.dumps({"skipped": "chỉ xử lý 1 công cụ mỗi lượt"}, ensure_ascii=False),
+            tool_call_id=_eid,
+            name=_tc.get("name", "tool"),
+        ))
+
     tool_result = ToolCallResult(
         tool_name=tool_name,
         success=success,
@@ -678,7 +690,7 @@ async def act_node(
 
     existing_sources = state.get("sources") or []
     new_state: dict = {
-        "messages": [tool_message],
+        "messages": [tool_message] + extra_tool_messages,
         "phase": AgentPhase.ACTING,
         "previous_phase": state["phase"],
         "tool_results": state.get("tool_results", []) + [tool_result],

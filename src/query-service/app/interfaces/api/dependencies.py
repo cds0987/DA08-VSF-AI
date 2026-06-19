@@ -318,6 +318,7 @@ def get_langgraph_agent():
             mcp_client=get_mcp_client(),
             tools_loader=get_langchain_mcp_tools_loader(),
             split_answer=settings.agent_split_answer,
+            merged_reason=settings.agent_merged_reason,
         )
     return build_langgraph_agent(
         model=get_langchain_model(),

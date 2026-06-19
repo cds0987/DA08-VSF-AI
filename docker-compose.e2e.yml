@@ -532,6 +532,8 @@ services:
       # MOSA: bật tách answer node (think=planner, answer=generator stream) — test luồng split
       # trong e2e TRƯỚC khi deploy (gate chặn nếu vỡ -> bảo vệ prod).
       AGENT_SPLIT_ANSWER: "true"
+      # Gộp triage vào think (1 LLM call, hết domino) — validate luồng gộp trong e2e.
+      AGENT_MERGED_REASON: "true"
       MCP_MODE: real
       MCP_SERVICE_URL: http://mcp-service:8003
       MCP_TIMEOUT_SECONDS: "20"

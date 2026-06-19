@@ -47,6 +47,7 @@ def build_langgraph_agent(
     *,
     models: dict[str, BaseChatModel] | None = None,
     split_answer: bool = False,
+    merged_reason: bool = False,
 ) -> "CompiledGraph":
     """
     Build and compile the LangGraph agent with triage + ReAct loop.
@@ -88,11 +89,14 @@ def build_langgraph_agent(
 
     # ---- Entry point ----
     # Conditional entry: check shortcuts before triage/LLM
+    # merged_reason: GỘP triage vào think — route_entry vẫn trả "triage" nhưng map THẲNG
+    # sang think (bỏ 1 LLM call triage). think tự phân loại (xem _CLASSIFY_GUIDANCE) + tool.
+    # SAFETY/identity vẫn do shortcut (rule) giữ. False = giữ triage riêng (hành vi cũ).
     workflow.set_conditional_entry_point(
         route_entry,
         path_map={
             "shortcut": "shortcut",
-            "triage": "triage",
+            "triage": "think" if merged_reason else "triage",
         },
     )
 

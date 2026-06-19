@@ -393,5 +393,22 @@ def build_agent_system_prompt(now: datetime | None = None) -> str:
         "  của create_leave_request PHẢI lấy từ tool resolve_date (xem LEAVE REQUEST\n"
         "  CONFIRMATION FLOW) — bạn dở số học lịch, đừng tự cộng/đoán ngày.\n\n"
     )
-    return context + AGENT_SYSTEM_PROMPT
+    return context + _CLASSIFY_GUIDANCE + AGENT_SYSTEM_PROMPT
+
+
+# Hướng dẫn tự-phân-loại cho think (chế độ gộp triage vào think). An toàn cho cả 2 chế độ:
+# khi triage còn chạy riêng thì các case này đã bị lọc nên think hiếm gặp. SAFETY (cháy/chấn
+# thương/khủng hoảng) do rule-shortcut xử lý trước -> không cần ở đây.
+_CLASSIFY_GUIDANCE = """\
+== TỰ PHÂN LOẠI TRƯỚC KHI HÀNH ĐỘNG ==
+Trước khi gọi tool, tự xác định câu hỏi thuộc loại nào:
+- NGOÀI PHẠM VI nội bộ (giải trí, thời tiết, mua sắm, kiến thức chung, học từ đầu...) →
+  KHÔNG gọi tool; lịch sự từ chối ngắn gọn + gợi ý hỏi về HR/chính sách/quy trình/IT nội bộ.
+- QUÁ MƠ HỒ, không có chủ đề/đầu mối (vd "nó hỏng rồi", "cho hỏi chút") và lịch sử không đủ
+  hiểu → hỏi LẠI 1 câu làm rõ, KHÔNG đoán.
+- HỎI VỀ HỘI THOẠI TRƯỚC (câu hỏi/nguồn đã nêu) → trả lời từ lịch sử, không cần tool.
+- CÒN LẠI (chính sách/dữ liệu HR/tài liệu/quy trình/thiết bị-IT) → dùng tool để tra rồi trả lời.
+Nguyên tắc: nếu CÓ THỂ cần tài liệu nội bộ hay dữ liệu HR cá nhân → cứ tra (allow-first).
+
+"""
 

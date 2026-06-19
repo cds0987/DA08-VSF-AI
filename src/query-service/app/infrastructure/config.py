@@ -142,6 +142,10 @@ class Settings(BaseSettings):
     # (think tự sinh câu trả lời) -> e2e không đổi. Bật sau khi eval parity xanh.
     agent_split_answer: bool = False
     llm_profiles_path: str | None = None  # override path profiles.yaml (None -> bundle mặc định)
+    # agent_merged_reason=True: GỘP triage (phân loại) vào think — bỏ 1 LLM call. think (reasoner)
+    # tự phân loại + suy luận + gọi tool. SAFETY vẫn do rule-shortcut (classify_shortcut) giữ.
+    # Giảm latency/cost + hết domino triage->think. False = giữ triage riêng (hành vi cũ).
+    agent_merged_reason: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
