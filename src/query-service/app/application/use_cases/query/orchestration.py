@@ -697,19 +697,9 @@ class QueryOrchestrationUseCase:
                         if span is not None and _tracer is not None:
                             output = event.get("data", {}).get("output") or {}
                             _tracer.span_end(span, output_data=_node_output_summary(output))
-                        # Emit "thought" lý do phân loại của triage -> UI hiện "model nghĩ gì".
-                        if run_name == "triage":
-                            t_out = (event.get("data") or {}).get("output") or {}
-                            if isinstance(t_out, dict) and t_out.get("triage_reason"):
-                                yield {
-                                    "phase": "thought",
-                                    "node": "triage",
-                                    "text": str(t_out.get("triage_reason"))[:300],
-                                    "route": t_out.get("triage_route"),
-                                    "session_id": session_id,
-                                    "agent_mode": "langgraph",
-                                    "iterations": last_iteration,
-                                }
+                        # GỘP phân loại + suy nghĩ thành 1 node "Suy nghĩ" duy nhất: KHÔNG emit
+                        # dòng "Phân loại" riêng nữa. Reasoning của think (deepseek-v4-pro) đã tự
+                        # bao gồm việc phân loại câu hỏi -> "Suy nghĩ" thể hiện đủ.
                         # Emit "quyết định" của think (planner) -> UI hiện bước think (kể cả
                         # khi model ẩn reasoning). node="plan" -> FE đẩy thành dòng riêng.
                         # node=plan = bước "Lập kế hoạch" (SAU "Suy nghĩ"): nêu cần gì / dùng tool nào.
