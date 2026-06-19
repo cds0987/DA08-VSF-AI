@@ -862,14 +862,28 @@ async def answer_node(state: AgentState, model: BaseChatModel | None = None, spl
             tool_results.append(str(m.content or ""))
         # AIMessage có tool_calls -> BỎ (tránh model bắt chước gọi tool)
 
+    # ❖ ĐỊNH HƯỚNG TỪ THINK: lấy reasoning/plan của think (bộ não) truyền cho answer (người
+    # viết) bám theo — think đã quyết "phân tích X, đưa lời khuyên Y" thì answer làm đúng vậy.
+    think_plan = ""
+    for m in reversed(messages):
+        if isinstance(m, AIMessage):
+            _rc = (getattr(m, "additional_kwargs", None) or {}).get("reasoning_content")
+            if _rc and str(_rc).strip():
+                think_plan = str(_rc).strip()[:1200]
+                break
+
     # ❖ ĐẶT CÂU HỎI Ở CUỐI (sau tool data) làm chỉ thị: tránh model bám vào data nổi bật
-    # (vd full HR profile nhiều data phép) mà trả lời lạc đề. Tool data -> rồi câu hỏi.
+    # (vd full HR profile nhiều data phép) mà trả lời lạc đề. Tool data -> định hướng -> câu hỏi.
     final_parts: list[str] = []
     if tool_results:
         final_parts.append("[THÔNG TIN ĐÃ THU THẬP]\n" + "\n\n".join(tool_results))
+    if think_plan:
+        final_parts.append(
+            "[ĐỊNH HƯỚNG TỪ BƯỚC SUY NGHĨ — bám theo cách tiếp cận này khi trả lời]\n" + think_plan
+        )
     final_parts.append(
-        f"YÊU CẦU: Dựa trên thông tin trên, TRẢ LỜI ĐÚNG câu hỏi sau (không lạc sang chủ đề "
-        f"khác, không liệt kê mục không liên quan):\n\"{question}\""
+        f"YÊU CẦU: Dựa trên thông tin + định hướng trên, TRẢ LỜI ĐÚNG câu hỏi sau (không lạc "
+        f"sang chủ đề khác, không liệt kê mục không liên quan):\n\"{question}\""
     )
     synth_messages: list = (
         [SystemMessage(content=SYNTHESIS_SYSTEM_PROMPT)] + history
