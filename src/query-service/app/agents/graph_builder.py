@@ -26,6 +26,28 @@ logger = logging.getLogger(__name__)
 
 _SYNTH_ROLE = "synthesize_recommend"
 
+_SYNTH_CITE_SYSTEM = """\
+Bạn là trợ lý nội bộ VinSmartFuture. Dựa CHỈ trên THÔNG TIN ĐÃ THU THẬP, trả lời đúng trọng tâm
+câu hỏi + khuyến nghị hành động cụ thể nếu phù hợp. Nếu dữ liệu không đủ, nói rõ phần còn thiếu +
+gợi ý liên hệ HR/IT Helpdesk. KHÔNG bịa số liệu/chính sách/ngày tháng.
+
+== TRÍCH DẪN NGUỒN (BẮT BUỘC) ==
+- DANH SÁCH NGUỒN cho sẵn ở cuối, mỗi nguồn có số [N]. Khi câu trả lời dùng thông tin từ tài liệu
+  nào, CHÈN [N] NGAY SAU câu/ý đó (vd: "Nhân viên được nghỉ 12 ngày phép năm [1]."). Dùng ĐÚNG số
+  trong danh sách; một câu có thể mang nhiều nguồn [1][3].
+- TUYỆT ĐỐI KHÔNG viết tên file/đường dẫn trong câu trả lời — KHÔNG "(Nguồn: abc.pdf, trang 1)",
+  KHÔNG để tên file trong ` `code` `, KHÔNG "mở file trực tiếp". CHỈ dùng số [N]; giao diện sẽ tự
+  render thẻ nguồn BẤM ĐƯỢC từ [N].
+- Nếu DANH SÁCH NGUỒN trống: KHÔNG bịa [N]; trả lời từ dữ liệu HR/kiến thức chung và nói rõ chưa
+  có tài liệu nội bộ phù hợp.
+
+== PHONG CÁCH ==
+Ấm áp, chuyên nghiệp, đúng trọng tâm. Dùng vài icon/emoji hợp lý + hài hước nhẹ (✅ 📌 💡 😊) nhưng
+KHÔNG lạm dụng, KHÔNG dùng cho nội dung nhạy cảm (lương/kỷ luật/an toàn/từ chối). Match ngôn ngữ
+người dùng (mặc định tiếng Việt). Dùng đề mục/danh sách khi có nhiều ý.
+"""
+
+
 _VERIFY_SYSTEM = (
     "Bạn là bộ kiểm thông tin của trợ lý nội bộ VinSmartFuture. Dựa trên CÂU HỎI và DỮ LIỆU đã "
     "thu thập, phán định: dữ liệu ĐÃ ĐỦ để trả lời đầy đủ & chính xác câu hỏi chưa?\n"
@@ -77,6 +99,12 @@ def build_orchestrator_graph(
             history=state.get("recent_messages"),
         )
         plan = await planner.plan(pctx)
+        # synthesize_recommend KHÔNG còn chạy như worker: node `synthesize` tự sinh câu trả lời +
+        # gắn [N] citation từ nguồn đã đánh ref (worker chỉ nhận text -> không cite được). Strip
+        # step synth khỏi DAG -> workers CHỈ gom dữ liệu (rag/hr/analyze). depends_on của step dữ
+        # liệu KHÔNG trỏ vào synth nên bỏ an toàn; route_join chỉ chờ các step dữ liệu.
+        if plan.route != "light":
+            plan.steps[:] = [s for s in plan.steps if s.role != _SYNTH_ROLE]
         logger.info("orchestrate route=%s steps=%d", plan.route, len(plan.steps))
         if ctx.emit:
             # "Suy nghĩ" = router NGHĨ GÌ (reasoning SẠCH tiếng Việt từ field reasoning, KHÔNG phải
@@ -204,15 +232,59 @@ def build_orchestrator_graph(
             return {"answer": plan.answer_hint or "Mình chưa rõ yêu cầu, bạn nói rõ hơn nhé.",
                     "sources": []}
         results = state.get("results") or {}
-        synth_ids = [sid for sid, o in results.items() if o.role == _SYNTH_ROLE]
         data_results = {k: v for k, v in results.items() if v.role != _SYNTH_ROLE}
-        if synth_ids:
-            answer = results[max(synth_ids)].output
+
+        # Gom + KHỬ TRÙNG sources theo chunk_id, ĐÁNH SỐ ref [1..N] (theo thứ tự step). Ref này
+        # vừa đưa vào prompt cho model trích [N], vừa trả ra done-event cho FE -> [N] khớp thẻ nguồn.
+        agg: list[dict] = []
+        seen: set = set()
+        for sid in sorted(data_results):
+            for s in (data_results[sid].sources or []):
+                cid = s.get("chunk_id") or (s.get("document_name"), s.get("page_number"))
+                if cid in seen:
+                    continue
+                seen.add(cid)
+                agg.append(s)
+        sources_ref = [{**s, "ref": i + 1} for i, s in enumerate(agg)]
+
+        # Text dữ liệu các worker (rag/hr/analyze) — đầu vào để model viết câu trả lời.
+        data_text = "\n\n".join(
+            f"[{data_results[k].role}] {data_results[k].output}"
+            for k in sorted(data_results)
+            if str(data_results[k].output or "").strip()
+        )
+        if sources_ref:
+            refs_block = "\n".join(
+                f"[{s['ref']}] {s.get('document_name', '')}"
+                + (f" — {str(s.get('caption', ''))[:140]}" if s.get('caption') else "")
+                + (f" (trang {s['page_number']})" if s.get('page_number') else "")
+                for s in sources_ref
+            )
         else:
-            # Plan không có synthesize step -> gộp output dữ liệu (fallback hiếm).
-            answer = "\n\n".join(str(results[k].output) for k in sorted(data_results)) or \
+            refs_block = "(không có nguồn tài liệu — KHÔNG dùng [N])"
+
+        # Không có model (mock/test) -> gộp text thô (vẫn trả sources cho FE).
+        if make_model is None:
+            return {"answer": data_text or
+                    "Mình chưa lấy được dữ liệu phù hợp, bạn thử lại hoặc liên hệ HR/IT Helpdesk.",
+                    "sources": sources_ref}
+
+        if ctx.emit:
+            await ctx.emit({"phase": "thinking", "node": "answer",
+                            "status": "Đang soạn câu trả lời..."})
+        from app.agents.roles._llm import astream_complete
+        user = (
+            f"CÂU HỎI: {state['question']}\n\n"
+            f"THÔNG TIN ĐÃ THU THẬP:\n{data_text or '(trống)'}\n\n"
+            f"DANH SÁCH NGUỒN (trích bằng số [N]):\n{refs_block}"
+        )
+        # STREAM token answer ra SSE (node=answer) + surface reasoning. capability "answer".
+        answer = await astream_complete(make_model("answer"), _SYNTH_CITE_SYSTEM, user,
+                                        ctx.emit, node="answer")
+        if not answer:
+            answer = data_text or \
                 "Mình chưa lấy được dữ liệu phù hợp, bạn thử lại hoặc liên hệ HR/IT Helpdesk."
-        return {"answer": answer, "sources": aggregate_sources(data_results)}
+        return {"answer": answer, "sources": sources_ref}
 
     g = StateGraph(OrchestratorState)
     g.add_node("orchestrate", orchestrate)

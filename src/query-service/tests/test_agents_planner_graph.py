@@ -78,7 +78,8 @@ async def test_graph_heavy_runs_workers_in_parallel():
     res = await g.ainvoke({"question": "Toi con bao nhieu phep va quy dinh?"})
     dt = time.time() - t
     assert res["answer"]
-    assert len(res["results"]) == 3
+    # synthesize_recommend KHÔNG còn là worker (node synthesize tự sinh) -> chỉ còn 2 worker dữ liệu.
+    assert len(res["results"]) == 2
     # 2 worker 0.2s SONG SONG -> tổng < 0.6s (nếu tuần tự sẽ ~0.4s+ chỉ riêng 2 worker)
     assert dt < 0.6, f"nghi tuan tu: {dt:.2f}s"
 
@@ -123,8 +124,8 @@ async def test_verify_emits_sse_so_user_sees_activity():
 
 
 def _make_model_replan():
-    """verify dùng capability 'answer' (model nhẹ). Lần gọi 'answer' #2 = verify đầu (sau synth
-    worker #1) -> trả 'insufficient' để ép replan 1 lần; planner ('think') luôn trả plan."""
+    """synth KHÔNG còn là worker -> lần gọi 'answer' ĐẦU TIÊN là verify. Cho call #1 trả
+    'insufficient' để ép replan 1 lần; planner ('think') luôn trả plan; call sau -> câu trả lời."""
     calls = {"think": 0, "answer": 0}
 
     def mk(cap):
@@ -133,7 +134,7 @@ def _make_model_replan():
             return _FakeModel(_PLAN_JSON)
         if cap == "answer":
             calls["answer"] += 1
-            if calls["answer"] == 2:   # verify lần đầu -> chưa đủ
+            if calls["answer"] == 1:   # verify lần đầu -> chưa đủ
                 return _FakeModel('{"sufficient": false, "missing": "quy dinh", "reason": "thieu"}')
             return _FakeModel("TRA LOI tong hop")
         return _FakeModel("worker output")
@@ -163,3 +164,39 @@ async def test_verify_insufficient_triggers_replan_and_emits_thought():
         if e.get("node") == "verify" and e.get("phase") == "thought" and "chưa đủ" in (e.get("text") or "")
     ]
     assert insufficient_thought, "verify insufficient KHÔNG phát thought SSE"
+
+
+# ------------------------------------------------------------- citation [N] gắn ref
+class _CaptureModel:
+    """Model giả ghi lại messages nhận được (để kiểm prompt synth có danh sách nguồn [N])."""
+    def __init__(self, text):
+        self.text = text
+        self.seen = []
+
+    async def ainvoke(self, msgs):
+        self.seen.append(list(msgs))
+        class R:
+            pass
+        r = R(); r.content = self.text; return r
+
+
+async def test_synthesize_assigns_refs_and_passes_numbered_sources():
+    cap = _CaptureModel("Nội dung trả lời [1].")
+
+    def mk(c):
+        if c == "think":
+            return _FakeModel(_PLAN_JSON)
+        if c == "answer":
+            return cap
+        return _FakeModel("worker output")
+
+    ctx = RoleContext(mcp_client=_SlowMCP(), user_id="u1", allowed_doc_ids=("d1",),
+                      rag_top_k=5, rag_score_threshold=0.45, make_model=mk)
+    g = build_orchestrator_graph(ctx=ctx, manifest=load_manifest(),
+                                 planner=PLANNER_REGISTRY.get("orchestrator_workers")(), make_model=mk)
+    res = await g.ainvoke({"question": "Toi con bao nhieu phep?"})
+    # nguồn từ rag_retrieve được gắn ref [1..N] ở node synthesize
+    assert res["sources"] and res["sources"][0]["ref"] == 1
+    # prompt synth PHẢI kèm DANH SÁCH NGUỒN đánh số để model trích [N]
+    joined = " ".join(str(getattr(m, "content", "")) for msgs in cap.seen for m in msgs)
+    assert "DANH SÁCH NGUỒN" in joined and "[1]" in joined

@@ -69,6 +69,9 @@ class RagRetrieveRole(AgentRole):
             }
             for r in used
         ]
+        # Expose MỌI chunk ĐÃ DÙNG làm citation (kể cả dưới ngưỡng) -> câu trả lời luôn có thẻ
+        # nguồn BẤM ĐƯỢC; score thật đi kèm để hover card hiện độ tin cậy (thấp = dưới ngưỡng).
+        # (Trước đây chỉ expose `qualified` -> dưới ngưỡng thì sources rỗng -> không bấm được.)
         sources = [
             {
                 "document_name": r.document_name,
@@ -80,7 +83,7 @@ class RagRetrieveRole(AgentRole):
                 "page_number": r.page_number,
                 "chunk_id": r.chunk_id,
             }
-            for r in qualified  # chỉ chunk đạt ngưỡng mới thành citation
+            for r in used
         ]
 
         raw_text = json.dumps({"results": chunks}, ensure_ascii=False)
