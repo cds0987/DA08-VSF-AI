@@ -822,12 +822,35 @@ async def answer_node(state: AgentState, model: BaseChatModel | None = None, spl
     if not do_synth:
         return {"phase": AgentPhase.DONE, "previous_phase": state["phase"]}
 
-    # Synthesize: bỏ các AIMessage draft cuối (không tool_calls) của think để answer model
-    # sinh mới từ [history + tool results], rồi trả AIMessage cuối làm câu trả lời.
-    synth_messages = list(messages)
-    while synth_messages and isinstance(synth_messages[-1], AIMessage) \
-            and not getattr(synth_messages[-1], "tool_calls", None):
-        synth_messages.pop()
+    # Synthesize bằng CONTEXT SẠCH:
+    #  - System = SYNTHESIS_SYSTEM_PROMPT (KHÔNG mô tả tool) -> model (deepseek) KHÔNG cố gọi
+    #    tool -> hết leak markup tool-call (DSML) ra user.
+    #  - Bỏ AIMessage có tool_calls (cấu trúc tool gây model bắt chước gọi tool).
+    #  - Gom ToolMessage thành 1 khối text "[THÔNG TIN ĐÃ THU THẬP]" -> model chỉ việc viết.
+    from langchain_core.messages import SystemMessage, HumanMessage
+    from app.application.prompts import SYNTHESIS_SYSTEM_PROMPT
+
+    # Bỏ draft AIMessage cuối (think của LƯỢT NÀY) trước khi gom — tránh đưa bản nháp vào synth.
+    src = list(messages)
+    while src and isinstance(src[-1], AIMessage) and not getattr(src[-1], "tool_calls", None):
+        src.pop()
+
+    convo: list = []
+    tool_results: list[str] = []
+    for m in src:
+        if isinstance(m, HumanMessage):
+            convo.append(m)
+        elif isinstance(m, AIMessage) and not getattr(m, "tool_calls", None) and str(m.content or "").strip():
+            convo.append(m)  # câu trả lời THẬT ở lượt trước (history) — giữ ngữ cảnh hội thoại
+        elif isinstance(m, ToolMessage):
+            tool_results.append(str(m.content or ""))
+        # AIMessage có tool_calls -> BỎ (tránh model bắt chước gọi tool)
+
+    synth_messages: list = [SystemMessage(content=SYNTHESIS_SYSTEM_PROMPT)] + convo
+    if tool_results:
+        synth_messages.append(
+            HumanMessage(content="[THÔNG TIN ĐÃ THU THẬP]\n" + "\n\n".join(tool_results))
+        )
     response: AIMessage = await model.ainvoke(synth_messages)
     return {
         "messages": [response],

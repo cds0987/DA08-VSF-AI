@@ -84,8 +84,14 @@ async def test_answer_synthesizes_from_tool_results():
     ]
     out = await answer_node(_state(messages=msgs, tool_results=[{"ok": 1}]), model=fake, split=True)
     assert out["messages"][0].content == "Tổng hợp từ tài liệu [1]."
-    # answer model nhận messages ĐÃ bỏ draft cuối (kết thúc bằng ToolMessage)
-    assert isinstance(fake.calls[0][-1], ToolMessage)
+    sent = fake.calls[0]
+    # Context SẠCH: system = synthesis prompt; KHÔNG còn ToolMessage / AIMessage-tool_calls;
+    # kết quả tool gom vào 1 HumanMessage "[THÔNG TIN ĐÃ THU THẬP]".
+    from langchain_core.messages import SystemMessage
+    assert isinstance(sent[0], SystemMessage) and "KHÔNG gọi công cụ" in sent[0].content
+    assert not any(isinstance(m, ToolMessage) for m in sent)
+    assert not any(isinstance(m, AIMessage) and getattr(m, "tool_calls", None) for m in sent)
+    assert any(isinstance(m, HumanMessage) and "THÔNG TIN ĐÃ THU THẬP" in m.content for m in sent)
 
 
 async def test_answer_shortcut_is_marker_even_when_split():

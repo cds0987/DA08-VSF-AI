@@ -709,6 +709,31 @@ class QueryOrchestrationUseCase:
                                     "agent_mode": "langgraph",
                                     "iterations": last_iteration,
                                 }
+                        # Emit "quyết định" của think (planner) -> UI hiện bước think (kể cả
+                        # khi model ẩn reasoning). node="plan" -> FE đẩy thành dòng riêng.
+                        if run_name == "think":
+                            k_out = (event.get("data") or {}).get("output") or {}
+                            k_msgs = k_out.get("messages") if isinstance(k_out, dict) else None
+                            if k_msgs:
+                                _last = k_msgs[-1]
+                                _tcs = getattr(_last, "tool_calls", None) or []
+                                if _tcs:
+                                    _names = ", ".join(tc.get("name", "") for tc in _tcs if tc.get("name"))
+                                    _ptext = f"Cần dùng công cụ: {_names}"
+                                else:
+                                    _c = getattr(_last, "content", "") or ""
+                                    _ptext = (
+                                        "Đã đủ thông tin → soạn câu trả lời."
+                                        if _c else "Tiếp tục xử lý."
+                                    )
+                                yield {
+                                    "phase": "thought",
+                                    "node": "plan",
+                                    "text": _ptext,
+                                    "session_id": session_id,
+                                    "agent_mode": "langgraph",
+                                    "iterations": last_iteration,
+                                }
                         # Emit observing event from act node output (ToolMessage with real results)
                         if run_name == "act":
                             out = (event.get("data") or {}).get("output") or {}
@@ -748,20 +773,9 @@ class QueryOrchestrationUseCase:
                         shortcut_response = final_state.get("shortcut_response")
                         shortcut_outcome = final_state.get("shortcut_outcome") or "SUCCESS"
 
-                        # Shortcut path — emit acting event then token stream
+                        # Shortcut/fallback path — word-stream câu trả lời. KHÔNG emit acting
+                        # event giả "shortcut_off_topic" nữa (nó lọt ra UI thành 1 'tool' sai).
                         if shortcut_response:
-                            # Emit one acting event to signal shortcut before streaming answer
-                            if not shortcut_acting_emitted:
-                                yield {
-                                    "phase": "acting",
-                                    "agent_mode": "langgraph",
-                                    "session_id": session_id,
-                                    "iterations": 0,
-                                    "tool": "shortcut_off_topic",
-                                    "tool_args": {"outcome": shortcut_outcome},
-                                }
-                                shortcut_acting_emitted = True
-
                             for token in _word_chunks(shortcut_response):
                                 yield {
                                     "token": token,
