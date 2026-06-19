@@ -11,6 +11,7 @@ from app.interfaces.api.schemas.conversation import (
     ConversationMessage,
     ConversationMutationResponse,
     ConversationSummary,
+    MessageActionStateRequest,
     RenameConversationRequest,
 )
 
@@ -53,6 +54,7 @@ async def get_conversations(
                 session_id=message.session_id,
                 sources=message.sources,
                 feedback=message.feedback,
+                metadata=getattr(message, "metadata", {}) or {},
             )
             for message in legacy_messages
         ],
@@ -90,10 +92,38 @@ async def get_conversation(
                 session_id=message.session_id,
                 sources=message.sources,
                 feedback=message.feedback,
+                metadata=getattr(message, "metadata", {}) or {},
             )
             for message in messages
         ],
     )
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages/{message_id}/actions",
+    response_model=ConversationMutationResponse,
+)
+async def set_message_action_state(
+    conversation_id: UUID,
+    message_id: UUID,
+    request: MessageActionStateRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+    repo=Depends(get_conversation_repo),
+) -> ConversationMutationResponse:
+    """Ghi trạng thái thực thi của 1 action (vd đơn nghỉ đã gửi) vào message ->
+    bền qua reload/đa thiết bị (xem docs/leave-action-state-b2.md)."""
+    update = getattr(repo, "update_message_action", None)
+    if update is None:
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Not supported")
+    state = {
+        "status": request.status,
+        "request_id": request.request_id,
+        "leave_status": request.leave_status,
+    }
+    ok = await update(user.id, str(message_id), request.idempotency_key, state)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+    return ConversationMutationResponse(message="Action state saved")
 
 
 @router.patch(

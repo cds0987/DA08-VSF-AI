@@ -71,6 +71,14 @@ class HRLeaveClient:
             "POST", f"/hr/leave-requests/{request_id}/cancel", json={"user_id": user_id}
         )
 
+    async def get(self, *, user_id: str, request_id: str) -> tuple[int, dict]:
+        """Trạng thái 1 đơn của CHÍNH chủ đơn (scope user_id). Dùng cho card chat hiện
+        trạng thái duyệt sống (chờ duyệt -> đã duyệt/từ chối)."""
+        return await self._request(
+            "GET", f"/hr/leave-requests/{request_id}",
+            params={"user_id": user_id},
+        )
+
     async def list_pending_approval(self, *, approver_user_id: str) -> tuple[int, dict]:
         return await self._request(
             "GET", "/hr/leave-requests/pending-approval",

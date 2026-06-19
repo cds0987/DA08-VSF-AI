@@ -44,6 +44,15 @@ export function useHRService() {
     )
   }
 
+  async function getLeaveRequest(id: string) {
+    return withTokenRefresh(() =>
+      $fetch<{ id: string; status: string }>(
+        `${baseUrl}/${encodeURIComponent(id)}`,
+        { headers: getHRServiceAuthHeaders() },
+      )
+    )
+  }
+
   async function cancelLeaveRequest(id: string) {
     return withTokenRefresh(() =>
       $fetch<{ id: string; status: string }>(
@@ -82,6 +91,7 @@ export function useHRService() {
 
   return {
     createLeaveRequest,
+    getLeaveRequest,
     cancelLeaveRequest,
     fetchPendingApprovals,
     approveLeaveRequest,

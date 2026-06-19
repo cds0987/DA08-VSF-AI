@@ -109,3 +109,17 @@ async def reject_leave_request(
     )
     _raise_for_status(status_code, body)
     return body
+
+
+# Đặt SAU /pending-approval để không nuốt route tĩnh đó vào {request_id}.
+@router.get("/{request_id}")
+async def get_leave_request(
+    request_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+    hr: HRLeaveClient = Depends(get_hr_leave_client),
+) -> dict:
+    """Trạng thái đơn của chính chủ đơn (user_id = JWT). Card chat dùng để hiện trạng
+    thái duyệt sống."""
+    status_code, body = await hr.get(user_id=user.id, request_id=request_id)
+    _raise_for_status(status_code, body)
+    return body

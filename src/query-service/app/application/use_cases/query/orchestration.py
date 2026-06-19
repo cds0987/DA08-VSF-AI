@@ -831,7 +831,7 @@ class QueryOrchestrationUseCase:
                         # Output guardrail — redact PII from final answer before persisting/sending.
                         answer = await self._output_guardrail.redact(answer)
 
-                        await self._save_assistant(user.id, session_id, answer, sources, started)
+                        message_id = await self._save_assistant(user.id, session_id, answer, sources, started)
                         # Cache: chỉ lưu khi SUCCESS + có sources (RAG path), không cache shortcut/HR.
                         if shortcut_outcome == "SUCCESS" and not shortcut_response and sources:
                             await self._semantic_cache.put(cache_namespace, question, answer, sources)
@@ -839,6 +839,7 @@ class QueryOrchestrationUseCase:
                             "done": True,
                             "sources": sources,
                             "session_id": session_id,
+                            "message_id": message_id,
                             "outcome": outcome_value,
                             "agent_mode": "langgraph",
                             "iterations": final_iteration,
@@ -992,11 +993,12 @@ class QueryOrchestrationUseCase:
         final_sources = [] if _is_fallback_answer(answer) else sources
         if final_sources:
             await self._semantic_cache.put(cache_namespace, question, answer, final_sources)
-        await self._save_assistant(user.id, session_id, answer, final_sources, started)
+        message_id = await self._save_assistant(user.id, session_id, answer, final_sources, started)
         done_event = {
             "done": True,
             "sources": final_sources,
             "session_id": session_id,
+            "message_id": message_id,
             "outcome": outcome.value,
         }
         if not final_sources:
@@ -1161,11 +1163,14 @@ class QueryOrchestrationUseCase:
         answer: str,
         sources: list[dict],
         started: float,
-    ) -> None:
+    ) -> str | None:
+        """Trả id row message vừa lưu (nếu có) -> đưa vào done event làm message_id ổn
+        định cho FE patch trạng thái action (xem docs/leave-action-state-b2.md)."""
         latency_ms = int((perf_counter() - started) * 1000)
+        message_id: str | None = None
         save_message_detail = getattr(self._conversation_repo, "save_message_detail", None)
         if save_message_detail:
-            await save_message_detail(
+            stored = await save_message_detail(
                 user_id=user_id,
                 role="assistant",
                 content=answer,
@@ -1176,6 +1181,7 @@ class QueryOrchestrationUseCase:
                 latency_ms=latency_ms,
                 create_if_missing=False,
             )
+            message_id = str(stored.id) if stored is not None else None
             context = await self._get_context(user_id, recent_k=6)
             if (
                 self._settings.llm_mode.strip().lower() == "mock"
@@ -1185,7 +1191,7 @@ class QueryOrchestrationUseCase:
                     [(message.role, message.content) for message in context.recent_messages]
                 )
                 if not summary:
-                    return
+                    return message_id
                 await self._conversation_repo.update_summary(
                     user_id,
                     summary,
@@ -1198,6 +1204,7 @@ class QueryOrchestrationUseCase:
                 answer,
                 conversation_id=_ACTIVE_CONVERSATION_ID.get(),
             )
+        return message_id
 
     @staticmethod
     def _source_payload(result: SearchResultLike) -> dict:
