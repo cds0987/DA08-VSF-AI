@@ -550,7 +550,9 @@ services:
       OBSERVABILITY_MODE: langfuse
       GUARDRAILS_MODE: "off"
       ALLOWED_ORIGINS: "http://localhost,http://localhost:3000,http://localhost:3001"
-      RAG_SCORE_THRESHOLD: "0.70"
+      # 0.35 khớp prod (deploy/env/query-service.env). 0.70 quá gắt + rerank LLM điểm dao
+      # động quanh ngưỡng -> flaky sources=0 (ingest OK nhưng qualified=0 ngẫu nhiên).
+      RAG_SCORE_THRESHOLD: "0.35"
       RAG_RESULT_LIMIT: "3"
       QUERY_RATE_LIMIT_PER_MINUTE: "60"
     depends_on:
