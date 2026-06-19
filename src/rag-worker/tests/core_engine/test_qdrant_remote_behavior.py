@@ -30,7 +30,8 @@ class _FakeClient:
     async def create_payload_index(self, **kwargs) -> None:
         return None
 
-    async def upsert(self, *, collection_name: str, points) -> None:
+    async def upsert(self, *, collection_name: str, points, **_kwargs) -> None:
+        # **_kwargs: nuốt wait=True (remote.py truyền để point searchable ngay).
         self.upsert_calls.append(list(points))
 
     async def scroll(self, **kwargs):
@@ -58,7 +59,7 @@ class _MissingThenRecoverClient(_FakeClient):
     async def create_payload_index(self, **kwargs) -> None:
         self.create_payload_index_calls += 1
 
-    async def upsert(self, *, collection_name: str, points) -> None:
+    async def upsert(self, *, collection_name: str, points, **_kwargs) -> None:
         self._upsert_attempts += 1
         if self._upsert_attempts == 1:
             self._exists = False
@@ -72,7 +73,7 @@ class _MissingThenRecoverClient(_FakeClient):
 
 
 class _MissingForeverClient(_FakeClient):
-    async def upsert(self, *, collection_name: str, points) -> None:
+    async def upsert(self, *, collection_name: str, points, **_kwargs) -> None:
         raise UnexpectedResponse(
             status_code=404,
             reason_phrase="Not Found",
