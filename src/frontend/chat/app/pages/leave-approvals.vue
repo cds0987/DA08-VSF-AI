@@ -13,6 +13,27 @@ interface LeaveRequest {
   days_count: number
   status: string
   reason?: string | null
+  // Danh tính nhân viên (backend _enrich_approval đính kèm) -> hiện tên/email thay user_id.
+  employee_name?: string | null
+  employee_email?: string | null
+  employee_department?: string | null
+  employee_job_title?: string | null
+}
+
+// Nhãn nhân viên: ưu tiên tên thật -> email -> user_id rút gọn (mirror ApprovalReviewCard).
+function employeeLabel(req: LeaveRequest): string {
+  if (req.employee_name) return req.employee_name
+  if (req.employee_email) return req.employee_email
+  return req.user_id.length > 10 ? `${req.user_id.slice(0, 6)}…${req.user_id.slice(-2)}` : req.user_id
+}
+
+// Dòng phụ: email (nếu đã hiện tên) + phòng ban/chức danh nếu có.
+function employeeSubtitle(req: LeaveRequest): string {
+  const parts: string[] = []
+  if (req.employee_name && req.employee_email) parts.push(req.employee_email)
+  if (req.employee_job_title) parts.push(req.employee_job_title)
+  if (req.employee_department) parts.push(req.employee_department)
+  return parts.join(' · ')
 }
 
 const hrService = useHRService()
@@ -114,7 +135,10 @@ onMounted(load)
                 Nghỉ {{ req.leave_type }} · {{ req.days_count }} ngày
               </h4>
               <p class="text-[11px] uppercase font-bold tracking-wider text-slate-500 dark:text-muted-foreground">
-                Nhân viên: {{ req.user_id }}
+                Nhân viên: {{ employeeLabel(req) }}
+              </p>
+              <p v-if="employeeSubtitle(req)" class="text-[11px] text-slate-400 dark:text-muted-foreground/80">
+                {{ employeeSubtitle(req) }}
               </p>
             </div>
           </div>
