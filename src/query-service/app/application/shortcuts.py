@@ -127,12 +127,16 @@ DISTRESS_PHRASES: frozenset[str] = frozenset({
 # Checked BEFORE distress so "gãy chân" routes here, NOT to distress.
 # Uses multi-word phrases requiring both the body part and injury verb.
 INJURY_PHRASES: frozenset[str] = frozenset({
-    "gay chan", "gay tay", "gay xuong", "gay xương",
-    "bong nang", "bong gan",
-    "chay mau",
-    "ngat xiu",
-    "treo chan",   # trẹo chân
-    "bi thuong nang",  # bị thương nặng (physical, not distress)
+    # Yêu cầu chủ ngữ hoặc "rồi" để phân biệt "đang báo chấn thương ngay lúc này"
+    # với "gãy chân/chảy máu" xuất hiện như lý do xin nghỉ ốm ("nghỉ ốm do gãy chân").
+    "toi gay chan", "toi bi gay chan", "gay chan roi",
+    "toi gay tay",  "toi bi gay tay",  "gay tay roi",
+    "toi gay xuong", "toi bi gay xuong", "gay xuong roi",
+    "toi bi bong",  "bong nang roi",
+    "toi chay mau", "dang chay mau",  "chay mau nhieu", "chay mau roi",
+    "toi ngat xiu", "bi ngat xiu roi", "ngat xiu roi",
+    "toi treo chan", "treo chan roi",
+    "bi thuong nang",
 })
 
 # Cross-user data requests — REFUSE (asking for another person's personal HR data).
