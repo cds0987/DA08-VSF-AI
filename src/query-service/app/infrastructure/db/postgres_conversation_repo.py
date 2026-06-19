@@ -20,6 +20,7 @@ class StoredMessage:
     sources: list[dict] = field(default_factory=list)
     latency_ms: int | None = None
     feedback: int | None = None
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -137,7 +138,7 @@ class PostgresConversationRepository(ConversationRepository):
                 )
                 VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::jsonb, $7)
                 RETURNING id, session_id, user_id, role, content, created_at,
-                          sources, latency_ms, feedback
+                          sources, latency_ms, feedback, metadata
                 """,
                 conversation["id"],
                 user_id,
@@ -278,6 +279,40 @@ class PostgresConversationRepository(ConversationRepository):
         if row is None:
             raise ValueError("Session not found")
 
+    async def update_message_action(
+        self,
+        user_id: str,
+        message_id: str,
+        idempotency_key: str,
+        state: dict,
+    ) -> bool:
+        """Ghi trạng thái 1 action vào metadata.actions[idempotency_key] của message.
+        Scope theo user_id -> user chỉ sửa được message của mình. Trả False nếu không có
+        row khớp (message không tồn tại / không thuộc user)."""
+        pool = await self._get_pool()
+        async with pool.acquire() as connection:
+            # jsonb_set KHÔNG tự tạo key 'actions' nếu chưa tồn tại -> set thẳng nhánh
+            # {actions} = (actions cũ hoặc {}) || {idem: state}. Merge nên không đè đơn khác.
+            row = await connection.fetchrow(
+                """
+                UPDATE query_svc.messages
+                SET metadata = jsonb_set(
+                    COALESCE(metadata, '{}'::jsonb),
+                    '{actions}',
+                    COALESCE(metadata -> 'actions', '{}'::jsonb)
+                        || jsonb_build_object($3::text, $4::jsonb),
+                    true
+                )
+                WHERE id = $1::uuid AND user_id = $2::uuid
+                RETURNING id
+                """,
+                message_id,
+                user_id,
+                idempotency_key,
+                json.dumps(state),
+            )
+        return row is not None
+
     async def list_messages(
         self,
         user_id: str,
@@ -298,7 +333,7 @@ class PostgresConversationRepository(ConversationRepository):
                 FROM (
                     SELECT message.id, message.session_id, message.user_id, message.role,
                            message.content, message.created_at, message.sources,
-                           message.latency_ms, message.feedback
+                           message.latency_ms, message.feedback, message.metadata
                     FROM query_svc.messages AS message
                     JOIN query_svc.conversations AS conversation
                       ON conversation.id = message.conversation_id
@@ -478,6 +513,13 @@ def _stored_message_from_row(row) -> StoredMessage:
     sources = row["sources"] or []
     if isinstance(sources, str):
         sources = json.loads(sources)
+    # metadata có thể vắng ở row cũ (vd query không SELECT cột này) -> mặc định {}.
+    try:
+        metadata = row["metadata"]
+    except (KeyError, IndexError):
+        metadata = {}
+    if isinstance(metadata, str):
+        metadata = json.loads(metadata)
     return StoredMessage(
         id=str(row["id"]),
         session_id=str(row["session_id"]) if row["session_id"] else None,
@@ -488,6 +530,7 @@ def _stored_message_from_row(row) -> StoredMessage:
         sources=list(sources),
         latency_ms=row["latency_ms"],
         feedback=row["feedback"],
+        metadata=dict(metadata or {}),
     )
 
 

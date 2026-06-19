@@ -121,6 +121,13 @@ class LeaveWriteRepository(ABC):
         """Danh sách đơn status='pending' mà approver_user_id là người duyệt."""
         raise NotImplementedError
 
+    async def get_leave_request(
+        self, *, user_id: str, request_id: str
+    ) -> Optional[dict[str, Any]]:
+        """Trả 1 đơn của CHÍNH chủ đơn (scope user_id) hoặc None nếu không có/không thuộc
+        user. Không abstract -> fake/test cũ không bắt buộc implement."""
+        raise NotImplementedError
+
     @abstractmethod
     async def update_leave_status(
         self,

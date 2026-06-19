@@ -13,6 +13,15 @@ class ConversationMessage(BaseModel):
     session_id: str | None = None
     sources: list[dict[str, Any]] = Field(default_factory=list)
     feedback: int | None = None
+    # Trạng thái thực thi của action gắn vào message (vd actions[idem] = {status,...}).
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MessageActionStateRequest(BaseModel):
+    idempotency_key: str = Field(min_length=1, max_length=64)
+    request_id: str | None = None
+    status: str = Field(default="submitted", max_length=32)
+    leave_status: str | None = Field(default=None, max_length=32)
 
 
 class ConversationSummary(BaseModel):

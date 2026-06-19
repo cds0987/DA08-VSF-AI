@@ -1,17 +1,72 @@
 <script setup lang="ts">
 // build: ship dropdown 7 loại (Phase 3) — image frontend-chat cũ chưa kèm; retry build
 // sau khi gate e2e (hybrid-search) được nới.
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { AlertTriangle, Calendar, Check, Loader2, Send } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import type { HRActionPayload } from '~/types'
 import { useHRService } from '~/lib/api/hrService'
+import { useQueryService } from '~/lib/api/queryService'
+import { useChatStore } from '~/stores/chat'
 
-const props = defineProps<{ action: HRActionPayload }>()
+const props = defineProps<{ action: HRActionPayload; messageId?: string }>()
 const hrService = useHRService()
+const queryService = useQueryService()
+const chatStore = useChatStore()
 const isSubmitting = ref(false)
 const isDone = ref(false)
 const serverError = ref<string | null>(null)
+// Trạng thái duyệt sống (pending/approved/rejected) — đọc từ server, refresh khi mount.
+const leaveStatus = ref<string | null>(props.action.leave_status ?? null)
+
+// NGUỒN SỰ THẬT là server: trạng thái thực thi được lưu vào message (metadata.actions)
+// và đọc lại khi reload (xem docs/leave-action-state-b2.md). localStorage chỉ là lớp
+// OPTIMISTIC để card hiện "đã gửi" tức thì cùng phiên, đề phòng server-state chưa kịp về.
+const SUBMITTED_KEY = 'eka.chat.leave.submitted'
+
+function loadSubmitted(): Set<string> {
+  if (!import.meta.client) return new Set()
+  try {
+    const raw = localStorage.getItem(SUBMITTED_KEY)
+    return new Set(raw ? (JSON.parse(raw) as string[]) : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function markSubmitted(key?: string) {
+  if (!import.meta.client || !key) return
+  try {
+    const set = loadSubmitted()
+    set.add(key)
+    localStorage.setItem(SUBMITTED_KEY, JSON.stringify([...set]))
+  } catch { /* storage đầy/chặn -> bỏ qua, không chặn UX */ }
+}
+
+onMounted(async () => {
+  if (props.action.action_type !== 'create_leave_request') return
+  // Ưu tiên trạng thái server (bền đa thiết bị); fallback localStorage (optimistic).
+  if (props.action.status === 'submitted'
+    || (props.action.idempotency_key && loadSubmitted().has(props.action.idempotency_key))) {
+    isDone.value = true
+  }
+  // Refresh trạng thái duyệt sống nếu đã biết request_id và chưa chốt.
+  const reqId = props.action.request_id
+  if (reqId && leaveStatus.value !== 'approved' && leaveStatus.value !== 'rejected') {
+    try {
+      const res = await hrService.getLeaveRequest(reqId)
+      if (res?.status) leaveStatus.value = res.status
+    } catch { /* không chặn UI nếu query lỗi */ }
+  }
+})
+
+// Nhãn trạng thái duyệt cho user.
+const LEAVE_STATUS_LABEL: Record<string, string> = {
+  pending: 'Đang chờ duyệt', approved: 'Đã được duyệt', rejected: 'Đã bị từ chối',
+  cancelled: 'Đã hủy',
+}
+const leaveStatusLabel = computed(() =>
+  leaveStatus.value ? (LEAVE_STATUS_LABEL[leaveStatus.value] || leaveStatus.value) : null)
 
 // Cảnh báo chồng ngày từ server (code=leave_overlap): user có thể quên đã đặt đơn.
 // -> đổi sang "form khác": hiện đơn cũ + nút Vẫn tạo (gửi lại confirm_overlap=true).
@@ -89,6 +144,30 @@ function onFieldChange() {
   serverError.value = null
 }
 
+// Ghi trạng thái "đã gửi" + request_id vào message trên server. Cần messageId (id row
+// server, ổn định nhờ done event trả message_id) + conversationId hiện hành.
+async function persistActionState(requestId: string | null, leaveStat: string) {
+  const conversationId = chatStore.currentConversationId
+  const key = props.action.idempotency_key
+  if (!props.messageId || !conversationId || !key) return
+  try {
+    await queryService.setMessageActionState(conversationId, props.messageId, {
+      idempotency_key: key,
+      request_id: requestId,
+      status: 'submitted',
+      leave_status: leaveStat,
+    })
+    // Đồng bộ in-memory action -> reload trong phiên cũng thấy trạng thái mới.
+    props.action.status = 'submitted'
+    props.action.request_id = requestId
+    props.action.leave_status = leaveStat
+  } catch (e) {
+    // Không chặn UX: localStorage đã giữ trạng thái cho phiên này; lần reload sau nếu
+    // server chưa có, card lại hiện form (nhưng server vẫn chặn trùng).
+    console.error('persist action state failed:', e)
+  }
+}
+
 async function submit(confirmOverlap: boolean) {
   if (isSubmitting.value || isDone.value) return
   if (error.value) {
@@ -98,7 +177,7 @@ async function submit(confirmOverlap: boolean) {
   isSubmitting.value = true
   serverError.value = null
   try {
-    await hrService.createLeaveRequest({
+    const created = await hrService.createLeaveRequest({
       leave_type: form.leave_type,
       start_date: form.start_date,
       end_date: form.end_date,
@@ -108,6 +187,10 @@ async function submit(confirmOverlap: boolean) {
     })
     toast.success('Đã gửi đơn nghỉ phép thành công!')
     isDone.value = true
+    leaveStatus.value = created?.status ?? 'pending'
+    markSubmitted(props.action.idempotency_key)  // optimistic, cùng phiên
+    // Persist trạng thái vào message (server là nguồn sự thật -> bền đa thiết bị).
+    void persistActionState(created?.id ?? null, created?.status ?? 'pending')
     overlapWarning.value = null
     isDuplicateBlocked.value = false
   } catch (err: any) {
@@ -253,6 +336,7 @@ const fieldClass
       <div v-else class="inline-flex items-center gap-1.5 text-[13px] font-semibold text-emerald-600">
         <Check class="h-4 w-4" />
         Đã gửi đến HR
+        <span v-if="leaveStatusLabel" class="font-medium text-slate-500 dark:text-muted-foreground">· {{ leaveStatusLabel }}</span>
       </div>
     </div>
   </div>

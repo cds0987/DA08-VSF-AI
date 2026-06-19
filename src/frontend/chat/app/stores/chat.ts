@@ -45,6 +45,31 @@ function newIdempotencyKey(): string {
     ?? `idem-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+// Hash tất định (cyrb53) -> dùng dựng idempotency_key BỀN qua reload. Trước đây key
+// random sinh lại mỗi lần rehydrate lịch sử -> idempotency vô tác dụng sau khi load lại
+// trang và card "Xác nhận đơn nghỉ" hiện lại như chưa gửi. Hash theo NỘI DUNG đơn ->
+// cùng đơn = cùng key qua mọi lần reload.
+function cyrb53(str: string): string {
+  let h1 = 0xdeadbeef
+  let h2 = 0x41c6ce57
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i)
+    h1 = Math.imul(h1 ^ ch, 2654435761)
+    h2 = Math.imul(h2 ^ ch, 1597334677)
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909)
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909)
+  return (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0')
+}
+
+// idempotency_key TẤT ĐỊNH cho 1 đơn nghỉ. PHẢI gồm user_id vì cột idempotency_key là
+// UNIQUE TOÀN CỤC (uq_leave_req_idempotency_key) -> nếu thiếu, 2 user cùng loại+ngày sẽ
+// đụng key và nhận nhầm đơn của nhau. <= 64 ký tự (giới hạn cột String(64)).
+function stableLeaveKey(userId: string | undefined, p: any): string {
+  const seed = [p?.leave_type, p?.start_date, p?.end_date, p?.reason ?? ''].join('|')
+  return `lv-${(userId || 'anon').slice(0, 36)}-${cyrb53(seed)}`
+}
+
 // Quét các JSON object top-level (cân bằng ngoặc) trong 1 chuỗi. Model yếu (nano) thỉnh
 // thoảng in tham số tool-call ra text rồi mới nối action JSON thật ->
 //   {"kind":"absolute",...}\n{"action_type":...}
@@ -79,7 +104,7 @@ function scanTopLevelJsonObjects(text: string): any[] {
 }
 
 // Dựng actions từ 1 parsed object có action_type. Trả null nếu không phải object action.
-function actionsFromParsed(parsed: any): any[] | null {
+function actionsFromParsed(parsed: any, userId?: string): any[] | null {
   if (!parsed || typeof parsed !== 'object' || !parsed.action_type) return null
   // Thẻ duyệt: không cần items/parameters — FE tự nạp hàng đợi live.
   if (parsed.action_type === 'review_leave_approvals') {
@@ -89,12 +114,13 @@ function actionsFromParsed(parsed: any): any[] | null {
     ? parsed.items
     : (parsed.parameters ? [parsed.parameters] : [])
   if (!rawItems.length) return []
-  // Mỗi đơn 1 idempotency_key riêng (sinh 1 lần lúc dựng card) -> bấm Confirm
-  // nhiều lần / nhiều đơn không tạo trùng nhau.
+  // idempotency_key TẤT ĐỊNH theo nội dung đơn -> bền qua reload (xem stableLeaveKey).
+  // Cùng đơn = cùng key: bấm Confirm nhiều lần / reload rồi gửi lại đều dedupe ở server,
+  // và card biết "đã gửi" nhờ key này.
   return rawItems.map(p => ({
     action_type: parsed.action_type,
     parameters: p,
-    idempotency_key: newIdempotencyKey(),
+    idempotency_key: stableLeaveKey(userId, p),
   }))
 }
 
@@ -105,14 +131,14 @@ function actionsFromParsed(parsed: any): any[] | null {
 // ROBUST với model leak: nếu content có lẫn JSON rác (vd tham số resolve_date) trước
 // action JSON, vẫn nhặt đúng object action thay vì đổ raw cho user.
 // Trả { actions, content }: actions = danh sách payload; content = câu dẫn nhập.
-function extractAction(rawContent: string): { actions?: any[]; content: string } {
+function extractAction(rawContent: string, userId?: string): { actions?: any[]; content: string } {
   const trimmed = (rawContent || '').trim()
   if (!trimmed.includes('{') || !trimmed.includes('}')) return { content: rawContent }
 
   // Đường nhanh: cả chuỗi là 1 JSON object hợp lệ.
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
     try {
-      const actions = actionsFromParsed(JSON.parse(trimmed))
+      const actions = actionsFromParsed(JSON.parse(trimmed), userId)
       if (actions && actions.length) return { actions, content: buildActionIntro(actions) }
       if (actions) return { content: 'Mình đã xử lý yêu cầu của bạn. Bạn có thể hỏi thêm nếu cần nhé.' }
     } catch { /* rơi xuống nhánh quét nhiều object */ }
@@ -122,7 +148,7 @@ function extractAction(rawContent: string): { actions?: any[]; content: string }
   const objs = scanTopLevelJsonObjects(trimmed)
   const actionObj = [...objs].reverse().find(o => o && o.action_type)
   if (actionObj) {
-    const actions = actionsFromParsed(actionObj)
+    const actions = actionsFromParsed(actionObj, userId)
     if (actions && actions.length) return { actions, content: buildActionIntro(actions) }
     return { content: 'Mình đã xử lý yêu cầu của bạn. Bạn có thể hỏi thêm nếu cần nhé.' }
   }
@@ -207,17 +233,24 @@ function toCitation(source: QuerySource, id: string): Citation {
   }
 }
 
-function toChatMessage(message: ConversationHistoryMessage): ChatMessage {
+function toChatMessage(message: ConversationHistoryMessage, userId?: string): ChatMessage {
   const createdAt = new Date(message.created_at)
   // Trợ lý có thể đã lưu raw JSON action -> parse lại để render form khi reload lịch sử.
   const extracted = message.role === 'assistant'
-    ? extractAction(message.content)
+    ? extractAction(message.content, userId)
     : { content: message.content, actions: undefined as any }
+  // Gắn trạng thái thực thi (server là nguồn sự thật) vào từng action theo idempotency_key
+  // -> card render "đã gửi" sau reload thay vì form. (B2 — docs/leave-action-state-b2.md)
+  const actionStates = message.metadata?.actions
+  const actions = extracted.actions?.map((a: any) => {
+    const st = a.idempotency_key ? actionStates?.[a.idempotency_key] : undefined
+    return st ? { ...a, status: st.status, request_id: st.request_id, leave_status: st.leave_status } : a
+  })
   return {
     id: message.id,
     role: message.role,
     content: extracted.content,
-    actions: extracted.actions,
+    actions,
     citations: message.sources?.map((source, index) => toCitation(
       source,
       message.id + '-source-' + index,
@@ -407,7 +440,7 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const detail = await queryService.fetchConversation(id)
       const updatedAt = detail.updated_at
-      const serverMsgs = detail.messages.map(toChatMessage)
+      const serverMsgs = detail.messages.map(m => toChatMessage(m, sessionStore.user?.id))
       // `trace` (các bước agent) + `reasoning` chỉ sống ở client — backend history KHÔNG lưu.
       // Khôi phục từ cache localStorage theo vị trí + content -> mở lại/đổi hội thoại KHÔNG
       // mất "Agent đã thực hiện N bước" của các câu trả lời cũ.
@@ -772,10 +805,12 @@ export const useChatStore = defineStore('chat', () => {
         const result = donePayload as QueryDoneEvent
         
         // Tách action JSON khỏi content (dùng chung helper với rehydrate lịch sử).
-        const extracted = extractAction(fullContent)
+        const extracted = extractAction(fullContent, userId ? String(userId) : undefined)
 
         const assistant: ChatMessage = {
-          id: 'a-' + Date.now(),
+          // Ưu tiên id row server (ổn định qua reload -> patch được trạng thái action);
+          // fallback id cục bộ khi done event không kèm message_id.
+          id: result.message_id || ('a-' + Date.now()),
           role: 'assistant',
           content: extracted.content, // intro nếu là action, raw JSON đã được ẩn
           actions: extracted.actions,

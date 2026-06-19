@@ -138,6 +138,25 @@ export function useQueryService() {
     )
   }
 
+  // Ghi trạng thái thực thi của 1 action (vd đơn nghỉ đã gửi) vào message -> bền qua
+  // reload/đa thiết bị (xem docs/leave-action-state-b2.md).
+  async function setMessageActionState(
+    conversationId: string,
+    messageId: string,
+    payload: { idempotency_key: string; request_id?: string | null; status?: string; leave_status?: string | null },
+  ) {
+    return withTokenRefresh(() =>
+      $fetch<{ message: string }>(
+        `${baseUrl}/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/actions`,
+        {
+          method: 'POST',
+          headers: getQueryServiceAuthHeaders(),
+          body: payload,
+        },
+      )
+    )
+  }
+
   return {
     baseUrl,
     fetchHistory,
@@ -149,5 +168,6 @@ export function useQueryService() {
     clearConversations,
     deleteConversation,
     renameConversation,
+    setMessageActionState,
   }
 }

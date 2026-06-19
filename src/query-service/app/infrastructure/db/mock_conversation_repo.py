@@ -18,6 +18,7 @@ class StoredMessage:
     sources: list[dict] = field(default_factory=list)
     latency_ms: int | None = None
     feedback: int | None = None
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -105,6 +106,22 @@ class InMemoryConversationRepository(ConversationRepository):
         conversation.messages.append(message)
         conversation.updated_at = datetime.now(timezone.utc)
         return message
+
+    async def update_message_action(
+        self,
+        user_id: str,
+        message_id: str,
+        idempotency_key: str,
+        state: dict,
+    ) -> bool:
+        for conversation in self._by_id.values():
+            if conversation.user_id != user_id:
+                continue
+            for message in conversation.messages:
+                if message.id == message_id:
+                    message.metadata.setdefault("actions", {})[idempotency_key] = state
+                    return True
+        return False
 
     async def update_summary(
         self,

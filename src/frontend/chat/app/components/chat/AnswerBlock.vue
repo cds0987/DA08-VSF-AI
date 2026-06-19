@@ -157,7 +157,7 @@ function nextCite() {
       <template v-for="(act, i) in data.actions" :key="act.idempotency_key || i">
         <ApprovalReviewCard v-if="act.action_type === 'review_leave_approvals'" />
         <ProactiveSuggestionCard v-else-if="act.action_type === 'proactive_doc_suggestion'" :action="act" />
-        <ActionableCard v-else :action="act" />
+        <ActionableCard v-else :action="act" :message-id="data.id" />
       </template>
     </div>
 

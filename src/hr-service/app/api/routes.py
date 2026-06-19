@@ -354,6 +354,20 @@ async def pending_approval(
     return {"items": items, "count": len(items)}
 
 
+# Khai báo SAU /pending-approval để route tĩnh đó không bị nuốt vào {request_id}.
+@router.get("/hr/leave-requests/{request_id}")
+async def get_leave_request(
+    request_id: str,
+    user_id: str,
+    repo: LeaveWriteRepository = Depends(get_write_repo),
+) -> dict[str, Any]:
+    """Trạng thái 1 đơn của chủ đơn (scope user_id)."""
+    req = await repo.get_leave_request(user_id=user_id, request_id=request_id)
+    if req is None:
+        raise HTTPException(status_code=404, detail="leave request not found")
+    return req
+
+
 async def _decide_leave(
     request_id: str,
     body: ApprovalActionRequest,

@@ -106,6 +106,9 @@ export interface QueryDoneEvent {
   done: true
   sources: QuerySource[]
   session_id: string
+  // id row message assistant đã lưu ở query-service -> FE dùng làm id ổn định để patch
+  // trạng thái action (xem docs/leave-action-state-b2.md).
+  message_id?: string | null
   trace_id?: string
   cached?: true
   fallback?: true
@@ -113,7 +116,7 @@ export interface QueryDoneEvent {
 
 export interface NotificationEvent {
   type: 'notify'
-  event: 'doc_new'
+  event: 'doc_new' | 'leave_request_new'
   id: string
   message: string
   doc_id: string | null
@@ -153,8 +156,14 @@ export interface HRActionPayload {
     end_date: string
     reason: string
   }
-  // Sinh 1 lần khi tạo card (FE) -> chống tạo trùng nếu user bấm Confirm 2 lần / retry.
+  // idempotency_key TẤT ĐỊNH theo nội dung đơn (stableLeaveKey) -> bền qua reload, dùng
+  // làm khóa map trạng thái action lưu trên server.
   idempotency_key?: string
+  // Trạng thái thực thi đọc từ server (metadata.actions[idempotency_key]) -> card render
+  // "đã gửi" sau reload thay vì form. 'submitted' = đã tạo đơn.
+  status?: string
+  request_id?: string | null
+  leave_status?: string | null
   // proactive_doc_suggestion fields
   document_name?: string
   doc_id?: string | null
@@ -213,6 +222,11 @@ export interface ConversationHistoryMessage {
   session_id?: string | null
   sources?: QuerySource[]
   feedback?: 1 | -1 | null
+  // metadata.actions[idempotency_key] = { status, request_id, leave_status } -> trạng thái
+  // thực thi action gắn vào message (server là nguồn sự thật).
+  metadata?: {
+    actions?: Record<string, { status?: string; request_id?: string | null; leave_status?: string | null }>
+  } | null
 }
 
 export interface ConversationSummaryResponse {

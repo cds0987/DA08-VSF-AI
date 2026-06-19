@@ -408,6 +408,22 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
 
         return await asyncio.to_thread(_query)
 
+    async def get_leave_request(self, *, user_id: str, request_id: str) -> Optional[dict]:
+        """1 đơn của chủ đơn (scope user_id) -> dict đầy đủ (gồm status) hoặc None."""
+        def _query() -> Optional[dict]:
+            with self._session() as session:
+                row = (
+                    session.query(LeaveRequestRecord)
+                    .filter(
+                        LeaveRequestRecord.id == request_id,
+                        LeaveRequestRecord.user_id == user_id,
+                    )
+                    .first()
+                )
+                return _req_to_dict(row) if row is not None else None
+
+        return await asyncio.to_thread(_query)
+
     async def get_attendance(self, user_id: str) -> Optional[AttendanceDTO]:
         def _query() -> Optional[AttendanceDTO]:
             with self._session() as session:
