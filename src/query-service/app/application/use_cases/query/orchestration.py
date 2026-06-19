@@ -574,20 +574,10 @@ class QueryOrchestrationUseCase:
                     # nhưng ĐẨY ra kênh "thought" để UI hiện "model đang nghĩ gì" live (tách
                     # khỏi answer). Model gọi-tool có thể phát ít/không phát (reasoning ẩn).
                     if self._settings.agent_split_answer and node == "think":
-                        # CHỈ stream reasoning_content (suy luận thật, deepseek-reasoner lộ),
-                        # KHÔNG stream content (câu trả lời/tool decision) -> không leak câu
-                        # trả lời vào panel "Lập kế hoạch". Model không lộ reasoning -> trống.
-                        _chunk = event["data"]["chunk"]
-                        _rc = (getattr(_chunk, "additional_kwargs", None) or {}).get("reasoning_content")
-                        if _rc:
-                            yield {
-                                "phase": "thought",
-                                "node": "think",
-                                "text": _rc,
-                                "session_id": session_id,
-                                "agent_mode": "langgraph",
-                                "iterations": last_iteration,
-                            }
+                        # KHÔNG stream reasoning_content THÔ ra UI: chuỗi suy luận của reasoner
+                        # (deepseek-v4-pro) reason TRÊN dữ liệu HR -> LEAK lương/nhạy cảm + dài
+                        # dòng + lộn xộn. Chỉ giữ dòng "quyết định" SẠCH (node=plan, emit ở
+                        # on_chain_end think). think cũng KHÔNG trộn vào câu trả lời cuối.
                         continue
                     token = event["data"]["chunk"].content
                     if token:
@@ -717,23 +707,17 @@ class QueryOrchestrationUseCase:
                             if k_msgs:
                                 _last = k_msgs[-1]
                                 _tcs = getattr(_last, "tool_calls", None) or []
-                                if _tcs:
-                                    _names = ", ".join(tc.get("name", "") for tc in _tcs if tc.get("name"))
-                                    _ptext = f"Cần dùng công cụ: {_names}"
-                                else:
-                                    _c = getattr(_last, "content", "") or ""
-                                    _ptext = (
-                                        "Đã đủ thông tin → soạn câu trả lời."
-                                        if _c else "Tiếp tục xử lý."
-                                    )
-                                yield {
-                                    "phase": "thought",
-                                    "node": "plan",
-                                    "text": _ptext,
-                                    "session_id": session_id,
-                                    "agent_mode": "langgraph",
-                                    "iterations": last_iteration,
-                                }
+                                # CHỈ emit dòng quyết định khi think chốt TRẢ LỜI (không gọi tool):
+                                # khi gọi tool thì bước tool ngay dưới đã thể hiện -> tránh trùng/lộn xộn.
+                                if not _tcs:
+                                    yield {
+                                        "phase": "thought",
+                                        "node": "plan",
+                                        "text": "Đã đủ thông tin → tổng hợp câu trả lời.",
+                                        "session_id": session_id,
+                                        "agent_mode": "langgraph",
+                                        "iterations": last_iteration,
+                                    }
                         # Emit observing event from act node output (ToolMessage with real results)
                         if run_name == "act":
                             out = (event.get("data") or {}).get("output") or {}
