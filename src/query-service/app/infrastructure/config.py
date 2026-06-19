@@ -136,6 +136,13 @@ class Settings(BaseSettings):
 
     use_langgraph: bool = True  # LangGraph is the canonical agent; set to false to use legacy orchestration
 
+    # MOSA per-node LLM (app/infrastructure/llm/profiles.yaml). Mỗi node (triage/think/
+    # answer) dùng adapter + model riêng. agent_split_answer=True tách answer thành node
+    # gọi LLM riêng (model `answer`) + stream token; False (mặc định) giữ hành vi cũ
+    # (think tự sinh câu trả lời) -> e2e không đổi. Bật sau khi eval parity xanh.
+    agent_split_answer: bool = False
+    llm_profiles_path: str | None = None  # override path profiles.yaml (None -> bundle mặc định)
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @model_validator(mode="after")

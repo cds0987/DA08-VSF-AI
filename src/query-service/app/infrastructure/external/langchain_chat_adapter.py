@@ -275,6 +275,16 @@ class OpenAIChatModel(BaseChatModel):
                 yield gen
                 yielded = True
 
+            # reasoning_content: chuỗi suy luận THẬT (deepseek-reasoner lộ; OpenAI ẩn).
+            # Đẩy qua additional_kwargs để orchestration hiện "model đang nghĩ" — TÁCH khỏi
+            # content (câu trả lời) nên KHÔNG bao giờ leak câu trả lời vào panel suy nghĩ.
+            rtext = getattr(delta, "reasoning_content", None) or getattr(delta, "reasoning", None)
+            if rtext:
+                yield ChatGenerationChunk(
+                    message=AIMessageChunk(content="", additional_kwargs={"reasoning_content": rtext})
+                )
+                yielded = True
+
             for tc in (getattr(delta, "tool_calls", None) or []):
                 idx = getattr(tc, "index", 0) or 0
                 slot = fn_calls.get(idx)

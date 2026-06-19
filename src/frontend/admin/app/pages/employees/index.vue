@@ -91,10 +91,14 @@ const proceedConfirm = async () => {
   confirmLoading.value = true
   try {
     if (type === 'delete') {
-      await userService.deleteUser(emp.user_id)
-      // Xoá row ngay khỏi local state: HR xoá async qua event user.deleted
-      // nên fetchEmployees() sẽ vẫn thấy row ~1-2s. Optimistic removal tránh
-      // trạng thái broken (power button mất, manager "No manager").
+      const isOrphan = !usersById.value[emp.user_id]
+      if (isOrphan) {
+        // Orphan: không có user account → xóa trực tiếp HR profile qua hr-service
+        await hrService.deleteEmployee(emp.id)
+      } else {
+        // Normal: xóa user account → HR profile được dọn async qua event user.deleted
+        await userService.deleteUser(emp.user_id)
+      }
       employees.value = employees.value.filter(e => e.user_id !== emp.user_id)
       total.value = Math.max(0, total.value - 1)
       toast.success(`${emp.full_name || emp.company_email} deleted`)
@@ -120,7 +124,10 @@ watch([departmentFilter, statusFilter], () => {
 })
 watch(offset, () => void fetchEmployees())
 
-onMounted(() => void fetchEmployees())
+onMounted(() => {
+  void fetchEmployees()
+  void hrService.listDepartments().then(d => { allDepartments.value = d }).catch(() => {})
+})
 
 const prevPage = () => { if (offset.value >= limit.value) offset.value -= limit.value }
 const nextPage = () => { if (offset.value + limit.value < total.value) offset.value += limit.value }
@@ -158,17 +165,19 @@ const form = reactive({
   job_title: '',
   manager_user_id: '',
 })
-const formErrors = reactive({ email: '', password: '' })
+const formErrors = reactive({ email: '', password: '', full_name: '', department: '' })
 const isSubmitting = ref(false)
 const isPolling = ref(false)
 
 // Toàn bộ nhân viên/admin trong Employee Management để chọn Manager (kể cả đã deactivate)
 const managerOptions = ref<EmployeeItem[]>([])
+const allDepartments = ref<string[]>([])
 const loadManagerOptions = async () => {
   try {
-    const res = await hrService.listEmployees({ limit: 200, offset: 0, status: 'active' })
+    const res = await hrService.listEmployees({ limit: 100, offset: 0, status: 'active' })
     managerOptions.value = res.items
-  } catch {
+  } catch (error) {
+    console.error('Failed to load manager options:', error)
     managerOptions.value = []
   }
 }
@@ -196,18 +205,30 @@ const resetForm = () => {
   form.manager_user_id = ''
   formErrors.email = ''
   formErrors.password = ''
+  formErrors.full_name = ''
+  formErrors.department = ''
 }
 
 const validateForm = () => {
   let ok = true
   formErrors.email = ''
   formErrors.password = ''
+  formErrors.full_name = ''
+  formErrors.department = ''
   if (!form.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
     formErrors.email = 'Valid email required'
     ok = false
   }
   if (form.password.length < 8) {
     formErrors.password = 'Password must be at least 8 characters'
+    ok = false
+  }
+  if (!form.full_name.trim()) {
+    formErrors.full_name = 'Full name is required'
+    ok = false
+  }
+  if (!form.department) {
+    formErrors.department = 'Department is required'
     ok = false
   }
   return ok
@@ -585,14 +606,16 @@ const pollAndApplyProfile = async (userId: string, profilePayload: UpdateEmploye
 
               <div class="flex gap-3">
                 <div class="flex-1">
-                  <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-full-name">Full Name</label>
+                  <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-full-name">Full Name <span class="text-destructive">*</span></label>
                   <input
                     id="emp-full-name"
                     v-model="form.full_name"
                     type="text"
                     placeholder="e.g. Nguyễn Văn A"
-                    class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded-md border bg-background px-3 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-primary/20"
+                    :class="formErrors.full_name ? 'border-destructive' : 'border-input'"
                   >
+                  <p v-if="formErrors.full_name" class="mt-1 text-[11px] text-destructive">{{ formErrors.full_name }}</p>
                 </div>
                 <div class="flex-1">
                   <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-phone">Phone Number</label>
@@ -628,14 +651,17 @@ const pollAndApplyProfile = async (userId: string, profilePayload: UpdateEmploye
               </div>
 
               <div>
-                <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-department">Department</label>
-                <input
+                <label class="mb-1 block text-[12px] font-medium text-foreground" for="emp-department">Department <span class="text-destructive">*</span></label>
+                <select
                   id="emp-department"
                   v-model="form.department"
-                  type="text"
-                  placeholder="e.g. Engineering"
-                  class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded-md border bg-background px-3 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-primary/20"
+                  :class="formErrors.department ? 'border-destructive' : 'border-input'"
                 >
+                  <option value="">— No department —</option>
+                  <option v-for="d in allDepartments" :key="d" :value="d">{{ d }}</option>
+                </select>
+                <p v-if="formErrors.department" class="mt-1 text-[11px] text-destructive">{{ formErrors.department }}</p>
               </div>
 
               <div class="flex gap-3">

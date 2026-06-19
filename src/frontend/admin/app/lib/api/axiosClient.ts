@@ -3,14 +3,9 @@ import axios, {
   type AxiosInstance,
   type InternalAxiosRequestConfig,
 } from 'axios'
-import type { ApiError, LoginResponse } from '~/types'
-import {
-  ACCESS_TOKEN_COOKIE,
-  SESSION_COOKIE,
-  getClientCookie,
-  removeClientCookie,
-  setClientCookie,
-} from '../cookie'
+import type { ApiError } from '~/types'
+import { ACCESS_TOKEN_COOKIE, getClientCookie, setClientCookie } from '../cookie'
+import { handleRefreshFailure, refreshAccessToken } from './authRefresh'
 
 export interface CustomInternalAxiosRequestConfig extends InternalAxiosRequestConfig {
   _retry?: boolean
@@ -20,52 +15,6 @@ export interface CustomInternalAxiosRequestConfig extends InternalAxiosRequestCo
 const axiosClient: AxiosInstance = axios.create({
   timeout: 30000,
 })
-
-// Đường dẫn /login phải tôn trọng NUXT_APP_BASE_URL (admin deploy ở /admin/) —
-// window.location.href tuyệt đối '/login' sẽ nhảy ra ngoài base path, bị nginx
-// route catch-all sang app chat. Xem getLoginPath() ở dưới.
-function getLoginPath(): string {
-  const base = useRuntimeConfig().app.baseURL || '/'
-  return `${base.replace(/\/$/, '')}/login`
-}
-
-// Dedup các lệnh refresh-token đồng thời: nhiều request 401 cùng lúc (vd nhiều
-// tab, hoặc nhiều API call song song khi access token hết hạn) chỉ nên gọi
-// /auth/refresh một lần — gọi nhiều lần dễ đua nhau làm rotate refresh token
-// và khiến request đến sau bị fail oan, dẫn tới logout giả.
-let refreshPromise: Promise<string | null> | null = null
-
-async function refreshAccessToken(): Promise<string | null> {
-  if (!refreshPromise) {
-    refreshPromise = (async () => {
-      try {
-        const runtimeConfig = useRuntimeConfig()
-        const gatewayUrl = String(runtimeConfig.public.apiGatewayUrl || '').replace(/\/$/, '')
-        const userPrefix = runtimeConfig.public.userServicePath || '/api/user'
-
-        const refreshHeaders: Record<string, string> = {}
-        const gatewayAuth = runtimeConfig.public.gatewayBasicAuth
-        if (gatewayAuth) {
-          refreshHeaders['Authorization-Gateway'] = gatewayAuth
-        }
-
-        // Browser gửi HttpOnly refresh token cookie tự động nhờ withCredentials
-        const refreshRes = await axios.post<LoginResponse>(
-          `${gatewayUrl}${userPrefix}/auth/refresh`,
-          {},
-          { headers: refreshHeaders, withCredentials: true },
-        )
-        return refreshRes.data.access_token || null
-      } catch (refreshError) {
-        console.error('Refresh token failed:', refreshError)
-        return null
-      } finally {
-        refreshPromise = null
-      }
-    })()
-  }
-  return refreshPromise
-}
 
 axiosClient.interceptors.request.use(
   (config: CustomInternalAxiosRequestConfig) => {
@@ -95,7 +44,7 @@ axiosClient.interceptors.request.use(
     }
 
     if (import.meta.client) {
-      const isAuthEndpoint = config.url?.includes('/auth/login') || config.url?.includes('/auth/refresh') || config.url?.includes('/auth/token')
+      const isAuthEndpoint = config.url?.includes('/auth/login') || config.url?.includes('/auth/admin/login') || config.url?.includes('/auth/refresh') || config.url?.includes('/auth/admin/refresh') || config.url?.includes('/auth/token')
 
       if (!isAuthEndpoint) {
         const token = getClientCookie(ACCESS_TOKEN_COOKIE)
@@ -117,6 +66,9 @@ axiosClient.interceptors.response.use(
     const detail = error.response?.data?.detail || 'Đã có lỗi xảy ra'
 
     if (status === 401 && !originalRequest._retry && !originalRequest.url?.includes('/auth/login') && !originalRequest.url?.includes('/auth/refresh')) {
+      // Lưu ý: '/auth/admin/refresh' không chứa chuỗi '/auth/refresh' nên cũng được phép
+      // vào nhánh này, nhưng lệnh refresh dùng axios trần (không qua interceptor) nên
+      // không xảy ra vòng lặp refresh.
       originalRequest._retry = true
 
       const access_token = await refreshAccessToken()
@@ -128,14 +80,8 @@ axiosClient.interceptors.response.use(
         return axiosClient(originalRequest)
       }
 
-      if (import.meta.client) {
-        removeClientCookie(ACCESS_TOKEN_COOKIE)
-        removeClientCookie(SESSION_COOKIE)
-        const loginPath = getLoginPath()
-        if (window.location.pathname !== loginPath) {
-          window.location.href = loginPath
-        }
-      }
+      // Refresh thất bại thật sự -> logout dùng chung với các đường request khác.
+      handleRefreshFailure()
     }
 
     switch (status) {

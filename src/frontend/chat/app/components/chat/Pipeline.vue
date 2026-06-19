@@ -1,14 +1,22 @@
 <script setup lang="ts">
 import { Search, Database, Loader2, CheckCircle2, Sparkles } from '@lucide/vue'
-import type { TraceEntry } from '~/types'
+import type { TraceEntry, NodeModel } from '~/types'
 
 interface Props {
   traceLog: TraceEntry[]
   thinkingStatus?: string
   isThinking?: boolean
+  models?: NodeModel[]
+  thoughts?: { node: string; text: string }[]
 }
 
 const props = defineProps<Props>()
+
+const NODE_LABEL: Record<string, string> = {
+  triage: 'Phân loại',
+  think: 'Lập kế hoạch',
+  answer: 'Soạn trả lời',
+}
 
 const TOOL_LABEL: Record<string, string> = {
   rag_search: 'Tìm kiếm tài liệu',
@@ -58,6 +66,18 @@ function getResultLabel(entry: TraceEntry): string {
     <div class="mb-2.5 flex items-center gap-2 text-[12px] font-medium text-slate-700 dark:text-foreground/80">
       <Sparkles class="h-3.5 w-3.5 text-blue-500" />
       Agent đang xử lý
+    </div>
+
+    <!-- Suy nghĩ / quyết định của model (live) -->
+    <div v-if="thoughts?.length" class="mb-2 space-y-1">
+      <div
+        v-for="(t, i) in thoughts"
+        :key="i"
+        class="rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-1.5 text-[11.5px] leading-relaxed text-slate-600 dark:border-blue-500/15 dark:bg-blue-500/5 dark:text-muted-foreground"
+      >
+        <span class="font-semibold text-blue-600 dark:text-blue-300">{{ NODE_LABEL[t.node] ?? t.node }}:</span>
+        {{ t.text }}
+      </div>
     </div>
 
     <!-- Thinking indicator (before any tool calls) -->

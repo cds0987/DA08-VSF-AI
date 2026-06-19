@@ -21,6 +21,7 @@ import {
   getQueryServiceAuthHeaders,
   useQueryService,
 } from '~/lib/api/queryService'
+import { handleRefreshFailure, refreshAccessToken } from '~/lib/api/authRefresh'
 
 const HISTORY_KEY = 'eka.chat.conversations'
 
@@ -282,6 +283,8 @@ export const useChatStore = defineStore('chat', () => {
   const streamingText = ref('')
   const thinkingStatus = ref('')
   const traceLog = ref<TraceEntry[]>([])
+  const modelsUsed = ref<{ node: string; model: string }[]>([])
+  const thoughts = ref<{ node: string; text: string }[]>([])
   const panelCitation = ref<Citation | null>(null)
   const isPanelOpen = ref(false)
   const pendingProactiveDoc = ref<{ name: string; docId: string | null } | null>(null)
@@ -404,12 +407,28 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const detail = await queryService.fetchConversation(id)
       const updatedAt = detail.updated_at
+      const serverMsgs = detail.messages.map(toChatMessage)
+      // `trace` (các bước agent) + `reasoning` chỉ sống ở client — backend history KHÔNG lưu.
+      // Khôi phục từ cache localStorage theo vị trí + content -> mở lại/đổi hội thoại KHÔNG
+      // mất "Agent đã thực hiện N bước" của các câu trả lời cũ.
+      const cachedMsgs = fallbackConversations.value.find((c) => c.id === id)?.messages ?? []
+      serverMsgs.forEach((s, i) => {
+        if (s.role !== 'assistant') return
+        const sameSlot = cachedMsgs[i]?.role === 'assistant' && cachedMsgs[i]?.content === s.content
+        const c = sameSlot
+          ? cachedMsgs[i]
+          : cachedMsgs.find((m) => m.role === 'assistant' && m.content === s.content && (m.trace?.length || m.reasoning))
+        if (c?.trace?.length) s.trace = c.trace
+        if (c?.reasoning) s.reasoning = c.reasoning
+        if (c?.models?.length) s.models = c.models
+        if (c?.thoughts?.length) s.thoughts = c.thoughts
+      })
       const synced: Conversation = {
         id: detail.id,
         title: detail.title,
         updatedAt,
         bucket: getBucket(new Date(updatedAt)),
-        messages: detail.messages.map(toChatMessage),
+        messages: serverMsgs,
       }
       const index = conversations.value.findIndex((item) => item.id === id)
       if (index >= 0) conversations.value.splice(index, 1, synced)
@@ -595,6 +614,8 @@ export const useChatStore = defineStore('chat', () => {
     streamingText.value = ''
     thinkingStatus.value = ''
     traceLog.value = []
+    modelsUsed.value = []
+    thoughts.value = []
     pipeline.value = 0
     let fullContent = ''
     let completed = false
@@ -617,8 +638,10 @@ export const useChatStore = defineStore('chat', () => {
       generating: 3,
     }
 
-    try {
-      await fetchEventSource(`${queryService.baseUrl}/query`, {
+    // Tách thân stream ra hàm riêng để có thể retry MỘT lần khi 401 xảy ra TRƯỚC khi
+    // stream bắt đầu. getQueryServiceAuthHeaders() được đọc lại mỗi lần gọi nên sau khi
+    // refresh (cookie mới) retry sẽ dùng token mới.
+    const runStream = () => fetchEventSource(`${queryService.baseUrl}/query`, {
         method: 'POST',
         headers: {
           ...getQueryServiceAuthHeaders(),
@@ -648,6 +671,29 @@ export const useChatStore = defineStore('chat', () => {
               streamingText.value += payload.token
               pipeline.value = pipelineStages.length
               thinkingStatus.value = ''
+            }
+
+            // model_used: ghi nhận model THẬT từng node đã chạy. Xử lý TRƯỚC guard
+            // hasStartedStreaming vì model_used của answer node phát SAU khi token bắt đầu.
+            if (payload.phase === 'model_used' && payload.node && payload.model) {
+              const m = { node: payload.node, model: payload.model }
+              if (!modelsUsed.value.some(x => x.node === m.node && x.model === m.model)) {
+                modelsUsed.value.push(m)
+              }
+              return
+            }
+
+            // thought: model nghĩ gì / quyết định gì. think token-stream -> gộp vào dòng
+            // think hiện tại; triage reason -> 1 dòng riêng.
+            if (payload.phase === 'thought' && payload.node && payload.text) {
+              if (payload.node === 'think') {
+                const last = thoughts.value[thoughts.value.length - 1]
+                if (last && last.node === 'think') last.text += payload.text
+                else thoughts.value.push({ node: 'think', text: payload.text })
+              } else {
+                thoughts.value.push({ node: payload.node, text: payload.text })
+              }
+              return
             }
 
             // Once answer tokens start, late phase events must not switch the UI
@@ -697,6 +743,30 @@ export const useChatStore = defineStore('chat', () => {
         },
       })
 
+    try {
+      try {
+        await runStream()
+      } catch (error) {
+        // CHỈ retry khi 401 xảy ra TRƯỚC khi stream phát token đầu tiên — không bao giờ
+        // replay giữa chừng vì sẽ duplicate câu trả lời / trạng thái conversation.
+        if (
+          error instanceof QueryServiceError
+          && error.status === 401
+          && !hasStartedStreaming
+          && !completed
+          && !controller.signal.aborted
+        ) {
+          const token = await refreshAccessToken()
+          if (!token) {
+            await handleRefreshFailure()
+            throw error
+          }
+          await runStream()
+        } else {
+          throw error
+        }
+      }
+
       if (donePayload) {
         await nextTick()
         const result = donePayload as QueryDoneEvent
@@ -716,6 +786,12 @@ export const useChatStore = defineStore('chat', () => {
           sessionId: result.session_id,
           traceId: result.trace_id,
           timestamp: new Date().toLocaleString(),
+          // Gắn các bước agent đã làm (đã loại pending) -> hiển thị bền vững dưới câu trả lời.
+          trace: traceLog.value.length ? traceLog.value.map(e => ({ ...e })) : undefined,
+          // Model thật từng node đã chạy (minh bạch vận hành).
+          models: modelsUsed.value.length ? modelsUsed.value.map(m => ({ ...m })) : undefined,
+          // Dòng suy nghĩ/quyết định của model.
+          thoughts: thoughts.value.length ? thoughts.value.map(t => ({ ...t })) : undefined,
         }
         assistant.fallback = result.fallback === true
 
@@ -832,6 +908,8 @@ export const useChatStore = defineStore('chat', () => {
     streamingText,
     thinkingStatus,
     traceLog,
+    modelsUsed,
+    thoughts,
     panelCitation,
     isPanelOpen,
     setInput,

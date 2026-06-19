@@ -57,6 +57,7 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_USERS_VIEWERS_CAN_EDIT: "true"   # cho Viewer (anonymous) DÙNG Explore (query Tempo/Loki/Prom), KHÔNG lưu được
+      GF_USERS_DEFAULT_THEME: light       # UI trắng – xanh dương (manifest theme.mode=light)
     volumes:
       - ./deploy/monitor_decision/monitor/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./deploy/monitor_decision/monitor/grafana/dashboards:/var/lib/grafana/dashboards:ro

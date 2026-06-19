@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AlertTriangle, CheckCircle2, ChevronDown, FileText, Loader2, Shield, UploadCloud, User as UserIcon, Users, X } from '@lucide/vue'
+import { AlertTriangle, CheckCircle2, ChevronDown, FileText, Loader2, UploadCloud, X } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import PageHeader from '~/components/admin-ui/PageHeader.vue'
 import { getApiErrorMessage, getApiStatus } from '~/lib/api/apiError'
@@ -47,9 +47,6 @@ const fileRef = ref<HTMLInputElement | null>(null)
 
 const openFilePicker = () => { fileRef.value?.click() }
 const isUploading = ref(false)
-const defaultClassification = ref<Classification>('internal')
-const defaultDepartments = ref<string[]>([])
-const defaultUserIds = ref<string[]>([])
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 // Picker state
@@ -111,9 +108,9 @@ const handleFiles = (files: FileList | null) => {
       file,
       name: file.name,
       sizeMb: +(file.size / (1024 * 1024)).toFixed(2),
-      classification: defaultClassification.value,
-      allowedDepartments: [...defaultDepartments.value],
-      allowedUserIds: [...defaultUserIds.value],
+      classification: 'internal' as Classification,
+      allowedDepartments: [],
+      allowedUserIds: [],
       status: 'queued',
     })
   }
@@ -225,101 +222,6 @@ onUnmounted(() => {
 
     <PageHeader title="Upload Center" description="Add new documents to the enterprise knowledge base." />
     <div class="space-y-6 px-8 pb-8 pt-2">
-      <!-- Default classification / ACL settings -->
-      <div class="grid grid-cols-1 gap-4 rounded-xl border border-border bg-card p-4 md:grid-cols-3">
-        <div class="space-y-1.5">
-          <label class="flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground">
-            <Shield class="h-3.5 w-3.5" /> Default Classification
-          </label>
-          <select v-model="defaultClassification" class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-primary/15">
-            <option v-for="option in classificationOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-          </select>
-        </div>
-
-        <!-- Default Allowed Departments picker -->
-        <div class="space-y-1.5">
-          <label class="flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground">
-            <Users class="h-3.5 w-3.5" /> Default Allowed Departments
-          </label>
-          <div class="relative z-20">
-            <div
-              class="flex min-h-[34px] w-full cursor-pointer flex-wrap items-center gap-1 rounded-md border border-input bg-background px-2.5 py-1 text-[13px] transition focus-within:ring-2 focus-within:ring-primary/15"
-              :class="defaultClassification !== 'secret' ? 'pointer-events-none opacity-50' : ''"
-              @click.stop="openDeptPicker('default')"
-            >
-              <span v-if="!defaultDepartments.length" class="flex-1 text-[13px] text-muted-foreground">Select departments...</span>
-              <template v-else>
-                <span v-for="d in defaultDepartments" :key="d" class="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
-                  {{ d }}<button class="ml-0.5 rounded hover:text-destructive" @click.stop="toggleInArray(defaultDepartments, d)"><X class="h-3 w-3" /></button>
-                </span>
-              </template>
-              <ChevronDown class="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            </div>
-            <div v-if="openDropdown === 'default-dept'" class="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-md border border-border bg-background shadow-lg">
-              <div class="border-b border-border px-2 py-1.5">
-                <input v-model="deptSearch" class="w-full rounded bg-muted px-2 py-1 text-[12px] outline-none" placeholder="Filter departments..." @click.stop />
-              </div>
-              <ul class="max-h-44 overflow-y-auto py-1">
-                <li v-if="!filteredDepts.length" class="px-3 py-2 text-[12px] text-muted-foreground">
-                  {{ allDepartments.length === 0 ? 'No departments found in HR data' : 'No match' }}
-                </li>
-                <li
-                  v-for="dept in filteredDepts"
-                  :key="dept"
-                  class="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[12px] hover:bg-accent"
-                  @click.stop="toggleInArray(defaultDepartments, dept)"
-                >
-                  <input type="checkbox" :checked="defaultDepartments.includes(dept)" class="h-3.5 w-3.5 accent-primary" readonly @click.stop />
-                  {{ dept }}
-                </li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <!-- Default Allowed Users picker -->
-        <div class="space-y-1.5">
-          <label class="flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground">
-            <UserIcon class="h-3.5 w-3.5" /> Default Allowed Users
-          </label>
-          <div class="relative z-20">
-            <div
-              class="flex min-h-[34px] w-full cursor-pointer flex-wrap items-center gap-1 rounded-md border border-input bg-background px-2.5 py-1 text-[13px] transition focus-within:ring-2 focus-within:ring-primary/15"
-              :class="defaultClassification !== 'top_secret' ? 'pointer-events-none opacity-50' : ''"
-              @click.stop="openUserPicker('default')"
-            >
-              <span v-if="!defaultUserIds.length" class="flex-1 text-[13px] text-muted-foreground">Select users...</span>
-              <template v-else>
-                <span v-for="uid in defaultUserIds" :key="uid" class="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
-                  {{ getUserLabel(uid) }}<button class="ml-0.5 rounded hover:text-destructive" @click.stop="toggleInArray(defaultUserIds, uid)"><X class="h-3 w-3" /></button>
-                </span>
-              </template>
-              <ChevronDown class="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            </div>
-            <div v-if="openDropdown === 'default-user'" class="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-md border border-border bg-background shadow-lg">
-              <div class="border-b border-border px-2 py-1.5">
-                <input v-model="userSearch" class="w-full rounded bg-muted px-2 py-1 text-[12px] outline-none" placeholder="Search by name or email..." @click.stop />
-              </div>
-              <ul class="max-h-44 overflow-y-auto py-1">
-                <li v-if="!filteredUsers.length" class="px-3 py-2 text-[12px] text-muted-foreground">No users found</li>
-                <li
-                  v-for="u in filteredUsers"
-                  :key="u.id"
-                  class="flex cursor-pointer items-center gap-2 px-3 py-1.5 hover:bg-accent"
-                  @click.stop="toggleInArray(defaultUserIds, u.id)"
-                >
-                  <input type="checkbox" :checked="defaultUserIds.includes(u.id)" class="h-3.5 w-3.5 shrink-0 accent-primary" readonly @click.stop />
-                  <div class="min-w-0">
-                    <div class="truncate text-[12px] font-medium">{{ u.name || u.email }}</div>
-                    <div v-if="u.name" class="truncate text-[11px] text-muted-foreground">{{ u.email }}</div>
-                  </div>
-                </li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- Drop zone -->
       <div
         :class="[

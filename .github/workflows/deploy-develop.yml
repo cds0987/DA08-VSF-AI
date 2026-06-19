@@ -225,6 +225,22 @@ jobs:
       - name: Check schema drift (query-service code <-> migrations)
         run: python infra/ci/schema_drift_check.py src/query-service
 
+  # ─────────────────── Phase 1d: MANIFEST LINT (MOSA) ─────────────────
+  # Gác monitor_decision: config.yaml (manifest) ↔ file dashboard ↔ metric-contract.
+  # "Lệch là CI đỏ": dashboard mồ côi, metric query nhưng chưa khai, ref tree sai,
+  # contract/strategy_source mất file. Thuần tĩnh (parse YAML/JSON), không cần hạ tầng.
+  manifest-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pyyaml
+        run: python -m pip install --upgrade pip pyyaml
+      - name: Validate monitor_decision manifest (MOSA)
+        run: python deploy/monitor_decision/scripts/validate_manifest.py
+
   # ─────────────────── Phase 1b: CONTRACT PARITY ──────────────────────
   # Guard CONTRACT giữa rag-worker (producer) và mcp-service (consumer): cùng
   # embedding model/dimension/collection. Lệch -> mcp search fail-closed. Không
@@ -331,7 +347,7 @@ jobs:
   # ───────────────────────── Phase GATE ─────────────────────────
   # Fail nếu BẤT KỲ test nào failure/cancelled. Job skipped (path không khớp) = pass.
   gate:
-    needs: [unit, frontend-test, contract, e2e, migration-lint]
+    needs: [unit, frontend-test, contract, e2e, migration-lint, manifest-lint]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -342,6 +358,7 @@ jobs:
             "frontend-test=${{ needs.frontend-test.result }}" \
             "contract=${{ needs.contract.result }}" \
             "migration-lint=${{ needs.migration-lint.result }}" \
+            "manifest-lint=${{ needs.manifest-lint.result }}" \
             "e2e=${{ needs.e2e.result }}"; do
             name="${nr%%=*}"; res="${nr#*=}"
             echo "  $name = $res"

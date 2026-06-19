@@ -62,7 +62,12 @@ def extract_usage(resp: Any) -> Usage:
     out_tok = int(_get(u, "output_tokens") or _get(u, "completion_tokens") or 0)
     total = int(_get(u, "total_tokens") or (in_tok + out_tok))
     cost = _get(u, "cost")   # OpenRouter trả USD thật; OpenAI không có
+    # reasoning_tokens: OpenAI o-series -> completion_tokens_details.reasoning_tokens;
+    # một số provider -> reasoning_tokens phẳng. Đã nằm trong output_tokens (chỉ để observ).
+    details = _get(u, "completion_tokens_details") or {}
+    reasoning = int(_get(details, "reasoning_tokens") or _get(u, "reasoning_tokens") or 0)
     return Usage(
         input_tokens=in_tok, output_tokens=out_tok, total_tokens=total,
+        reasoning_tokens=reasoning,
         cost_usd=float(cost) if cost is not None else None,
     )

@@ -19,8 +19,41 @@ namespaces:
       - { name: airouter_resolve_total,      type: counter, labels: [capability, tier, provider] }
       - { name: airouter_fallback_total,     type: counter, labels: [capability, tier] }
       - { name: airouter_resolve_fail_total, type: counter, labels: [capability, reason] }
+      # ── drift catalog: model provider trả KHÔNG có trong catalog (WS-A) -> cần rebuild catalog ──
+      - { name: airouter_model_unmatched_total, type: counter, labels: [model, capability] }
       # ── per-key gauge (Redis snapshot) ──
       - { name: airouter_key_tokens_today,   type: gauge, labels: [key_id, secret_env, provider, tier] }
       - { name: airouter_key_remaining,      type: gauge, labels: [key_id, secret_env, provider, tier] }
       - { name: airouter_key_cost_month_usd, type: gauge, labels: [key_id, secret_env, provider, tier] }
       - { name: airouter_key_cooldown,       type: gauge, labels: [key_id, secret_env, provider, tier] }
+      - { name: airouter_key_limit,          type: gauge, labels: [key_id, secret_env, provider, tier] }   # trần quota/ngày (free-tier)
+      # ── meta gauge ──
+      - { name: airouter_keys_total,         type: gauge,   labels: [] }   # tổng key đăng ký
+
+  vsf:
+    description: "RED per-service từ OTel spanmetrics connector (otel-collector)."
+    metrics:
+      - { name: vsf_calls_total,                  type: counter,   labels: [service_name, status_code] }
+      - { name: vsf_duration_milliseconds_bucket, type: histogram, labels: [service_name, le] }
+
+  node:
+    description: "Hạ tầng VM từ node-exporter (CPU/RAM/đĩa)."
+    metrics:
+      - { name: node_cpu_seconds_total,      type: counter, labels: [mode] }
+      - { name: node_memory_MemAvailable_bytes, type: gauge, labels: [] }
+      - { name: node_memory_MemTotal_bytes,  type: gauge,   labels: [] }
+      - { name: node_filesystem_avail_bytes, type: gauge,   labels: [mountpoint] }
+      - { name: node_filesystem_size_bytes,  type: gauge,   labels: [mountpoint] }
+
+  qdrant:
+    description: "Vector store Qdrant — RPS/latency/error/collection. Scrape qdrant:6333/metrics (WS-H).
+      Tên metric theo /metrics chuẩn của Qdrant (gauge avg-duration, KHÔNG có histogram bucket)."
+    metrics:
+      - { name: app_info,                          type: gauge,   labels: [name, version] }
+      - { name: collections_total,                 type: gauge,   labels: [] }
+      - { name: collections_vector_total,          type: gauge,   labels: [] }
+      - { name: pending_operations,                type: gauge,   labels: [] }
+      - { name: rest_responses_total,              type: counter, labels: [method, endpoint, status] }
+      - { name: rest_responses_fail_total,         type: counter, labels: [method, endpoint, status] }
+      - { name: rest_responses_avg_duration_seconds, type: gauge, labels: [method, endpoint] }
+      - { name: memory_resident_bytes,             type: gauge,   labels: [] }

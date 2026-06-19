@@ -1,3 +1,6 @@
+// ⚠️ DEPRECATED — KHÔNG dùng/import (xem frontend/base/README.md). axiosClient này KHÔNG
+// có refresh-token (401 là xóa cookie + về login ngay) và dùng tên cookie khác chat/admin.
+// Chính sách auth/refresh thật: frontend/chat & frontend/admin (app/lib/api/authRefresh.ts).
 import axios, {
   AxiosError,
   type AxiosInstance,

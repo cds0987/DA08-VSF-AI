@@ -85,9 +85,17 @@ export interface TraceEntry {
 
 export interface QueryTokenEvent {
   token?: string
-  phase?: 'thinking' | 'acting' | 'observing' | 'generating'
+  // reasoning: token "đang nghĩ" của think node (planner) — hiện ở panel thinking, KHÔNG
+  // phải câu trả lời cuối.
+  reasoning?: string
+  // phase 'model_used': node vừa chạy xong 1 model. 'thought': model đang nghĩ/quyết định
+  // (text) -> hiện "model nghĩ gì / quyết định gì".
+  phase?: 'thinking' | 'acting' | 'observing' | 'generating' | 'model_used' | 'thought'
   status?: string
   node?: string
+  model?: string
+  text?: string
+  route?: string
   tool?: string
   tool_args?: Record<string, unknown>
   tool_result_summary?: { count?: number; docs?: string[]; raw?: string }
@@ -168,6 +176,25 @@ export interface ChatMessage {
   interrupted?: boolean
   // Nhiều đơn 1 lượt -> mỗi phần tử là 1 form xác nhận riêng.
   actions?: HRActionPayload[]
+  // Các bước agent đã thực hiện (tool calls + kết quả) — hiển thị bền vững dưới câu trả lời
+  // để user xem lại agent đã nghĩ/làm gì. Chỉ có ở message sinh trong phiên (history không lưu).
+  trace?: TraceEntry[]
+  // Nội dung "đang suy nghĩ" của planner (think node) — lưu để xem lại trong MessageSteps.
+  reasoning?: string
+  // Model thật từng node đã chạy (minh bạch vận hành) — hiện badge dưới câu trả lời.
+  models?: NodeModel[]
+  // Dòng suy nghĩ/quyết định của model (triage reason, reasoning của think) — minh bạch tư duy.
+  thoughts?: Thought[]
+}
+
+export interface NodeModel {
+  node: string
+  model: string
+}
+
+export interface Thought {
+  node: string
+  text: string
 }
 
 export interface Conversation {

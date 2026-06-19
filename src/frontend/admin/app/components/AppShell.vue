@@ -35,6 +35,19 @@ const handleSignOut = () => {
 }
 
 const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
+
+const maskedEmail = computed(() => {
+  const email = session.user?.email
+  if (!email) return ''
+  const [local, domain] = email.split('@')
+  if (!domain) return email
+  return `${local.slice(0, 3)}*****@${domain}`
+})
+
+const userInitials = computed(() => {
+  if (session.user?.initials) return session.user.initials
+  return (session.user?.email ?? '').slice(0, 2).toUpperCase()
+})
 </script>
 
 <template>
@@ -178,7 +191,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
               <div
                 class="flex shrink-0 items-center justify-center rounded-full bg-blue-600 font-bold text-white border-2 border-blue-500 shadow-md transform-gpu transition-all hover:scale-105 h-9 w-9 text-xs"
               >
-                {{ session.user?.initials }}
+                {{ userInitials }}
               </div>
             </div>
             <div
@@ -186,7 +199,7 @@ const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
               :class="isCollapsed ? 'opacity-0' : 'opacity-100'"
             >
               <div class="truncate text-sm font-semibold text-slate-900 leading-tight">
-                {{ session.user?.name }}
+                {{ maskedEmail }}
               </div>
             </div>
             <ChevronsUpDown 

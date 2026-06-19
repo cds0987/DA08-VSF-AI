@@ -27,6 +27,16 @@ scrape_configs:
     static_configs:
       - targets: ['node-exporter:9100']
 
+  # Vector store Qdrant (WS-H). prometheus cùng network compose -> tới qdrant:6333/metrics.
+  # /metrics của Qdrant mặc định KHÔNG đòi api-key; nếu version bật bảo vệ -> thêm
+  # authorization (api-key) ở đây. Qdrant không expose host port nên chỉ scrape nội bộ.
+  - job_name: qdrant
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['qdrant:6333']
+        labels:
+          service: qdrant
+
   # (cadvisor GỠ — cgroup-v2 chỉ ra cgroup root. Per-service resource: Phase 2 OTel.)
 
   # OTel Collector: metrics đã gom từ service (8889) + self-metrics (8888).

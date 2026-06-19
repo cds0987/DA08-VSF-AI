@@ -181,6 +181,23 @@ class Router:
             "tier": dec.tier, "provider": dec.provider.value,
         }
 
+    def _canon_model(self, data: dict, dec: RouteDecision, capability: str,
+                     *, check_drift: bool = True) -> None:
+        """GOM model về CANONICAL trên response trả về client (Langfuse đọc field `model`).
+
+        - Ghi đè `data["model"]` = dec.model_id (id router ĐÃ quyết theo routing.yaml) -> Prometheus
+          (đã dùng dec.model_id) == Langfuse, hết phân mảnh gpt-5.4-mini vs gpt-5.4-mini-2026-03-17.
+        - check_drift: đối chiếu snapshot provider vs catalog; lạ (unmatched) -> phát drift để biết
+          catalog cần rebuild. Stream gọi nhiều chunk -> chỉ check 1 lần (tránh over-count).
+        """
+        served = data.get("model", "")
+        if served and check_drift:
+            canon, kind = self.catalog.canonicalize(served)
+            if kind == "unmatched":
+                self.metrics.inc("airouter_model_unmatched_total",
+                                 {"model": canon, "capability": capability})
+        data["model"] = dec.model_id
+
     def _emit_call(self, dec: RouteDecision, capability: str, usage: Usage | None,
                    *, status: str, cost: float | None) -> None:
         labels = self._labels(dec, capability)
@@ -274,7 +291,10 @@ class Router:
                 self._emit_call(dec, capability, usage, status="ok", cost=cost)
                 self._trace_log("call_ok", dec, capability, conversation_id=conversation_id,
                                 status="ok", latency_ms=latency_ms, usage=usage, cost=cost)
-                data["_router"] = dec.public()
+                served = data.get("model", "")
+                self._canon_model(data, dec, capability)
+                pub = dec.public(); pub["served_model"] = served
+                data["_router"] = pub
                 return data
             except Exception as exc:  # noqa: BLE001 — phân loại 429 quota/rate, cooldown đúng
                 last_err = exc
@@ -304,13 +324,21 @@ class Router:
         try:
             stream = await client.chat.completions.create(stream=True, **self._prep_body(sb, dec))
             usage_seen: Usage | None = None
+            served_first = ""
             async for chunk in stream:
                 data = chunk.model_dump()
+                first = not served_first
+                if data.get("model") and first:
+                    served_first = data["model"]          # giữ snapshot provider lần đầu thấy
+                if data.get("model"):
+                    # drift chỉ check ở chunk model ĐẦU (tránh over-count đa-chunk)
+                    self._canon_model(data, dec, capability, check_drift=first)
                 if data.get("usage"):
                     usage_seen = extract_usage(data)
                     # Gắn _router vào chunk usage cuối -> client (adapter) đọc được key_id/tier
                     # để tag Langfuse per-key (stream path KHÔNG có response.model_dump tổng).
-                    data["_router"] = dec.public()
+                    pub = dec.public(); pub["served_model"] = served_first
+                    data["_router"] = pub
                 yield data
         except Exception as exc:  # noqa: BLE001
             await self._handle_error(dec, capability, exc,
@@ -343,7 +371,10 @@ class Router:
         self._emit_call(dec, "embed", usage, status="ok", cost=cost)
         self._trace_log("call_ok", dec, "embed", conversation_id=None, status="ok",
                         latency_ms=latency_ms, usage=usage, cost=cost)
-        data["_router"] = dec.public()
+        served = data.get("model", "")
+        self._canon_model(data, dec, "embed")
+        pub = dec.public(); pub["served_model"] = served
+        data["_router"] = pub
         return data
 
     # ----------------- control plane: drain key (HITL v1) -----------------

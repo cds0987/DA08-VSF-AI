@@ -40,37 +40,51 @@ from langchain_core.language_models import BaseChatModel
 
 
 def build_langgraph_agent(
-    model: BaseChatModel,
-    mcp_client: MCPToolClient,
+    model: BaseChatModel | None = None,
+    mcp_client: MCPToolClient = None,
     tools_loader=None,
     checkpointer=None,
+    *,
+    models: dict[str, BaseChatModel] | None = None,
+    split_answer: bool = False,
 ) -> "CompiledGraph":
     """
     Build and compile the LangGraph agent with triage + ReAct loop.
 
-    Args:
-        model: LangChain-compatible chat model (e.g. OpenAIResponsesChatModel)
-        mcp_client: MCP tool client for rag_search and hr_query (used by act_node
-            and as fallback when tools_loader is None)
-        tools_loader: optional LangChainMCPToolsLoader; when provided, think_node
-            uses auto-discovered MCP tool descriptions instead of hardcoded schemas
-        checkpointer: Optional LangGraph checkpointer for multi-turn conversations
+    Model wiring (MOSA per-node):
+        - models={"triage":.., "think":.., "answer":..}: mỗi node 1 model riêng.
+        - model=<1 model>: dùng chung cho mọi node (back-compat path 'responses').
+    split_answer=True: answer_node gọi `models["answer"]` để SINH câu trả lời (stream),
+        tách khỏi think (planner/reasoning). False: answer_node là marker (think tự sinh).
 
-    Returns:
-        A compiled LangGraph that can be invoked or streamed.
+    Args:
+        model: 1 model dùng chung (khi không truyền `models`).
+        mcp_client: MCP tool client for rag_search and hr_query (act_node + fallback).
+        tools_loader: optional LangChainMCPToolsLoader.
+        models: dict model theo node (ưu tiên hơn `model`).
+        split_answer: bật answer node sinh-chữ-riêng.
     """
+    _m = models or {}
+    triage_model = _m.get("triage") or model
+    think_model = _m.get("think") or model
+    answer_model = _m.get("answer") or model
+
     workflow = StateGraph(AgentState)
 
     # ---- Nodes ----
     workflow.add_node("shortcut", shortcut_node)
-    workflow.add_node("triage", partial(triage_node, model=model))
+    workflow.add_node("triage", partial(triage_node, model=triage_model))
     workflow.add_node(
         "think",
-        partial(think_node, model=model, mcp_client=mcp_client, tools_loader=tools_loader),
+        partial(think_node, model=think_model, mcp_client=mcp_client, tools_loader=tools_loader),
     )
     workflow.add_node("act", partial(act_node, mcp_client=mcp_client))
     workflow.add_node("observe", observe_node)
-    workflow.add_node("answer", answer_node)
+    # answer: split=True -> gọi answer_model sinh câu trả lời; False -> marker (think tự sinh).
+    workflow.add_node(
+        "answer",
+        partial(answer_node, model=answer_model if split_answer else None, split=split_answer),
+    )
 
     # ---- Entry point ----
     # Conditional entry: check shortcuts before triage/LLM

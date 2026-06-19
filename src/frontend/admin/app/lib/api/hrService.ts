@@ -36,6 +36,10 @@ const hrService = {
     const response = await axiosClient.patch<EmployeeDetail>(`/hr/admin/employees/${employeeId}`, payload, { service: 'hr' })
     return response.data
   },
+
+  async deleteEmployee(employeeId: string): Promise<void> {
+    await axiosClient.delete(`/hr/admin/employees/${employeeId}`, { service: 'hr' })
+  },
 }
 
 export default hrService

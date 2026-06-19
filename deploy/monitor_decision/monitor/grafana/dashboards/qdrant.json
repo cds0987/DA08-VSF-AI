@@ -1,0 +1,89 @@
+{
+  "title": "Qdrant — Vector Store",
+  "uid": "qdrant-vector",
+  "tags": ["vsf-ai", "qdrant", "vector", "infra"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] },
+  "links": [
+    { "title": "← Tổng quan", "type": "link", "url": "/d/vsf-ops-overview", "targetBlank": false },
+    { "title": "Ingest (rag-worker) ↗", "type": "dashboards", "tags": ["ingest"], "asDropdown": true }
+  ],
+  "panels": [
+    { "id": 100, "type": "row", "title": "Sức khỏe vector store", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 } },
+    {
+      "id": 1, "type": "stat", "title": "Qdrant",
+      "description": "up{job=qdrant} = Prometheus scrape được qdrant:6333/metrics. 0 = down / chưa scrape.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 5, "x": 0, "y": 1 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } } ], "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+      "targets": [ { "expr": "up{job=\"qdrant\"}", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 2, "type": "stat", "title": "Collections",
+      "description": "collections_total — số collection đang có.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 5, "x": 5, "y": 1 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "#1f6feb" } } },
+      "targets": [ { "expr": "collections_total", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 3, "type": "stat", "title": "Tổng vector",
+      "description": "collections_vector_total — tổng vector toàn bộ collection.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 5, "x": 10, "y": 1 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "#388bfd" } } },
+      "targets": [ { "expr": "collections_vector_total", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 4, "type": "stat", "title": "Pending ops",
+      "description": "pending_operations — thao tác chờ. Cao kéo dài = ingest dồn / Qdrant nghẽn.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 15, "y": 1 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 50 }, { "color": "red", "value": 500 } ] } } },
+      "targets": [ { "expr": "pending_operations", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 5, "type": "stat", "title": "RAM Qdrant",
+      "description": "memory_resident_bytes — RAM thường trú của Qdrant.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 5, "x": 19, "y": 1 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "fieldConfig": { "defaults": { "unit": "bytes", "color": { "mode": "fixed", "fixedColor": "#1f6feb" } } },
+      "targets": [ { "expr": "memory_resident_bytes", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+
+    { "id": 200, "type": "row", "title": "Tải & độ trễ REST", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 } },
+    {
+      "id": 6, "type": "timeseries", "title": "RPS theo method/endpoint",
+      "description": "rate(rest_responses_total[5m]) — tải REST vào Qdrant (search/upsert/...).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "fieldConfig": { "defaults": { "unit": "reqps", "color": { "mode": "continuous-BlPu" }, "custom": { "fillOpacity": 10 } } },
+      "targets": [ { "expr": "sum by (method, endpoint) (rate(rest_responses_total[5m]))", "legendFormat": "{{method}} {{endpoint}}", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Độ trễ trung bình (s) theo endpoint",
+      "description": "rest_responses_avg_duration_seconds — Qdrant phát avg (không có histogram bucket).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "fieldConfig": { "defaults": { "unit": "s", "color": { "mode": "continuous-BlPu" }, "custom": { "fillOpacity": 5 } } },
+      "targets": [ { "expr": "avg by (endpoint) (rest_responses_avg_duration_seconds)", "legendFormat": "{{endpoint}}", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Tỉ lệ lỗi REST",
+      "description": "rest_responses_fail_total / rest_responses_total — lỗi truy vấn/ghi vector. >0 kéo dài = điều tra.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 15 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "color": { "mode": "fixed", "fixedColor": "orange" }, "custom": { "fillOpacity": 10 }, "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.05 } ] } } },
+      "targets": [ { "expr": "sum(rate(rest_responses_fail_total[5m])) / clamp_min(sum(rate(rest_responses_total[5m])), 1)", "legendFormat": "error rate", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    }
+  ]
+}

@@ -529,6 +529,9 @@ services:
       AIROUTER_INTERNAL_TOKEN: e2e-router-token
       USE_LANGGRAPH: "true"
       AGENT_MAX_ITERATIONS: "3"
+      # MOSA: bật tách answer node (think=planner, answer=generator stream) — test luồng split
+      # trong e2e TRƯỚC khi deploy (gate chặn nếu vỡ -> bảo vệ prod).
+      AGENT_SPLIT_ANSWER: "true"
       MCP_MODE: real
       MCP_SERVICE_URL: http://mcp-service:8003
       MCP_TIMEOUT_SECONDS: "20"

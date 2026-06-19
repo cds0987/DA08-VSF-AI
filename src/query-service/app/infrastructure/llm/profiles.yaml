@@ -1,0 +1,50 @@
+# MOSA LLM profiles — map mỗi node gọi LLM của LangGraph -> adapter + cấu hình model.
+#
+# HOT-CONFIG: sửa file này để đổi model/adapter/effort cho từng node, KHÔNG sửa code.
+# Thiếu file / sai cú pháp / node không khai báo / adapter chưa đăng ký -> loader tự
+# fallback an toàn về adapter 'standard' (xem loader.py) -> KHÔNG làm vỡ service.
+#
+# - adapter:          tên đã @register (standard | reasoning_oai | reasoning_or)
+# - capability:       chuỗi gửi cho ai-router khi route (OPENAI_BASE_URL set) -> router map -> model thật
+# - models:           danh sách model THẬT của node (dùng khi gọi trực tiếp / để tài liệu hoá)
+# - reasoning_effort: low | medium | high (chỉ adapter reasoning_* dùng; standard bỏ qua)
+version: 1
+
+defaults:
+  adapter: standard
+  reasoning_effort: null
+
+nodes:
+  # Phân loại. ⚠️ capability = think (gpt-5.4-mini) CHỨ KHÔNG phải triage (gpt-4o-mini):
+  # e2e/deploy smoke lộ ra gpt-4o-mini phân loại SAI (RAG -> meta) -> regression. Giữ triage
+  # trên cùng model như think để KHÔNG đổi hành vi prod. Muốn hạ model triage: phải eval
+  # chất lượng phân loại trước rồi đổi capability ở đây.
+  triage:
+    adapter: standard
+    capability: think
+
+  # Node CHÍNH (planner): chọn tool + tổng hợp.
+  # MẶC ĐỊNH 'standard' = hành vi cũ (gửi temperature, KHÔNG reasoning_effort).
+  # ⚠️ KHÔNG để reasoning_oai ở đây nếu think còn bind tools trên chat.completions:
+  # OpenAI 400 "Function tools with reasoning_effort not supported ... use /v1/responses".
+  # Muốn dùng reasoning cho think: hoặc qua /v1/responses, hoặc bỏ effort (adapter tự bỏ
+  # khi có tools — xem reasoning_oai). Đổi adapter ở đây sau khi eval parity xanh.
+  think:
+    adapter: standard
+    capability: think
+
+  # Sinh câu trả lời cuối (stream token). answer KHÔNG bind tools -> an toàn dùng reasoning
+  # khi bật split + trỏ capability `answer` sang model reasoning. Mặc định standard.
+  answer:
+    adapter: standard
+    capability: answer
+
+  # Guardrail LLM-judge (input/output).
+  guardrail:
+    adapter: standard
+    capability: guardrail
+
+  # LLM-rerank (mcp-service đọc cùng manifest concept; ở đây để query-service tham chiếu).
+  rerank:
+    adapter: standard
+    capability: rerank

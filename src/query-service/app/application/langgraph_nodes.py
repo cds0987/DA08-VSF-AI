@@ -40,6 +40,18 @@ from app.application.prompts import TRIAGE_SYSTEM_PROMPT
 logger = logging.getLogger(__name__)
 
 
+def _model_trace_fields(model) -> dict:
+    """Trích thông tin model 1 node để log/trace (dò bug chính xác model nào ở node nào).
+
+    Hoạt động với MosaChatModel (adapter_name/model/reasoning_effort); model khác ->
+    None an toàn. `model_id` = capability khi route qua ai-router, hoặc tên model thật."""
+    return {
+        "adapter": getattr(model, "adapter_name", None),
+        "model_id": getattr(model, "model", None),
+        "reasoning_effort": getattr(model, "reasoning_effort", None),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Tool wrappers (LangGraph-compatible, with ACL guard embedded)
 # ---------------------------------------------------------------------------
@@ -170,7 +182,8 @@ async def triage_node(state: AgentState, model: BaseChatModel) -> dict:
 
     logger.info(
         "langgraph_triage_start",
-        extra={"session_id": state["session_id"], "question": question[:120]},
+        extra={"session_id": state["session_id"], "question": question[:120],
+               **_model_trace_fields(model)},
     )
 
     try:
@@ -315,8 +328,10 @@ async def triage_node(state: AgentState, model: BaseChatModel) -> dict:
             "phase": AgentPhase.DONE,
         }
 
-    # ALLOW (and any unrecognised label) — proceed to think_node
-    return {}
+    # ALLOW (and any unrecognised label) — proceed to think_node.
+    # Trả route + reason ra state để orchestration phát "model nghĩ gì" (lý do phân loại)
+    # cho UI minh bạch tư duy.
+    return {"triage_route": canonical, "triage_reason": reason}
 
 
 # ---------------------------------------------------------------------------
@@ -381,7 +396,8 @@ async def think_node(
 
     logger.info(
         "langgraph_think",
-        extra={"session_id": state["session_id"], "iteration": state["iteration"]},
+        extra={"session_id": state["session_id"], "iteration": state["iteration"],
+               **_model_trace_fields(model)},
     )
 
     user_id = state["user_id"]
@@ -752,17 +768,42 @@ def observe_node(state: AgentState) -> dict:
 # Node: answer_node
 # ---------------------------------------------------------------------------
 
-def answer_node(state: AgentState) -> dict:
+def _looks_like_action_json(content: str) -> bool:
+    """True nếu content là payload ACTION JSON (create_leave_request/review_leave_approvals).
+
+    Khi think quyết 1 action, nó xuất PURE JSON {"action_type":...}; answer_node phải GIỮ
+    nguyên (không cho answer model viết lại) -> bảo toàn luồng tạo/duyệt đơn nghỉ."""
+    if not content:
+        return False
+    s = content.strip()
+    return s.startswith("{") and '"action_type"' in s
+
+
+async def answer_node(state: AgentState, model: BaseChatModel | None = None, split: bool = False) -> dict:
     """
-    answer_node: Mark the end of the agent run.
+    answer_node: kết thúc lượt agent + (tùy chọn) SINH câu trả lời bằng model riêng.
 
-    - shortcut path: uses state["shortcut_response"] directly
-    - think path: LLM already gave content in the last AIMessage
-
-    Phase is set to DONE so the SSE stream knows to emit the final event.
+    - split=False / model=None: marker — think tự sinh (last AIMessage là câu trả lời).
+    - split=True: tách generator. Quy tắc:
+        * shortcut_response set       -> marker (canned answer).
+        * content là ACTION JSON      -> marker (giữ JSON của think).
+        * có content & KHÔNG có tool   -> marker (think trả lời trực tiếp, không cần synth).
+        * còn lại (có tool_results)    -> answer model SYNTHESIZE từ tool results (stream).
+    Phase set DONE để SSE phát final event.
     """
     outcome = state.get("shortcut_outcome") or "SUCCESS"
     has_tool_calls = bool(state.get("tool_results"))
+    messages = state.get("messages") or []
+    last_ai = next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
+    content = (getattr(last_ai, "content", "") or "") if last_ai else ""
+
+    do_synth = (
+        split
+        and model is not None
+        and not state.get("shortcut_response")
+        and not _looks_like_action_json(content)
+        and not (content and not has_tool_calls)
+    )
 
     logger.info(
         "langgraph_answer",
@@ -772,10 +813,24 @@ def answer_node(state: AgentState) -> dict:
             "outcome": outcome,
             "sources_count": len(state.get("sources", [])),
             "has_tool_calls": has_tool_calls,
+            "split": bool(split),
+            "synth": do_synth,
+            **_model_trace_fields(model),
         },
     )
 
+    if not do_synth:
+        return {"phase": AgentPhase.DONE, "previous_phase": state["phase"]}
+
+    # Synthesize: bỏ các AIMessage draft cuối (không tool_calls) của think để answer model
+    # sinh mới từ [history + tool results], rồi trả AIMessage cuối làm câu trả lời.
+    synth_messages = list(messages)
+    while synth_messages and isinstance(synth_messages[-1], AIMessage) \
+            and not getattr(synth_messages[-1], "tool_calls", None):
+        synth_messages.pop()
+    response: AIMessage = await model.ainvoke(synth_messages)
     return {
+        "messages": [response],
         "phase": AgentPhase.DONE,
         "previous_phase": state["phase"],
     }

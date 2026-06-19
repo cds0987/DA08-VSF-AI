@@ -532,6 +532,8 @@ class QueryOrchestrationUseCase:
                 # LLM call completed — accumulate usage + create langfuse generation child span
                 elif event_type == "on_chat_model_end":
                     # Cộng dồn token của LẦN GỌI NÀY (triage/think/answer) vào rollup.
+                    # KHÔNG emit tên model ra SSE (tránh leak provider/model cho end user);
+                    # model thật vẫn ghi vào Langfuse (block dưới) cho devops.
                     _accumulate_usage(_usage_acc, event)
                     if _lang_trace is not None and _tracer is not None:
                         run_id = event.get("run_id", "")
@@ -567,6 +569,25 @@ class QueryOrchestrationUseCase:
                     node = (event.get("metadata") or {}).get("langgraph_node")
                     if node == "triage":
                         # JSON phân loại nội bộ — KHÔNG đẩy ra SSE/frontend
+                        continue
+                    # split_answer: think là planner — KHÔNG trộn draft vào câu trả lời cuối,
+                    # nhưng ĐẨY ra kênh "thought" để UI hiện "model đang nghĩ gì" live (tách
+                    # khỏi answer). Model gọi-tool có thể phát ít/không phát (reasoning ẩn).
+                    if self._settings.agent_split_answer and node == "think":
+                        # CHỈ stream reasoning_content (suy luận thật, deepseek-reasoner lộ),
+                        # KHÔNG stream content (câu trả lời/tool decision) -> không leak câu
+                        # trả lời vào panel "Lập kế hoạch". Model không lộ reasoning -> trống.
+                        _chunk = event["data"]["chunk"]
+                        _rc = (getattr(_chunk, "additional_kwargs", None) or {}).get("reasoning_content")
+                        if _rc:
+                            yield {
+                                "phase": "thought",
+                                "node": "think",
+                                "text": _rc,
+                                "session_id": session_id,
+                                "agent_mode": "langgraph",
+                                "iterations": last_iteration,
+                            }
                         continue
                     token = event["data"]["chunk"].content
                     if token:
@@ -675,6 +696,19 @@ class QueryOrchestrationUseCase:
                         if span is not None and _tracer is not None:
                             output = event.get("data", {}).get("output") or {}
                             _tracer.span_end(span, output_data=_node_output_summary(output))
+                        # Emit "thought" lý do phân loại của triage -> UI hiện "model nghĩ gì".
+                        if run_name == "triage":
+                            t_out = (event.get("data") or {}).get("output") or {}
+                            if isinstance(t_out, dict) and t_out.get("triage_reason"):
+                                yield {
+                                    "phase": "thought",
+                                    "node": "triage",
+                                    "text": str(t_out.get("triage_reason"))[:300],
+                                    "route": t_out.get("triage_route"),
+                                    "session_id": session_id,
+                                    "agent_mode": "langgraph",
+                                    "iterations": last_iteration,
+                                }
                         # Emit observing event from act node output (ToolMessage with real results)
                         if run_name == "act":
                             out = (event.get("data") or {}).get("output") or {}

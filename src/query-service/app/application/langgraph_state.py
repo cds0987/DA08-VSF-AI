@@ -87,6 +87,11 @@ class AgentState(TypedDict):
     #              start (ISO), end (ISO)}.  Consumed by orchestration to build Langfuse spans.
     rag_search_events: list
 
+    # --- Triage decision (cho UI minh bạch "model nghĩ gì") ---
+    # route + reason do triage_node trả; orchestration phát ra SSE thought event.
+    triage_route: str
+    triage_reason: str
+
     # --- Metadata ---
     session_id: str
     question: str
@@ -129,6 +134,8 @@ def create_initial_state(
         rag_top_k=rag_top_k,
         rag_score_threshold=rag_score_threshold,
         source_ref_counter=0,
+        triage_route="",
+        triage_reason="",
         session_id=session_id,
         question=question,
     )
