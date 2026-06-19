@@ -534,11 +534,26 @@ async def act_node(
                 # e2e flaky). Cố định top_k -> retrieval deterministic -> ổn định.
                 effective_top_k = state.get("rag_top_k", 5)
                 _rag_start_dt = datetime.now(timezone.utc)
-                results = await mcp_client.rag_search(
-                    query=state["question"],  # raw question — server-injected, like user_id
-                    document_ids=list(allowed_doc_ids),
-                    top_k=effective_top_k,
-                )
+                # RETRY 1 lần: mcp rag_search đôi khi trả isError intermittent (lỗi tạm sau
+                # embed) -> thử lại 1 lần trước khi NO_INFO. Chống flake + UX tốt hơn.
+                try:
+                    results = await mcp_client.rag_search(
+                        query=state["question"],  # raw question — server-injected, like user_id
+                        document_ids=list(allowed_doc_ids),
+                        top_k=effective_top_k,
+                    )
+                except MCPCircuitOpenError:
+                    raise
+                except Exception as _rag_exc:
+                    logger.warning(
+                        "langgraph_rag_retry session=%s err=%s",
+                        state["session_id"], str(_rag_exc)[:120],
+                    )
+                    results = await mcp_client.rag_search(
+                        query=state["question"],
+                        document_ids=list(allowed_doc_ids),
+                        top_k=effective_top_k,
+                    )
                 _rag_end_dt = datetime.now(timezone.utc)
                 _threshold = state.get("rag_score_threshold", 0.45)
                 qualified = [r for r in results if r.score >= _threshold]
