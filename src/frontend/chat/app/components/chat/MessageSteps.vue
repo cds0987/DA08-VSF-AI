@@ -3,7 +3,7 @@
 // Hiển thị BỀN VỮNG các bước agent đã thực hiện (tool calls + kết quả) dưới mỗi câu trả lời.
 // Khác Pipeline.vue (chỉ live lúc đang stream rồi biến mất), component này gắn vào message
 // -> user có thể mở lại xem agent đã tra tài liệu nào, thấy bao nhiêu kết quả.
-import { Search, Database, CheckCircle2, ChevronRight, Sparkles, Cpu } from '@lucide/vue'
+import { Search, Database, CheckCircle2, ChevronRight, Sparkles } from '@lucide/vue'
 import type { TraceEntry, NodeModel, Thought } from '~/types'
 
 const props = defineProps<{ trace: TraceEntry[]; models?: NodeModel[]; thoughts?: Thought[] }>()
@@ -64,19 +64,6 @@ function resultLabel(e: TraceEntry): string {
         :class="open && 'rotate-90'"
       />
     </button>
-
-    <!-- Model badges (minh bạch vận hành: node nào chạy model nào) — luôn hiện -->
-    <div v-if="models?.length" class="mt-1 flex flex-wrap items-center gap-1 px-2">
-      <span
-        v-for="(m, i) in models"
-        :key="i"
-        class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10.5px] font-medium text-slate-600 dark:bg-white/10 dark:text-slate-300"
-        :title="`${NODE_LABEL[m.node] ?? m.node} · ${m.model}`"
-      >
-        <Cpu class="h-3 w-3 text-blue-500" />
-        {{ NODE_LABEL[m.node] ?? m.node }}: {{ m.model }}
-      </span>
-    </div>
 
     <!-- Suy nghĩ / quyết định của model -->
     <div v-if="open && thoughts?.length" class="mt-1.5 space-y-1 pl-1">

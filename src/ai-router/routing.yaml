@@ -30,17 +30,22 @@ aliases:
 # Bậc thang: OpenAI free -> OpenRouter free -> paid (PLAN §5.1). Model free_or có thể
 # đổi/biến mất (OpenRouter xoay free) -> selector tự bỏ qua tier nếu model không còn trong catalog.
 capabilities:
-  answer:                           # câu trả lời cuối + agent (cần tool)
-    tiers: [free_oai, free_or, paid]
+  answer:                           # câu trả lời cuối (split answer node) -> GIAO TOÀN BỘ
+                                    # cho deepseek qua OpenRouter, xoay API key mỗi 150K token.
+    tiers: [paid]                   # paid = OpenRouter (deepseek). KHÔNG dùng OpenAI free.
     models:
-      free_oai: openai/gpt-4o-mini
-      free_or:                        # interchange: model đầu sập -> tự thử model kế
-        - google/gemma-4-31b-it:free
-        - qwen/qwen3-next-80b-a3b-instruct:free
-        - openai/gpt-oss-120b:free
       paid: deepseek/deepseek-v4-flash
-    require_tools: false            # bật true nếu muốn ÉP mọi answer phải tool-capable
-    quality_floor: null             # user sẽ điền model tối thiểu sau
+    selector:                       # banded_rotation: dính 1 key tới khi phục vụ 150K -> xoay key kế.
+      impl: banded_rotation
+      params:
+        band_tokens: 150000
+        save_mode:                  # cạn HẾT key deepseek -> degrade gpt-4o-mini (tránh 503).
+          enabled: true
+          model: openai/gpt-4o-mini
+          tier: free_oai
+          band_tokens: 150000
+    require_tools: false            # answer node KHÔNG bind tool -> deepseek-flash ok.
+    quality_floor: null
   triage:                           # phân loại nhanh, rẻ
     tiers: [free_oai, free_or, paid]
     models:

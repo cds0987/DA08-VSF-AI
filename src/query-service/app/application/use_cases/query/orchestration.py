@@ -532,24 +532,9 @@ class QueryOrchestrationUseCase:
                 # LLM call completed — accumulate usage + create langfuse generation child span
                 elif event_type == "on_chat_model_end":
                     # Cộng dồn token của LẦN GỌI NÀY (triage/think/answer) vào rollup.
+                    # KHÔNG emit tên model ra SSE (tránh leak provider/model cho end user);
+                    # model thật vẫn ghi vào Langfuse (block dưới) cho devops.
                     _accumulate_usage(_usage_acc, event)
-                    # Minh bạch vận hành: emit MODEL THẬT mà mỗi node vừa dùng -> UI hiện
-                    # "node X chạy model Y" cho end user (node từ metadata, model từ
-                    # response_metadata do router/provider trả). Best-effort, không token.
-                    _md = event.get("metadata") or {}
-                    _node_used = _md.get("langgraph_node")
-                    _out_used = (event.get("data") or {}).get("output")
-                    _rmeta_used = getattr(_out_used, "response_metadata", None) or {}
-                    _model_used = _rmeta_used.get("model_name")
-                    if _node_used and _model_used:
-                        yield {
-                            "phase": "model_used",
-                            "node": _node_used,
-                            "model": _model_used,
-                            "session_id": session_id,
-                            "agent_mode": "langgraph",
-                            "iterations": last_iteration,
-                        }
                     if _lang_trace is not None and _tracer is not None:
                         run_id = event.get("run_id", "")
                         if run_id and run_id in _llm_runs:
@@ -589,12 +574,16 @@ class QueryOrchestrationUseCase:
                     # nhưng ĐẨY ra kênh "thought" để UI hiện "model đang nghĩ gì" live (tách
                     # khỏi answer). Model gọi-tool có thể phát ít/không phát (reasoning ẩn).
                     if self._settings.agent_split_answer and node == "think":
-                        _ttok = event["data"]["chunk"].content
-                        if _ttok:
+                        # CHỈ stream reasoning_content (suy luận thật, deepseek-reasoner lộ),
+                        # KHÔNG stream content (câu trả lời/tool decision) -> không leak câu
+                        # trả lời vào panel "Lập kế hoạch". Model không lộ reasoning -> trống.
+                        _chunk = event["data"]["chunk"]
+                        _rc = (getattr(_chunk, "additional_kwargs", None) or {}).get("reasoning_content")
+                        if _rc:
                             yield {
                                 "phase": "thought",
                                 "node": "think",
-                                "text": _ttok,
+                                "text": _rc,
                                 "session_id": session_id,
                                 "agent_mode": "langgraph",
                                 "iterations": last_iteration,
