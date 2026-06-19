@@ -42,6 +42,27 @@ function resolveRef(n: number): Citation | undefined {
   return props.data.citations?.find(x => x.ref === n) ?? props.data.citations?.[n - 1]
 }
 
+// Tên tài liệu sạch cho nhãn chip: bỏ đuôi file + thay '_' bằng space (vd
+// "CNHC_Employee_Handbook.pdf" -> "CNHC Employee Handbook").
+function docNameLabel(doc?: string | null): string {
+  let s = (doc ?? '').trim()
+  if (!s) return ''
+  s = s.replace(/\.(pdf|docx?|pptx?|xlsx?|txt|md|csv|jpe?g|png|webp|gif)$/i, '')
+  return s.replace(/_+/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+// Nhãn chip citation INLINE: ưu tiên topic sạch (heading) -> tên tài liệu -> mới tới caption.
+// caption từ rag thường là ĐOẠN CHUNK THÔ (vd "tin và thông báo việc...", "time.") -> dùng
+// làm nhãn inline trông rất thô; caption đầy đủ vẫn nằm ở hover card. (heading_path có thể rỗng
+// với tài liệu ảnh/OCR -> fallback tên tài liệu cho nhãn vẫn có nghĩa.)
+function chipLabel(c: Citation): string {
+  const heads = citationHeadingPath(c.heading_path ?? [], c.document)
+  if (heads.length) return citationTeaser(heads[heads.length - 1])
+  const doc = docNameLabel(c.document)
+  if (doc) return citationTeaser(doc)
+  return citationTeaser(c.caption || c.snippet)
+}
+
 const renderedContent = computed(() => {
   if (!props.data.content) return ''
   const rawHtml = md.render(props.data.content)
@@ -54,12 +75,12 @@ const renderedContent = computed(() => {
       .filter(n => resolveRef(n))  // bỏ ref LLM bịa (không khớp source)
     if (!refs.length) return punct  // ref bịa -> bỏ marker, GIỮ dấu câu
     const first = resolveRef(refs[0])!
-    const teaser = esc(citationTeaser(first.caption || first.snippet))
+    const teaser = esc(chipLabel(first))
     const extra = refs.length > 1
       ? `<span class="ml-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">+${refs.length - 1}</span>`
       : ''
     // aria-label nằm trong attribute -> phải escape cả dấu nháy kép, không chỉ &<>
-    const label = esc(`Xem nguồn: ${citationTeaser(first.caption || first.snippet)}`).replace(/"/g, '&quot;')
+    const label = esc(`Xem nguồn: ${chipLabel(first)}`).replace(/"/g, '&quot;')
     const chip = `<span class="citation-ref cursor-pointer select-none inline-flex items-center gap-1 align-baseline rounded-full bg-slate-100 dark:bg-white/10 pl-0.5 pr-1.5 py-0.5 mx-0.5 hover:bg-slate-200 dark:hover:bg-white/20" role="button" tabindex="0" aria-label="${label}" data-refs="${refs.join(',')}"><img src="/logo.png" alt="" class="h-3.5 w-3.5 rounded-full object-cover"/><span class="text-[11px] font-medium text-slate-600 dark:text-slate-300">${teaser}</span>${extra}</span>`
     return `${punct}${lead || ' '}${chip}`
   })
