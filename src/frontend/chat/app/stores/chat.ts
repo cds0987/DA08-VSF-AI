@@ -734,15 +734,11 @@ export const useChatStore = defineStore('chat', () => {
             // thought: model nghĩ gì / quyết định gì. think token-stream -> gộp vào dòng
             // think hiện tại; triage reason -> 1 dòng riêng.
             if (payload.phase === 'thought' && payload.node && payload.text) {
-              // think + verify stream reasoning token-by-token -> GỘP vào dòng cùng node hiện
-              // tại (tránh mỗi token 1 dòng). Các node khác (triage reason...) -> 1 dòng riêng.
-              if (payload.node === 'think' || payload.node === 'verify') {
-                const last = thoughts.value[thoughts.value.length - 1]
-                if (last && last.node === payload.node) last.text += payload.text
-                else thoughts.value.push({ node: payload.node, text: payload.text })
-              } else {
-                thoughts.value.push({ node: payload.node, text: payload.text })
-              }
+              // Reasoning stream token-by-token (think/verify/answer...) -> GỘP các mảnh LIÊN
+              // TIẾP cùng node vào 1 dòng (tránh mỗi token 1 box = vỡ vụn). Node đổi -> dòng mới.
+              const last = thoughts.value[thoughts.value.length - 1]
+              if (last && last.node === payload.node) last.text += payload.text
+              else thoughts.value.push({ node: payload.node, text: payload.text })
               return
             }
 

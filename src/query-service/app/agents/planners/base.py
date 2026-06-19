@@ -17,6 +17,7 @@ class PlanContext:
     role_catalog: tuple[RoleSpec, ...]          # role active (từ manifest) -> catalog
     make_model: Callable[[str], Any] | None     # capability -> chat model (.ainvoke)
     history: list | None = None                 # recent messages (memory)
+    emit: Callable[[dict], Any] | None = None    # SSE emit -> stream reasoning lúc lập kế hoạch
 
 
 class Planner(ABC):

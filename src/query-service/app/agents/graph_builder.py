@@ -79,7 +79,8 @@ def build_orchestrator_graph(
         plan = await planner.plan(pctx)
         logger.info("orchestrate route=%s steps=%d", plan.route, len(plan.steps))
         if ctx.emit:
-            # "Suy nghĩ" = router NGHĨ GÌ (reasoning thật); thiếu -> fallback ngắn theo route.
+            # "Suy nghĩ" = router NGHĨ GÌ (reasoning SẠCH tiếng Việt từ field reasoning, KHÔNG phải
+            # raw CoT) -> 1 dòng gọn; trong lúc planner chạy, status spinner ở trên đã báo hoạt động.
             _think = plan.reasoning.strip() if plan.reasoning else (
                 "Trả lời trực tiếp." if plan.route == "light"
                 else "Cần truy xuất dữ liệu rồi tổng hợp."
@@ -160,38 +161,20 @@ def build_orchestrator_graph(
 
         if ctx.emit:
             await ctx.emit({"phase": "thinking", "node": "verify",
-                            "status": "Đang tổng hợp & kiểm tra thông tin đã đủ chưa…"})
+                            "status": "Đang kiểm tra thông tin đã đủ chưa…"})
 
         evidence = "\n\n".join(
             f"[step {k}] {v.output}" for k, v in sorted(data_results.items())
         )
-        from app.agents.roles._llm import acomplete
-        # capability "think" = deepseek-pro qua ai-router (đúng yêu cầu "deepseek pro tổng hợp lại").
-        _model = make_model("think")
+        from app.agents.roles._llm import astream_reasoning
+        # GATE phải NHANH (chặn trước synthesize -> ảnh hưởng TTFT). Dùng model NHẸ capability
+        # "answer" (deepseek-flash) thay vì "think" (gpt-5.4-mini reasoning nặng -> nghĩ dài).
+        # STREAM reasoning live ra SSE (node=verify) cho user THẤY model đang kiểm tra (không ẩn);
+        # content (JSON verdict) chỉ gom để parse, KHÔNG đẩy token JSON ra UI. FE gộp node=verify
+        # thành 1 dòng "Kiểm tra & tổng hợp". Model không astream/lỗi -> tự fallback acomplete.
+        _model = make_model("answer")
         _user = f"Câu hỏi: {state['question']}\n\nDữ liệu thu thập:\n{evidence}"
-        # STREAM reasoning live ra SSE (phase=thought, node=verify) -> FE hiện "Kiểm tra & tổng
-        # hợp" chạy dần, user thấy model đang làm gì (không "im lặng"). content (JSON verdict) gom
-        # để parse. Model không hỗ trợ astream / lỗi -> fallback acomplete (non-stream).
-        text: str | None = None
-        if ctx.emit and _model is not None and hasattr(_model, "astream"):
-            try:
-                from langchain_core.messages import HumanMessage, SystemMessage
-                _parts: list[str] = []
-                async for _chunk in _model.astream(
-                    [SystemMessage(content=_VERIFY_SYSTEM), HumanMessage(content=_user)]
-                ):
-                    _rc = (getattr(_chunk, "additional_kwargs", None) or {}).get("reasoning_content")
-                    if _rc:
-                        await ctx.emit({"phase": "thought", "node": "verify", "text": _rc})
-                    _tok = getattr(_chunk, "content", "") or ""
-                    if _tok:
-                        _parts.append(_tok)
-                text = "".join(_parts).strip() or None
-            except Exception as exc:  # noqa: BLE001 — stream lỗi -> non-stream
-                logger.warning("verify stream fail -> acomplete: %s", str(exc)[:120])
-                text = None
-        if text is None:
-            text = await acomplete(_model, system=_VERIFY_SYSTEM, user=_user)
+        text = await astream_reasoning(_model, _VERIFY_SYSTEM, _user, ctx.emit, node="verify")
         verdict = "sufficient"
         reason = ""
         if text:

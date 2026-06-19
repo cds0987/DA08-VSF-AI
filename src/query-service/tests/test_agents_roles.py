@@ -83,6 +83,57 @@ async def test_synthesize_no_model_falls_back_no_info():
     assert out.status == "no_info"  # mini chết -> fallback an toàn, KHÔNG raise
 
 
+class _StreamModel:
+    """Model giả có astream: phát reasoning_content (model 'nghĩ') rồi content (câu trả lời)."""
+    def __init__(self, reasoning_parts, content_parts):
+        self._r = reasoning_parts
+        self._c = content_parts
+
+    async def astream(self, msgs):
+        from langchain_core.messages import AIMessageChunk
+        for r in self._r:
+            yield AIMessageChunk(content="", additional_kwargs={"reasoning_content": r})
+        for c in self._c:
+            yield AIMessageChunk(content=c)
+
+
+async def test_astream_complete_surfaces_reasoning_and_streams_content():
+    """FIX hiệu ứng: reasoning_content -> SSE thought (user THẤY model nghĩ live); content ->
+    token generating (câu trả lời chạy dần). Trước đây reasoning bị BỎ -> UI im lặng/trả 1 cục."""
+    from app.agents.roles._llm import astream_complete
+
+    events: list[dict] = []
+
+    async def emit(ev):
+        events.append(ev)
+
+    model = _StreamModel(["Đang cân nhắc ", "dữ liệu…"], ["Xin ", "chào ", "bạn!"])
+    text = await astream_complete(model, "sys", "user", emit, node="answer")
+
+    assert text == "Xin chào bạn!"
+    thoughts = [e for e in events if e.get("phase") == "thought" and e.get("node") == "answer"]
+    tokens = [e for e in events if e.get("token")]
+    assert thoughts, "reasoning_content KHÔNG được surface ra SSE -> UI im lặng khi model nghĩ"
+    assert len(tokens) == 3 and "".join(t["token"] for t in tokens) == "Xin chào bạn!"
+
+
+async def test_astream_reasoning_emits_thought_but_not_content_tokens():
+    """planner/verify: reasoning -> thought live; content (JSON) chỉ gom, KHÔNG emit token JSON."""
+    from app.agents.roles._llm import astream_reasoning
+
+    events: list[dict] = []
+
+    async def emit(ev):
+        events.append(ev)
+
+    model = _StreamModel(["Phân tích ", "câu hỏi…"], ['{"sufficient":', ' true}'])
+    text = await astream_reasoning(model, "sys", "user", emit, node="verify")
+
+    assert text == '{"sufficient": true}'
+    assert [e for e in events if e.get("phase") == "thought" and e.get("node") == "verify"]
+    assert not [e for e in events if e.get("token")], "KHÔNG được leak JSON content ra token SSE"
+
+
 async def test_role_never_raises_on_mcp_error():
     class _BadMCP:
         async def rag_search(self, *a, **k):
