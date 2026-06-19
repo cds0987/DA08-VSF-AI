@@ -419,9 +419,13 @@ class QueryOrchestrationUseCase:
             })
             answer = str(result.get("answer") or "").strip()
             raw_sources = result.get("sources") or []
+            # retrieved: tổng chunk rag lấy được (kể cả dưới ngưỡng) — pipeline-health cho smoke.
+            retrieved = sum(
+                getattr(o, "retrieved", 0) for o in (result.get("results") or {}).values()
+            )
         except Exception as exc:  # noqa: BLE001 — fail-closed
             logger.error("orchestrator_stream_failed: %s", str(exc)[:300], exc_info=True)
-            answer, raw_sources = "", []
+            answer, raw_sources, retrieved = "", [], 0
 
         if not answer:
             answer = (
@@ -456,6 +460,7 @@ class QueryOrchestrationUseCase:
         yield {
             "done": True,
             "sources": sources,
+            "retrieved": retrieved,  # pipeline-health: chunk lấy được (kể cả <threshold)
             "session_id": session_id,
             "message_id": message_id,
             "outcome": outcome_value,

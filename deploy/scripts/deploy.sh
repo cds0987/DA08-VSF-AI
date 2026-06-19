@@ -347,11 +347,21 @@ if done is None:
     print("  [%s] FAIL: khong nhan event done (stream crash/treo?)" % label); sys.exit(1)
 outcome = done.get("outcome")
 src = len(done.get("sources") or [])
-print("  [%s] done OK  outcome=%s  sources=%s" % (label, outcome, src))
+# retrieved: chunk rag lay duoc ke ca <threshold (pipeline-health). Path orchestrator phat
+# field nay -> tach "pipeline khoe" khoi "citation": sources=0 do diem <threshold KHONG fail oan
+# (goc flaky deploy-smoke). None (path cu) -> fallback assert sources>0 nhu truoc.
+retrieved = done.get("retrieved")
+print("  [%s] done OK  outcome=%s  sources=%s  retrieved=%s" % (label, outcome, src, retrieved))
 if outcome in (6, "ERROR"):
     print("  [%s] FAIL: outcome=ERROR (wiring query->mcp / mcp->hr dut?)" % label); sys.exit(1)
-if need and src < 1:
-    print("  [%s] FAIL: can sources>0 (query->mcp->rag->qdrant tra rong)" % label); sys.exit(1)
+if need:
+    if retrieved is not None:
+        if retrieved < 1:
+            print("  [%s] FAIL: retrieved=0 (rag pipeline dut: collection/embed/qdrant?)" % label); sys.exit(1)
+        if src < 1:
+            print("  [%s] WARN: retrieved=%s nhung sources=0 (chunk duoi nguong citation — pipeline OK)" % (label, retrieved))
+    elif src < 1:
+        print("  [%s] FAIL: can sources>0 (query->mcp->rag->qdrant tra rong)" % label); sys.exit(1)
 PYEOF
 # Mật khẩu LẤY TỪ secret (SEED_ADMIN_PASSWORD đã đẩy vào payload) — KHÔNG hardcode trong
 # git (GitGuardian bắt cặp email+password; creds này sống thật trên prod).

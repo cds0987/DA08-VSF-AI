@@ -82,7 +82,8 @@ class RagRetrieveRole(AgentRole):
             user=f"Định hướng: {task.direction or query}\n\nTài liệu:\n{raw_text}",
         )
         output = analysis or raw_text
-        return WorkerOutput(task.step_id, self.name, output, sources=sources, status="ok")
+        return WorkerOutput(task.step_id, self.name, output, sources=sources, status="ok",
+                            retrieved=len(used))
 
     async def _search(self, query: str):
         return await self.ctx.mcp_client.rag_search(

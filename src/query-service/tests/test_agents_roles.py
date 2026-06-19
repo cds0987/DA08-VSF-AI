@@ -54,6 +54,7 @@ async def test_rag_retrieve_without_model_returns_raw_chunks():
     out = await role.run(WorkerInput(1, "rag_retrieve", "nghi phep", "trich"))
     assert out.status == "ok"
     assert len(out.sources) == 1
+    assert out.retrieved == 1  # pipeline-health: chunk lấy được (kể cả dưới ngưỡng)
     assert "results" in out.output
 
 

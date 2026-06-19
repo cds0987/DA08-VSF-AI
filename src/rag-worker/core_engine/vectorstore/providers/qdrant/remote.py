@@ -90,6 +90,7 @@ class QdrantRemoteProvider(QdrantBase):
             await self._client.upsert(
                 collection_name=self._collection,
                 points=[self._point(r) for r in record_list],
+                wait=True,  # chờ index xong -> point SEARCHABLE ngay (hết race query-ngay-sau-ingest)
             )
 
         await self._retry_on_missing_collection(op)
@@ -107,6 +108,7 @@ class QdrantRemoteProvider(QdrantBase):
                     await self._client.upsert(
                         collection_name=self._collection,
                         points=points[index : index + self._upsert_batch],
+                        wait=True,  # chờ index xong -> point SEARCHABLE ngay (hết race ingest->query)
                     )
                 except Exception as exc:  # DIAG upsert 400 "Not existing vector name": log body THẬT
                     p0 = points[index]

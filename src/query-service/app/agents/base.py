@@ -35,6 +35,9 @@ class WorkerOutput:
     sources: list[dict[str, Any]] = field(default_factory=list)
     status: WorkerStatus = "ok"
     error: str | None = None
+    # retrieved: số chunk rag LẤY ĐƯỢC (kể cả dưới ngưỡng citation). Tách "pipeline khỏe"
+    # (retrieved>0: embed+qdrant+search chạy) khỏi "citation" (sources: chunk >= threshold).
+    retrieved: int = 0
 
 
 @dataclass(frozen=True)

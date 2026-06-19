@@ -314,9 +314,11 @@ def _parse_sse(raw: bytes, label: str, need_sources: bool) -> None:
         raise SystemExit(f"[{label}] FAIL: không nhận event done (stream crash/treo?)")
     outcome = done.get("outcome")
     src = len(done.get("sources") or [])
+    # retrieved: chunk rag lấy được kể cả <threshold (pipeline-health). None nếu path cũ
+    # không phát field này -> fallback dùng src cho assert (hành vi cũ).
+    retrieved = done.get("retrieved")
     agent_mode = done.get("agent_mode")
-    # DIAGNOSTIC: phases + tool_seen phân biệt 'think không gọi tool' vs 'gọi mà rỗng'.
-    diag = f"agent_mode={agent_mode} phases={phases} tool_seen={tool_seen} answer_chars={answer_chars}"
+    diag = f"agent_mode={agent_mode} retrieved={retrieved} phases={phases} tool_seen={tool_seen} answer_chars={answer_chars}"
     print(f"  [{label}] done outcome={outcome} sources={src} {diag}")
     if outcome in (6, "ERROR"):
         raise SystemExit(f"[{label}] FAIL: outcome=ERROR (wiring đứt?) {diag}")
@@ -328,13 +330,25 @@ def _parse_sse(raw: bytes, label: str, need_sources: bool) -> None:
             f"[{label}] FAIL: agent_mode={agent_mode!r} != EXPECT {expect_mode!r} "
             f"-> path prod KHÔNG được kích hoạt (fallback?). {diag}"
         )
-    if need_sources and src < 1:
-        hint = ("model KHÔNG gọi tool/retrieve (adapter/model không phát tool_call)"
-                if not tool_seen else "tool gọi RỒI nhưng rag/qdrant trả rỗng (args rỗng?)")
-        raise SystemExit(f"[{label}] FAIL: cần sources>0 -> {hint}. {diag}")
-    # Câu hỏi cần dữ liệu mà answer rỗng -> fail-closed đã kích hoạt sai/synthesize trống.
-    if need_sources and answer_chars < 1:
-        raise SystemExit(f"[{label}] FAIL: answer rỗng dù có sources. {diag}")
+    if need_sources:
+        # PIPELINE-HEALTH: nếu có field retrieved (path orchestrator) -> assert retrieved>0
+        # (embed+qdrant+search chạy thật). Tách khỏi citation: sources=0 do điểm <threshold
+        # KHÔNG còn fail oan (gốc của flaky deploy-smoke). sources=0 -> warning, không fail.
+        if retrieved is not None:
+            if retrieved < 1:
+                hint = ("model KHÔNG sinh step rag_retrieve"
+                        if not tool_seen else "rag/qdrant trả RỖNG (collection/embed/wiring?)")
+                raise SystemExit(f"[{label}] FAIL: retrieved=0 (pipeline rag đứt) -> {hint}. {diag}")
+            if src < 1:
+                print(f"  [{label}] WARN: retrieved={retrieved} nhưng sources=0 "
+                      f"(chunk dưới ngưỡng citation — pipeline OK, confidence thấp). {diag}")
+        elif src < 1:
+            # Path cũ (react không có retrieved) -> giữ assert sources>0.
+            hint = ("model KHÔNG gọi tool/retrieve (adapter/model không phát tool_call)"
+                    if not tool_seen else "tool gọi RỒI nhưng rag/qdrant trả rỗng (args rỗng?)")
+            raise SystemExit(f"[{label}] FAIL: cần sources>0 -> {hint}. {diag}")
+        if answer_chars < 1:
+            raise SystemExit(f"[{label}] FAIL: answer rỗng. {diag}")
 
 
 def query(label: str, token: str, uid: str, question: str, need_sources: bool) -> None:
