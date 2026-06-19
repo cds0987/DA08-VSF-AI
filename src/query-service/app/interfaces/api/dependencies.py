@@ -31,7 +31,7 @@ from app.infrastructure.external.intent_ai_client import (
     OpenAIIntentLLMClient,
     TokenHashIntentEmbeddingClient,
 )
-from app.infrastructure.external.openai_client import OpenAIStreamingClient
+from app.infrastructure.external.openai_client import ConversationSummarizer, OpenAIStreamingClient
 from app.infrastructure.messaging.nats_events import QueryNatsEventHandler
 from app.infrastructure.messaging.nats_subscriber import NatsSubscriberManager
 from app.infrastructure.messaging.notification_service import NotificationService
@@ -197,6 +197,11 @@ def get_openai_client() -> OpenAIStreamingClient:
 
 
 @lru_cache
+def get_summarizer() -> ConversationSummarizer:
+    return ConversationSummarizer(get_settings())
+
+
+@lru_cache
 def get_observability_tracer():
     # Gộp langfuse + langsmith (composite) theo OBSERVABILITY_MODE. Xem tracing.build_tracer.
     return build_tracer(get_settings())
@@ -254,6 +259,7 @@ def get_orchestration_use_case() -> QueryOrchestrationUseCase:
         guardrails=get_guardrails(),
         user_access_profile_repo=get_user_access_profile_repo(),
         access_cache=get_access_cache(),
+        summarizer=get_summarizer(),
         agent_mode=mode,
         orchestrator_planner=planner,
         make_model=(get_node_model if planner is not None else None),
@@ -423,3 +429,4 @@ def reset_state_for_tests() -> None:
     get_observability_tracer.cache_clear()
     get_guardrails.cache_clear()
     get_openai_client.cache_clear()
+    get_summarizer.cache_clear()

@@ -70,6 +70,7 @@ class QueryOrchestrationUseCase:
         guardrails=None,
         user_access_profile_repo=None,
         access_cache=None,
+        summarizer=None,
         agent_mode: str = "react",
         orchestrator_planner=None,
         make_model=None,
@@ -81,6 +82,7 @@ class QueryOrchestrationUseCase:
         self._semantic_cache = semantic_cache
         self._mcp_client = mcp_client
         self._openai_client = openai_client
+        self._summarizer = summarizer
         self._langgraph_agent = langgraph_agent
         # MOSA Orchestrator-Workers (mode=orchestrator_workers). Mặc định react ->
         # các field này None -> _stream_inner đi path langgraph/legacy cũ KHÔNG đổi.
@@ -481,7 +483,7 @@ class QueryOrchestrationUseCase:
         _lang_trace: trace handle từ stream() — dùng để tạo child span/generation
         cho langfuse enriched tracing (per-node LLM call + tool call). Best-effort.
         """
-        from langchain_core.messages import HumanMessage, AIMessage as LCAIMessage
+        from langchain_core.messages import HumanMessage, AIMessage as LCAIMessage, SystemMessage
 
         allowed_doc_ids = await self._get_allowed_doc_ids(user)
         # Narrow to request-specified docs (intersect with ACL).
@@ -499,11 +501,19 @@ class QueryOrchestrationUseCase:
         # state["messages"] contains only prior turns.
         recent_lc_messages: list = []
         try:
-            ctx = await self._get_context(user.id, recent_k=4)
+            ctx = await self._get_context(user.id, recent_k=self._settings.agent_recent_k)
+            # Summary các lượt CŨ (đã nén) đứng đầu context -> giữ mạch mà không nhồi raw.
+            summary_text = (getattr(ctx, "summary", None) or "").strip()
+            if summary_text:
+                recent_lc_messages.append(
+                    SystemMessage(content=f"[Tóm tắt hội thoại trước đó]: {summary_text}")
+                )
             for msg in ctx.recent_messages:
                 if msg.role == "user":
                     recent_lc_messages.append(HumanMessage(content=msg.content))
                 elif msg.role == "assistant":
+                    # Giữ NGUYÊN VĂN K lượt gần (sliding window): fidelity cho follow-up.
+                    # Lượt cũ hơn window đã được nén vào summary ở trên.
                     content = msg.content
                     if msg.sources:
                         names = sorted({
@@ -1313,21 +1323,7 @@ class QueryOrchestrationUseCase:
                 create_if_missing=False,
             )
             message_id = str(stored.id) if stored is not None else None
-            context = await self._get_context(user_id, recent_k=6)
-            if (
-                self._settings.llm_mode.strip().lower() == "mock"
-                and len(context.recent_messages) >= 10
-            ):
-                summary = _extractive_summary(
-                    [(message.role, message.content) for message in context.recent_messages]
-                )
-                if not summary:
-                    return message_id
-                await self._conversation_repo.update_summary(
-                    user_id,
-                    summary,
-                    conversation_id=_ACTIVE_CONVERSATION_ID.get(),
-                )
+            await self._maybe_update_summary(user_id)
         else:
             await self._conversation_repo.save_message(
                 user_id,
@@ -1336,6 +1332,31 @@ class QueryOrchestrationUseCase:
                 conversation_id=_ACTIVE_CONVERSATION_ID.get(),
             )
         return message_id
+
+    async def _maybe_update_summary(self, user_id: str) -> None:
+        """Summary-buffer: gộp các lượt CŨ HƠN window vào `conversations.summary` bằng model
+        rẻ. Best-effort (memory phụ — không được làm hỏng lượt). Hội thoại ngắn -> bỏ qua."""
+        if not self._settings.summary_enabled or self._summarizer is None:
+            return
+        try:
+            window = max(1, self._settings.agent_recent_k)
+            # Lấy rộng hơn window 1 ít để bắt các lượt vừa bị đẩy ra; cũ hơn nữa đã nằm trong summary.
+            ctx = await self._get_context(user_id, recent_k=window + 2)
+            msgs = ctx.recent_messages
+            if len(msgs) <= window * 2:
+                return  # chưa vượt window -> chưa có lượt cũ nào để tóm tắt
+            evicted = [(m.role, m.content) for m in msgs[: len(msgs) - window * 2]]
+            prev = getattr(ctx, "summary", None)
+            new_summary = await self._summarizer.summarize(evicted, prev_summary=prev)
+            new_summary = (new_summary or "").strip()
+            if new_summary and new_summary != (prev or "").strip():
+                await self._conversation_repo.update_summary(
+                    user_id,
+                    new_summary,
+                    conversation_id=_ACTIVE_CONVERSATION_ID.get(),
+                )
+        except Exception:
+            logger.warning("summary_update_failed", exc_info=True)
 
     @staticmethod
     def _source_payload(result: SearchResultLike) -> dict:
@@ -1422,18 +1443,6 @@ def _hr_context_text(result: HrQueryResultLike) -> str:
     if result.summary:
         return result.summary
     return f"Khong co du lieu HR phu hop cho intent {result.intent}."
-
-
-def _extractive_summary(messages: list[tuple[str, str]]) -> str | None:
-    snippets = []
-    for role, content in messages:
-        normalized = " ".join(content.split())
-        if not normalized:
-            continue
-        snippets.append(f"{role}: {normalized[:180]}")
-    if not snippets:
-        return None
-    return "Recent conversation: " + " | ".join(snippets[-6:])
 
 
 def _word_chunks(text: str) -> list[str]:
