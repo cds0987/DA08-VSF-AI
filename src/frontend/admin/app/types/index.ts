@@ -159,3 +159,50 @@ export interface UpdateEmployeeRequest {
   hire_date?: string | null
   department?: string | null
 }
+
+export interface LeaveBalanceInfo {
+  annual_total: number
+  annual_used: number
+  annual_remaining: number
+  sick_total: number
+  sick_used: number
+  sick_remaining: number
+}
+
+export interface LeaveRequestInfo {
+  leave_type: string
+  start_date: string
+  end_date: string
+  days_count: number
+  status: string
+}
+
+export interface AttendanceInfo {
+  period: string
+  work_days: number
+  late_count: number
+  absent_count: number
+}
+
+export interface PayrollInfo {
+  period: string
+  gross_salary: number
+  deductions: number
+  net_salary: number
+}
+
+export interface PerformanceInfo {
+  period: string
+  rating: string
+  kpi: unknown[]
+  reviewer_user_id: string | null
+}
+
+export interface EmployeeDetailsResponse {
+  employee: EmployeeItem
+  leave_balance: LeaveBalanceInfo | null
+  leave_requests: LeaveRequestInfo[]
+  attendance: AttendanceInfo | null
+  payroll: PayrollInfo | null
+  performance: PerformanceInfo | null
+}

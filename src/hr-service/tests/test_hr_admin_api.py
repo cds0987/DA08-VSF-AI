@@ -4,7 +4,14 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.api.hr_admin import get_repo, get_publisher
 from app.api.auth import require_admin_jwt
-from app.domain.entities.dtos import EmployeeDTO
+from app.domain.entities.dtos import (
+    AttendanceDTO,
+    EmployeeDTO,
+    LeaveBalanceDTO,
+    LeaveRequestDTO,
+    PayrollDTO,
+    PerformanceReviewDTO,
+)
 from app.domain.repositories.hr_repository import HrRepository
 from jose import jwt
 
@@ -323,6 +330,89 @@ def test_delete_employee_not_found_returns_404():
     response = client.delete("/hr/admin/employees/nonexistent")
 
     assert response.status_code == 404
+
+    app.dependency_overrides.clear()
+
+
+def test_get_employee_details_empty():
+    """GET /details: employee có hồ sơ nhưng chưa có dữ liệu HR phụ -> 200, các nhánh null/[]."""
+    fake_repo = FakeHrRepository()
+    app.dependency_overrides[require_admin_jwt] = mock_require_admin_jwt
+    app.dependency_overrides[get_repo] = lambda: fake_repo
+
+    client = TestClient(app)
+    response = client.get("/hr/admin/employees/emp-1/details")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["employee"]["id"] == "emp-1"
+    assert data["leave_balance"] is None
+    assert data["leave_requests"] == []
+    assert data["attendance"] is None
+    assert data["payroll"] is None
+    assert data["performance"] is None
+
+    app.dependency_overrides.clear()
+
+
+def test_get_employee_details_not_found():
+    """GET /details: employee không tồn tại -> 404."""
+    fake_repo = FakeHrRepository()
+    app.dependency_overrides[require_admin_jwt] = mock_require_admin_jwt
+    app.dependency_overrides[get_repo] = lambda: fake_repo
+
+    client = TestClient(app)
+    response = client.get("/hr/admin/employees/missing/details")
+
+    assert response.status_code == 404
+
+    app.dependency_overrides.clear()
+
+
+def test_get_employee_details_aggregates_data():
+    """GET /details: gộp đủ dữ liệu HR; payroll lấy kỳ mới nhất, leave_requests cắt 5 đơn."""
+    class RichRepo(FakeHrRepository):
+        async def get_leave_balance(self, user_id):
+            return LeaveBalanceDTO(
+                annual_total=12, annual_used=4, annual_remaining=8,
+                sick_total=10, sick_used=2, sick_remaining=8,
+            )
+
+        async def get_leave_requests(self, user_id):
+            # 6 đơn -> use case phải cắt còn 5
+            return [
+                LeaveRequestDTO(leave_type="annual", start_date="2026-05-10",
+                                end_date="2026-05-12", days_count=3, status="approved")
+                for _ in range(6)
+            ]
+
+        async def get_attendance(self, user_id):
+            return AttendanceDTO(period="2026-05", work_days=21, late_count=2, absent_count=0)
+
+        async def get_payroll(self, user_id):
+            # repo trả desc theo kỳ -> use case lấy phần tử đầu (mới nhất)
+            return [
+                PayrollDTO(period="2026-05", gross_salary=35000000.0, deductions=5000000.0, net_salary=30000000.0),
+                PayrollDTO(period="2026-04", gross_salary=34000000.0, deductions=5000000.0, net_salary=29000000.0),
+            ]
+
+        async def get_performance(self, user_id):
+            return PerformanceReviewDTO(period="2026-Q1", rating="Exceeds Expectations", kpi=[], reviewer_user_id="mgr-9")
+
+    app.dependency_overrides[require_admin_jwt] = mock_require_admin_jwt
+    app.dependency_overrides[get_repo] = lambda: RichRepo()
+
+    client = TestClient(app)
+    response = client.get("/hr/admin/employees/emp-1/details")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["leave_balance"]["annual_remaining"] == 8
+    assert len(data["leave_requests"]) == 5
+    assert data["attendance"]["work_days"] == 21
+    assert data["payroll"]["period"] == "2026-05"
+    assert data["payroll"]["net_salary"] == 30000000.0
+    assert data["performance"]["rating"] == "Exceeds Expectations"
 
     app.dependency_overrides.clear()
 
