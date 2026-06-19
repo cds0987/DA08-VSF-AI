@@ -66,9 +66,14 @@ AIROUTER_URL = os.environ.get("AIROUTER_URL", "http://localhost:8010").rstrip("/
 def verify_router_served() -> None:
     """CHỨNG MINH luồng trả lời chính ĐÃ đi qua ai-router (không phải tình cờ chạy direct).
 
-    Sau khi query, /metrics phải có airouter_resolve_total > 0 (router đã resolve key cho
-    LLM call) và ÍT NHẤT 1 key đã tiêu token hôm nay. Nếu query-service bypass router thì
-    cả 2 = 0 -> FAIL. Đây là khác biệt giữa 'answer chạy' và 'answer chạy QUA ROUTER'.
+    Sau khi query, /metrics phải chứng minh router ĐÃ phục vụ LLM. Bằng chứng = key đã tiêu
+    token hôm nay (airouter_key_tokens_today, lưu REDIS = SHARED toàn cluster) HOẶC
+    airouter_resolve_total > 0.
+
+    ⚠️ airouter_resolve_total là counter IN-MEMORY per-process; ai-router chạy --workers 2
+    (docker-entrypoint.sh) -> /metrics GET chỉ trúng 1 process, có thể đọc 0 dù process kia
+    đã resolve (flaky). key_tokens_today lấy từ Redis nên ĐÁNG TIN: >0 = router thật sự phục
+    vụ + tính cost. Chỉ FAIL khi CẢ HAI = 0 (bypass thật).
     """
     st, raw = _http("GET", f"{AIROUTER_URL}/metrics", timeout=15)
     if st != 200:
@@ -85,8 +90,9 @@ def verify_router_served() -> None:
         if line.startswith("airouter_key_tokens_today{")
     )
     print(f"  [router] resolve_total={resolved} key_tokens_today={tokens}")
-    if resolved < 1:
-        raise SystemExit("[router] FAIL: airouter_resolve_total=0 -> query KHÔNG đi qua router")
+    # tokens>0 (Redis shared) = bằng chứng chắc; resolve_total per-process chỉ bổ trợ.
+    if resolved < 1 and tokens <= 0:
+        raise SystemExit("[router] FAIL: resolve_total=0 VÀ key_tokens_today=0 -> query KHÔNG qua router")
     # raw key KHÔNG được lộ trong /metrics (chỉ key_id/secret_env)
     if "sk-" in text:
         raise SystemExit("[router] FAIL: /metrics lộ raw key (sk-...)")
