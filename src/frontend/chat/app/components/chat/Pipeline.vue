@@ -14,8 +14,8 @@ const props = defineProps<Props>()
 
 const NODE_LABEL: Record<string, string> = {
   triage: 'Phân loại',
+  think: 'Suy nghĩ',
   plan: 'Lập kế hoạch',
-  think: 'Lập kế hoạch',
   answer: 'Soạn trả lời',
 }
 

@@ -712,8 +712,26 @@ class QueryOrchestrationUseCase:
                                 }
                         # Emit "quyết định" của think (planner) -> UI hiện bước think (kể cả
                         # khi model ẩn reasoning). node="plan" -> FE đẩy thành dòng riêng.
-                        # (Không emit dòng "quyết định" node=plan nữa: reasoning_content của
-                        #  think đã thể hiện kế hoạch; thêm dòng quyết định gây trộn/lộn xộn.)
+                        # node=plan = bước "Lập kế hoạch" (SAU "Suy nghĩ"): nêu cần gì / dùng tool nào.
+                        if run_name == "think":
+                            k_out = (event.get("data") or {}).get("output") or {}
+                            k_msgs = k_out.get("messages") if isinstance(k_out, dict) else None
+                            if k_msgs:
+                                _last = k_msgs[-1]
+                                _tcs = getattr(_last, "tool_calls", None) or []
+                                if _tcs:
+                                    _names = ", ".join(tc.get("name", "") for tc in _tcs if tc.get("name"))
+                                    _ptext = f"Cần dùng công cụ: {_names}"
+                                else:
+                                    _ptext = "Đã đủ thông tin → tổng hợp câu trả lời."
+                                yield {
+                                    "phase": "thought",
+                                    "node": "plan",
+                                    "text": _ptext,
+                                    "session_id": session_id,
+                                    "agent_mode": "langgraph",
+                                    "iterations": last_iteration,
+                                }
                         # Emit observing event from act node output (ToolMessage with real results)
                         if run_name == "act":
                             out = (event.get("data") or {}).get("output") or {}
