@@ -539,11 +539,26 @@ async def act_node(
                 llm_query = (tool_args.get("query") or "").strip()
                 search_query = llm_query if llm_query else state["question"]
                 _rag_start_dt = datetime.now(timezone.utc)
-                results = await mcp_client.rag_search(
-                    query=search_query,
-                    document_ids=list(allowed_doc_ids),
-                    top_k=effective_top_k,
-                )
+                # RETRY 1 lần: mcp rag_search đôi khi trả isError intermittent (lỗi tạm sau
+                # embed) -> thử lại 1 lần trước khi NO_INFO. Chống flake + UX tốt hơn.
+                try:
+                    results = await mcp_client.rag_search(
+                        query=search_query,
+                        document_ids=list(allowed_doc_ids),
+                        top_k=effective_top_k,
+                    )
+                except MCPCircuitOpenError:
+                    raise
+                except Exception as _rag_exc:
+                    logger.warning(
+                        "langgraph_rag_retry session=%s err=%s",
+                        state["session_id"], str(_rag_exc)[:120],
+                    )
+                    results = await mcp_client.rag_search(
+                        query=search_query,
+                        document_ids=list(allowed_doc_ids),
+                        top_k=effective_top_k,
+                    )
                 _rag_end_dt = datetime.now(timezone.utc)
                 _threshold = state.get("rag_score_threshold", 0.45)
                 qualified = [r for r in results if r.score >= _threshold]
