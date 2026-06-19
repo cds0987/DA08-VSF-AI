@@ -849,22 +849,32 @@ async def answer_node(state: AgentState, model: BaseChatModel | None = None, spl
     while src and isinstance(src[-1], AIMessage) and not getattr(src[-1], "tool_calls", None):
         src.pop()
 
-    convo: list = []
+    question = state.get("question", "")
+    history: list = []          # lượt trước (ngữ cảnh) — KHÔNG gồm câu hỏi hiện tại
     tool_results: list[str] = []
     for m in src:
         if isinstance(m, HumanMessage):
-            convo.append(m)
+            if str(m.content or "").strip() != question.strip():
+                history.append(m)
         elif isinstance(m, AIMessage) and not getattr(m, "tool_calls", None) and str(m.content or "").strip():
-            convo.append(m)  # câu trả lời THẬT ở lượt trước (history) — giữ ngữ cảnh hội thoại
+            history.append(m)  # câu trả lời THẬT ở lượt trước
         elif isinstance(m, ToolMessage):
             tool_results.append(str(m.content or ""))
         # AIMessage có tool_calls -> BỎ (tránh model bắt chước gọi tool)
 
-    synth_messages: list = [SystemMessage(content=SYNTHESIS_SYSTEM_PROMPT)] + convo
+    # ❖ ĐẶT CÂU HỎI Ở CUỐI (sau tool data) làm chỉ thị: tránh model bám vào data nổi bật
+    # (vd full HR profile nhiều data phép) mà trả lời lạc đề. Tool data -> rồi câu hỏi.
+    final_parts: list[str] = []
     if tool_results:
-        synth_messages.append(
-            HumanMessage(content="[THÔNG TIN ĐÃ THU THẬP]\n" + "\n\n".join(tool_results))
-        )
+        final_parts.append("[THÔNG TIN ĐÃ THU THẬP]\n" + "\n\n".join(tool_results))
+    final_parts.append(
+        f"YÊU CẦU: Dựa trên thông tin trên, TRẢ LỜI ĐÚNG câu hỏi sau (không lạc sang chủ đề "
+        f"khác, không liệt kê mục không liên quan):\n\"{question}\""
+    )
+    synth_messages: list = (
+        [SystemMessage(content=SYNTHESIS_SYSTEM_PROMPT)] + history
+        + [HumanMessage(content="\n\n".join(final_parts))]
+    )
     response: AIMessage = await model.ainvoke(synth_messages)
     return {
         "messages": [response],
