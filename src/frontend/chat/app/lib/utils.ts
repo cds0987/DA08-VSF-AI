@@ -28,11 +28,26 @@ export function formatRelevance(score?: number | null): string {
   return `${pct}%`
 }
 
+/**
+ * Dọn nhãn citation: gộp khoảng trắng + bóc các tiền tố đánh số/bullet vô nghĩa ở
+ * đầu (vd "1. ", "1) ", "a. ", "- ", "• ") — caption thường là 1 dòng list thô cắt
+ * từ tài liệu nên hay dính số thứ tự, làm nhãn đọc như "1. Lập, cập nhật,…".
+ */
+export function cleanCitationLabel(text?: string | null): string {
+  let clean = (text ?? '').replace(/\s+/g, ' ').trim()
+  // Bóc lặp để xử lý lồng nhau (vd "1. a) ..."); dừng khi không còn bóc được nữa.
+  let prev = ''
+  while (clean && clean !== prev) {
+    prev = clean
+    clean = clean.replace(/^(?:\d+|[a-zA-Z])[.)\]]\s+|^[-–—•*]\s+/, '').trim()
+  }
+  return clean
+}
+
 /** Vài chữ đầu nội dung cho chip citation (gợi tò mò). Cắt theo ranh giới từ,
  * ngắn (~18 ký tự). Rỗng -> "Nguồn". */
 export function citationTeaser(text?: string | null): string {
-  if (!text) return 'Nguồn'
-  const clean = text.replace(/\s+/g, ' ').trim()
+  const clean = cleanCitationLabel(text)
   if (!clean) return 'Nguồn'
   if (clean.length <= 18) return clean
   const cut = clean.slice(0, 18)

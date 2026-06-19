@@ -8,7 +8,7 @@ import {
   ThumbsDown,
   ThumbsUp,
 } from '@lucide/vue'
-import { citationHeadingPath, citationTeaser, cn, formatRelevance } from '~/lib/utils'
+import { citationHeadingPath, citationTeaser, cleanCitationLabel, cn, formatRelevance } from '~/lib/utils'
 import type { ChatMessage, Citation } from '~/types'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
@@ -28,8 +28,11 @@ const copied = ref(false)
 
 const popoverCitations = ref<Citation[]>([])   // nhóm nguồn của chip đang hover
 const popoverIndex = ref(0)                    // trang carousel hiện tại
-const popoverStyle = ref({ top: '0px', left: '0px' })
+const popoverStyle = ref({ top: '0px', left: '0px', transform: 'none' })
 let hideTimer: ReturnType<typeof setTimeout> | null = null
+// Ước lượng chiều cao popover để quyết định lật lên/xuống (transform translateY(-100%)
+// tự bù đúng chiều cao thật nên không cần đo chính xác).
+const POPOVER_EST_HEIGHT = 200
 
 const activeCite = computed(() => popoverCitations.value[popoverIndex.value] ?? null)
 
@@ -55,10 +58,12 @@ const renderedContent = computed(() => {
     const extra = refs.length > 1
       ? `<span class="ml-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">+${refs.length - 1}</span>`
       : ''
-    const chip = `<span class="citation-ref cursor-pointer select-none inline-flex items-center gap-1 align-baseline rounded-full bg-slate-100 dark:bg-white/10 pl-0.5 pr-1.5 py-0.5 mx-0.5 hover:bg-slate-200 dark:hover:bg-white/20" data-refs="${refs.join(',')}"><img src="/logo.png" alt="" class="h-3.5 w-3.5 rounded-full object-cover"/><span class="text-[11px] font-medium text-slate-600 dark:text-slate-300">${teaser}</span>${extra}</span>`
+    // aria-label nằm trong attribute -> phải escape cả dấu nháy kép, không chỉ &<>
+    const label = esc(`Xem nguồn: ${citationTeaser(first.caption || first.snippet)}`).replace(/"/g, '&quot;')
+    const chip = `<span class="citation-ref cursor-pointer select-none inline-flex items-center gap-1 align-baseline rounded-full bg-slate-100 dark:bg-white/10 pl-0.5 pr-1.5 py-0.5 mx-0.5 hover:bg-slate-200 dark:hover:bg-white/20" role="button" tabindex="0" aria-label="${label}" data-refs="${refs.join(',')}"><img src="/logo.png" alt="" class="h-3.5 w-3.5 rounded-full object-cover"/><span class="text-[11px] font-medium text-slate-600 dark:text-slate-300">${teaser}</span>${extra}</span>`
     return `${punct}${lead || ' '}${chip}`
   })
-  return DOMPurify.sanitize(withRefs, { ADD_ATTR: ['data-refs'] })
+  return DOMPurify.sanitize(withRefs, { ADD_ATTR: ['data-refs', 'role', 'tabindex', 'aria-label'] })
 })
 
 function refsFromChip(chip: HTMLElement): Citation[] {
@@ -68,13 +73,55 @@ function refsFromChip(chip: HTMLElement): Citation[] {
     .filter((c): c is Citation => Boolean(c))
 }
 
+function openChip(chip: HTMLElement) {
+  const list = refsFromChip(chip)
+  if (!list.length) return
+  // Chỉ dùng popoverIndex (vị trí carousel) khi popover đang mở ĐÚNG chip này; nếu
+  // click chip khác (vd touch không qua hover) thì index cũ vô nghĩa -> về nguồn đầu.
+  const sameChip = popoverCitations.value.length === list.length
+    && popoverCitations.value.every((c, i) => c === list[i])
+  const citation = list[sameChip ? popoverIndex.value : 0] ?? list[0]
+  emit('open-citation', citation)
+}
+
 function handleContentClick(e: MouseEvent) {
   // closest: click có thể trúng <img>/"+N" con bên trong chip
   const chip = (e.target as HTMLElement).closest('.citation-ref') as HTMLElement | null
+  if (chip) openChip(chip)
+}
+
+// Enter/Space mở citation khi chip đang focus (keyboard) — chip là role="button".
+function handleContentKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Enter' && e.key !== ' ') return
+  const chip = (e.target as HTMLElement).closest('.citation-ref') as HTMLElement | null
   if (!chip) return
+  e.preventDefault()
+  openChip(chip)
+}
+
+// Hiện popover khi chip nhận focus bằng bàn phím (Tab), tái dùng logic định vị hover.
+function showPopoverForChip(chip: HTMLElement) {
+  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
   const list = refsFromChip(chip)
-  const citation = list[popoverIndex.value] ?? list[0]
-  if (citation) emit('open-citation', citation)
+  if (!list.length) return
+  const rect = chip.getBoundingClientRect()
+  const left = Math.max(8, Math.min(rect.left + window.scrollX, window.innerWidth - 332))
+  // Lật lên trên nếu chỗ trống bên dưới không đủ (vd chip gần đáy màn hình).
+  const flipUp = window.innerHeight - rect.bottom < POPOVER_EST_HEIGHT && rect.top > window.innerHeight - rect.bottom
+  popoverStyle.value = flipUp
+    ? { top: `${rect.top + window.scrollY - 6}px`, left: `${left}px`, transform: 'translateY(-100%)' }
+    : { top: `${rect.bottom + window.scrollY + 6}px`, left: `${left}px`, transform: 'none' }
+  popoverCitations.value = list
+  popoverIndex.value = 0
+}
+
+function handleContentFocusIn(e: FocusEvent) {
+  const chip = (e.target as HTMLElement).closest('.citation-ref') as HTMLElement | null
+  if (chip) showPopoverForChip(chip)
+}
+
+function handleContentFocusOut() {
+  hideTimer = setTimeout(() => { popoverCitations.value = [] }, 200)
 }
 
 function copyToClipboard() {
@@ -86,17 +133,7 @@ function copyToClipboard() {
 
 function handleContentMouseOver(e: MouseEvent) {
   const chip = (e.target as HTMLElement).closest('.citation-ref') as HTMLElement | null
-  if (!chip) return
-  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
-  const list = refsFromChip(chip)
-  if (!list.length) return
-  const rect = chip.getBoundingClientRect()
-  popoverStyle.value = {
-    top: `${rect.bottom + window.scrollY + 6}px`,
-    left: `${Math.min(rect.left + window.scrollX, window.innerWidth - 332)}px`,
-  }
-  popoverCitations.value = list
-  popoverIndex.value = 0
+  if (chip) showPopoverForChip(chip)
 }
 
 function handleContentMouseLeave() {
@@ -144,8 +181,11 @@ function nextCite() {
         class="ai-response-markdown prose prose-base prose-slate dark:prose-invert max-w-none font-medium text-slate-900 dark:text-foreground prose-p:font-medium prose-p:leading-relaxed prose-pre:bg-slate-50 dark:prose-pre:bg-background/50 prose-pre:border prose-pre:border-slate-200 dark:prose-pre:border-white/5 [overflow-wrap:anywhere]"
         v-html="renderedContent"
         @click="handleContentClick"
+        @keydown="handleContentKeydown"
         @mouseover="handleContentMouseOver"
         @mouseleave="handleContentMouseLeave"
+        @focusin="handleContentFocusIn"
+        @focusout="handleContentFocusOut"
       />
       <!-- Network interruption — ChatGPT style: no content received, show subtle placeholder -->
       <p
@@ -232,7 +272,7 @@ function nextCite() {
     <Teleport to="body">
       <div
         v-if="activeCite"
-        :style="{ position: 'absolute', zIndex: '9999', width: '320px', top: popoverStyle.top, left: popoverStyle.left }"
+        :style="{ position: 'absolute', zIndex: '9999', width: '320px', top: popoverStyle.top, left: popoverStyle.left, transform: popoverStyle.transform }"
         class="rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-card shadow-lg p-3 pointer-events-auto"
         @mouseenter="keepPopover"
         @mouseleave="leavePopover"
@@ -264,9 +304,9 @@ function nextCite() {
           <img src="/logo.png" alt="" class="h-4 w-4 rounded-full object-cover shrink-0" />
           <span class="truncate text-[12px] font-semibold text-slate-800 dark:text-foreground">{{ activeCite.document }}</span>
         </div>
-        <!-- Snippet -->
+        <!-- Snippet (đoạn khớp nguyên văn ưu tiên; caption là tóm tắt AI -> dọn tiền tố) -->
         <p class="line-clamp-3 text-[12px] leading-snug text-slate-600 dark:text-muted-foreground mb-1">
-          {{ activeCite.snippet || activeCite.caption }}
+          {{ activeCite.snippet?.trim() || cleanCitationLabel(activeCite.caption) }}
         </p>
         <!-- Breadcrumb section (nếu có heading) -->
         <div
@@ -303,5 +343,14 @@ function nextCite() {
   display: inline-block;
   margin: 0;
   vertical-align: middle;
+}
+
+/* Focus bàn phím (Tab) phải nhìn thấy rõ — chip là role="button". */
+.ai-response-markdown :deep(.citation-ref:focus-visible) {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.ai-response-markdown :deep(.citation-ref:focus:not(:focus-visible)) {
+  outline: none;
 }
 </style>

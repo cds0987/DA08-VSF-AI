@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { AlertTriangle, BookOpen, Database, Search, Wand2 } from '@lucide/vue'
 import { toast } from 'vue-sonner'
-import { useDebounceFn } from '@vueuse/core'
+import { useDebounceFn, useEventListener } from '@vueuse/core'
 import { useSessionStore } from '~/stores/session'
 import { useChatStore } from '~/stores/chat'
 import { cn } from '~/lib/utils'
@@ -51,6 +51,13 @@ async function submitFeedback(messageId: string, score: 1 | -1) {
   } catch {
     toast.error('Could not save feedback. Please try again.')
   }
+}
+
+// Esc đóng source panel — thói quen chuẩn với panel/modal.
+if (import.meta.client) {
+  useEventListener(window, 'keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Escape' && chat.isPanelOpen) chat.handleCloseCitation()
+  })
 }
 
 onMounted(async () => {
@@ -154,6 +161,21 @@ watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText
         />
       </div>
     </div>
+
+    <!-- Backdrop mobile: panel che full màn hình -> cho tap ra ngoài để đóng. Ẩn trên
+         desktop (lg) vì panel chỉ chiếm 40vw, không cần che. -->
+    <Transition
+      enter-active-class="transition-opacity duration-300 ease-out"
+      leave-active-class="transition-opacity duration-300 ease-out"
+      enter-from-class="opacity-0"
+      leave-to-class="opacity-0"
+    >
+      <div
+        v-if="chat.isPanelOpen"
+        class="fixed inset-0 z-40 bg-slate-900/40 lg:hidden"
+        @click="chat.handleCloseCitation"
+      />
+    </Transition>
 
     <aside
       :class="cn(

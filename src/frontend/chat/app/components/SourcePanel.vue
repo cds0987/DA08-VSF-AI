@@ -5,7 +5,7 @@ import DOMPurify from 'dompurify'
 import MarkdownIt from 'markdown-it'
 import type { Citation } from '~/types'
 import documentService from '~/lib/api/documentService'
-import { citationHeadingPath, formatRelevance } from '~/lib/utils'
+import { citationHeadingPath, cleanCitationLabel, formatRelevance } from '~/lib/utils'
 
 type ViewerMode = 'pdf' | 'html' | 'text' | 'image' | 'unsupported'
 type SupportedFileType = 'pdf' | 'docx' | 'txt' | 'xlsx' | 'csv' | 'pptx' | 'md' | ImageFileType
@@ -54,6 +54,13 @@ function revokeObjectUrl() {
 
 const fileTypeLabel = computed(() => fileType.value ? fileType.value.toUpperCase() : '')
 const headingPath = computed(() => props.citation ? citationHeadingPath(props.citation.heading_path, props.citation.document) : [])
+// Caption (tóm tắt AI) chỉ là mô tả phụ — dọn tiền tố số thứ tự và bỏ nếu trùng tên
+// tài liệu (đã hiển thị làm title) để tránh lặp.
+const captionText = computed(() => {
+  const caption = cleanCitationLabel(props.citation?.caption)
+  if (!caption) return ''
+  return caption.toLowerCase() === props.citation?.document?.trim().toLowerCase() ? '' : caption
+})
 
 function normalizeFileType(value: string, documentName: string): string {
   const normalized = value.trim().toLowerCase().replace(/^\./, '')
@@ -203,7 +210,7 @@ watch(
     resetViewer()
     if (!newCitation) return
     if (!newCitation.document_id) {
-      errorMsg.value = 'Document preview is unavailable because the citation payload has no document ID'
+      errorMsg.value = 'Không xem trước được vì trích dẫn thiếu mã tài liệu'
       return
     }
     if (import.meta.server) return
@@ -222,7 +229,7 @@ watch(
 
       if (!supportedFileTypes.has(normalizedType as SupportedFileType)) {
         viewerMode.value = 'unsupported'
-        errorMsg.value = `Preview is not supported for .${normalizedType || 'unknown'} files`
+        errorMsg.value = `Không hỗ trợ xem trước tệp .${normalizedType || 'unknown'}`
         return
       }
 
@@ -271,7 +278,7 @@ watch(
         detail: error?.response?.data?.detail,
         error,
       })
-      errorMsg.value = 'Failed to load document preview'
+      errorMsg.value = 'Không tải được bản xem trước tài liệu'
     } finally {
       if (loadController === controller) {
         loadController = null
@@ -297,14 +304,13 @@ onBeforeUnmount(() => {
             <FileText class="h-5 w-5" />
           </div>
           <div class="min-w-0">
-            <div :title="citation?.caption || ''" class="line-clamp-2 text-sm font-semibold text-slate-900 dark:text-foreground">
-              {{ citation?.caption || citation?.document || 'No source selected' }}
+            <div :title="citation?.document || ''" class="line-clamp-2 text-sm font-semibold text-slate-900 dark:text-foreground">
+              {{ citation?.document || 'Chưa chọn nguồn' }}
             </div>
             <div v-if="headingPath.length" class="mt-1 text-xs font-medium text-slate-500 dark:text-muted-foreground">
               {{ headingPath.join(' › ') }}
             </div>
             <div class="mt-1 flex items-center gap-2 truncate text-[11px] text-slate-400 dark:text-muted-foreground">
-              <span class="truncate">{{ citation?.document || '—' }}</span>
               <span v-if="fileTypeLabel" class="rounded bg-slate-100 dark:bg-muted px-1.5 py-0.5 font-semibold text-slate-500 dark:text-muted-foreground">
                 {{ fileTypeLabel }}
               </span>
@@ -313,6 +319,9 @@ onBeforeUnmount(() => {
                 {{ formatRelevance(citation?.score) }}
               </span>
             </div>
+            <p v-if="captionText" :title="captionText" class="mt-1.5 line-clamp-2 text-xs leading-snug text-slate-500 dark:text-muted-foreground">
+              {{ captionText }}
+            </p>
           </div>
         </div>
         <div class="flex shrink-0 items-center gap-1">
@@ -322,7 +331,7 @@ onBeforeUnmount(() => {
             target="_blank"
             rel="noopener noreferrer"
             class="rounded-full p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-accent hover:text-slate-900 dark:hover:text-accent-foreground"
-            title="Open original document"
+            title="Mở tài liệu gốc"
           >
             <ExternalLink class="h-4 w-4" />
           </a>
@@ -331,7 +340,7 @@ onBeforeUnmount(() => {
             :href="sourceUrl"
             :download="citation?.document"
             class="rounded-full p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-accent hover:text-slate-900 dark:hover:text-accent-foreground"
-            title="Download document"
+            title="Tải tài liệu"
           >
             <Download class="h-4 w-4" />
           </a>
@@ -343,8 +352,23 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="citation" class="relative flex-1 overflow-hidden bg-slate-200 dark:bg-background">
-      <div v-if="isLoading" class="absolute inset-0 z-10 flex items-center justify-center bg-white/80 dark:bg-background/80">
-        <div class="text-sm text-slate-500 dark:text-muted-foreground">Loading document...</div>
+      <!-- Skeleton trong lúc tải: mô phỏng khung tài liệu cho cảm giác mượt hơn text trống -->
+      <div v-if="isLoading" class="absolute inset-0 z-10 overflow-hidden bg-white dark:bg-card p-6">
+        <div class="mx-auto max-w-2xl space-y-3">
+          <div class="h-6 w-1/2 animate-pulse rounded bg-slate-200 dark:bg-muted" />
+          <div class="h-3.5 w-1/3 animate-pulse rounded bg-slate-200 dark:bg-muted" />
+          <div class="h-px w-full bg-slate-100 dark:bg-border" />
+          <div
+            v-for="i in 9"
+            :key="i"
+            class="h-3.5 animate-pulse rounded bg-slate-200 dark:bg-muted"
+            :class="i % 3 === 0 ? 'w-2/3' : 'w-full'"
+          />
+        </div>
+        <div class="absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-2 text-xs text-slate-400 dark:text-muted-foreground">
+          <div class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-200 border-t-slate-500 dark:border-muted dark:border-t-muted-foreground" />
+          Đang tải tài liệu…
+        </div>
       </div>
       <div v-else-if="errorMsg" class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white dark:bg-card p-6 text-center">
         <div class="text-sm text-red-500">{{ errorMsg }}</div>
@@ -355,21 +379,21 @@ onBeforeUnmount(() => {
           rel="noopener noreferrer"
           class="text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
         >
-          Open original document
+          Mở tài liệu gốc
         </a>
       </div>
       <iframe
         v-else-if="viewerMode === 'pdf' && fileUrl"
         :src="fileUrl"
         class="h-full w-full border-none"
-        title="PDF document viewer"
+        title="Trình xem PDF"
       />
       <iframe
         v-else-if="viewerMode === 'html'"
         :srcdoc="htmlContent"
         sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
         class="h-full w-full border-none bg-white dark:bg-card"
-        title="Document preview"
+        title="Bản xem trước tài liệu"
       />
       <pre
         v-else-if="viewerMode === 'text'"
@@ -381,16 +405,16 @@ onBeforeUnmount(() => {
       >
         <img
           :src="fileUrl"
-          :alt="citation?.caption || citation?.document || 'Document preview'"
+          :alt="citation?.caption || citation?.document || 'Bản xem trước tài liệu'"
           class="max-h-full max-w-full object-contain"
         >
       </div>
       <div v-else class="absolute inset-0 flex items-center justify-center bg-white dark:bg-card text-sm text-slate-400 dark:text-muted-foreground">
-        Preview not available
+        Không có bản xem trước
       </div>
     </div>
     <div v-else class="flex flex-1 items-center justify-center p-6 text-sm text-slate-400 dark:text-muted-foreground">
-      Select a citation from an answer to inspect its metadata.
+      Chọn một trích dẫn trong câu trả lời để xem chi tiết nguồn.
     </div>
   </div>
 </template>
