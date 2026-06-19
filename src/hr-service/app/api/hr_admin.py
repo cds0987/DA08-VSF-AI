@@ -12,6 +12,7 @@ from app.core.config import HrSettings, get_settings
 from app.domain.repositories.hr_repository import HrRepository
 from app.application.use_cases.list_employees_use_case import ListEmployeesUseCase
 from app.application.use_cases.get_employee_use_case import GetEmployeeUseCase
+from app.application.use_cases.get_employee_details_use_case import GetEmployeeDetailsUseCase
 from app.application.use_cases.update_employee_use_case import UpdateEmployeeUseCase
 from app.application.services.employee_profile_service import EmployeeProfileService
 
@@ -43,6 +44,47 @@ class EmployeeItem(BaseModel):
 class EmployeeListResponse(BaseModel):
     items: list[EmployeeItem]
     total: int
+
+class LeaveBalanceInfo(BaseModel):
+    annual_total: int
+    annual_used: int
+    annual_remaining: int
+    sick_total: int
+    sick_used: int
+    sick_remaining: int
+
+class LeaveRequestInfo(BaseModel):
+    leave_type: str
+    start_date: str
+    end_date: str
+    days_count: int
+    status: str
+
+class AttendanceInfo(BaseModel):
+    period: str
+    work_days: int
+    late_count: int
+    absent_count: int
+
+class PayrollInfo(BaseModel):
+    period: str
+    gross_salary: float
+    deductions: float
+    net_salary: float
+
+class PerformanceInfo(BaseModel):
+    period: str
+    rating: str
+    kpi: list[Any] = []
+    reviewer_user_id: str | None = None
+
+class EmployeeDetailsResponse(BaseModel):
+    employee: EmployeeItem
+    leave_balance: LeaveBalanceInfo | None = None
+    leave_requests: list[LeaveRequestInfo] = []
+    attendance: AttendanceInfo | None = None
+    payroll: PayrollInfo | None = None
+    performance: PerformanceInfo | None = None
 
 class UpdateEmployeeRequest(BaseModel):
     employee_code: Optional[str] = None
@@ -85,6 +127,9 @@ def get_list_employees_use_case(repo: HrRepository = Depends(get_repo)) -> ListE
 def get_get_employee_use_case(repo: HrRepository = Depends(get_repo)) -> GetEmployeeUseCase:
     return GetEmployeeUseCase(repo)
 
+def get_get_employee_details_use_case(repo: HrRepository = Depends(get_repo)) -> GetEmployeeDetailsUseCase:
+    return GetEmployeeDetailsUseCase(repo)
+
 def get_update_employee_use_case(
     repo: HrRepository = Depends(get_repo),
     publisher: Any = Depends(get_publisher),
@@ -121,6 +166,24 @@ async def get_employee(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     return EmployeeItem(**employee.__dict__)
+
+@admin_router.get("/employees/{employee_id}/details", response_model=EmployeeDetailsResponse)
+async def get_employee_details(
+    employee_id: str,
+    use_case: GetEmployeeDetailsUseCase = Depends(get_get_employee_details_use_case),
+) -> EmployeeDetailsResponse:
+    details = await use_case.execute(employee_id)
+    if not details:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    return EmployeeDetailsResponse(
+        employee=EmployeeItem(**details.employee.__dict__),
+        leave_balance=LeaveBalanceInfo(**details.leave_balance.__dict__) if details.leave_balance else None,
+        leave_requests=[LeaveRequestInfo(**r.__dict__) for r in details.leave_requests],
+        attendance=AttendanceInfo(**details.attendance.__dict__) if details.attendance else None,
+        payroll=PayrollInfo(**details.payroll.__dict__) if details.payroll else None,
+        performance=PerformanceInfo(**details.performance.__dict__) if details.performance else None,
+    )
+
 
 @admin_router.delete("/employees/{employee_id}", status_code=204)
 async def delete_employee(

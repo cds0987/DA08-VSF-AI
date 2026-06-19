@@ -1,5 +1,5 @@
 import axiosClient from './axiosClient'
-import type { EmployeeDetail, EmployeeListResponse, EmploymentStatus, UpdateEmployeeRequest } from '~/types'
+import type { EmployeeDetail, EmployeeDetailsResponse, EmployeeListResponse, EmploymentStatus, UpdateEmployeeRequest } from '~/types'
 
 export interface EmployeeDepartment {
   user_id: string
@@ -29,6 +29,11 @@ const hrService = {
 
   async getEmployee(employeeId: string): Promise<EmployeeDetail> {
     const response = await axiosClient.get<EmployeeDetail>(`/hr/admin/employees/${employeeId}`, { service: 'hr' })
+    return response.data
+  },
+
+  async getEmployeeDetails(employeeId: string): Promise<EmployeeDetailsResponse> {
+    const response = await axiosClient.get<EmployeeDetailsResponse>(`/hr/admin/employees/${employeeId}/details`, { service: 'hr' })
     return response.data
   },
 

@@ -5,7 +5,7 @@ import PageHeader from '~/components/admin-ui/PageHeader.vue'
 import StatusBadge from '~/components/admin-ui/StatusBadge.vue'
 import { getApiErrorMessage, getApiStatus } from '~/lib/api/apiError'
 import hrService from '~/lib/api/hrService'
-import type { EmployeeDetail, EmployeeItem } from '~/types'
+import type { EmployeeDetail, EmployeeDetailsResponse, EmployeeItem } from '~/types'
 
 const route = useRoute()
 const employeeId = route.params.id as string
@@ -32,6 +32,24 @@ const loadEmployee = async () => {
     isLoading.value = false
   }
 }
+
+// --- HR details (read-only: leave, payroll, attendance, performance) ---
+const details = ref<EmployeeDetailsResponse | null>(null)
+
+const loadDetails = async () => {
+  try {
+    details.value = await hrService.getEmployeeDetails(employeeId)
+  } catch (error) {
+    // Không chặn trang nếu phần HR phụ lỗi; profile/edit vẫn dùng được.
+    console.error('Failed to load HR details:', error)
+  }
+}
+
+const formatCurrency = (n: number) =>
+  new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(n)
+
+const leaveTypeLabel = (t: string) =>
+  ({ annual: 'Annual', sick: 'Sick', unpaid: 'Unpaid' } as Record<string, string>)[t] ?? t
 
 // --- edit form ---
 const form = reactive({
@@ -76,6 +94,7 @@ const loadManagers = async () => {
 onMounted(async () => {
   await loadEmployee()
   await Promise.all([
+    loadDetails(),
     loadManagers(),
     hrService.listDepartments().then(d => { allDepartments.value = d }).catch(() => {}),
   ])
@@ -183,6 +202,88 @@ const managerLabel = (emp: EmployeeItem) =>
               <dd class="mt-0.5 text-muted-foreground">{{ formatDate(employee.updated_at) }}</dd>
             </div>
           </dl>
+        </div>
+
+        <!-- HR overview: leave, payroll, attendance, performance -->
+        <div v-if="details" class="grid grid-cols-2 gap-4">
+          <!-- Leave balance -->
+          <div class="rounded-lg border border-border bg-card p-5">
+            <h2 class="mb-4 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Leave Balance</h2>
+            <div v-if="details.leave_balance" class="grid grid-cols-2 gap-4 text-[13px]">
+              <div>
+                <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Annual leave</dt>
+                <dd class="mt-0.5 text-foreground">
+                  <span class="text-lg font-semibold">{{ details.leave_balance.annual_remaining }}</span>
+                  <span class="text-muted-foreground"> / {{ details.leave_balance.annual_total }} days left</span>
+                </dd>
+                <dd class="text-[11px] text-muted-foreground">Used {{ details.leave_balance.annual_used }}</dd>
+              </div>
+              <div>
+                <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Sick leave</dt>
+                <dd class="mt-0.5 text-foreground">
+                  <span class="text-lg font-semibold">{{ details.leave_balance.sick_remaining }}</span>
+                  <span class="text-muted-foreground"> / {{ details.leave_balance.sick_total }} days left</span>
+                </dd>
+                <dd class="text-[11px] text-muted-foreground">Used {{ details.leave_balance.sick_used }}</dd>
+              </div>
+            </div>
+            <p v-else class="text-[12px] text-muted-foreground">No leave balance data.</p>
+          </div>
+
+          <!-- Payroll (latest period) -->
+          <div class="rounded-lg border border-border bg-card p-5">
+            <h2 class="mb-4 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Payroll</h2>
+            <div v-if="details.payroll" class="text-[13px]">
+              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Net salary · {{ details.payroll.period }}</dt>
+              <dd class="mt-0.5 text-lg font-semibold text-foreground">{{ formatCurrency(details.payroll.net_salary) }}</dd>
+              <dd class="mt-1 text-[11px] text-muted-foreground">
+                Gross {{ formatCurrency(details.payroll.gross_salary) }} · Deductions {{ formatCurrency(details.payroll.deductions) }}
+              </dd>
+            </div>
+            <p v-else class="text-[12px] text-muted-foreground">No payroll data.</p>
+          </div>
+
+          <!-- Attendance (latest period) -->
+          <div class="rounded-lg border border-border bg-card p-5">
+            <h2 class="mb-4 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Attendance</h2>
+            <div v-if="details.attendance" class="text-[13px]">
+              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Period {{ details.attendance.period }}</dt>
+              <dd class="mt-1 flex gap-4 text-foreground">
+                <span><span class="font-semibold">{{ details.attendance.work_days }}</span> work days</span>
+                <span><span class="font-semibold">{{ details.attendance.late_count }}</span> late</span>
+                <span><span class="font-semibold">{{ details.attendance.absent_count }}</span> absent</span>
+              </dd>
+            </div>
+            <p v-else class="text-[12px] text-muted-foreground">No attendance data.</p>
+          </div>
+
+          <!-- Performance (latest) -->
+          <div class="rounded-lg border border-border bg-card p-5">
+            <h2 class="mb-4 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Performance</h2>
+            <div v-if="details.performance" class="text-[13px]">
+              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Period {{ details.performance.period }}</dt>
+              <dd class="mt-1">
+                <span class="inline-flex items-center rounded-md border border-border bg-accent px-2 py-0.5 text-[12px] font-medium text-foreground">
+                  {{ details.performance.rating }}
+                </span>
+              </dd>
+            </div>
+            <p v-else class="text-[12px] text-muted-foreground">No performance review.</p>
+          </div>
+        </div>
+
+        <!-- Recent leave requests -->
+        <div v-if="details && details.leave_requests.length" class="rounded-lg border border-border bg-card p-5">
+          <h2 class="mb-4 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Recent Leave Requests</h2>
+          <ul class="flex flex-col divide-y divide-border text-[13px]">
+            <li v-for="(req, i) in details.leave_requests" :key="i" class="flex items-center justify-between py-2 first:pt-0 last:pb-0">
+              <div>
+                <span class="font-medium text-foreground">{{ leaveTypeLabel(req.leave_type) }}</span>
+                <span class="text-muted-foreground"> · {{ req.start_date }} → {{ req.end_date }} ({{ req.days_count }}d)</span>
+              </div>
+              <StatusBadge :status="req.status" />
+            </li>
+          </ul>
         </div>
 
         <!-- editable form -->
