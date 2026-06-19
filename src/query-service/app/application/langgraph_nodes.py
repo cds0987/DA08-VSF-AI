@@ -6,7 +6,7 @@ Architecture:
   think_node     - LLM decides action via structured tool_calls
   act_node       - Execute tool with ACL guard
   observe_node   - Log state + increment iteration counter
-  answer_node    - Stream final answer
+  answer_node    - Stream final answer (synthesize theo định hướng từ think)
 """
 
 import json
