@@ -322,6 +322,9 @@ export const useChatStore = defineStore('chat', () => {
   const isPanelOpen = ref(false)
   const pendingProactiveDoc = ref<{ name: string; docId: string | null } | null>(null)
   let abortController: AbortController | null = null
+  // Giữ citation tới khi panel trượt hết ra (khớp transition 300ms) để tránh flash
+  // nội dung trống trong lúc animation đóng.
+  let closePanelTimer: ReturnType<typeof setTimeout> | null = null
 
   function setInput(val: string) {
     input.value = val
@@ -336,13 +339,20 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function handleOpenCitation(citation: Citation) {
+    if (closePanelTimer) { clearTimeout(closePanelTimer); closePanelTimer = null }
     panelCitation.value = citation
     isPanelOpen.value = true
   }
 
   function handleCloseCitation() {
     isPanelOpen.value = false
-    panelCitation.value = null
+    if (closePanelTimer) clearTimeout(closePanelTimer)
+    // Xóa sau khi animation trượt ra xong; nếu user mở citation khác trong lúc đó,
+    // handleOpenCitation đã hủy timer này nên không xóa nhầm.
+    closePanelTimer = setTimeout(() => {
+      panelCitation.value = null
+      closePanelTimer = null
+    }, 300)
   }
 
   function clear() {
