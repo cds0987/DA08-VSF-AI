@@ -199,14 +199,14 @@ def build_orchestrator_graph(
         evidence = "\n\n".join(
             f"[step {k}] {v.output}" for k, v in sorted(data_results.items())
         )
-        from app.agents.roles._llm import acomplete
+        from app.agents.roles._llm import astream_reasoning
         # think 2 = TỔNG HỢP + VERIFY -> capability "synth" RIÊNG (đổi model chỉ sửa routing.yaml).
-        # KHÔNG stream raw CoT của verify (trước đây dump cả tính toán BHXH "Tuy nhiên/Hoặc là" ->
-        # rối). Chỉ hiện status "Đang kiểm tra & tổng hợp…" (đã emit ở trên). acomplete gom verdict.
+        # STREAM reasoning live (node=verify) -> SSE liên tục, user THẤY model đang kiểm tra/tổng hợp
+        # (không im lặng). content (JSON verdict) chỉ gom để parse, KHÔNG đẩy token ra UI.
         _model = make_model("synth")
         _user = f"Câu hỏi: {state['question']}\n\nDữ liệu thu thập:\n{evidence}"
-        text = await acomplete(_model, _VERIFY_SYSTEM, _user,
-                               tracer=ctx.tracer, trace=ctx.trace, node="verify")
+        text = await astream_reasoning(_model, _VERIFY_SYSTEM, _user, ctx.emit, node="verify",
+                                       tracer=ctx.tracer, trace=ctx.trace)
         verdict = "sufficient"
         reason = ""
         if text:

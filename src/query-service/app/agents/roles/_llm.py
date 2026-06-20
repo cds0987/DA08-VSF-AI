@@ -100,26 +100,18 @@ async def astream_plan(
         router: dict | None = None
         first_tok_dt: datetime | None = None
         last_tok_dt: datetime | None = None
-        json_started = False        # content: thấy '{' -> ngừng emit (phần còn lại là JSON)
-        reason_json_started = False  # reasoning: model hay nháp JSON trong CoT -> cũng lọc '{'
+        json_started = False        # content: thấy '{' -> ngừng emit text (JSON plan render thành card)
         async for chunk in model.astream([SystemMessage(content=system), HumanMessage(content=user)]):
             um = getattr(chunk, "usage_metadata", None)
             if um:
                 usage_meta = um
             router = router or _router_of(chunk)
-            # reasoning_content (CoT) hay chứa bản NHÁP JSON -> lọc '{' GIỐNG content để KHÔNG
-            # lộ JSON thô ra panel "đang nghĩ"; chỉ giữ phần prose sạch trước JSON (lấp dead-air).
+            # STREAM HẾT reasoning_content (CoT "đang nghĩ") -> SSE liên tục, KHÔNG freeze. Có lẫn
+            # JSON nháp cũng KHÔNG sao (ACL user-id: mỗi user chỉ xem dữ liệu của mình). FE xếp vào
+            # mục Orchestrator nên không lộn xộn.
             rtext = (getattr(chunk, "additional_kwargs", None) or {}).get("reasoning_content")
-            if rtext and not reason_json_started:
-                ridx = rtext.find("{")
-                if ridx == -1:
-                    if rtext.strip():
-                        await emit({"phase": "thought", "node": node, "text": rtext})
-                else:
-                    reason_json_started = True
-                    rhead = rtext[:ridx]
-                    if rhead.strip():
-                        await emit({"phase": "thought", "node": node, "text": rhead})
+            if rtext:
+                await emit({"phase": "thought", "node": node, "text": rtext})
             tok = getattr(chunk, "content", "") or ""
             if not tok:
                 continue

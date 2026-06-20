@@ -124,6 +124,14 @@ def test_unknown_node_falls_back_to_standard():
     assert prof.make_adapter().name == "standard"
 
 
+def test_plan_node_profile():
+    # plan = standard (KHÔNG cắt reasoning — để model nghĩ + stream; hiển thị xử lý ở FE).
+    prof = get_node_profile("plan")
+    assert prof.adapter == "standard"
+    assert prof.capability == "plan"
+    assert prof.reasoning_effort is None
+
+
 def test_per_node_max_output_tokens():
     # think (planner) nâng trần để reasoning + JSON đủ chỗ -> hết retry; node không khai -> None
     # (build_node_chat_model dùng trần chung). answer nâng để câu trả lời không cụt.

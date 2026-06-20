@@ -42,8 +42,10 @@ nodes:
 
   # ── MOSA mỗi BƯỚC = 1 capability RIÊNG -> đổi model chỉ sửa routing.yaml (ai-router), KHÔNG
   # sửa code. Đây là "bảng điều khiển" để quét tìm bộ model tối ưu sau này. ───────────────────
-  # Bước LẬP KẾ HOẠCH (orchestrate). Mặc định plan -> deepseek-v4-flash (routing.yaml). Trần cao
-  # vì reasoning model: token nghĩ + JSON plan chung 1 trần -> 3000 để hết retry "nghĩ hết trần".
+  # Bước LẬP KẾ HOẠCH (orchestrate). plan -> deepseek-v4-flash (routing.yaml). KHÔNG cắt reasoning
+  # (để model nghĩ thoải mái + STREAM ra UI); vấn đề hiển thị giải quyết ở tầng SẮP XẾP (FE), không
+  # phải giảm nghĩ. max cao để JSON không cụt. (adapter openrouter_effort vẫn có sẵn để hot-config
+  # cắt nghĩ per-node SAU NÀY nếu cần — hiện KHÔNG dùng.)
   plan:
     adapter: standard
     capability: plan

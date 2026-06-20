@@ -258,6 +258,14 @@ class Router:
         """Gán model thật + chuẩn hoá param theo provider (PLAN §6)."""
         out = {k: v for k, v in body.items() if k != "model"}
         out["model"] = dec.model_name
+        # 'reasoning' (cắt độ nghĩ) do client gửi qua extra_body -> tới đây nằm TOP-LEVEL body.
+        # create() từ chối kwarg lạ -> phải chuyển vào extra_body. CHỈ OpenRouter hiểu 'reasoning';
+        # provider OpenAI (save_mode degrade gpt-4o-mini) KHÔNG hiểu -> bỏ để tránh 400.
+        _reasoning = out.pop("reasoning", None)
+        if _reasoning is not None and dec.provider != Provider.OPENAI:
+            extra = dict(out.get("extra_body") or {})
+            extra.setdefault("reasoning", _reasoning)
+            out["extra_body"] = extra
         if dec.provider == Provider.OPENAI:
             # OpenAI mới yêu cầu max_completion_tokens, không phải max_tokens
             if "max_tokens" in out and "max_completion_tokens" not in out:

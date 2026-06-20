@@ -38,6 +38,27 @@ def test_reasoning_oai_drops_effort_when_tools_present():
     assert no_tools["reasoning_effort"] == "medium"
 
 
+def test_openrouter_effort_puts_reasoning_in_extra_body():
+    """Cắt độ nghĩ: reasoning_effort -> nested reasoning:{effort} trong extra_body (OpenRouter),
+    KHÔNG top-level reasoning_effort; bỏ sampling param. Không mutate input."""
+    a = get_adapter("openrouter_effort")
+    base = {"model": "deepseek/deepseek-v4-flash", "temperature": 0.0, "top_p": 1,
+            "max_completion_tokens": 3000}
+    out = a.transform_params(base, reasoning_effort="low")
+    assert "temperature" not in out and "top_p" not in out
+    assert "reasoning_effort" not in out                       # không top-level
+    assert out["extra_body"]["reasoning"] == {"effort": "low"}  # nested cho OpenRouter
+    assert out["max_completion_tokens"] == 3000
+    assert base["temperature"] == 0.0                          # input không bị mutate
+    assert a.surfaces_reasoning_stream() is True
+
+
+def test_openrouter_effort_no_reasoning_when_none_or_invalid():
+    a = get_adapter("openrouter_effort")
+    assert "extra_body" not in a.transform_params({"temperature": 0}, reasoning_effort=None)
+    assert "extra_body" not in a.transform_params({"temperature": 0}, reasoning_effort="bogus")
+
+
 def test_reasoning_or_strips_sampling_and_streams_reasoning():
     a = get_adapter("reasoning_or")
     out = a.transform_params({"temperature": 0.0, "top_p": 1, "reasoning_effort": "high"})

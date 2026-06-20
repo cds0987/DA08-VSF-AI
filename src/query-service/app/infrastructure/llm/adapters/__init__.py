@@ -13,3 +13,7 @@ try:
     from . import reasoning_or  # noqa: F401
 except ImportError:  # pragma: no cover
     pass
+try:
+    from . import openrouter_effort  # noqa: F401  (cắt độ nghĩ reasoning model per-node)
+except ImportError:  # pragma: no cover
+    pass
