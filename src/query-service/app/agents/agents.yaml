@@ -22,12 +22,13 @@ roles:
   - {name: rag_retrieve,         capability: worker, tools: [rag_search]}
   - {name: hr_lookup,            capability: worker, tools: [hr_query]}
   - {name: analyze,              capability: worker, tools: []}
+  - {name: leave_action,         capability: think,  tools: [resolve_date], description: "Tạo DRAFT đơn nghỉ phép (resolve ngày qua resolve_date) hoặc mở hàng đợi duyệt; xuất action JSON cho FE render form. Dùng khi user muốn TẠO/GỬI đơn nghỉ hoặc DUYỆT đơn."}
   - {name: synthesize_recommend, capability: answer, tools: []}
   - {name: critic,               capability: worker, tools: [], enabled: false}
 
 max_replan: 1
 max_workers_per_level: 4
-worker_timeout_seconds: 30
+worker_timeout_seconds: 60
 
 # verify_before_synthesize: chèn node verify (deepseek-pro tổng hợp lại + kiểm tra ĐỦ chưa)
 # giữa join -> synthesize. Đủ -> synthesize_recommend; thiếu -> replan (trong max_replan).

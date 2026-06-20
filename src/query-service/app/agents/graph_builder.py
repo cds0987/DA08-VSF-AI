@@ -25,6 +25,7 @@ from app.agents.registry import AGENT_REGISTRY
 logger = logging.getLogger(__name__)
 
 _SYNTH_ROLE = "synthesize_recommend"
+_ACTION_ROLE = "leave_action"
 
 _SYNTH_CITE_SYSTEM = """\
 Bạn là trợ lý nội bộ VinSmartFuture. Dựa CHỈ trên THÔNG TIN ĐÃ THU THẬP, trả lời đúng trọng tâm
@@ -183,6 +184,11 @@ def build_orchestrator_graph(
         data_results = {k: v for k, v in results.items() if v.role != _SYNTH_ROLE}
         replan_count = state.get("replan_count", 0)
 
+        # leave_action xuất action JSON / câu hỏi làm rõ -> KHÔNG verify "đủ thông tin" (vô nghĩa,
+        # và replan sẽ tạo lại đơn). Đi thẳng synthesize (passthrough).
+        if any(v.role == _ACTION_ROLE for v in data_results.values()):
+            return {"verify_verdict": "sufficient"}
+
         # Không có dữ liệu / hết hạn mức replan / không có model -> đi synthesize luôn.
         if not data_results or replan_count >= manifest.max_replan or make_model is None:
             return {"verify_verdict": "sufficient"}
@@ -233,6 +239,16 @@ def build_orchestrator_graph(
                     "sources": []}
         results = state.get("results") or {}
         data_results = {k: v for k, v in results.items() if v.role != _SYNTH_ROLE}
+
+        # ACTION PASSTHROUGH: leave_action xuất PURE JSON action (create_leave_request /
+        # review_leave_approvals) hoặc câu hỏi làm rõ. TUYỆT ĐỐI KHÔNG rewrite qua model (sẽ phá
+        # JSON mà FE.extractAction cần để render form xác nhận). Trả verbatim + sources rỗng.
+        # KHÔNG emit token ở đây -> streamed_tokens=False -> orchestration word-chunk câu trả lời
+        # (FE gom fullContent rồi tách action JSON). Lấy step leave_action ĐẦU TIÊN có output.
+        for sid in sorted(data_results):
+            r = data_results[sid]
+            if r.role == _ACTION_ROLE and r.status == "ok" and str(r.output or "").strip():
+                return {"answer": str(r.output).strip(), "sources": []}
 
         # Gom + KHỬ TRÙNG sources theo chunk_id, ĐÁNH SỐ ref [1..N] (theo thứ tự step). Ref này
         # vừa đưa vào prompt cho model trích [N], vừa trả ra done-event cho FE -> [N] khớp thẻ nguồn.

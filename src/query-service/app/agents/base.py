@@ -68,6 +68,9 @@ class RoleContext:
     # emit(ev: dict) -> đẩy progress event ra SSE (Suy nghĩ / bước tool / token answer).
     # None (test/non-stream) -> role bỏ qua emit. Set bởi _stream_orchestrator mỗi request.
     emit: Callable[[dict], Any] | None = None
+    # history: hội thoại gần đây (role, content) — role cần để CARRY-FORWARD (vd sửa ngày/loại
+    # đơn nghỉ ở lượt sau). Rỗng cho phần lớn role; leave_action dùng. Set bởi _stream_orchestrator.
+    history: tuple[tuple[str, str], ...] = ()
 
 
 class AgentRole(ABC):

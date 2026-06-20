@@ -4,6 +4,7 @@ from app.agents.roles import (  # noqa: F401
     analyze,
     critic,
     hr_lookup,
+    leave_action,
     rag_retrieve,
     synthesize_recommend,
 )

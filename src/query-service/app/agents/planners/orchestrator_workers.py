@@ -34,6 +34,10 @@ QUY TẮC:
 - Các step độc lập (depends_on rỗng) sẽ chạy SONG SONG -> tách retrieval/HR thành step riêng.
 - LUÔN kết thúc bằng đúng 1 step role "synthesize_recommend" depends_on mọi step dữ liệu.
 - Câu hỏi đơn giản chỉ cần 1 retrieval: 1 step rag_retrieve + 1 step synthesize_recommend.
+- TẠO/GỬI ĐƠN NGHỈ hoặc DUYỆT ĐƠN: nếu user muốn TẠO/GỬI đơn nghỉ (vd "tạo đơn", "xin nghỉ
+  thứ 2 tuần sau 3 ngày", "cho tôi nghỉ ốm mai") HOẶC duyệt/từ chối đơn chờ duyệt -> plan ĐÚNG
+  1 step role "leave_action" (KHÔNG kèm rag_retrieve/hr_lookup, KHÔNG synthesize_recommend).
+  leave_action tự resolve ngày + tự hỏi làm rõ nếu thiếu loại nghỉ/ngày.
 
 - "reasoning": 1-2 câu NGẮN tiếng Việt nói rõ BẠN HIỂU câu hỏi là gì + VÌ SAO chọn plan này
   (đây là phần "suy nghĩ" hiển thị cho người dùng — viết tự nhiên, dễ hiểu).
@@ -108,6 +112,8 @@ class OrchestratorWorkersPlanner(Planner):
     def _with_question(plan: Plan, question: str) -> Plan:
         """Bơm câu hỏi gốc vào step rỗng input (rag/synthesize) để worker có ngữ cảnh."""
         for s in plan.steps:
-            if (s.input is None or s.input == "") and s.role in ("rag_retrieve", "synthesize_recommend"):
+            if (s.input is None or s.input == "") and s.role in (
+                "rag_retrieve", "synthesize_recommend", "leave_action",
+            ):
                 s.input = question
         return plan

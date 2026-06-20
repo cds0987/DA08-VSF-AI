@@ -134,6 +134,61 @@ async def test_astream_reasoning_emits_thought_but_not_content_tokens():
     assert not [e for e in events if e.get("token")], "KHÔNG được leak JSON content ra token SSE"
 
 
+class _DateMCP:
+    """resolve_date giả: span_days>1 -> start/end; 1 ngày -> date. today cố định để test past-check."""
+    async def call_tool(self, name, args):
+        assert name == "resolve_date"
+        if int(args.get("span_days") or 1) > 1:
+            return {"start_date": "2026-06-22", "end_date": "2026-06-24", "today": "2026-06-20"}
+        return {"date": "2026-06-22", "today": "2026-06-20"}
+
+
+def _ctx_date(model=None):
+    return RoleContext(
+        mcp_client=_DateMCP(), user_id="u1", allowed_doc_ids=(),
+        make_model=(lambda cap: model) if model else None,
+    )
+
+
+async def test_leave_action_creates_draft_json():
+    """create-leave -> PURE JSON action create_leave_request (FE render form). Ngày qua resolve_date."""
+    import json
+    model = _FakeModel(
+        '{"intent":"create","leave_type":"sick","items":[{"date_spec":'
+        '{"kind":"weekday","weekday":"thu_2","week_offset":1,"span_days":3},"reason":"ốm"}]}'
+    )
+    out = await AGENT_REGISTRY.get("leave_action")(_ctx_date(model)).run(
+        WorkerInput(1, "leave_action", "nghỉ ốm 3 ngày thứ 2 tuần sau"))
+    assert out.status == "ok"
+    data = json.loads(out.output)
+    assert data["action_type"] == "create_leave_request"
+    item = data["items"][0]
+    assert item["leave_type"] == "sick"
+    assert item["start_date"] == "2026-06-22" and item["end_date"] == "2026-06-24"
+
+
+async def test_leave_action_clarifies_when_type_missing():
+    """Không có loại nghỉ + lý do -> hỏi làm rõ (văn xuôi), KHÔNG bịa đơn annual."""
+    model = _FakeModel('{"intent":"clarify","clarify":"Bạn muốn nghỉ loại nào — phép năm hay nghỉ ốm?"}')
+    out = await AGENT_REGISTRY.get("leave_action")(_ctx_date(model)).run(
+        WorkerInput(1, "leave_action", "cho tôi nghỉ thứ 2 tuần sau"))
+    assert out.status == "ok"
+    assert "action_type" not in out.output and "loại nào" in out.output
+
+
+async def test_leave_action_approve_emits_review_card():
+    model = _FakeModel('{"intent":"approve"}')
+    out = await AGENT_REGISTRY.get("leave_action")(_ctx_date(model)).run(
+        WorkerInput(1, "leave_action", "duyệt giúp tôi các đơn chờ"))
+    assert '"action_type": "review_leave_approvals"' in out.output
+
+
+async def test_leave_action_no_model_clarifies():
+    ctx = RoleContext(mcp_client=_DateMCP(), user_id="u1")
+    out = await AGENT_REGISTRY.get("leave_action")(ctx).run(WorkerInput(1, "leave_action", "nghỉ phép"))
+    assert out.status == "ok" and "action_type" not in out.output
+
+
 async def test_role_never_raises_on_mcp_error():
     class _BadMCP:
         async def rag_search(self, *a, **k):

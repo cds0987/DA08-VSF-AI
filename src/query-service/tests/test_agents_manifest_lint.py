@@ -14,8 +14,8 @@ from app.agents.registry import AGENT_REGISTRY, PLANNER_REGISTRY
 
 # Capability hợp lệ = phải có trong src/ai-router/routing.yaml (cross-service contract).
 _ALLOWED_CAPABILITIES = {"worker", "answer", "think", "guardrail", "rerank", "triage"}
-# Tool hợp lệ = mcp-service expose (rag_search, hr_query). Cập nhật khi thêm tool MCP.
-_ALLOWED_TOOLS = {"rag_search", "hr_query"}
+# Tool hợp lệ = mcp-service expose (rag_search, hr_query, resolve_date). Cập nhật khi thêm tool MCP.
+_ALLOWED_TOOLS = {"rag_search", "hr_query", "resolve_date"}
 
 
 def test_committed_mode_is_react_default_off():

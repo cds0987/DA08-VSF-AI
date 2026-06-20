@@ -394,6 +394,8 @@ class QueryOrchestrationUseCase:
                     rag_score_threshold=self._settings.rag_score_threshold,
                     make_model=self._make_model,
                     emit=_emit,
+                    # carry-forward cho leave_action (sửa ngày/loại đơn ở lượt sau).
+                    history=tuple(recent_messages),
                 )
                 graph = build_orchestrator_graph(
                     ctx=ctx, manifest=self._agent_manifest,
