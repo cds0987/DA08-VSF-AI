@@ -194,8 +194,8 @@ class _RecTracer:
     def __init__(self):
         self.llms = []
         self.tools = []
-    def on_llm(self, trace, node, model, inp, out, usage, s, e, router=None):
-        self.llms.append({"node": node, "model": model})
+    def on_llm(self, trace, node, model, inp, out, usage, s, e, router=None, **kw):
+        self.llms.append({"node": node, "model": model, "timing": kw.get("timing")})
     def on_tool(self, trace, name, args, out, s, e):
         self.tools.append(name)
 
@@ -237,6 +237,24 @@ async def test_leave_action_emits_generation_and_resolve_date_span():
     assert out.status == "ok"
     assert any(g["node"] == "leave_action" for g in tr.llms)
     assert "resolve_date" in tr.tools
+
+
+async def test_astream_complete_reports_ttft_timing():
+    """astream_complete ghi TTFT + inter-token vào generation (qua tracer.on_llm timing)."""
+    from app.agents.roles._llm import astream_complete
+
+    async def emit(ev):  # cần emit để vào nhánh stream (không fallback acomplete)
+        pass
+
+    tr = _RecTracer()
+    model = _StreamModel([], ["Xin ", "chào ", "bạn!"])
+    text = await astream_complete(model, "sys", "user", emit, node="answer",
+                                  tracer=tr, trace=object())
+    assert text == "Xin chào bạn!"
+    assert tr.llms and tr.llms[0]["timing"] is not None
+    t = tr.llms[0]["timing"]
+    assert t["stream_tokens"] == 3
+    assert t["ttft_ms"] is not None and t["inter_token_ms"] is not None
 
 
 async def test_role_never_raises_on_mcp_error():

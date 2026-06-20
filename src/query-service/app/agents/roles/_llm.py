@@ -18,15 +18,31 @@ def _report_llm(
     tracer: Any, trace: Any, node: str | None, model: Any,
     input_text: str, output_text: str | None,
     usage_metadata: dict | None, router: dict | None, start_dt: datetime,
+    first_tok_dt: datetime | None = None, last_tok_dt: datetime | None = None,
+    stream_tokens: int = 0,
 ) -> None:
-    """Ghi 1 generation con (per-step) vào trace. Best-effort — lỗi/thiếu tracer -> no-op."""
+    """Ghi 1 generation con (per-step) vào trace. Best-effort — lỗi/thiếu tracer -> no-op.
+
+    first_tok_dt = lúc token ĐẦU tiên về (stream) -> Langfuse tính TTFT. inter_token_ms =
+    trung bình thời gian giữa các token (TIME-TO-NEXT-TOKEN) -> đo độ mượt streaming mỗi bước.
+    """
     if tracer is None or trace is None or node is None:
         return
     try:
         model_name = getattr(model, "model", None) or ""
+        timing: dict | None = None
+        if first_tok_dt is not None:
+            ttft_ms = round((first_tok_dt - start_dt).total_seconds() * 1000, 1)
+            inter_ms = None
+            if last_tok_dt is not None and stream_tokens > 1:
+                inter_ms = round(
+                    (last_tok_dt - first_tok_dt).total_seconds() * 1000 / (stream_tokens - 1), 1
+                )
+            timing = {"ttft_ms": ttft_ms, "inter_token_ms": inter_ms, "stream_tokens": stream_tokens}
         tracer.on_llm(
             trace, node, model_name, input_text, output_text or "",
             usage_metadata, start_dt, datetime.now(timezone.utc), router,
+            completion_start_dt=first_tok_dt, timing=timing,
         )
     except Exception as exc:  # noqa: BLE001 — tracing KHÔNG được làm hỏng query
         logger.warning("role_llm_trace_failed: %s", str(exc)[:160])
@@ -81,6 +97,8 @@ async def astream_reasoning(
         parts: list[str] = []
         usage_meta: dict | None = None
         router: dict | None = None
+        first_tok_dt: datetime | None = None
+        last_tok_dt: datetime | None = None
         async for chunk in model.astream([SystemMessage(content=system), HumanMessage(content=user)]):
             um = getattr(chunk, "usage_metadata", None)
             if um:
@@ -91,9 +109,13 @@ async def astream_reasoning(
                 await emit({"phase": "thought", "node": node, "text": rtext})
             tok = getattr(chunk, "content", "") or ""
             if tok:
+                if first_tok_dt is None:
+                    first_tok_dt = datetime.now(timezone.utc)
+                last_tok_dt = datetime.now(timezone.utc)
                 parts.append(tok)
         text = "".join(parts).strip() or None
-        _report_llm(tracer, trace, node, model, user, text, usage_meta, router, start_dt)
+        _report_llm(tracer, trace, node, model, user, text, usage_meta, router, start_dt,
+                    first_tok_dt, last_tok_dt, len(parts))
         return text
     except Exception as exc:  # noqa: BLE001 — stream lỗi -> non-stream
         logger.warning("role_llm_reasoning_stream_failed: %s -> acomplete", str(exc)[:160])
@@ -123,6 +145,8 @@ async def astream_complete(
         parts: list[str] = []
         usage_meta: dict | None = None
         router: dict | None = None
+        first_tok_dt: datetime | None = None
+        last_tok_dt: datetime | None = None
         async for chunk in model.astream([SystemMessage(content=system), HumanMessage(content=user)]):
             um = getattr(chunk, "usage_metadata", None)
             if um:
@@ -133,10 +157,14 @@ async def astream_complete(
                 await emit({"phase": "thought", "node": node, "text": rtext})
             tok = getattr(chunk, "content", "") or ""
             if tok:
+                if first_tok_dt is None:
+                    first_tok_dt = datetime.now(timezone.utc)
+                last_tok_dt = datetime.now(timezone.utc)
                 parts.append(tok)
                 await emit({"token": tok, "phase": "generating"})
         text = "".join(parts).strip()
-        _report_llm(tracer, trace, node, model, user, text or None, usage_meta, router, start_dt)
+        _report_llm(tracer, trace, node, model, user, text or None, usage_meta, router, start_dt,
+                    first_tok_dt, last_tok_dt, len(parts))
         return text or None
     except Exception as exc:  # noqa: BLE001 — stream lỗi -> thử non-stream
         logger.warning("role_llm_stream_failed: %s -> fallback acomplete", str(exc)[:160])

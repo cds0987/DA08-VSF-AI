@@ -229,6 +229,8 @@ class LangfuseTracer:
         start_dt: datetime,
         end_dt: datetime,
         router: dict | None = None,
+        completion_start_dt: datetime | None = None,
+        timing: dict | None = None,
     ) -> None:
         """Tạo 1 generation con (per-node LLM call) gắn vào trace. Best-effort.
 
@@ -236,6 +238,11 @@ class LangfuseTracer:
         (vd 'triage', 'think') từ event metadata. Tái dùng _build_usage để tính cost.
         router = {key_id, provider, tier, ...} từ ai-router -> gắn metadata để Langfuse lọc
         "request này dùng key/tier nào" (per-key aggregate tổng hợp ở Grafana).
+
+        completion_start_dt = lúc token ĐẦU TIÊN về -> Langfuse tự tính TTFT (Time To First Token)
+        = completion_start - start. timing = {ttft_ms, inter_token_ms, output_tokens} (đo client)
+        gắn vào metadata để xem TIME-TO-NEXT-TOKEN trung bình mỗi bước (rất quan trọng cho UX
+        streaming). Bước non-stream (acomplete) -> không có completion_start/timing.
         """
         if handle is None:
             return
@@ -258,12 +265,23 @@ class LangfuseTracer:
                 output=output_text or "",
                 usage=usage,
             )
+            if completion_start_dt is not None:
+                gen_kwargs["completion_start_time"] = completion_start_dt
+            metadata: dict = {}
             if router:
-                gen_kwargs["metadata"] = {
+                metadata.update({
                     "router_key_id": router.get("key_id"),
                     "router_provider": router.get("provider"),
                     "router_tier": router.get("tier"),
-                }
+                })
+            if timing:
+                metadata.update({
+                    "ttft_ms": timing.get("ttft_ms"),
+                    "inter_token_ms": timing.get("inter_token_ms"),
+                    "stream_tokens": timing.get("stream_tokens"),
+                })
+            if metadata:
+                gen_kwargs["metadata"] = metadata
             handle.trace.generation(**gen_kwargs)
         except Exception as exc:  # noqa: BLE001
             logger.warning("langfuse_on_llm_failed", extra={"node": node, "error": str(exc)[:200]})
