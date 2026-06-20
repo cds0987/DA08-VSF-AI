@@ -1,22 +1,60 @@
-"""Helper gọi chat model trong role — fail mềm (trả None thay vì raise)."""
+"""Helper gọi chat model trong role — fail mềm (trả None thay vì raise).
+
+Tracing (best-effort): khi caller truyền tracer+trace+node, mỗi LLM call -> 1 generation con
+trên Langfuse trace (model, token in/out, cost qua PriceCatalog, router key/tier). Nhờ vậy bấm
+vào trace MOSA thấy CÂY BƯỚC: orchestrate -> worker(rag/hr/analyze/leave) -> verify -> answer,
+mỗi bước có input/output + token + cost. tracer/trace/node=None -> bỏ qua (no-op an toàn).
+"""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import logging
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-async def acomplete(model: Any, system: str, user: str) -> str | None:
+def _report_llm(
+    tracer: Any, trace: Any, node: str | None, model: Any,
+    input_text: str, output_text: str | None,
+    usage_metadata: dict | None, router: dict | None, start_dt: datetime,
+) -> None:
+    """Ghi 1 generation con (per-step) vào trace. Best-effort — lỗi/thiếu tracer -> no-op."""
+    if tracer is None or trace is None or node is None:
+        return
+    try:
+        model_name = getattr(model, "model", None) or ""
+        tracer.on_llm(
+            trace, node, model_name, input_text, output_text or "",
+            usage_metadata, start_dt, datetime.now(timezone.utc), router,
+        )
+    except Exception as exc:  # noqa: BLE001 — tracing KHÔNG được làm hỏng query
+        logger.warning("role_llm_trace_failed: %s", str(exc)[:160])
+
+
+def _router_of(obj: Any) -> dict | None:
+    rm = getattr(obj, "response_metadata", None) or {}
+    r = rm.get("router") if isinstance(rm, dict) else None
+    return r if isinstance(r, dict) else None
+
+
+async def acomplete(
+    model: Any, system: str, user: str,
+    *, tracer: Any = None, trace: Any = None, node: str | None = None,
+) -> str | None:
     """Gọi model.ainvoke([System, Human]) -> text. Lỗi/timeout -> None (caller fallback)."""
     if model is None:
         return None
+    start_dt = datetime.now(timezone.utc)
     try:
         from langchain_core.messages import HumanMessage, SystemMessage
 
         resp = await model.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
         content = getattr(resp, "content", resp)
-        return str(content).strip() if content else None
+        text = str(content).strip() if content else None
+        _report_llm(tracer, trace, node, model, user, text,
+                    getattr(resp, "usage_metadata", None), _router_of(resp), start_dt)
+        return text
     except Exception as exc:  # noqa: BLE001 — worker LLM lỗi KHÔNG được làm hỏng cả câu trả lời
         logger.warning("role_llm_failed: %s", str(exc)[:160])
         return None
@@ -24,6 +62,7 @@ async def acomplete(model: Any, system: str, user: str) -> str | None:
 
 async def astream_reasoning(
     model: Any, system: str, user: str, emit: Any = None, *, node: str = "think",
+    tracer: Any = None, trace: Any = None,
 ) -> str | None:
     """Gọi model STREAM nhưng CHỈ surface reasoning_content ra SSE (phase:thought, node) cho
     user thấy model "đang nghĩ" LIVE; content (thường JSON nội bộ: plan/verdict) chỉ GOM để
@@ -34,26 +73,36 @@ async def astream_reasoning(
     if model is None:
         return None
     if emit is None or not hasattr(model, "astream"):
-        return await acomplete(model, system, user)
+        return await acomplete(model, system, user, tracer=tracer, trace=trace, node=node)
+    start_dt = datetime.now(timezone.utc)
     try:
         from langchain_core.messages import HumanMessage, SystemMessage
 
         parts: list[str] = []
+        usage_meta: dict | None = None
+        router: dict | None = None
         async for chunk in model.astream([SystemMessage(content=system), HumanMessage(content=user)]):
+            um = getattr(chunk, "usage_metadata", None)
+            if um:
+                usage_meta = um
+            router = router or _router_of(chunk)
             rtext = (getattr(chunk, "additional_kwargs", None) or {}).get("reasoning_content")
             if rtext:
                 await emit({"phase": "thought", "node": node, "text": rtext})
             tok = getattr(chunk, "content", "") or ""
             if tok:
                 parts.append(tok)
-        return "".join(parts).strip() or None
+        text = "".join(parts).strip() or None
+        _report_llm(tracer, trace, node, model, user, text, usage_meta, router, start_dt)
+        return text
     except Exception as exc:  # noqa: BLE001 — stream lỗi -> non-stream
         logger.warning("role_llm_reasoning_stream_failed: %s -> acomplete", str(exc)[:160])
-        return await acomplete(model, system, user)
+        return await acomplete(model, system, user, tracer=tracer, trace=trace, node=node)
 
 
 async def astream_complete(
     model: Any, system: str, user: str, emit: Any = None, *, node: str = "answer",
+    tracer: Any = None, trace: Any = None,
 ) -> str | None:
     """Như acomplete nhưng STREAM ra SSE. Trả full text (content).
 
@@ -66,12 +115,19 @@ async def astream_complete(
     if model is None:
         return None
     if emit is None or not hasattr(model, "astream"):
-        return await acomplete(model, system, user)
+        return await acomplete(model, system, user, tracer=tracer, trace=trace, node=node)
+    start_dt = datetime.now(timezone.utc)
     try:
         from langchain_core.messages import HumanMessage, SystemMessage
 
         parts: list[str] = []
+        usage_meta: dict | None = None
+        router: dict | None = None
         async for chunk in model.astream([SystemMessage(content=system), HumanMessage(content=user)]):
+            um = getattr(chunk, "usage_metadata", None)
+            if um:
+                usage_meta = um
+            router = router or _router_of(chunk)
             rtext = (getattr(chunk, "additional_kwargs", None) or {}).get("reasoning_content")
             if rtext:
                 await emit({"phase": "thought", "node": node, "text": rtext})
@@ -80,7 +136,8 @@ async def astream_complete(
                 parts.append(tok)
                 await emit({"token": tok, "phase": "generating"})
         text = "".join(parts).strip()
+        _report_llm(tracer, trace, node, model, user, text or None, usage_meta, router, start_dt)
         return text or None
     except Exception as exc:  # noqa: BLE001 — stream lỗi -> thử non-stream
         logger.warning("role_llm_stream_failed: %s -> fallback acomplete", str(exc)[:160])
-        return await acomplete(model, system, user)
+        return await acomplete(model, system, user, tracer=tracer, trace=trace, node=node)

@@ -27,6 +27,7 @@ class AnalyzeRole(AgentRole):
             model,
             system="Bạn là chuyên viên phân tích. Phân tích dữ liệu theo định hướng, nêu kết luận rõ ràng.",
             user=f"Định hướng: {task.direction}\n\nDữ liệu:\n{upstream}",
+            tracer=self.ctx.tracer, trace=self.ctx.trace, node=self.name,
         )
         if result is None:
             # Không có model: trả dữ liệu thô để synthesize tự xử.

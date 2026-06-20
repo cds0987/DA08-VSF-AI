@@ -46,6 +46,7 @@ class SynthesizeRecommendRole(AgentRole):
                 f"Dữ liệu thu thập:\n{upstream or '(trống)'}"
             ),
             emit=self.ctx.emit,
+            tracer=self.ctx.tracer, trace=self.ctx.trace,
         )
         if answer is None:
             return WorkerOutput(

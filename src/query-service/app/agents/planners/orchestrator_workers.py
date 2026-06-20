@@ -92,7 +92,8 @@ class OrchestratorWorkersPlanner(Planner):
         user = f"DANH SÁCH ROLE:\n{_catalog_text(ctx)}\n\nCÂU HỎI: {ctx.question}"
         err_hint = ""
         for attempt in range(2):
-            text = await acomplete(model, _SYSTEM, user + err_hint)
+            text = await acomplete(model, _SYSTEM, user + err_hint,
+                                   tracer=ctx.tracer, trace=ctx.trace, node="orchestrate")
             if not text:
                 continue
             try:

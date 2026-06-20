@@ -189,6 +189,56 @@ async def test_leave_action_no_model_clarifies():
     assert out.status == "ok" and "action_type" not in out.output
 
 
+class _RecTracer:
+    """Tracer giả ghi lại on_llm/on_tool -> verify trace MOSA có generation + span mỗi bước."""
+    def __init__(self):
+        self.llms = []
+        self.tools = []
+    def on_llm(self, trace, node, model, inp, out, usage, s, e, router=None):
+        self.llms.append({"node": node, "model": model})
+    def on_tool(self, trace, name, args, out, s, e):
+        self.tools.append(name)
+
+
+def _ctx_traced(model, tracer, mcp=None):
+    return RoleContext(
+        mcp_client=mcp or _MockMCP(), user_id="u1", allowed_doc_ids=("d1",),
+        rag_top_k=5, rag_score_threshold=0.45,
+        make_model=(lambda cap: model), tracer=tracer, trace=object(),
+    )
+
+
+async def test_rag_retrieve_emits_generation_and_tool_span():
+    tr = _RecTracer()
+    role = AGENT_REGISTRY.get("rag_retrieve")(_ctx_traced(_FakeModel("phan tich"), tr))
+    out = await role.run(WorkerInput(1, "rag_retrieve", "nghi phep", "trich"))
+    assert out.status == "ok"
+    assert any(g["node"] == "rag_retrieve" for g in tr.llms), "thiếu generation per-step rag_retrieve"
+    assert "rag_search" in tr.tools, "thiếu span tool rag_search"
+
+
+async def test_hr_lookup_emits_generation_and_tool_span():
+    tr = _RecTracer()
+    out = await AGENT_REGISTRY.get("hr_lookup")(_ctx_traced(_FakeModel("So phep: 5"), tr)).run(
+        WorkerInput(2, "hr_lookup", {"intent": "leave_balance"}, "so phep"))
+    assert out.status == "ok"
+    assert any(g["node"] == "hr_lookup" for g in tr.llms)
+    assert "hr_query" in tr.tools
+
+
+async def test_leave_action_emits_generation_and_resolve_date_span():
+    tr = _RecTracer()
+    model = _FakeModel('{"intent":"create","leave_type":"sick","items":[{"date_spec":'
+                       '{"kind":"weekday","weekday":"thu_2","week_offset":1,"span_days":3},"reason":"ốm"}]}')
+    ctx = RoleContext(mcp_client=_DateMCP(), user_id="u1", make_model=lambda cap: model,
+                      tracer=tr, trace=object())
+    out = await AGENT_REGISTRY.get("leave_action")(ctx).run(
+        WorkerInput(1, "leave_action", "nghỉ ốm 3 ngày thứ 2 tuần sau"))
+    assert out.status == "ok"
+    assert any(g["node"] == "leave_action" for g in tr.llms)
+    assert "resolve_date" in tr.tools
+
+
 async def test_role_never_raises_on_mcp_error():
     class _BadMCP:
         async def rag_search(self, *a, **k):

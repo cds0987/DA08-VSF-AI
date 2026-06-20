@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 
 from app.agents.base import AgentRole, WorkerInput, WorkerOutput
 from app.agents.registry import register_agent
@@ -102,7 +103,8 @@ class LeaveActionRole(AgentRole):
             (f"HỘI THOẠI GẦN ĐÂY:\n{history_txt}\n\n" if history_txt else "")
             + f"CÂU MỚI NHẤT: {question}"
         )
-        raw = await acomplete(model, _PARSE_SYSTEM, user)
+        raw = await acomplete(model, _PARSE_SYSTEM, user,
+                              tracer=ctx.tracer, trace=ctx.trace, node=self.name)
         try:
             data = _extract_json(raw or "")
         except Exception as exc:  # noqa: BLE001 — parse hỏng -> hỏi làm rõ
@@ -171,11 +173,17 @@ class LeaveActionRole(AgentRole):
         if ctx.emit:
             await ctx.emit({"phase": "acting", "tool": "resolve_date",
                             "tool_args": {k: v for k, v in args.items() if k != "user_id"}})
+        _tool_start = datetime.now(timezone.utc)
         try:
             res = await ctx.mcp_client.call_tool("resolve_date", args)
         except Exception as exc:  # noqa: BLE001
             logger.warning("leave_action resolve_date fail: %s", str(exc)[:160])
             return None
+        if ctx.tracer is not None:
+            ctx.tracer.on_tool(ctx.trace, "resolve_date",
+                               {k: v for k, v in args.items() if k != "user_id"},
+                               res if isinstance(res, dict) else "", _tool_start,
+                               datetime.now(timezone.utc))
         if not isinstance(res, dict) or res.get("error"):
             return None
         # span_days>1 -> tool trả start_date/end_date; ngược lại 1 ngày -> date.

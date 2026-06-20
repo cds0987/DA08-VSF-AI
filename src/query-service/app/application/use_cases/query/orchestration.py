@@ -237,6 +237,7 @@ class QueryOrchestrationUseCase:
         ):
             async for event in self._stream_orchestrator(
                 question, user, session_id, started, document_ids=_document_ids,
+                _lang_trace=_lang_trace,
             ):
                 yield event
             return
@@ -341,6 +342,7 @@ class QueryOrchestrationUseCase:
         session_id: str,
         started: float,
         document_ids: list[str] | None = None,
+        _lang_trace: Any = None,
     ) -> AsyncIterator[dict]:
         """MOSA Orchestrator-Workers: router(deepseek-pro) -> workers song song -> synthesize.
 
@@ -396,6 +398,10 @@ class QueryOrchestrationUseCase:
                     emit=_emit,
                     # carry-forward cho leave_action (sửa ngày/loại đơn ở lượt sau).
                     history=tuple(recent_messages),
+                    # tracer + trace handle -> role/node ghi generation (model/token/cost) +
+                    # span tool mỗi bước vào Langfuse trace (trace MOSA có cây bước, không phẳng).
+                    tracer=self._tracer,
+                    trace=_lang_trace,
                 )
                 graph = build_orchestrator_graph(
                     ctx=ctx, manifest=self._agent_manifest,

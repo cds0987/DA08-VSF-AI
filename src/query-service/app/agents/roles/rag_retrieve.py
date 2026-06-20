@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 
 from app.agents.base import AgentRole, WorkerInput, WorkerOutput
 from app.agents.registry import register_agent
@@ -35,6 +36,7 @@ class RagRetrieveRole(AgentRole):
                             "tool_args": {"query": query}})
 
         # Retry 1 lần (mcp rag_search intermittent) — giống act_node hiện tại.
+        _tool_start = datetime.now(timezone.utc)
         try:
             results = await self._search(query)
         except Exception as exc:  # noqa: BLE001
@@ -43,6 +45,9 @@ class RagRetrieveRole(AgentRole):
                 results = await self._search(query)
             except Exception as exc2:  # noqa: BLE001
                 return WorkerOutput(task.step_id, self.name, "", status="error", error=str(exc2)[:200])
+        if ctx.tracer is not None:
+            ctx.tracer.on_tool(ctx.trace, "rag_search", {"query": query},
+                               f"{len(results)} chunks", _tool_start, datetime.now(timezone.utc))
 
         threshold = ctx.rag_score_threshold
         qualified = [r for r in results if getattr(r, "score", 0) >= threshold]
@@ -97,6 +102,7 @@ class RagRetrieveRole(AgentRole):
                 "định hướng. Nêu rõ trích dẫn tài liệu. Không bịa."
             ),
             user=f"Định hướng: {task.direction or query}\n\nTài liệu:\n{raw_text}",
+            tracer=ctx.tracer, trace=ctx.trace, node=self.name,
         )
         output = analysis or raw_text
         return WorkerOutput(task.step_id, self.name, output, sources=sources, status="ok",

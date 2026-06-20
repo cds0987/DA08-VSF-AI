@@ -35,6 +35,7 @@ class CriticRole(AgentRole):
                 "(2) đúng trọng tâm câu hỏi, (3) không bịa. Trả JSON {\"verdict\":\"pass|fail\",\"reason\":\"...\"}."
             ),
             user=f"Câu hỏi: {task.input}\n\nCâu trả lời:\n{draft}\n\nBằng chứng:\n{evidence}",
+            tracer=self.ctx.tracer, trace=self.ctx.trace, node=self.name,
         )
         verdict = "pass"  # fail-open: critic lỗi KHÔNG chặn câu trả lời
         reason = ""

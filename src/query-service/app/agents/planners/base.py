@@ -18,6 +18,8 @@ class PlanContext:
     make_model: Callable[[str], Any] | None     # capability -> chat model (.ainvoke)
     history: list | None = None                 # recent messages (memory)
     emit: Callable[[dict], Any] | None = None    # SSE emit -> stream reasoning lúc lập kế hoạch
+    tracer: Any = None                           # LangfuseTracer (best-effort) -> generation bước orchestrate
+    trace: Any = None                            # trace handle của lượt query
 
 
 class Planner(ABC):

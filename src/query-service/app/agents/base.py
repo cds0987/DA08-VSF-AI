@@ -71,6 +71,11 @@ class RoleContext:
     # history: hội thoại gần đây (role, content) — role cần để CARRY-FORWARD (vd sửa ngày/loại
     # đơn nghỉ ở lượt sau). Rỗng cho phần lớn role; leave_action dùng. Set bởi _stream_orchestrator.
     history: tuple[tuple[str, str], ...] = ()
+    # tracer + trace: LangfuseTracer + trace handle của lượt query. Role/node dùng để ghi
+    # generation (model/token/cost) + span tool MỖI BƯỚC -> trace MOSA có cây bước (không phẳng).
+    # None (test/langfuse tắt) -> bỏ qua, best-effort. Set bởi _stream_orchestrator.
+    tracer: Any = None
+    trace: Any = None
 
 
 class AgentRole(ABC):

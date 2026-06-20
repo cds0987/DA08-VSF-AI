@@ -98,6 +98,7 @@ def build_orchestrator_graph(
             role_catalog=role_catalog,
             make_model=make_model,
             history=state.get("recent_messages"),
+            tracer=ctx.tracer, trace=ctx.trace,
         )
         plan = await planner.plan(pctx)
         # synthesize_recommend KHÔNG còn chạy như worker: node `synthesize` tự sinh câu trả lời +
@@ -208,7 +209,8 @@ def build_orchestrator_graph(
         # thành 1 dòng "Kiểm tra & tổng hợp". Model không astream/lỗi -> tự fallback acomplete.
         _model = make_model("answer")
         _user = f"Câu hỏi: {state['question']}\n\nDữ liệu thu thập:\n{evidence}"
-        text = await astream_reasoning(_model, _VERIFY_SYSTEM, _user, ctx.emit, node="verify")
+        text = await astream_reasoning(_model, _VERIFY_SYSTEM, _user, ctx.emit, node="verify",
+                                       tracer=ctx.tracer, trace=ctx.trace)
         verdict = "sufficient"
         reason = ""
         if text:
@@ -296,7 +298,8 @@ def build_orchestrator_graph(
         )
         # STREAM token answer ra SSE (node=answer) + surface reasoning. capability "answer".
         answer = await astream_complete(make_model("answer"), _SYNTH_CITE_SYSTEM, user,
-                                        ctx.emit, node="answer")
+                                        ctx.emit, node="answer",
+                                        tracer=ctx.tracer, trace=ctx.trace)
         if not answer:
             answer = data_text or \
                 "Mình chưa lấy được dữ liệu phù hợp, bạn thử lại hoặc liên hệ HR/IT Helpdesk."
