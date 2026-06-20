@@ -76,6 +76,67 @@ async def acomplete(
         return None
 
 
+async def astream_plan(
+    model: Any, system: str, user: str, emit: Any = None, *, node: str = "orchestrate",
+    tracer: Any = None, trace: Any = None,
+) -> str | None:
+    """Cho PLANNER: output = "<prose suy nghĩ>\\n<JSON plan>". STREAM phần PROSE (content TRƯỚC
+    dấu '{') ra SSE phase:thought NGAY -> user thấy chữ chạy từ giây đầu (lấp dead-air pha plan),
+    rồi NGỪNG emit khi JSON bắt đầu (gom thầm để parse, KHÔNG leak JSON). Cũng surface
+    reasoning_content (nếu model nhả). Khác astream_reasoning ở chỗ stream được CẢ content prose
+    (không phụ thuộc reasoning ẩn — học từ react non-split). Trả full text (prose+JSON) để parse.
+
+    emit=None / model không astream / lỗi -> fallback acomplete (non-stream an toàn)."""
+    if model is None:
+        return None
+    if emit is None or not hasattr(model, "astream"):
+        return await acomplete(model, system, user, tracer=tracer, trace=trace, node=node)
+    start_dt = datetime.now(timezone.utc)
+    try:
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        parts: list[str] = []
+        usage_meta: dict | None = None
+        router: dict | None = None
+        first_tok_dt: datetime | None = None
+        last_tok_dt: datetime | None = None
+        json_started = False  # đã thấy '{' -> ngừng emit content (phần còn lại là JSON)
+        async for chunk in model.astream([SystemMessage(content=system), HumanMessage(content=user)]):
+            um = getattr(chunk, "usage_metadata", None)
+            if um:
+                usage_meta = um
+            router = router or _router_of(chunk)
+            rtext = (getattr(chunk, "additional_kwargs", None) or {}).get("reasoning_content")
+            if rtext:
+                await emit({"phase": "thought", "node": node, "text": rtext})
+            tok = getattr(chunk, "content", "") or ""
+            if not tok:
+                continue
+            if first_tok_dt is None:
+                first_tok_dt = datetime.now(timezone.utc)
+            last_tok_dt = datetime.now(timezone.utc)
+            parts.append(tok)
+            if json_started:
+                continue
+            # Phần prose TRƯỚC '{' -> emit thought; tới '{' thì emit phần trước nó rồi dừng.
+            idx = tok.find("{")
+            if idx == -1:
+                if tok.strip():
+                    await emit({"phase": "thought", "node": node, "text": tok})
+            else:
+                json_started = True
+                head = tok[:idx]
+                if head.strip():
+                    await emit({"phase": "thought", "node": node, "text": head})
+        text = "".join(parts).strip() or None
+        _report_llm(tracer, trace, node, model, user, text, usage_meta, router, start_dt,
+                    first_tok_dt, last_tok_dt, len(parts))
+        return text
+    except Exception as exc:  # noqa: BLE001 — stream lỗi -> non-stream
+        logger.warning("role_llm_plan_stream_failed: %s -> acomplete", str(exc)[:160])
+        return await acomplete(model, system, user, tracer=tracer, trace=trace, node=node)
+
+
 async def astream_reasoning(
     model: Any, system: str, user: str, emit: Any = None, *, node: str = "think",
     tracer: Any = None, trace: Any = None,

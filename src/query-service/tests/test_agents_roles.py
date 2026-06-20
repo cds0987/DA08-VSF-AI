@@ -257,6 +257,27 @@ async def test_astream_complete_reports_ttft_timing():
     assert t["ttft_ms"] is not None and t["inter_token_ms"] is not None
 
 
+async def test_astream_plan_streams_prose_then_hides_json():
+    """C: planner stream PROSE (trước '{') ra thought NGAY; JSON gom thầm KHÔNG leak."""
+    from app.agents.roles._llm import astream_plan
+
+    events: list[dict] = []
+
+    async def emit(ev):
+        events.append(ev)
+
+    # model: prose "Mình cần tra tài liệu." rồi JSON plan.
+    model = _StreamModel([], ["Mình ", "cần tra ", "tài liệu.\n", '{"route":', '"light"}'])
+    text = await astream_plan(model, "sys", "user", emit, node="orchestrate")
+
+    thoughts = [e for e in events if e.get("phase") == "thought" and e.get("node") == "orchestrate"]
+    prose = "".join(t["text"] for t in thoughts)
+    assert "Mình" in prose and "tài liệu" in prose
+    assert "{" not in prose, "JSON KHÔNG được leak ra thought"
+    assert not [e for e in events if e.get("token")], "KHÔNG emit token (chỉ thought)"
+    assert '{"route":"light"}' in (text or ""), "full text vẫn có JSON để parse"
+
+
 async def test_role_never_raises_on_mcp_error():
     class _BadMCP:
         async def rag_search(self, *a, **k):

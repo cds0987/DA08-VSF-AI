@@ -12,7 +12,7 @@ import logging
 from app.agents.plan_schema import Plan
 from app.agents.planners.base import PlanContext, Planner
 from app.agents.registry import register_planner
-from app.agents.roles._llm import astream_reasoning
+from app.agents.roles._llm import astream_plan
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,13 @@ QUY TẮC:
 - "reasoning": 1-2 câu NGẮN tiếng Việt nói rõ BẠN HIỂU câu hỏi là gì + VÌ SAO chọn plan này
   (đây là phần "suy nghĩ" hiển thị cho người dùng — viết tự nhiên, dễ hiểu).
 
-CHỈ trả JSON đúng schema, không giải thích thêm:
+ĐỊNH DẠNG TRẢ LỜI — 2 phần ĐÚNG THỨ TỰ:
+1) TRƯỚC TIÊN: viết 1-2 câu tiếng Việt NGẮN, tự nhiên, nói BẠN HIỂU câu hỏi là gì + sẽ làm gì
+   (đây là phần hiển thị cho user thấy bạn "đang suy nghĩ" — KHÔNG phải JSON, TUYỆT ĐỐI KHÔNG
+   chứa dấu "{").
+2) SAU ĐÓ: xuống dòng và trả JSON ĐÚNG schema (KHÔNG bọc ```), KHÔNG thêm chữ nào SAU JSON.
+Ví dụ:
+Mình cần tra chính sách nghỉ phép trong tài liệu nội bộ và đối chiếu dữ liệu cá nhân của bạn, rồi tổng hợp lại.
 {"route":"light|heavy","reasoning":"...","answer_hint":"...","steps":[{"id":1,"role":"...","input":"...","direction":"...","depends_on":[]}]}
 """
 
@@ -92,12 +98,12 @@ class OrchestratorWorkersPlanner(Planner):
         user = f"DANH SÁCH ROLE:\n{_catalog_text(ctx)}\n\nCÂU HỎI: {ctx.question}"
         err_hint = ""
         for attempt in range(2):
-            # STREAM reasoning planner ra SSE (node=orchestrate) -> UI thấy model "đang nghĩ" LIVE
-            # trong lúc lập kế hoạch (pha này có thể 10-20s). Trước đây dùng acomplete (CÂM) ->
-            # màn hình đứng im = "streaming hiển thị không tốt". content (JSON plan) chỉ gom để
-            # parse, KHÔNG leak token JSON ra UI. emit=None -> tự fallback acomplete (test/non-stream).
-            text = await astream_reasoning(model, _SYSTEM, user + err_hint, ctx.emit,
-                                           node="orchestrate", tracer=ctx.tracer, trace=ctx.trace)
+            # STREAM phần PROSE (suy nghĩ) của planner ra SSE NGAY (node=orchestrate) -> user thấy
+            # chữ chạy từ giây đầu, LẤP dead-air pha plan (10-20s). deepseek-v4-pro giấu reasoning
+            # nhưng VẪN stream content -> ta để model viết prose TRƯỚC rồi JSON; astream_plan stream
+            # prose, dừng emit khi gặp '{' (JSON gom thầm để parse, không leak). emit=None -> fallback.
+            text = await astream_plan(model, _SYSTEM, user + err_hint, ctx.emit,
+                                      node="orchestrate", tracer=ctx.tracer, trace=ctx.trace)
             if not text:
                 continue
             try:
