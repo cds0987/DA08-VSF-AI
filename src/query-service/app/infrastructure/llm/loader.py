@@ -32,6 +32,10 @@ class NodeProfile:
     capability: str | None = None
     models: tuple[str, ...] = field(default_factory=tuple)
     reasoning_effort: str | None = None
+    # Trần token OUTPUT riêng cho node này (reasoning model: gồm CẢ token suy nghĩ). None ->
+    # dùng trần chung (settings.llm_max_output_tokens). VD node 'think' (planner) cần nhiều hơn
+    # vì reasoning ăn token: nếu trần quá thấp -> nghĩ hết trần, KHÔNG kịp ra JSON -> retry.
+    max_output_tokens: int | None = None
 
     def make_adapter(self) -> NodeLLMAdapter:
         """Trả instance adapter. Adapter chưa đăng ký -> fallback 'standard' (logged)."""
@@ -64,6 +68,17 @@ def _safe_load_yaml(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _coerce_int(raw: Any, default: int | None = None) -> int | None:
+    """max_output_tokens: int hợp lệ (>0) -> int; thiếu/sai -> default (an toàn, không vỡ)."""
+    if raw is None:
+        return default
+    try:
+        v = int(raw)
+        return v if v > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
 def _coerce_models(raw: Any) -> tuple[str, ...]:
     if raw is None:
         return ()
@@ -83,6 +98,7 @@ def load_profiles(path: str | None = None) -> dict[str, NodeProfile]:
     defaults = data.get("defaults") or {}
     default_adapter = str(defaults.get("adapter", FALLBACK_ADAPTER) or FALLBACK_ADAPTER)
     default_effort = defaults.get("reasoning_effort")
+    default_max_out = _coerce_int(defaults.get("max_output_tokens"))
 
     profiles: dict[str, NodeProfile] = {}
     for node, cfg in (data.get("nodes") or {}).items():
@@ -94,6 +110,7 @@ def load_profiles(path: str | None = None) -> dict[str, NodeProfile]:
             capability=cfg.get("capability") or node,
             models=_coerce_models(cfg.get("models")),
             reasoning_effort=cfg.get("reasoning_effort", default_effort),
+            max_output_tokens=_coerce_int(cfg.get("max_output_tokens"), default_max_out),
         )
     return profiles
 

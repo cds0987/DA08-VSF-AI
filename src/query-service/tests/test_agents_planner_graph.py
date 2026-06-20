@@ -45,9 +45,9 @@ class _FakeModel:
 
 def _make_model(plan_json):
     def mk(cap):
-        if cap == "think":
+        if cap in ("think", "plan"):          # planner (MOSA dùng "plan", react dùng "think")
             return _FakeModel(plan_json)
-        if cap == "answer":
+        if cap in ("answer", "synth"):        # synth=think2 (verify) + answer (câu trả lời)
             return _FakeModel("TRA LOI tong hop")
         return _FakeModel("worker output")
     return mk
@@ -149,18 +149,20 @@ async def test_verify_emits_sse_so_user_sees_activity():
 
 
 def _make_model_replan():
-    """synth KHÔNG còn là worker -> lần gọi 'answer' ĐẦU TIÊN là verify. Cho call #1 trả
-    'insufficient' để ép replan 1 lần; planner ('think') luôn trả plan; call sau -> câu trả lời."""
-    calls = {"think": 0, "answer": 0}
+    """think 2 = capability 'synth'. Cho lần verify ĐẦU TIÊN trả 'insufficient' để ép replan 1 lần;
+    planner ('plan') luôn trả plan; answer -> câu trả lời cuối."""
+    calls = {"plan": 0, "synth": 0}
 
     def mk(cap):
-        if cap == "think":
-            calls["think"] += 1
+        if cap in ("plan", "think"):
+            calls["plan"] += 1
             return _FakeModel(_PLAN_JSON)
-        if cap == "answer":
-            calls["answer"] += 1
-            if calls["answer"] == 1:   # verify lần đầu -> chưa đủ
+        if cap == "synth":
+            calls["synth"] += 1
+            if calls["synth"] == 1:   # verify lần đầu -> chưa đủ
                 return _FakeModel('{"sufficient": false, "missing": "quy dinh", "reason": "thieu"}')
+            return _FakeModel("du roi")
+        if cap == "answer":
             return _FakeModel("TRA LOI tong hop")
         return _FakeModel("worker output")
 
@@ -181,8 +183,8 @@ async def test_verify_insufficient_triggers_replan_and_emits_thought():
                                  make_model=mk)
     res = await g.ainvoke({"question": "Toi con bao nhieu phep va quy dinh?"})
     assert res["answer"]
-    # replan đã xảy ra: orchestrate (planner='think') chạy lần 2 sau verify insufficient.
-    assert calls["think"] >= 2, f"không thấy replan, think calls={calls['think']}"
+    # replan đã xảy ra: orchestrate (planner='plan') chạy lần 2 sau verify insufficient.
+    assert calls["plan"] >= 2, f"không thấy replan, plan calls={calls['plan']}"
     # SSE: verify phát 'thought' báo chưa đủ -> user thấy lý do model tra cứu thêm.
     insufficient_thought = [
         e for e in events

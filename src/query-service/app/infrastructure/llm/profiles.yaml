@@ -8,11 +8,15 @@
 # - capability:       chuỗi gửi cho ai-router khi route (OPENAI_BASE_URL set) -> router map -> model thật
 # - models:           danh sách model THẬT của node (dùng khi gọi trực tiếp / để tài liệu hoá)
 # - reasoning_effort: low | medium | high (chỉ adapter reasoning_* dùng; standard bỏ qua)
+# - max_output_tokens: trần token OUTPUT riêng cho node (HOT-CONFIG). Với reasoning model, trần
+#     này gồm CẢ token "suy nghĩ" — node nghĩ nhiều (planner) cần trần CAO, không thì nghĩ hết
+#     trần -> không kịp ra JSON -> retry. Thiếu -> dùng trần chung LLM_MAX_OUTPUT_TOKENS (1500).
 version: 1
 
 defaults:
   adapter: standard
   reasoning_effort: null
+  max_output_tokens: null            # null -> dùng trần chung (settings.llm_max_output_tokens)
 
 nodes:
   # Phân loại. ⚠️ capability = think (gpt-5.4-mini) CHỨ KHÔNG phải triage (gpt-4o-mini):
@@ -32,12 +36,34 @@ nodes:
   think:
     adapter: standard
     capability: think
+    # Dùng cho luồng react (fallback) + leave_action. Reasoning model: token nghĩ + content CHUNG
+    # 1 trần -> để 3000 cho đủ chỗ, tránh nghĩ hết trần -> cụt.
+    max_output_tokens: 3000
+
+  # ── MOSA mỗi BƯỚC = 1 capability RIÊNG -> đổi model chỉ sửa routing.yaml (ai-router), KHÔNG
+  # sửa code. Đây là "bảng điều khiển" để quét tìm bộ model tối ưu sau này. ───────────────────
+  # Bước LẬP KẾ HOẠCH (orchestrate). Mặc định plan -> deepseek-v4-flash (routing.yaml). Trần cao
+  # vì reasoning model: token nghĩ + JSON plan chung 1 trần -> 3000 để hết retry "nghĩ hết trần".
+  plan:
+    adapter: standard
+    capability: plan
+    max_output_tokens: 3000
+
+  # Bước THINK 2 = TỔNG HỢP + VERIFY. Mặc định synth -> deepseek-v4-flash; muốn chất hơn đổi
+  # routing.yaml synth.paid = deepseek-v4-pro. Trần cao cho reasoning + bản tổng hợp.
+  synth:
+    adapter: standard
+    capability: synth
+    max_output_tokens: 3000
 
   # Sinh câu trả lời cuối (stream token). answer KHÔNG bind tools -> an toàn dùng reasoning
   # khi bật split + trỏ capability `answer` sang model reasoning. Mặc định standard.
   answer:
     adapter: standard
     capability: answer
+    # Câu trả lời cuối (chính sách + HR + khuyến nghị) có thể dài -> 1500 dễ CỤT giữa chừng.
+    # Nâng 2500 cho câu trả lời đầy đủ. (Worker/triage giữ trần chung 1500 — output ngắn.)
+    max_output_tokens: 2500
 
   # Guardrail LLM-judge (input/output).
   guardrail:

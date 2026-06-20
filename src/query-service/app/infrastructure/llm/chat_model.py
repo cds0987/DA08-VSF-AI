@@ -83,12 +83,14 @@ def build_node_chat_model(
         model = prof.capability or node
     else:
         model = direct_model or (prof.models[0] if prof.models else "gpt-4o-mini")
+    # Trần token per-node (profiles.yaml) ƯU TIÊN; thiếu -> trần chung truyền vào.
+    eff_max_out = prof.max_output_tokens or max_output_tokens
     return MosaChatModel(
         api_key=api_key,
         base_url=base_url,
         model=model,
         timeout=timeout,
-        max_output_tokens=max_output_tokens,
+        max_output_tokens=eff_max_out,
         adapter_name=prof.adapter,
         reasoning_effort=prof.reasoning_effort,
     )

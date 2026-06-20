@@ -46,6 +46,40 @@ capabilities:
           band_tokens: 150000
     require_tools: false            # answer node KHÔNG bind tool -> deepseek-flash ok.
     quality_floor: null
+  # ── MOSA per-step (ô model độc lập, đổi model tại đây không sửa code) ──────────────────────
+  plan:                             # bước LẬP KẾ HOẠCH. flash NHANH HƠN pro (~5s vs 7s) + vẫn
+                                    # reason+stream. (Trước dùng 'think'=pro -> 15s+retry.) Muốn
+                                    # nâng chất ca khó: đổi paid = deepseek/deepseek-v4-pro.
+    tiers: [paid]
+    models:
+      paid: deepseek/deepseek-v4-flash
+    selector:
+      impl: banded_rotation
+      params:
+        band_tokens: 150000
+        save_mode:
+          enabled: true
+          model: openai/gpt-4o-mini
+          tier: free_oai
+          band_tokens: 150000
+    require_tools: false
+    quality_floor: null
+  synth:                            # THINK 2 = tổng hợp + verify. flash mặc định; nâng chất:
+                                    # đổi paid = deepseek/deepseek-v4-pro (chỉ sửa dòng dưới).
+    tiers: [paid]
+    models:
+      paid: deepseek/deepseek-v4-flash
+    selector:
+      impl: banded_rotation
+      params:
+        band_tokens: 150000
+        save_mode:
+          enabled: true
+          model: openai/gpt-4o-mini
+          tier: free_oai
+          band_tokens: 150000
+    require_tools: false
+    quality_floor: null
   triage:                           # phân loại nhanh, rẻ
     tiers: [free_oai, free_or, paid]
     models:

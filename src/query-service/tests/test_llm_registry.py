@@ -124,6 +124,25 @@ def test_unknown_node_falls_back_to_standard():
     assert prof.make_adapter().name == "standard"
 
 
+def test_per_node_max_output_tokens():
+    # think (planner) nâng trần để reasoning + JSON đủ chỗ -> hết retry; node không khai -> None
+    # (build_node_chat_model dùng trần chung). answer nâng để câu trả lời không cụt.
+    assert get_node_profile("think").max_output_tokens == 3000
+    assert get_node_profile("answer").max_output_tokens == 2500
+    assert get_node_profile("triage").max_output_tokens is None  # giữ trần chung 1500
+    assert get_node_profile("khong-co-node-nay").max_output_tokens is None
+
+
+def test_build_node_chat_model_uses_profile_max_output():
+    from app.infrastructure.llm.chat_model import build_node_chat_model
+    # think có trần 3000 trong profiles -> override trần chung 1500 truyền vào.
+    m = build_node_chat_model("think", api_key="k", base_url="http://r/v1", max_output_tokens=1500)
+    assert m.max_output_tokens == 3000
+    # node không khai -> giữ trần chung truyền vào.
+    m2 = build_node_chat_model("triage", api_key="k", base_url="http://r/v1", max_output_tokens=1500)
+    assert m2.max_output_tokens == 1500
+
+
 def test_make_adapter_unregistered_falls_back():
     # NodeProfile trỏ adapter chưa đăng ký -> make_adapter lùi về standard, không raise.
     prof = NodeProfile(node="x", adapter="adapter-ma", capability="x")

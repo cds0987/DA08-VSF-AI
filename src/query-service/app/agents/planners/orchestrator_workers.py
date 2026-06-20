@@ -89,7 +89,9 @@ class OrchestratorWorkersPlanner(Planner):
     name = "orchestrator_workers"
 
     async def plan(self, ctx: PlanContext) -> Plan:
-        model = ctx.make_model("think") if ctx.make_model else None
+        # capability "plan" RIÊNG (không dùng chung "think") -> đổi model planner CHỈ sửa
+        # routing.yaml (plan -> flash/pro), KHÔNG sửa code. Mỗi bước MOSA 1 ô model độc lập.
+        model = ctx.make_model("plan") if ctx.make_model else None
         if model is None:
             logger.warning("orchestrator no model -> fallback plan")
             return self._with_question(_fallback_plan(), ctx.question)

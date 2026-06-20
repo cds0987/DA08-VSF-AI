@@ -101,7 +101,6 @@ async def astream_plan(
         first_tok_dt: datetime | None = None
         last_tok_dt: datetime | None = None
         json_started = False  # đã thấy '{' -> ngừng emit content (phần còn lại là JSON)
-        _n_reason = 0  # DIAG: đếm reasoning-chunk nhận được -> soi reasoning có tới query-service?
         async for chunk in model.astream([SystemMessage(content=system), HumanMessage(content=user)]):
             um = getattr(chunk, "usage_metadata", None)
             if um:
@@ -109,7 +108,6 @@ async def astream_plan(
             router = router or _router_of(chunk)
             rtext = (getattr(chunk, "additional_kwargs", None) or {}).get("reasoning_content")
             if rtext:
-                _n_reason += 1
                 await emit({"phase": "thought", "node": node, "text": rtext})
             tok = getattr(chunk, "content", "") or ""
             if not tok:
@@ -131,11 +129,6 @@ async def astream_plan(
                 if head.strip():
                     await emit({"phase": "thought", "node": node, "text": head})
         text = "".join(parts).strip() or None
-        # DIAG: reason_chunks=0 -> reasoning KHÔNG tới được query-service (mất ở ai-router/SDK);
-        # >0 -> tới nhưng FE/luồng không hiện. ttfc = lúc content đầu (sau pha reasoning).
-        _ttfc = round((first_tok_dt - start_dt).total_seconds() * 1000) if first_tok_dt else None
-        logger.info("astream_plan_diag node=%s reason_chunks=%d content_chunks=%d ttfc_content_ms=%s",
-                    node, _n_reason, len(parts), _ttfc)
         _report_llm(tracer, trace, node, model, user, text, usage_meta, router, start_dt,
                     first_tok_dt, last_tok_dt, len(parts))
         return text

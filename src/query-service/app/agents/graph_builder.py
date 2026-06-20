@@ -205,12 +205,11 @@ def build_orchestrator_graph(
             f"[step {k}] {v.output}" for k, v in sorted(data_results.items())
         )
         from app.agents.roles._llm import astream_reasoning
-        # GATE phải NHANH (chặn trước synthesize -> ảnh hưởng TTFT). Dùng model NHẸ capability
-        # "answer" (deepseek-flash) thay vì "think" (gpt-5.4-mini reasoning nặng -> nghĩ dài).
-        # STREAM reasoning live ra SSE (node=verify) cho user THẤY model đang kiểm tra (không ẩn);
-        # content (JSON verdict) chỉ gom để parse, KHÔNG đẩy token JSON ra UI. FE gộp node=verify
-        # thành 1 dòng "Kiểm tra & tổng hợp". Model không astream/lỗi -> tự fallback acomplete.
-        _model = make_model("answer")
+        # think 2 = TỔNG HỢP + VERIFY -> capability "synth" RIÊNG (đổi model chỉ sửa routing.yaml).
+        # Mặc định synth -> deepseek-flash (reason mặc định + nhanh hơn pro); muốn nâng chất:
+        # routing.yaml synth.paid = deepseek-v4-pro, KHÔNG sửa code. STREAM reasoning live (node=verify)
+        # cho user THẤY model đang tổng hợp/kiểm tra; content (JSON verdict) chỉ gom để parse.
+        _model = make_model("synth")
         _user = f"Câu hỏi: {state['question']}\n\nDữ liệu thu thập:\n{evidence}"
         text = await astream_reasoning(_model, _VERIFY_SYSTEM, _user, ctx.emit, node="verify",
                                        tracer=ctx.tracer, trace=ctx.trace)
