@@ -12,7 +12,7 @@ import logging
 from app.agents.plan_schema import Plan
 from app.agents.planners.base import PlanContext, Planner
 from app.agents.registry import register_planner
-from app.agents.roles._llm import acomplete
+from app.agents.roles._llm import astream_reasoning
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +92,12 @@ class OrchestratorWorkersPlanner(Planner):
         user = f"DANH SÁCH ROLE:\n{_catalog_text(ctx)}\n\nCÂU HỎI: {ctx.question}"
         err_hint = ""
         for attempt in range(2):
-            text = await acomplete(model, _SYSTEM, user + err_hint,
-                                   tracer=ctx.tracer, trace=ctx.trace, node="orchestrate")
+            # STREAM reasoning planner ra SSE (node=orchestrate) -> UI thấy model "đang nghĩ" LIVE
+            # trong lúc lập kế hoạch (pha này có thể 10-20s). Trước đây dùng acomplete (CÂM) ->
+            # màn hình đứng im = "streaming hiển thị không tốt". content (JSON plan) chỉ gom để
+            # parse, KHÔNG leak token JSON ra UI. emit=None -> tự fallback acomplete (test/non-stream).
+            text = await astream_reasoning(model, _SYSTEM, user + err_hint, ctx.emit,
+                                           node="orchestrate", tracer=ctx.tracer, trace=ctx.trace)
             if not text:
                 continue
             try:
