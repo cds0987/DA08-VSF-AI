@@ -84,6 +84,31 @@ async def test_graph_heavy_runs_workers_in_parallel():
     assert dt < 0.6, f"nghi tuan tu: {dt:.2f}s"
 
 
+async def test_orchestrate_passes_emit_to_planner():
+    """REGRESSION (dead-air lúc plan): PlanContext PHẢI có emit -> planner stream reasoning/prose
+    LIVE. Thiếu emit -> astream_plan fallback acomplete (CÂM) -> màn hình đứng im suốt pha plan."""
+    seen: dict = {}
+
+    class _SpyPlanner:
+        name = "spy"
+
+        async def plan(self, pctx):
+            seen["emit"] = pctx.emit
+            from app.agents.plan_schema import Plan
+            return Plan.model_validate({"route": "light", "answer_hint": "hi", "steps": []})
+
+    async def emit(ev):
+        pass
+
+    ctx = RoleContext(mcp_client=_SlowMCP(), user_id="u1", allowed_doc_ids=("d1",),
+                      make_model=_make_model("x"), emit=emit)
+    g = build_orchestrator_graph(ctx=ctx, manifest=load_manifest(),
+                                 planner=_SpyPlanner(), make_model=_make_model("x"))
+    await g.ainvoke({"question": "hi"})
+    assert seen.get("emit") is not None, \
+        "PlanContext thiếu emit -> planner astream_plan fallback acomplete (câm) -> dead-air"
+
+
 async def test_graph_light_skips_workers():
     light = '{"route":"light","answer_hint":"Xin chao!","steps":[]}'
     ctx = RoleContext(mcp_client=_SlowMCP(), user_id="u1", allowed_doc_ids=("d1",),

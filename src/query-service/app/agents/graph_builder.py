@@ -99,6 +99,9 @@ def build_orchestrator_graph(
             make_model=make_model,
             history=state.get("recent_messages"),
             tracer=ctx.tracer, trace=ctx.trace,
+            # GỐC RỄ dead-air: thiếu emit -> planner astream_plan fallback acomplete (CÂM) suốt.
+            # Nối emit -> planner stream reasoning + prose LIVE lúc lập kế hoạch (lấp dead-air).
+            emit=ctx.emit,
         )
         plan = await planner.plan(pctx)
         # synthesize_recommend KHÔNG còn chạy như worker: node `synthesize` tự sinh câu trả lời +
