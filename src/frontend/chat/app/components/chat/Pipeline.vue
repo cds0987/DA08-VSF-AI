@@ -57,8 +57,9 @@ function getResultLabel(entry: TraceEntry): string {
       <div class="flex items-center gap-1.5 text-[12px] font-semibold text-blue-700 dark:text-blue-300">
         <GitBranch class="h-3.5 w-3.5" /> Orchestrator
       </div>
+      <!-- reasoning live: bounded (max-h + scroll) -> stream SSE nhưng KHÔNG thành tường dài -->
       <div v-for="(t, i) in orchThoughts" :key="`o-${i}`"
-        class="mt-1 rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-1.5 text-[11.5px] leading-relaxed text-slate-600 dark:border-blue-500/15 dark:bg-blue-500/5 dark:text-muted-foreground">
+        class="mt-1 max-h-32 overflow-y-auto rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-1.5 text-[11.5px] leading-relaxed text-slate-600 dark:border-blue-500/15 dark:bg-blue-500/5 dark:text-muted-foreground">
         {{ t.text }}
       </div>
       <!-- spinner lập kế hoạch (trước khi có thought/plan) -->
@@ -89,7 +90,7 @@ function getResultLabel(entry: TraceEntry): string {
         <ShieldCheck class="h-3.5 w-3.5" /> Verify — Kiểm tra &amp; tổng hợp
       </div>
       <div v-for="(t, i) in verifyThoughts" :key="`v-${i}`"
-        class="mt-1 rounded-lg border border-violet-100 bg-violet-50/50 px-3 py-1.5 text-[11.5px] leading-relaxed text-slate-600 dark:border-violet-500/15 dark:bg-violet-500/5 dark:text-muted-foreground">
+        class="mt-1 max-h-32 overflow-y-auto rounded-lg border border-violet-100 bg-violet-50/50 px-3 py-1.5 text-[11.5px] leading-relaxed text-slate-600 dark:border-violet-500/15 dark:bg-violet-500/5 dark:text-muted-foreground">
         {{ t.text }}
       </div>
       <div v-if="isThinking && traceLog.length > 0" class="mt-1 flex items-center gap-2 px-1 py-1">
