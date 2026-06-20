@@ -309,10 +309,14 @@ class Router:
         messages = body.get("messages")
         est = estimate_tokens(messages)
         has_tools = bool(body.get("tools"))
+        # DIAG timing: tách resolve() vs time-to-first-chunk (TTFC) từ upstream để soi điểm nghẽn
+        # latency (model nhanh ~2s direct nhưng xuyên router ~8-18s). Log 1 dòng/chat ra stdout.
+        _t_start = time.monotonic()
         dec = await self.resolve(
             capability_alias, est_tokens=est, has_tools=has_tools,
             has_image=_has_image(messages), conversation_id=conversation_id, endpoint="chat",
         )
+        _resolve_ms = (time.monotonic() - _t_start) * 1000
         if dec is None:
             raise NoCapacityError(capability_alias)
         client = self.clients.get(dec.base_url, dec.api_key)
@@ -323,9 +327,18 @@ class Router:
         t0 = time.monotonic()
         try:
             stream = await client.chat.completions.create(stream=True, **self._prep_body(sb, dec))
+            _create_ms = (time.monotonic() - t0) * 1000   # thời gian await create() (mở request)
             usage_seen: Usage | None = None
             served_first = ""
+            _ttfc_ms: float | None = None                 # time-to-first-chunk từ upstream
             async for chunk in stream:
+                if _ttfc_ms is None:
+                    _ttfc_ms = (time.monotonic() - t0) * 1000
+                    logger.info(
+                        "chat_stream_timing cap=%s model=%s est_tok=%d resolve_ms=%.0f "
+                        "create_ms=%.0f ttfc_ms=%.0f", capability, dec.model_name, est,
+                        _resolve_ms, _create_ms, _ttfc_ms,
+                    )
                 data = chunk.model_dump()
                 first = not served_first
                 if data.get("model") and first:
