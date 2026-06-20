@@ -100,15 +100,26 @@ async def astream_plan(
         router: dict | None = None
         first_tok_dt: datetime | None = None
         last_tok_dt: datetime | None = None
-        json_started = False  # đã thấy '{' -> ngừng emit content (phần còn lại là JSON)
+        json_started = False        # content: thấy '{' -> ngừng emit (phần còn lại là JSON)
+        reason_json_started = False  # reasoning: model hay nháp JSON trong CoT -> cũng lọc '{'
         async for chunk in model.astream([SystemMessage(content=system), HumanMessage(content=user)]):
             um = getattr(chunk, "usage_metadata", None)
             if um:
                 usage_meta = um
             router = router or _router_of(chunk)
+            # reasoning_content (CoT) hay chứa bản NHÁP JSON -> lọc '{' GIỐNG content để KHÔNG
+            # lộ JSON thô ra panel "đang nghĩ"; chỉ giữ phần prose sạch trước JSON (lấp dead-air).
             rtext = (getattr(chunk, "additional_kwargs", None) or {}).get("reasoning_content")
-            if rtext:
-                await emit({"phase": "thought", "node": node, "text": rtext})
+            if rtext and not reason_json_started:
+                ridx = rtext.find("{")
+                if ridx == -1:
+                    if rtext.strip():
+                        await emit({"phase": "thought", "node": node, "text": rtext})
+                else:
+                    reason_json_started = True
+                    rhead = rtext[:ridx]
+                    if rhead.strip():
+                        await emit({"phase": "thought", "node": node, "text": rhead})
             tok = getattr(chunk, "content", "") or ""
             if not tok:
                 continue
@@ -213,9 +224,8 @@ async def astream_complete(
             if um:
                 usage_meta = um
             router = router or _router_of(chunk)
-            rtext = (getattr(chunk, "additional_kwargs", None) or {}).get("reasoning_content")
-            if rtext:
-                await emit({"phase": "thought", "node": node, "text": rtext})
+            # answer node: CHỈ stream token câu trả lời (content). KHÔNG đẩy reasoning_content thô
+            # (CoT "Soạn trả lời" dài dòng) ra panel suy nghĩ -> khúc agent gọn, không rối.
             tok = getattr(chunk, "content", "") or ""
             if tok:
                 if first_tok_dt is None:

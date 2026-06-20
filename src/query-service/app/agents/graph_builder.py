@@ -112,13 +112,8 @@ def build_orchestrator_graph(
             plan.steps[:] = [s for s in plan.steps if s.role != _SYNTH_ROLE]
         logger.info("orchestrate route=%s steps=%d", plan.route, len(plan.steps))
         if ctx.emit:
-            # "Suy nghĩ" = router NGHĨ GÌ (reasoning SẠCH tiếng Việt từ field reasoning, KHÔNG phải
-            # raw CoT) -> 1 dòng gọn; trong lúc planner chạy, status spinner ở trên đã báo hoạt động.
-            _think = plan.reasoning.strip() if plan.reasoning else (
-                "Trả lời trực tiếp." if plan.route == "light"
-                else "Cần truy xuất dữ liệu rồi tổng hợp."
-            )
-            await ctx.emit({"phase": "thought", "node": "think", "text": _think})
+            # KHÔNG emit lại plan.reasoning (node=think) — astream_plan ĐÃ stream "Lập kế hoạch"
+            # (node=plan) live + sạch ngay lúc planner chạy -> tránh khối "Suy nghĩ" trùng lặp.
             # "plan" = cấu trúc node + depends_on -> FE vẽ subagents SONG SONG theo level.
             await ctx.emit({
                 "phase": "plan", "route": plan.route,
@@ -204,15 +199,14 @@ def build_orchestrator_graph(
         evidence = "\n\n".join(
             f"[step {k}] {v.output}" for k, v in sorted(data_results.items())
         )
-        from app.agents.roles._llm import astream_reasoning
+        from app.agents.roles._llm import acomplete
         # think 2 = TỔNG HỢP + VERIFY -> capability "synth" RIÊNG (đổi model chỉ sửa routing.yaml).
-        # Mặc định synth -> deepseek-flash (reason mặc định + nhanh hơn pro); muốn nâng chất:
-        # routing.yaml synth.paid = deepseek-v4-pro, KHÔNG sửa code. STREAM reasoning live (node=verify)
-        # cho user THẤY model đang tổng hợp/kiểm tra; content (JSON verdict) chỉ gom để parse.
+        # KHÔNG stream raw CoT của verify (trước đây dump cả tính toán BHXH "Tuy nhiên/Hoặc là" ->
+        # rối). Chỉ hiện status "Đang kiểm tra & tổng hợp…" (đã emit ở trên). acomplete gom verdict.
         _model = make_model("synth")
         _user = f"Câu hỏi: {state['question']}\n\nDữ liệu thu thập:\n{evidence}"
-        text = await astream_reasoning(_model, _VERIFY_SYSTEM, _user, ctx.emit, node="verify",
-                                       tracer=ctx.tracer, trace=ctx.trace)
+        text = await acomplete(_model, _VERIFY_SYSTEM, _user,
+                               tracer=ctx.tracer, trace=ctx.trace, node="verify")
         verdict = "sufficient"
         reason = ""
         if text:

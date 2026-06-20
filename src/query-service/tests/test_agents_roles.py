@@ -97,9 +97,9 @@ class _StreamModel:
             yield AIMessageChunk(content=c)
 
 
-async def test_astream_complete_surfaces_reasoning_and_streams_content():
-    """FIX hiệu ứng: reasoning_content -> SSE thought (user THẤY model nghĩ live); content ->
-    token generating (câu trả lời chạy dần). Trước đây reasoning bị BỎ -> UI im lặng/trả 1 cục."""
+async def test_astream_complete_streams_tokens_not_raw_reasoning():
+    """answer node: CHỈ stream token câu trả lời (content). KHÔNG dump reasoning_content thô (CoT
+    'Soạn trả lời' dài dòng) ra panel suy nghĩ -> khúc agent gọn, không rối."""
     from app.agents.roles._llm import astream_complete
 
     events: list[dict] = []
@@ -111,9 +111,9 @@ async def test_astream_complete_surfaces_reasoning_and_streams_content():
     text = await astream_complete(model, "sys", "user", emit, node="answer")
 
     assert text == "Xin chào bạn!"
-    thoughts = [e for e in events if e.get("phase") == "thought" and e.get("node") == "answer"]
+    thoughts = [e for e in events if e.get("phase") == "thought"]
     tokens = [e for e in events if e.get("token")]
-    assert thoughts, "reasoning_content KHÔNG được surface ra SSE -> UI im lặng khi model nghĩ"
+    assert not thoughts, "answer KHÔNG được dump reasoning thô ra thought"
     assert len(tokens) == 3 and "".join(t["token"] for t in tokens) == "Xin chào bạn!"
 
 

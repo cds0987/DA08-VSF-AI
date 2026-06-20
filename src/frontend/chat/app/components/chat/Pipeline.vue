@@ -85,8 +85,8 @@ function getResultLabel(entry: TraceEntry): string {
       </div>
     </div>
 
-    <!-- Kế hoạch + subagents song song (orchestrator-workers) -->
-    <div v-if="plan?.steps?.length" class="mb-2">
+    <!-- Subagents NẰM DƯỚI orchestrator (thụt lề + viền trái = phân cấp) -->
+    <div v-if="plan?.steps?.length" class="mb-2 ml-1.5 border-l-2 border-blue-100 pl-3 dark:border-blue-500/20">
       <AgentPlanView :plan="plan" />
     </div>
 

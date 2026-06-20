@@ -105,7 +105,7 @@ class OrchestratorWorkersPlanner(Planner):
             # nhưng VẪN stream content -> ta để model viết prose TRƯỚC rồi JSON; astream_plan stream
             # prose, dừng emit khi gặp '{' (JSON gom thầm để parse, không leak). emit=None -> fallback.
             text = await astream_plan(model, _SYSTEM, user + err_hint, ctx.emit,
-                                      node="orchestrate", tracer=ctx.tracer, trace=ctx.trace)
+                                      node="plan", tracer=ctx.tracer, trace=ctx.trace)
             if not text:
                 continue
             try:

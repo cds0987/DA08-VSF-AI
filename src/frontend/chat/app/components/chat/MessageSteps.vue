@@ -69,12 +69,7 @@ function resultLabel(e: TraceEntry): string {
       />
     </button>
 
-    <!-- Kế hoạch + subagents song song (orchestrator-workers) -->
-    <div v-if="open && plan?.steps?.length" class="mt-1.5 pl-1">
-      <AgentPlanView :plan="plan" />
-    </div>
-
-    <!-- Suy nghĩ / quyết định của model -->
+    <!-- Suy nghĩ orchestrator (Lập kế hoạch) — đặt TRƯỚC subagents để đọc theo thứ tự logic -->
     <div v-if="open && thoughts?.length" class="mt-1.5 space-y-1 pl-1">
       <div
         v-for="(t, i) in thoughts"
@@ -84,6 +79,11 @@ function resultLabel(e: TraceEntry): string {
         <span class="font-semibold text-blue-600 dark:text-blue-300">{{ NODE_LABEL[t.node] ?? t.node }}:</span>
         {{ t.text }}
       </div>
+    </div>
+
+    <!-- Subagents NẰM DƯỚI orchestrator (thụt lề + viền trái = phân cấp) -->
+    <div v-if="open && plan?.steps?.length" class="mt-1.5 ml-1.5 border-l-2 border-blue-100 pl-3 dark:border-blue-500/20">
+      <AgentPlanView :plan="plan" />
     </div>
 
     <!-- Steps -->
