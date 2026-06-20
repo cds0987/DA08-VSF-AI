@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class PlanStep(BaseModel):
@@ -17,12 +17,25 @@ class PlanStep(BaseModel):
     direction: str = Field(default="", description="Định hướng cụ thể cho worker")
     depends_on: list[int] = Field(default_factory=list, description="ID các step phụ thuộc")
 
+    @field_validator("direction", mode="before")
+    @classmethod
+    def _none_to_empty(cls, v: Any) -> Any:
+        return "" if v is None else v
+
 
 class Plan(BaseModel):
     route: Literal["light", "heavy"]
     reasoning: str = Field(default="", description="Router suy nghĩ gì: hiểu câu hỏi + vì sao plan này (1-2 câu, ngắn)")
     answer_hint: str = Field(default="", description="Gợi ý trả lời khi route=light")
     steps: list[PlanStep] = Field(default_factory=list)
+
+    # Planner (LLM) THƯỜNG xuất "answer_hint": null / "reasoning": null ở route=heavy. Field kiểu
+    # str -> Pydantic CHỐI null -> parse fail -> RETRY 1 lần gọi planner chậm (5-23s) MỖI query.
+    # Coerce null -> "" để hết retry lãng phí (điểm nghẽn chính của latency MOSA).
+    @field_validator("reasoning", "answer_hint", mode="before")
+    @classmethod
+    def _none_to_empty(cls, v: Any) -> Any:
+        return "" if v is None else v
 
     @model_validator(mode="after")
     def _check(self) -> "Plan":

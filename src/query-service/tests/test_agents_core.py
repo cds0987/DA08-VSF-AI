@@ -38,6 +38,17 @@ def test_plan_dag_ready_steps():
     assert [s.id for s in p.ready_steps({1, 2})] == [3]
 
 
+def test_plan_accepts_null_answer_hint_and_reasoning():
+    """Planner LLM hay xuất answer_hint/reasoning = null ở route=heavy -> PHẢI parse OK
+    (coerce -> ""), KHÔNG fail gây retry gọi lại planner chậm (điểm nghẽn latency)."""
+    p = Plan.model_validate({
+        "route": "heavy", "reasoning": None, "answer_hint": None,
+        "steps": [{"id": 1, "role": "rag_retrieve", "input": "q", "direction": None, "depends_on": []}],
+    })
+    assert p.answer_hint == "" and p.reasoning == ""
+    assert p.steps[0].direction == ""
+
+
 def test_plan_rejects_cycle():
     with pytest.raises(Exception):
         Plan.model_validate({"route": "heavy", "steps": [
