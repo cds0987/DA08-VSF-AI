@@ -61,6 +61,31 @@ _VERIFY_SYSTEM = (
 )
 
 
+# GỘP analyze + verify + answer -> 1 node verify_answer. Model TỔNG HỢP/PHÂN TÍCH (reasoning hiện
+# ra PANEL "Verify — Kiểm tra & tổng hợp"), tự quyết: thiếu -> "<<NEED_MORE>>" (replan, mở rộng plan);
+# đủ -> viết THẲNG câu trả lời + [N] (stream xuống message). 1 lần suy luận thay vì 3.
+_VA_SYSTEM = """\
+Bạn là trợ lý nội bộ VinSmartFuture. Dựa trên CÂU HỎI, THÔNG TIN ĐÃ THU THẬP và DANH SÁCH NGUỒN:
+
+BƯỚC 1 — TỔNG HỢP & KIỂM TRA (phần suy nghĩ này HIỆN cho user thấy): phân tích/đối chiếu dữ liệu
+với câu hỏi; phán định dữ liệu đã ĐỦ trả lời phần CỐT LÕI chưa (số liệu/chính sách/bước/trạng thái
+cụ thể). Tài liệu nội bộ rõ ràng KHÔNG có thông tin -> vẫn coi là ĐỦ (trả lời trung thực phần thiếu
++ gợi ý liên hệ HR/IT, tránh tra vô ích).
+
+BƯỚC 2 — XUẤT (chọn 1):
+- CHƯA ĐỦ và tra thêm có thể lấp -> in ĐÚNG 1 dòng bắt đầu "<<NEED_MORE>>" + mô tả NGẮN cần tra gì,
+  rồi DỪNG. TUYỆT ĐỐI KHÔNG viết câu trả lời.
+- ĐỦ -> viết THẲNG câu trả lời cho nhân viên (KHÔNG nhắc <<NEED_MORE>>).
+
+== KHI VIẾT CÂU TRẢ LỜI ==
+Đúng trọng tâm + khuyến nghị hành động cụ thể. KHÔNG bịa số liệu/chính sách/ngày.
+- TRÍCH DẪN: DANH SÁCH NGUỒN có số [N]; chèn [N] NGAY SAU ý dùng nguồn đó (vd "...12 ngày [1]").
+  TUYỆT ĐỐI KHÔNG viết tên file/đường dẫn trong câu (giao diện tự render thẻ nguồn từ [N]).
+  DANH SÁCH NGUỒN trống -> KHÔNG bịa [N]; trả lời từ dữ liệu HR/kiến thức chung.
+- Phong cách ấm áp, chuyên nghiệp, vài icon hợp lý (✅ 📌 💡 😊) trừ nội dung nhạy cảm.
+"""
+
+
 def build_orchestrator_graph(
     *,
     ctx: RoleContext,
@@ -109,8 +134,10 @@ def build_orchestrator_graph(
         # gắn [N] citation từ nguồn đã đánh ref (worker chỉ nhận text -> không cite được). Strip
         # step synth khỏi DAG -> workers CHỈ gom dữ liệu (rag/hr/analyze). depends_on của step dữ
         # liệu KHÔNG trỏ vào synth nên bỏ an toàn; route_join chỉ chờ các step dữ liệu.
+        # Strip synthesize_recommend + analyze: việc TỔNG HỢP/PHÂN TÍCH/viết dồn vào node
+        # verify_answer (1 lần suy luận). Workers CHỈ gom dữ liệu (rag/hr/leave_action).
         if plan.route != "light":
-            plan.steps[:] = [s for s in plan.steps if s.role != _SYNTH_ROLE]
+            plan.steps[:] = [s for s in plan.steps if s.role not in (_SYNTH_ROLE, "analyze")]
         logger.info("orchestrate route=%s steps=%d", plan.route, len(plan.steps))
         if ctx.emit:
             # KHÔNG emit lại plan.reasoning (node=think) — astream_plan ĐÃ stream "Lập kế hoạch"
@@ -129,8 +156,8 @@ def build_orchestrator_graph(
 
     def route_plan(state: OrchestratorState):
         if state["plan"].route == "light":
-            return "synthesize"
-        return _pending_sends(state) or "synthesize"
+            return "verify_answer"
+        return _pending_sends(state) or "verify_answer"
 
     async def worker(payload: dict) -> dict:
         task = WorkerInput(
@@ -165,92 +192,39 @@ def build_orchestrator_graph(
     async def join(state: OrchestratorState) -> dict:
         return {}  # barrier; reducer đã merge results
 
+    # verify_before_synthesize: bật/tắt VÒNG REPLAN của verify_answer (thiếu -> tra thêm).
+    # False -> verify_answer luôn trả lời thẳng (không <<NEED_MORE>>) = rollback hành vi cũ.
     enable_verify = bool(getattr(manifest, "verify_before_synthesize", False))
-    # Đích khi mọi step xong: verify (think 2) nếu bật, ngược lại synthesize thẳng.
-    _all_done_target = "verify" if enable_verify else "synthesize"
 
     def route_join(state: OrchestratorState):
         plan = state["plan"]
         done = set((state.get("results") or {}).keys())
         if all(s.id in done for s in plan.steps):
-            return _all_done_target
-        return _pending_sends(state) or _all_done_target
+            return "verify_answer"
+        return _pending_sends(state) or "verify_answer"
 
-    async def verify(state: OrchestratorState) -> dict:
-        """think 2: deepseek-pro TỔNG HỢP lại dữ liệu đã thu thập + quyết ĐỦ chưa.
-        Đủ -> synthesize; thiếu (còn hạn mức replan) -> orchestrate lại để tra thêm.
-        Fail-open: lỗi/parse hỏng/hết hạn mức -> coi là đủ (không chặn câu trả lời)."""
-        results = state.get("results") or {}
-        data_results = {k: v for k, v in results.items() if v.role != _SYNTH_ROLE}
-        replan_count = state.get("replan_count", 0)
-
-        # leave_action xuất action JSON / câu hỏi làm rõ -> KHÔNG verify "đủ thông tin" (vô nghĩa,
-        # và replan sẽ tạo lại đơn). Đi thẳng synthesize (passthrough).
-        if any(v.role == _ACTION_ROLE for v in data_results.values()):
-            return {"verify_verdict": "sufficient"}
-
-        # Không có dữ liệu / hết hạn mức replan / không có model -> đi synthesize luôn.
-        if not data_results or replan_count >= manifest.max_replan or make_model is None:
-            return {"verify_verdict": "sufficient"}
-
-        if ctx.emit:
-            await ctx.emit({"phase": "thinking", "node": "verify",
-                            "status": "Đang kiểm tra thông tin đã đủ chưa…"})
-
-        evidence = "\n\n".join(
-            f"[step {k}] {v.output}" for k, v in sorted(data_results.items())
-        )
-        from app.agents.roles._llm import astream_reasoning
-        # think 2 = TỔNG HỢP + VERIFY -> capability "synth" RIÊNG (đổi model chỉ sửa routing.yaml).
-        # STREAM reasoning live (node=verify) -> SSE liên tục, user THẤY model đang kiểm tra/tổng hợp
-        # (không im lặng). content (JSON verdict) chỉ gom để parse, KHÔNG đẩy token ra UI.
-        _model = make_model("synth")
-        _user = f"Câu hỏi: {state['question']}\n\nDữ liệu thu thập:\n{evidence}"
-        text = await astream_reasoning(_model, _VERIFY_SYSTEM, _user, ctx.emit, node="verify",
-                                       tracer=ctx.tracer, trace=ctx.trace)
-        verdict = "sufficient"
-        reason = ""
-        if text:
-            try:
-                s, e = text.find("{"), text.rfind("}")
-                data = json.loads(text[s:e + 1])
-                verdict = "insufficient" if not bool(data.get("sufficient", True)) else "sufficient"
-                reason = str(data.get("reason", ""))[:200]
-            except Exception as exc:  # noqa: BLE001 — fail-open
-                logger.warning("verify parse fail -> sufficient: %s", str(exc)[:120])
-        logger.info("verify verdict=%s replan_count=%d reason=%s", verdict, replan_count, reason[:80])
-
-        if verdict == "insufficient":
-            if ctx.emit:
-                await ctx.emit({"phase": "thought", "node": "verify",
-                                "text": f"Thông tin chưa đủ ({reason or 'thiếu khía cạnh chính'}) — tra cứu thêm."})
-            return {"verify_verdict": "insufficient", "replan_count": replan_count + 1}
-        return {"verify_verdict": "sufficient"}
-
-    def route_after_verify(state: OrchestratorState):
-        # insufficient -> orchestrate lại (tra thêm); còn lại -> synthesize.
-        return "orchestrate" if state.get("verify_verdict") == "insufficient" else "synthesize"
-
-    async def synthesize(state: OrchestratorState) -> dict:
+    async def verify_answer(state: OrchestratorState) -> dict:
+        """GỘP analyze+verify+answer (1 LLM call). Stream reasoning (PANEL node=verify
+        "Kiểm tra & tổng hợp") cho user thấy model TỔNG HỢP/PHÂN TÍCH; tự quyết:
+        - thiếu + còn hạn mức replan -> "<<NEED_MORE>>" -> orchestrate MỞ RỘNG plan tra thêm.
+        - đủ -> STREAM câu trả lời + [N] xuống message.
+        Fail-safe: lỗi/không model -> trả dữ liệu thô (không chặn câu trả lời)."""
         plan = state["plan"]
         if plan.route == "light":
             return {"answer": plan.answer_hint or "Mình chưa rõ yêu cầu, bạn nói rõ hơn nhé.",
                     "sources": []}
         results = state.get("results") or {}
         data_results = {k: v for k, v in results.items() if v.role != _SYNTH_ROLE}
+        replan_count = state.get("replan_count", 0)
 
-        # ACTION PASSTHROUGH: leave_action xuất PURE JSON action (create_leave_request /
-        # review_leave_approvals) hoặc câu hỏi làm rõ. TUYỆT ĐỐI KHÔNG rewrite qua model (sẽ phá
-        # JSON mà FE.extractAction cần để render form xác nhận). Trả verbatim + sources rỗng.
-        # KHÔNG emit token ở đây -> streamed_tokens=False -> orchestration word-chunk câu trả lời
-        # (FE gom fullContent rồi tách action JSON). Lấy step leave_action ĐẦU TIÊN có output.
+        # ACTION PASSTHROUGH: leave_action xuất PURE JSON action -> trả verbatim (FE.extractAction
+        # cần JSON nguyên để render form). KHÔNG qua model, KHÔNG verify.
         for sid in sorted(data_results):
             r = data_results[sid]
             if r.role == _ACTION_ROLE and r.status == "ok" and str(r.output or "").strip():
                 return {"answer": str(r.output).strip(), "sources": []}
 
-        # Gom + KHỬ TRÙNG sources theo chunk_id, ĐÁNH SỐ ref [1..N] (theo thứ tự step). Ref này
-        # vừa đưa vào prompt cho model trích [N], vừa trả ra done-event cho FE -> [N] khớp thẻ nguồn.
+        # Gom + KHỬ TRÙNG sources, ĐÁNH SỐ ref [1..N] -> prompt trích [N] + done-event cho FE.
         agg: list[dict] = []
         seen: set = set()
         for sid in sorted(data_results):
@@ -261,8 +235,6 @@ def build_orchestrator_graph(
                 seen.add(cid)
                 agg.append(s)
         sources_ref = [{**s, "ref": i + 1} for i, s in enumerate(agg)]
-
-        # Text dữ liệu các worker (rag/hr/analyze) — đầu vào để model viết câu trả lời.
         data_text = "\n\n".join(
             f"[{data_results[k].role}] {data_results[k].output}"
             for k in sorted(data_results)
@@ -285,41 +257,54 @@ def build_orchestrator_graph(
                     "sources": sources_ref}
 
         if ctx.emit:
-            await ctx.emit({"phase": "thinking", "node": "answer",
-                            "status": "Đang soạn câu trả lời..."})
-        from app.agents.roles._llm import astream_complete
+            await ctx.emit({"phase": "thinking", "node": "verify",
+                            "status": "Đang tổng hợp & kiểm tra thông tin…"})
+
+        # cho replan khi: bật flag + còn hạn mức + có dữ liệu (để "thiếu" có nghĩa).
+        allow_replan = enable_verify and bool(data_results) and replan_count < manifest.max_replan
+        from app.agents.roles._llm import astream_verify_answer
         user = (
             f"CÂU HỎI: {state['question']}\n\n"
             f"THÔNG TIN ĐÃ THU THẬP:\n{data_text or '(trống)'}\n\n"
             f"DANH SÁCH NGUỒN (trích bằng số [N]):\n{refs_block}"
         )
-        # STREAM token answer ra SSE (node=answer) + surface reasoning. capability "answer".
-        answer = await astream_complete(make_model("answer"), _SYNTH_CITE_SYSTEM, user,
-                                        ctx.emit, node="answer",
-                                        tracer=ctx.tracer, trace=ctx.trace)
+        if not allow_replan:
+            user += ("\n\n(LƯU Ý: PHẢI trả lời NGAY dù dữ liệu có thể chưa đủ — trung thực phần "
+                     "thiếu + gợi ý liên hệ HR/IT. KHÔNG dùng <<NEED_MORE>>.)")
+        # 1 call: reasoning -> PANEL node=verify; content -> <<NEED_MORE>> (replan) HOẶC answer stream.
+        answer, need_more, missing = await astream_verify_answer(
+            make_model("answer"), _VA_SYSTEM, user, ctx.emit, node="verify",
+            allow_replan=allow_replan, tracer=ctx.tracer, trace=ctx.trace,
+        )
+        if need_more:
+            logger.info("verify_answer NEED_MORE replan_count=%d missing=%s", replan_count, missing[:80])
+            if ctx.emit:
+                await ctx.emit({"phase": "thought", "node": "verify",
+                                "text": f"Thông tin chưa đủ ({missing or 'thiếu khía cạnh chính'}) — tra cứu thêm."})
+            return {"verify_verdict": "insufficient", "replan_count": replan_count + 1}
         if not answer:
             answer = data_text or \
                 "Mình chưa lấy được dữ liệu phù hợp, bạn thử lại hoặc liên hệ HR/IT Helpdesk."
         return {"answer": answer, "sources": sources_ref}
 
+    def route_after(state: OrchestratorState):
+        # CHỈ replan khi CHƯA có answer + verdict insufficient (need_more). Có answer -> END NGAY
+        # (kể cả verify_verdict cũ còn "insufficient" từ lần replan trước -> tránh lặp vô tận).
+        if not state.get("answer") and state.get("verify_verdict") == "insufficient":
+            return "orchestrate"
+        return END
+
     g = StateGraph(OrchestratorState)
     g.add_node("orchestrate", orchestrate)
     g.add_node("worker", worker)
     g.add_node("join", join)
-    if enable_verify:
-        g.add_node("verify", verify)
-    g.add_node("synthesize", synthesize)
+    g.add_node("verify_answer", verify_answer)
 
     g.add_edge(START, "orchestrate")
-    g.add_conditional_edges("orchestrate", route_plan, ["worker", "synthesize"])
+    g.add_conditional_edges("orchestrate", route_plan, ["worker", "verify_answer"])
     g.add_edge("worker", "join")
-    if enable_verify:
-        g.add_conditional_edges("join", route_join, ["worker", "verify", "synthesize"])
-        # verify (think 2): đủ -> synthesize; thiếu -> orchestrate lại (replan trong max_replan).
-        g.add_conditional_edges("verify", route_after_verify, ["orchestrate", "synthesize"])
-    else:
-        g.add_conditional_edges("join", route_join, ["worker", "synthesize"])
-    g.add_edge("synthesize", END)
+    g.add_conditional_edges("join", route_join, ["worker", "verify_answer"])
+    g.add_conditional_edges("verify_answer", route_after, ["orchestrate", END])
 
     compiled = g.compile(checkpointer=checkpointer)
     compiled.name = "VsfOrchestratorWorkers"

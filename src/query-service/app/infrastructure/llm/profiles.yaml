@@ -58,14 +58,13 @@ nodes:
     capability: synth
     max_output_tokens: 3000
 
-  # Sinh câu trả lời cuối (stream token). answer KHÔNG bind tools -> an toàn dùng reasoning
-  # khi bật split + trỏ capability `answer` sang model reasoning. Mặc định standard.
+  # Node GỘP verify_answer (tổng hợp+kiểm tra+viết) dùng capability `answer`. 1 call vừa REASONING
+  # (suy nghĩ ẩn) vừa viết câu trả lời -> trần phải gồm CẢ token nghĩ + answer -> nâng 4000 để
+  # không CỤT (trước 2500 chỉ đủ answer, nay thêm reasoning của bước gộp).
   answer:
     adapter: standard
     capability: answer
-    # Câu trả lời cuối (chính sách + HR + khuyến nghị) có thể dài -> 1500 dễ CỤT giữa chừng.
-    # Nâng 2500 cho câu trả lời đầy đủ. (Worker/triage giữ trần chung 1500 — output ngắn.)
-    max_output_tokens: 2500
+    max_output_tokens: 4000
 
   # Guardrail LLM-judge (input/output).
   guardrail:

@@ -136,7 +136,7 @@ def test_per_node_max_output_tokens():
     # think (planner) nâng trần để reasoning + JSON đủ chỗ -> hết retry; node không khai -> None
     # (build_node_chat_model dùng trần chung). answer nâng để câu trả lời không cụt.
     assert get_node_profile("think").max_output_tokens == 3000
-    assert get_node_profile("answer").max_output_tokens == 2500
+    assert get_node_profile("answer").max_output_tokens == 4000  # node gộp verify_answer: nghĩ + viết
     assert get_node_profile("triage").max_output_tokens is None  # giữ trần chung 1500
     assert get_node_profile("khong-co-node-nay").max_output_tokens is None
 

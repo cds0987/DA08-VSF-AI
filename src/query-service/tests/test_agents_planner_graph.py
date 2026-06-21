@@ -171,21 +171,19 @@ async def test_verify_emits_sse_so_user_sees_activity():
 
 
 def _make_model_replan():
-    """think 2 = capability 'synth'. Cho lần verify ĐẦU TIÊN trả 'insufficient' để ép replan 1 lần;
-    planner ('plan') luôn trả plan; answer -> câu trả lời cuối."""
-    calls = {"plan": 0, "synth": 0}
+    """verify_answer (capability 'answer') lần ĐẦU trả <<NEED_MORE>> -> ép replan 1 lần; lần 2
+    (hết hạn replan) trả câu trả lời. planner ('plan') luôn trả plan."""
+    calls = {"plan": 0, "answer": 0}
 
     def mk(cap):
         if cap in ("plan", "think"):
             calls["plan"] += 1
             return _FakeModel(_PLAN_JSON)
-        if cap == "synth":
-            calls["synth"] += 1
-            if calls["synth"] == 1:   # verify lần đầu -> chưa đủ
-                return _FakeModel('{"sufficient": false, "missing": "quy dinh", "reason": "thieu"}')
+        if cap in ("answer", "synth"):
+            calls["answer"] += 1
+            if calls["answer"] == 1:   # verify_answer lần đầu -> cần tra thêm
+                return _FakeModel("<<NEED_MORE>> thiếu quy định chi tiết")
             return _FakeModel("du roi")
-        if cap == "answer":
-            return _FakeModel("TRA LOI tong hop")
         return _FakeModel("worker output")
 
     return mk, calls
