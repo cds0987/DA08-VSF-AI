@@ -135,6 +135,10 @@ async def astream_plan(
                 head = tok[:idx]
                 if head.strip():
                     await emit({"phase": "thought", "node": node, "text": head})
+                # JSON plan sinh THẦM sau '{' (không emit để khỏi leak JSON). Với follow-up đa lượt
+                # context lớn -> pha này có thể 10-15s IM LẶNG -> user tưởng ĐƠ. Phát status để panel
+                # vẫn báo "đang làm" (spinner) thay vì đứng hình.
+                await emit({"phase": "thinking", "node": node, "status": "Đang hoàn tất kế hoạch các bước…"})
         text = "".join(parts).strip() or None
         _report_llm(tracer, trace, node, model, user, text, usage_meta, router, start_dt,
                     first_tok_dt, last_tok_dt, len(parts))
