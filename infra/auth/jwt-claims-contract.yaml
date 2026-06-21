@@ -1,0 +1,47 @@
+# HỢP ĐỒNG JWT CLAIMS — 1 nguồn sự thật cho access-token liên-service.
+#
+# Vì sao: user-service PHÁT token; query/document/hr-service GIẢI MÃ. Không gì ép 2 bên khớp
+# -> đổi 1 claim ở producer là lệch ÂM THẦM, nguy hiểm cho ACL:
+#   - đổi/bỏ claim consumer 'required' -> token bị từ chối toàn bộ (401 fail-closed), HOẶC
+#   - RENAME claim ACL (vd account_type) -> consumer .get(default) -> external thành internal
+#     (fail-OPEN, lỗ hổng quyền truy cập).
+# File này + infra/ci/jwt_claims_lint.py biến hợp đồng thành GATE: lệch = CI đỏ trước prod.
+version: 1
+
+secret_env: JWT_SECRET_KEY
+algorithm: HS256
+
+# Claims user-service PHÁT trong access token (nguồn sự thật — snapshot khoá ở gate A).
+# Đổi tập này = THAY ĐỔI CÓ Ý THỨC: phải sửa yaml + review mọi consumer.
+issued_claims: [sub, user_id, role, account_type, jti, iat, exp]
+
+# Alias định danh consumer đọc dự phòng (any-of sub/id/user_id) nhưng producer không phát.
+# Vô hại (chỉ là fallback identity). KHÔNG đưa vào issued.
+compat_aliases: [id]
+
+# Claims DẪN DẮT quyết định phân quyền. Consumer đọc 1 claim ACL mà producer KHÔNG phát =>
+# luôn rơi default => phân quyền sai. Gate C bắt buộc khai báo (known_unissued_acl_reads).
+acl_critical: [role, account_type, department]
+
+producer:
+  service: user-service
+  encoder_file: src/user-service/app/infrastructure/security/jwt_token_service.py
+  encoder_marker: create_access_token
+
+consumers:
+  query-service:
+    decoder_file: src/query-service/app/infrastructure/auth/auth_service.py
+    decoder_marker: _authenticate_jwt
+  document-service:
+    decoder_file: src/document-service/app/interfaces/api/dependencies.py
+    decoder_marker: get_current_user
+  hr-service:
+    decoder_file: src/hr-service/app/api/auth.py
+    decoder_marker: require_admin_jwt
+
+# GAP ĐÃ BIẾT (không im lặng): document-service đọc `department` cho ACL secret-doc nhưng
+# producer KHÔNG phát department (HR tự quản — xem create_user_use_case.py + event-contracts.yaml).
+# -> token luôn department="" -> nhánh ACL theo department của secret-doc thực chất CHẾT (fail-closed,
+# an toàn nhưng có thể quá chặt). Ghi nhận để gate xanh nhưng GAP được theo dõi (đừng thêm GAP mới).
+known_unissued_acl_reads:
+  document-service: [department]
