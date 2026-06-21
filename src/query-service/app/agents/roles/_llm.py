@@ -100,7 +100,6 @@ async def astream_plan(
         router: dict | None = None
         first_tok_dt: datetime | None = None
         last_tok_dt: datetime | None = None
-        json_started = False        # content: thấy '{' -> ngừng emit text (JSON plan render thành card)
         async for chunk in model.astream([SystemMessage(content=system), HumanMessage(content=user)]):
             um = getattr(chunk, "usage_metadata", None)
             if um:
@@ -123,22 +122,12 @@ async def astream_plan(
                 first_tok_dt = datetime.now(timezone.utc)
             last_tok_dt = datetime.now(timezone.utc)
             parts.append(tok)
-            if json_started:
-                continue
-            # Phần prose TRƯỚC '{' -> emit thought; tới '{' thì emit phần trước nó rồi dừng.
-            idx = tok.find("{")
-            if idx == -1:
-                if tok.strip():
-                    await emit({"phase": "thought", "node": node, "text": tok})
-            else:
-                json_started = True
-                head = tok[:idx]
-                if head.strip():
-                    await emit({"phase": "thought", "node": node, "text": head})
-                # JSON plan sinh THẦM sau '{' (không emit để khỏi leak JSON). Với follow-up đa lượt
-                # context lớn -> pha này có thể 10-15s IM LẶNG -> user tưởng ĐƠ. Phát status để panel
-                # vẫn báo "đang làm" (spinner) thay vì đứng hình.
-                await emit({"phase": "thinking", "node": node, "status": "Đang hoàn tất kế hoạch các bước…"})
+            # STREAM HẾT content (prose + JSON) ra panel -> KHÔNG bao giờ đơ lúc model sinh JSON
+            # plan (pha này 20-28s với follow-up đa lượt). Trước đây nuốt content sau '{' để giấu
+            # JSON -> mất streaming = ĐƠ. Lộ JSON OK (ACL user-id; FE vẫn parse JSON -> render
+            # subagent cards qua phase:plan; box reasoning có max-h + scroll nên không tràn).
+            if tok.strip():
+                await emit({"phase": "thought", "node": node, "text": tok})
         text = "".join(parts).strip() or None
         _report_llm(tracer, trace, node, model, user, text, usage_meta, router, start_dt,
                     first_tok_dt, last_tok_dt, len(parts))
