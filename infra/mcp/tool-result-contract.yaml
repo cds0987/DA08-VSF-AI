@@ -1,0 +1,34 @@
+# HỢP ĐỒNG KẾT QUẢ MCP TOOL — mcp-service (producer) ↔ query-service (consumer).
+#
+# Vì sao: query-service parse kết quả tool MCP bằng nhiều fallback any-of (chunk_id|section_id|
+# node_id|unit_id...) -> RẤT khoan dung: mcp đổi tên field KHÔNG làm crash, chỉ DEGRADE ÂM THẦM
+# (mất nguồn/link tài liệu -> citation hỏng). File này khoá SHAPE canonical: mcp bỏ/đổi 1 field
+# canonical = CI đỏ (đổi có ý thức), consumer phải còn đọc field đó.
+#
+# Cơ chế (infra/ci/mcp_result_lint.py, AST):
+#   (a) producer `_hit_to_dict` PHẢI emit ⊇ canonical_fields (thêm field mới OK, consumer bỏ qua).
+#   (b) consumer `_search_result_from_payload` PHẢI tham chiếu MỖI canonical field (.get("X")) —
+#       đảm bảo consumer còn đọc tên canonical (dù có fallback). Bỏ đọc 1 field = đỏ.
+version: 1
+
+rag_search_result:
+  envelope_key: results          # mcp bọc {"results": [...]}; query đọc payload["results"]
+  producer:
+    file: src/mcp-service/app/tools/rag_search.py
+    marker: _hit_to_dict
+  consumer:
+    file: src/query-service/app/infrastructure/external/mcp_client.py
+    marker: _search_result_from_payload
+  # Field canonical 1 item kết quả (tên mcp PHÁT = tên query đọc làm primary).
+  canonical_fields:
+    - chunk_id
+    - document_id
+    - document_name
+    - caption
+    - child_text
+    - parent_text
+    - heading_path
+    - score
+    - page_number
+    - source_gcs_uri
+    - markdown_gcs_uri

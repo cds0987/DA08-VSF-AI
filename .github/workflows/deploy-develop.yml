@@ -260,6 +260,8 @@ jobs:
         run: python infra/ci/jwt_claims_lint.py
       - name: Lint HTTP hr-service contract (client dict ↔ server Pydantic)
         run: python infra/ci/http_contract_lint.py
+      - name: Lint MCP tool-result contract (mcp producer ↔ query consumer)
+        run: python infra/ci/mcp_result_lint.py
 
   # ─────────────────── Phase 1b: CONTRACT PARITY ──────────────────────
   # Guard CONTRACT giữa rag-worker (producer) và mcp-service (consumer): cùng
