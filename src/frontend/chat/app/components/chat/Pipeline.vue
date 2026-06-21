@@ -4,6 +4,7 @@
 import { computed } from 'vue'
 import { Search, Database, Loader2, CheckCircle2, Sparkles, GitBranch, ShieldCheck } from '@lucide/vue'
 import type { TraceEntry, NodeModel, AgentPlan } from '~/types'
+import { nodeGroup } from '~/types/sse-contract.gen'
 import AgentPlanView from './AgentPlan.vue'
 
 interface Props {
@@ -19,9 +20,11 @@ const props = defineProps<Props>()
 const TOOL_LABEL: Record<string, string> = { rag_search: 'Tìm kiếm tài liệu', hr_query: 'Truy vấn dữ liệu HR' }
 const TOOL_ICON: Record<string, any> = { rag_search: Search, hr_query: Database }
 
-const orchThoughts = computed(() => (props.thoughts ?? []).filter(t => t.node === 'plan' || t.node === 'orchestrate' || t.node === 'think'))
-const verifyThoughts = computed(() => (props.thoughts ?? []).filter(t => t.node === 'verify'))
-const otherThoughts = computed(() => (props.thoughts ?? []).filter(t => !['plan', 'orchestrate', 'think', 'verify'].includes(t.node)))
+// Gom theo GROUP của hợp đồng SSE (sse-contract.gen) -> node mới thuộc group orchestrator/
+// verify TỰ vào đúng mục, KHÔNG cần sửa file này. Node group khác (worker/answer) -> "khác".
+const orchThoughts = computed(() => (props.thoughts ?? []).filter(t => nodeGroup(t.node) === 'orchestrator'))
+const verifyThoughts = computed(() => (props.thoughts ?? []).filter(t => nodeGroup(t.node) === 'verify'))
+const otherThoughts = computed(() => (props.thoughts ?? []).filter(t => !['orchestrator', 'verify'].includes(nodeGroup(t.node))))
 
 function getQueryLabel(entry: TraceEntry): string {
   const args = entry.args

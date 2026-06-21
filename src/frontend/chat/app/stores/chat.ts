@@ -22,6 +22,7 @@ import {
   getQueryServiceAuthHeaders,
   useQueryService,
 } from '~/lib/api/queryService'
+import { SSE_DONE_REQUIRED } from '~/types/sse-contract.gen'
 import { handleRefreshFailure, refreshAccessToken } from '~/lib/api/authRefresh'
 
 const HISTORY_KEY = 'eka.chat.conversations'
@@ -806,6 +807,14 @@ export const useChatStore = defineStore('chat', () => {
               pipeline.value = PHASE_MAP[payload.phase]
             }
             return
+          }
+          // done-event thiếu/sai field bắt buộc -> KHÔNG drop ÂM THẦM (trước đây thiếu field
+          // => tin nhắn treo, không rõ vì sao). Cảnh báo kèm field thiếu để chẩn nhanh; hợp
+          // đồng nguồn: query-service sse_contract.py (DONE_REQUIRED) -> sse-contract.gen.ts.
+          if ((payload as any)?.done === true && !isDoneEvent(payload)) {
+            const miss = SSE_DONE_REQUIRED.filter(f => !(f in (payload as Record<string, unknown>)))
+            console.warn('[sse] done-event không hợp lệ (thiếu/sai field):', miss.length ? miss : 'kiểu sai',
+              '-> tin nhắn có thể treo. Hợp đồng: sse_contract.py')
           }
           if (!isDoneEvent(payload) || completed) return
 

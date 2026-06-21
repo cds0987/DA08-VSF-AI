@@ -2,31 +2,68 @@
 // Khúc "agent đã làm" PHÂN CẤP, đọc theo thứ tự logic:
 //   Orchestrator (lập kế hoạch + suy nghĩ)
 //     └─ subagents song song (Tìm tài liệu / Tra HR / Phân tích) + kết quả tool
-//   Verify (kiểm tra & tổng hợp)
-//   (câu trả lời ở dưới message)
-// Gắn vào message (bền) -> user mở lại xem agent đã làm gì. Khác Pipeline.vue (chỉ live).
+//   Worker / Verify / Answer (theo group khai trong hợp đồng SSE)
+//
+// GENERIC theo HỢP ĐỒNG SSE (sse-contract.gen.ts): thought gom theo NODE.group, vẽ các
+// group theo ĐÚNG THỨ TỰ SSE_GROUPS. Thêm node mới ở backend (khai NodeDescriptor) ->
+// TỰ HIỆN dưới group của nó, KHÔNG cần sửa file này. Node lạ chưa khai -> nodeGroup()
+// fallback 'orchestrator' -> vẫn hiện (KHÔNG bao giờ câm).
 import { computed } from 'vue'
 import { Search, Database, CheckCircle2, ChevronRight, Sparkles, GitBranch, ShieldCheck } from '@lucide/vue'
 import type { TraceEntry, NodeModel, Thought, AgentPlan } from '~/types'
+import { SSE_GROUPS, SSE_TOOLS, nodeGroup, type SseGroup } from '~/types/sse-contract.gen'
 import AgentPlanView from './AgentPlan.vue'
 
 const props = defineProps<{ trace: TraceEntry[]; models?: NodeModel[]; thoughts?: Thought[]; plan?: AgentPlan }>()
 
 const open = ref(false)
 
-const TOOL_LABEL: Record<string, string> = {
-  rag_search: 'Tìm kiếm tài liệu',
-  hr_query: 'Truy vấn dữ liệu HR',
-  leave_approvals: 'Lấy danh sách đơn chờ duyệt',
-  resolve_date: 'Xác định ngày',
-  leave_types: 'Lấy danh mục loại nghỉ',
-}
+// Nhãn + icon tool: ưu tiên hợp đồng SSE_TOOLS (1 nguồn sự thật), bổ sung vài nhãn cũ.
+const TOOL_LABEL: Record<string, string> = { ...SSE_TOOLS }
 const TOOL_ICON: Record<string, any> = { rag_search: Search, hr_query: Database }
 
-// Gom suy nghĩ theo TẦNG: orchestrator (lập kế hoạch) vs verify (kiểm tra) vs khác.
-const orchThoughts = computed(() => (props.thoughts ?? []).filter(t => t.node === 'plan' || t.node === 'orchestrate' || t.node === 'think'))
-const verifyThoughts = computed(() => (props.thoughts ?? []).filter(t => t.node === 'verify'))
-const otherThoughts = computed(() => (props.thoughts ?? []).filter(t => !['plan', 'orchestrate', 'think', 'verify'].includes(t.node)))
+// Style theo GROUP (tập cố định, nhỏ) — node động map vào 1 trong các group này. Thêm NODE
+// KHÔNG thêm group -> style ổn định; node mới mượn style group của nó.
+const GROUP_STYLE: Record<SseGroup, { title: string; icon: any; head: string; box: string }> = {
+  orchestrator: {
+    title: 'Orchestrator', icon: GitBranch,
+    head: 'text-blue-700 dark:text-blue-300',
+    box: 'border-blue-100 bg-blue-50/50 dark:border-blue-500/15 dark:bg-blue-500/5',
+  },
+  worker: {
+    title: 'Worker', icon: Search,
+    head: 'text-amber-700 dark:text-amber-300',
+    box: 'border-amber-100 bg-amber-50/50 dark:border-amber-500/15 dark:bg-amber-500/5',
+  },
+  verify: {
+    title: 'Verify — Kiểm tra & tổng hợp', icon: ShieldCheck,
+    head: 'text-violet-700 dark:text-violet-300',
+    box: 'border-violet-100 bg-violet-50/50 dark:border-violet-500/15 dark:bg-violet-500/5',
+  },
+  answer: {
+    title: 'Soạn câu trả lời', icon: Sparkles,
+    head: 'text-emerald-700 dark:text-emerald-300',
+    box: 'border-emerald-100 bg-emerald-50/50 dark:border-emerald-500/15 dark:bg-emerald-500/5',
+  },
+}
+
+// thought gom theo group (qua nodeGroup của hợp đồng). Node lạ -> 'orchestrator'.
+const grouped = computed<Record<string, Thought[]>>(() => {
+  const by: Record<string, Thought[]> = {}
+  for (const t of props.thoughts ?? []) {
+    const g = nodeGroup(t.node)
+    ;(by[g] ??= []).push(t)
+  }
+  return by
+})
+
+// Group cần hiển thị, ĐÚNG THỨ TỰ SSE_GROUPS. orchestrator còn hiện khi có plan/trace.
+const visibleGroups = computed(() =>
+  SSE_GROUPS.filter(g =>
+    (grouped.value[g]?.length)
+    || (g === 'orchestrator' && (props.plan?.steps?.length || props.trace.length)),
+  ),
+)
 
 function queryLabel(e: TraceEntry): string {
   if (e.tool === 'rag_search') { const q = (e.args.query as string) || ''; return q ? `"${q}"` : '' }
@@ -59,18 +96,22 @@ function resultLabel(e: TraceEntry): string {
     </button>
 
     <div v-if="open" class="mt-1.5 space-y-2">
-      <!-- ═══ ORCHESTRATOR ═══ -->
-      <div v-if="orchThoughts.length || plan?.steps?.length">
-        <div class="flex items-center gap-1.5 text-[12px] font-semibold text-blue-700 dark:text-blue-300">
-          <GitBranch class="h-3.5 w-3.5" /> Orchestrator
+      <!-- Các GROUP theo thứ tự hợp đồng. orchestrator kèm plan + tool (subagents). -->
+      <div v-for="g in visibleGroups" :key="g">
+        <div class="flex items-center gap-1.5 text-[12px] font-semibold" :class="GROUP_STYLE[g].head">
+          <component :is="GROUP_STYLE[g].icon" class="h-3.5 w-3.5" /> {{ GROUP_STYLE[g].title }}
         </div>
-        <!-- suy nghĩ lập kế hoạch -->
-        <div v-for="(t, i) in orchThoughts" :key="`o-${i}`"
-          class="mt-1 max-h-40 overflow-y-auto rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-1.5 text-[11.5px] leading-relaxed text-slate-600 dark:border-blue-500/15 dark:bg-blue-500/5 dark:text-muted-foreground">
+
+        <!-- suy nghĩ của các node thuộc group -->
+        <div v-for="(t, i) in (grouped[g] || [])" :key="`${g}-${i}`"
+          class="mt-1 max-h-40 overflow-y-auto rounded-lg border px-3 py-1.5 text-[11.5px] leading-relaxed text-slate-600 dark:text-muted-foreground"
+          :class="GROUP_STYLE[g].box">
           {{ t.text }}
         </div>
-        <!-- subagents + tool: THỤT LỀ dưới orchestrator (viền trái = phân cấp) -->
-        <div v-if="plan?.steps?.length || trace.length" class="mt-1.5 ml-2 space-y-1 border-l-2 border-blue-100 pl-3 dark:border-blue-500/20">
+
+        <!-- orchestrator: subagents (plan song song) + kết quả tool, THỤT LỀ (viền trái = phân cấp) -->
+        <div v-if="g === 'orchestrator' && (plan?.steps?.length || trace.length)"
+          class="mt-1.5 ml-2 space-y-1 border-l-2 border-blue-100 pl-3 dark:border-blue-500/20">
           <AgentPlanView v-if="plan?.steps?.length" :plan="plan" />
           <div v-for="(e, i) in trace" :key="`t-${i}`"
             class="rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2 dark:border-white/5 dark:bg-white/[0.03]">
@@ -83,23 +124,6 @@ function resultLabel(e: TraceEntry): string {
             <div class="mt-1 pl-5 text-[11px] text-slate-500 dark:text-muted-foreground/80">{{ resultLabel(e) }}</div>
           </div>
         </div>
-      </div>
-
-      <!-- ═══ VERIFY ═══ -->
-      <div v-if="verifyThoughts.length">
-        <div class="flex items-center gap-1.5 text-[12px] font-semibold text-violet-700 dark:text-violet-300">
-          <ShieldCheck class="h-3.5 w-3.5" /> Verify — Kiểm tra &amp; tổng hợp
-        </div>
-        <div v-for="(t, i) in verifyThoughts" :key="`v-${i}`"
-          class="mt-1 max-h-40 overflow-y-auto rounded-lg border border-violet-100 bg-violet-50/50 px-3 py-1.5 text-[11.5px] leading-relaxed text-slate-600 dark:border-violet-500/15 dark:bg-violet-500/5 dark:text-muted-foreground">
-          {{ t.text }}
-        </div>
-      </div>
-
-      <!-- thoughts khác (nếu có) -->
-      <div v-for="(t, i) in otherThoughts" :key="`x-${i}`"
-        class="rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-1.5 text-[11.5px] text-slate-600 dark:border-white/5 dark:bg-white/[0.03] dark:text-muted-foreground">
-        {{ t.text }}
       </div>
     </div>
   </div>

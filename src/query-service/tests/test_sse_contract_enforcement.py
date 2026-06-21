@@ -200,7 +200,31 @@ async def test_gate_runtime_all_graph_events_valid():
         assert not problems, f"event KHÔNG hợp lệ theo contract: {ev} -> {problems}"
 
 
-# ───────────────────────────── GATE 7: manifest = nguồn cho FE codegen ─────────────────
+# ───────────────────── GATE 7: FE .gen.ts ĐỒNG BỘ với contract (sync gate) ─────────────
+def test_gate_fe_generated_contract_in_sync():
+    """File TS sinh ra (sse-contract.gen.ts) PHẢI khớp contract Python HIỆN TẠI. Đổi contract
+    mà quên chạy `python scripts/gen_sse_contract.py` -> đỏ -> ép FE đồng bộ (else FE render
+    theo hợp đồng CŨ). Đây là gate khóa 2 đầu (Python emit + TS consume)."""
+    import importlib.util
+
+    root = Path(__file__).resolve().parents[3]
+    script = root / "scripts" / "gen_sse_contract.py"
+    out = root / "src" / "frontend" / "chat" / "app" / "types" / "sse-contract.gen.ts"
+    if not (script.exists() and out.exists()):
+        pytest.skip("scripts/ hoặc FE không có trong checkout này")
+
+    spec = importlib.util.spec_from_file_location("gen_sse_contract", script)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    expected = mod._ts(contract_manifest())
+    actual = out.read_text(encoding="utf-8")
+    assert actual == expected, (
+        "sse-contract.gen.ts LỆCH với contract Python -> chạy `python scripts/gen_sse_contract.py` "
+        "rồi commit lại file .gen.ts (giữ FE đồng bộ backend)."
+    )
+
+
+# ───────────────────────────── GATE 8: manifest = nguồn cho FE codegen ─────────────────
 def test_gate_manifest_json_serializable_and_shaped():
     m = contract_manifest()
     s = json.dumps(m, ensure_ascii=False)   # phải serialize được (FE đọc JSON)
