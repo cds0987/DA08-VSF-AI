@@ -111,6 +111,10 @@ async def astream_plan(
             # mục Orchestrator nên không lộn xộn.
             rtext = (getattr(chunk, "additional_kwargs", None) or {}).get("reasoning_content")
             if rtext:
+                # TTFT = token đầu USER THẤY (reasoning stream ngay), không đợi prose/JSON.
+                if first_tok_dt is None:
+                    first_tok_dt = datetime.now(timezone.utc)
+                last_tok_dt = datetime.now(timezone.utc)
                 await emit({"phase": "thought", "node": node, "text": rtext})
             tok = getattr(chunk, "content", "") or ""
             if not tok:
@@ -170,6 +174,9 @@ async def astream_reasoning(
             router = router or _router_of(chunk)
             rtext = (getattr(chunk, "additional_kwargs", None) or {}).get("reasoning_content")
             if rtext:
+                if first_tok_dt is None:   # TTFT = token reasoning đầu (user thấy ngay)
+                    first_tok_dt = datetime.now(timezone.utc)
+                last_tok_dt = datetime.now(timezone.utc)
                 await emit({"phase": "thought", "node": node, "text": rtext})
             tok = getattr(chunk, "content", "") or ""
             if tok:
@@ -281,6 +288,12 @@ async def astream_verify_answer(
             # PANEL: stream suy luận (tổng hợp/phân tích/quyết định) — node=verify giữ mục cũ.
             rtext = (getattr(chunk, "additional_kwargs", None) or {}).get("reasoning_content")
             if rtext:
+                # TTFT = token ĐẦU TIÊN USER THẤY (reasoning stream lên panel ngay) — KHÔNG đợi
+                # token answer. Trước đây chỉ tính content -> Langfuse báo TTFT cao GIẢ (đã stream
+                # reasoning rồi). Tính reasoning -> "Time to first token" phản ánh đúng UX (thấp).
+                if first_tok_dt is None:
+                    first_tok_dt = datetime.now(timezone.utc)
+                last_tok_dt = datetime.now(timezone.utc)
                 await emit({"phase": "thought", "node": node, "text": rtext})
             tok = getattr(chunk, "content", "") or ""
             if not tok:
