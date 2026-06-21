@@ -20,6 +20,9 @@ class Settings(BaseModel):
     jwt_secret_key: str = getenv("JWT_SECRET_KEY", "change-me-in-env")
     jwt_algorithm: str = getenv("JWT_ALGORITHM", "HS256")
     nats_url: str = getenv("NATS_URL", "nats://localhost:4222")
+    # hr-service = NGUỒN SỰ THẬT của department. ACL secret-doc đọc department SỐNG từ đây
+    # (KHÔNG từ JWT token — token không mang department, xem migration 0002 user-service).
+    hr_service_url: str = getenv("HR_SERVICE_URL", "http://hr-service:8004")
     nats_jetstream_enabled: bool = getenv("NATS_JETSTREAM_ENABLED", "true").lower() in {
         "1",
         "true",

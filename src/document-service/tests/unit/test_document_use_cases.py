@@ -464,6 +464,73 @@ async def test_file_acl_denies_empty_department_for_secret() -> None:
         )
 
 
+class _FakeHrDept:
+    """HR client giả: trả department cố định (hoặc raise) để test ACL secret lấy department SỐNG."""
+    def __init__(self, dept: str = "", *, fail: bool = False) -> None:
+        self._dept = dept
+        self._fail = fail
+        self.calls = 0
+
+    async def get_department(self, user_id: str) -> str:
+        self.calls += 1
+        if self._fail:
+            raise RuntimeError("hr down")
+        return self._dept
+
+
+@pytest.mark.asyncio
+async def test_secret_department_resolved_live_from_hr_not_token() -> None:
+    # Token KHÔNG mang department (user.department=""); HR trả "HR" -> ĐƯỢC xem secret-doc HR.
+    doc = document(classification="secret", allowed_departments=["HR"])
+    hr = _FakeHrDept("HR")
+    use_case = GetDocumentFileUseCase(InMemoryDocuments([doc]), FakeStorage(), hr)
+    result = await use_case.execute(
+        CurrentUser(id=str(uuid4()), role="user", account_type="internal", department=""),
+        doc.id,
+    )
+    assert result.file_type == "pdf"
+    assert hr.calls == 1  # secret -> đã hỏi HR
+
+
+@pytest.mark.asyncio
+async def test_secret_denied_when_hr_department_mismatch() -> None:
+    doc = document(classification="secret", allowed_departments=["HR"])
+    hr = _FakeHrDept("Finance")
+    use_case = GetDocumentFileUseCase(InMemoryDocuments([doc]), FakeStorage(), hr)
+    with pytest.raises(PermissionDeniedError):
+        await use_case.execute(
+            CurrentUser(id=str(uuid4()), role="user", account_type="internal", department=""),
+            doc.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_secret_fail_closed_when_hr_down() -> None:
+    # HR lỗi -> department "" -> deny (fail-closed, KHÔNG mở nhầm).
+    doc = document(classification="secret", allowed_departments=["HR"])
+    hr = _FakeHrDept(fail=True)
+    use_case = GetDocumentFileUseCase(InMemoryDocuments([doc]), FakeStorage(), hr)
+    with pytest.raises(PermissionDeniedError):
+        await use_case.execute(
+            CurrentUser(id=str(uuid4()), role="user", account_type="internal", department=""),
+            doc.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_admin_secret_bypass_does_not_call_hr() -> None:
+    # admin xem hết -> KHÔNG cần gọi HR (tối ưu + không phụ thuộc HR cho admin).
+    doc = document(classification="secret", allowed_departments=["HR"])
+    hr = _FakeHrDept("Finance")
+    use_case = GetDocumentFileUseCase(InMemoryDocuments([doc]), FakeStorage(), hr)
+    result = await use_case.execute(
+        CurrentUser(id=str(uuid4()), role="admin", account_type="internal", department=""),
+        doc.id,
+    )
+    assert result.file_type == "pdf"
+    assert hr.calls == 0
+
+
 @pytest.mark.asyncio
 async def test_file_acl_denies_external_user_for_secret_document() -> None:
     doc = document(classification="secret", allowed_departments=["HR"])
@@ -615,7 +682,9 @@ async def test_document_auth_decodes_account_type() -> None:
     user = await get_current_user(token=token, settings=settings)
 
     assert user.account_type == "external"
-    assert user.department == "Partner"
+    # department KHÔNG còn đọc từ token (token không phải nguồn sự thật của department —
+    # ACL secret-doc lấy department SỐNG từ hr-service). get_current_user luôn trả "".
+    assert user.department == ""
 
 
 @pytest.mark.asyncio

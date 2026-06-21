@@ -2,9 +2,11 @@ from dataclasses import dataclass
 from typing import Protocol
 from urllib.parse import urlparse
 
+from typing import Any
+
 from app.application.auth import CurrentUser
 from app.application.exceptions import NotFoundError, PermissionDeniedError, StorageError
-from app.application.use_cases.documents.common import can_access_document
+from app.application.use_cases.documents.common import can_access_document, with_live_department
 from app.application.use_cases.documents.common import ALLOWED_EXTENSIONS
 from app.domain.repositories.document_repository import DocumentRepository
 
@@ -26,14 +28,18 @@ class GetDocumentFileUseCase:
         self,
         document_repository: DocumentRepository,
         storage: PresignedStorage,
+        hr_department_client: Any | None = None,
     ) -> None:
         self.document_repository = document_repository
         self.storage = storage
+        self.hr_department_client = hr_department_client
 
     async def execute(self, user: CurrentUser, document_id: str) -> DocumentFileResult:
         document = await self.document_repository.get_by_id(document_id)
         if document is None:
             raise NotFoundError()
+        # department lấy SỐNG từ HR cho secret-doc (KHÔNG từ token).
+        user = await with_live_department(user, document.classification, self.hr_department_client)
         if not can_access_document(
             user,
             document.classification,

@@ -39,9 +39,7 @@ consumers:
     decoder_file: src/hr-service/app/api/auth.py
     decoder_marker: require_admin_jwt
 
-# GAP ĐÃ BIẾT (không im lặng): document-service đọc `department` cho ACL secret-doc nhưng
-# producer KHÔNG phát department (HR tự quản — xem create_user_use_case.py + event-contracts.yaml).
-# -> token luôn department="" -> nhánh ACL theo department của secret-doc thực chất CHẾT (fail-closed,
-# an toàn nhưng có thể quá chặt). Ghi nhận để gate xanh nhưng GAP được theo dõi (đừng thêm GAP mới).
-known_unissued_acl_reads:
-  document-service: [department]
+# (2026-06-21 ĐÃ KHẮC PHỤC) document-service KHÔNG còn đọc `department` từ token. department giờ
+# lấy SỐNG từ hr-service (NGUỒN SỰ THẬT) ở tầng ACL (with_live_department). known_unissued_acl_reads
+# nay RỖNG -> gate ép: KHÔNG consumer nào được đọc claim ACL mà producer không phát (chống fail-open).
+known_unissued_acl_reads: {}

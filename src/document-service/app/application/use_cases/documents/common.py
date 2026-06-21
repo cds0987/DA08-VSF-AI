@@ -1,5 +1,6 @@
 import json
-from typing import Iterable
+from dataclasses import replace
+from typing import Any, Iterable
 
 from app.application.auth import CurrentUser
 from app.application.exceptions import PermissionDeniedError, ValidationError
@@ -57,6 +58,25 @@ def validate_classification_and_acl(
         raise ValidationError("allowed_departments is required for secret documents")
     if classification == "top_secret" and not allowed_user_ids:
         raise ValidationError("allowed_user_ids is required for top_secret documents")
+
+
+async def with_live_department(
+    user: CurrentUser,
+    classification: str,
+    hr_department_client: Any | None,
+) -> CurrentUser:
+    """Trả CurrentUser với `department` lấy SỐNG từ hr-service (NGUỒN SỰ THẬT) — CHỈ khi cần
+    (secret + non-admin). KHÔNG đọc department từ JWT (token không mang department).
+
+    hr_department_client=None (unit test dựng use-case không inject) -> giữ user nguyên
+    (dùng department truyền sẵn). Lỗi/HR down -> "" -> can_access_document deny (fail-closed)."""
+    if hr_department_client is None or classification != "secret" or user.role == "admin":
+        return user
+    try:
+        dept = await hr_department_client.get_department(user.id)
+    except Exception:  # noqa: BLE001 — HR lỗi KHÔNG được làm sập; coi như không có quyền
+        dept = ""
+    return replace(user, department=dept or "")
 
 
 def can_access_document(

@@ -13,6 +13,6 @@ boto3
 nats-py
 pytest
 pytest-asyncio
-httpx2
+httpx
 newrelic
 
