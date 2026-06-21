@@ -46,8 +46,32 @@ Cập nhật lần cuối: 2026-06-21 (đang chạy batch, sẽ bổ sung advers
      thường buffer → cân nhắc model khác cho answer, hoặc chấp nhận (đây là nghĩ thật).
 - **Rủi ro nếu để vậy:** gap 5-7s là "model đang nghĩ" — chấp nhận được; spike 15s thì khó chịu.
 
-### [STREAM-2..] (chờ M1-M3, R1-R2, edge)
-(đang chạy)
+### [MEM-2] Luồng tạo đơn nghỉ (carry-forward) gap ~14s — CONFIRMED
+- **Triệu chứng:** M2 = ["tạo đơn nghỉ thứ 2 tuần sau 3 ngày" → "phép năm"]. Lượt 2 ("phép năm")
+  ra FORM đúng (carry-forward hoạt động ✓) nhưng **gap = 10.6 / 14.4 / 14.6s** (3/3 NHẤT QUÁN).
+  trace mẫu: `6d32336d`, `58aaa775`.
+- **Nguyên nhân (giả định):** lượt 2 → planner (đa lượt) sinh plan 1-step `leave_action`; rồi
+  `leave_action` (worker NON-stream: resolve_date + dựng JSON form) chạy CÂM; form trả ở cuối
+  (passthrough, word-chunk). Cả pha planner + leave_action không stream → ~14s đơ. (KHÁC STREAM-1:
+  đây là worker câm, không phải verify_answer.)
+- **Hướng giải quyết (CHỜ DUYỆT):** (a) phát status lúc leave_action chạy ("Đang dựng đơn…");
+  (b) xem planner lượt-2 có chậm không (đo trace). Cần đọc trace `6d32336d` để tách planner vs
+  leave_action.
+
+### [STREAM-1 bổ sung] Phân phối đầy đủ batch 1
+- gap median theo scenario: S1=6.1 S2=2.6(max15) S3=0.9 S4=3.8 S5=3.5 M1=5.1(max14.7) M3=1.3 R1=1.9 R2=3.6.
+- **Spike biến thiên:** S2 và M1 có 1 sample ~15s (1/3) = verify_answer buffer reasoning → "nghi
+  ngờ spike", chưa nhất quán đủ để gọi lỗi riêng (gộp vào STREAM-1).
+
+### [NOISE-1] 1 console error trong batch (chưa quy được run) — THEO DÕI
+- harness đếm tổng `console_errors=1` / ~33 run, chưa gắn được vào run cụ thể (harness chỉ đếm
+  tổng). → cần bản harness ghi error theo từng run để tái hiện. Hiện **chưa kết luận** (có thể
+  network blip). Mức: theo dõi.
+
+### ✅ Nội dung batch 1 — KHÔNG thấy lỗi (đối chứng)
+- memory đa lượt: M1 (follow-up "nghỉ ốm" đúng ngữ cảnh), M2 (carry-forward ra form đúng) — OK.
+- reasoning: R1 (12-3=9 đúng), R2 ("cho tôi nghỉ" → hỏi lại, không bịa) — OK.
+- KHÔNG thấy hallucination ở batch thường. Đòn hallucination/leak nặng ở batch adversarial (dưới).
 
 ### [HALLU-..] (chờ batch adversarial)
 (sắp chạy: điều luật bịa, loại nghỉ bịa, số liệu bịa, lý do trừ lương bịa)
