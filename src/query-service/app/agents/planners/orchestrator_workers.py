@@ -77,6 +77,17 @@ def _memory_block(ctx: PlanContext) -> str:
             "-> Nếu CÂU HỎI MỚI là câu TRẢ LỜI/bổ sung cho việc dở này, TIẾP TỤC flow đó "
             "(route đúng role, vd leave_action), ĐỪNG coi là câu hỏi mới độc lập."
         )
+    ws = getattr(mem, "working_set", None)
+    items = getattr(ws, "items", ()) if ws is not None else ()
+    if items:
+        lines = []
+        for it in items:
+            docs = it.detail.get("docs") if isinstance(it.detail, dict) else None
+            lines.append(f"- {it.kind}: {it.label}" + (f" (đã có: {', '.join(docs)})" if docs else ""))
+        parts.append(
+            "[ĐÃ TRA PHIÊN NÀY]\n" + "\n".join(lines)
+            + "\n-> Nếu thông tin trên ĐÃ ĐỦ cho câu mới thì ĐỪNG plan lại tool đó; CHỈ plan phần MỚI."
+        )
     return ("\n\n".join(parts) + "\n\n") if parts else ""
 
 

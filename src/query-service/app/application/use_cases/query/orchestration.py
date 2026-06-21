@@ -452,6 +452,14 @@ class QueryOrchestrationUseCase:
         # retrieved: tổng chunk rag lấy được (kể cả dưới ngưỡng) — pipeline-health cho smoke.
         retrieved = sum(getattr(o, "retrieved", 0) for o in (result.get("results") or {}).values())
 
+        # Memory WRITE (best-effort, orchestration boundary — worker KHÔNG chạm memory/stateless):
+        # ghi working-set (bằng chứng đã lấy -> turn sau không tra lại) + task_state (flow đơn nghỉ dở).
+        if _mem is not None:
+            try:
+                await self._record_memory(_mem, user.id, _conv_id, result)
+            except Exception as exc:  # noqa: BLE001 — memory write KHÔNG được làm vỡ trả lời
+                logger.warning("memory_record_failed: %s", str(exc)[:160])
+
         if not answer:
             answer = (
                 "Mình chưa lấy được thông tin phù hợp lúc này. Bạn thử lại sau hoặc liên hệ "
@@ -495,6 +503,40 @@ class QueryOrchestrationUseCase:
             "agent_mode": "orchestrator_workers",
             "_answer": answer,
         }
+
+    async def _record_memory(self, mem: Any, user_id: str, conv_id: str | None, result: dict) -> None:
+        """Ghi STM sau 1 lượt (orchestration boundary). working-set = bằng chứng đã lấy (rag/hr)
+        -> turn sau planner biết, không tra lại. task_state = flow đơn nghỉ dở (clarify=pending,
+        form ra=clear). Worker KHÔNG tham gia (stateless) — chỉ đọc OUTPUT của chúng."""
+        from app.agents.memory.contracts import TaskState, WorkingSetItem
+
+        plan = result.get("plan")
+        results = result.get("results") or {}
+
+        # 1. working-set: digest bằng chứng (rag docs / hr intent)
+        for s in getattr(plan, "steps", []) or []:
+            out = results.get(s.id)
+            if out is None or getattr(out, "status", "") not in ("ok", "no_info"):
+                continue
+            if s.role == "rag_retrieve":
+                docs = sorted({str(src.get("document_name") or "") for src in (out.sources or [])
+                               if src.get("document_name")})
+                label = str(s.input or s.direction or "")[:80]
+                await mem.add_evidence(user_id, conv_id,
+                                       WorkingSetItem(kind="rag", label=label, detail={"docs": docs[:5]}))
+            elif s.role == "hr_lookup":
+                await mem.add_evidence(user_id, conv_id,
+                                       WorkingSetItem(kind="hr", label=str(s.direction or "hồ sơ HR")[:80]))
+
+        # 2. task_state: leave_action -> clarify (pending) hay action JSON (clear).
+        leave_out = next((results[k] for k in results if getattr(results[k], "role", "") == "leave_action"), None)
+        if leave_out is not None:
+            txt = str(getattr(leave_out, "output", "") or "")
+            if '"action_type"' in txt:
+                await mem.set_task_state(user_id, conv_id, None)  # form đã ra -> phần chat của flow xong
+            else:
+                await mem.set_task_state(user_id, conv_id,
+                                        TaskState(flow="create_leave", missing=("type/reason",), status="pending"))
 
     async def _stream_langgraph(
         self,

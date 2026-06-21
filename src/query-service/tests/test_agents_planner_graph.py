@@ -84,6 +84,28 @@ async def test_graph_heavy_runs_workers_in_parallel():
     assert dt < 0.6, f"nghi tuan tu: {dt:.2f}s"
 
 
+def test_memory_block_renders_dialogue_taskstate_workingset():
+    """Prompt planner phải nhúng hội thoại + việc dở + đã-tra -> route đa lượt + không tra lại."""
+    from app.agents.planners.orchestrator_workers import _memory_block
+    from app.agents.planners.base import PlanContext
+    from app.agents.memory.contracts import MemoryContext, Turn, TaskState, WorkingSetDigest, WorkingSetItem
+
+    mem = MemoryContext(
+        dialogue=(Turn("user", "tạo đơn nghỉ 3 ngày"), Turn("assistant", "loại nghỉ nào?")),
+        summary="",
+        task_state=TaskState(flow="create_leave", missing=("type",), status="pending"),
+        working_set=WorkingSetDigest(items=(WorkingSetItem(kind="rag", label="phép năm",
+                                                           detail={"docs": ["CNHC.pdf"]}),)),
+    )
+    ctx = PlanContext("phép năm", (), None, memory=mem)
+    block = _memory_block(ctx)
+    assert "HỘI THOẠI GẦN ĐÂY" in block and "loại nghỉ nào?" in block
+    assert "VIỆC ĐANG DỞ" in block and "create_leave" in block
+    assert "ĐÃ TRA" in block and "phép năm" in block
+    # lượt đầu (memory rỗng) -> block rỗng
+    assert _memory_block(PlanContext("q", (), None, memory=None)) == ""
+
+
 async def test_orchestrate_passes_emit_to_planner():
     """REGRESSION (dead-air lúc plan): PlanContext PHẢI có emit -> planner stream reasoning/prose
     LIVE. Thiếu emit -> astream_plan fallback acomplete (CÂM) -> màn hình đứng im suốt pha plan."""
