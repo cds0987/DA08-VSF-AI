@@ -31,6 +31,9 @@ Khi heavy, mỗi step gồm:
 - depends_on: [] nếu độc lập (chạy song song); [id...] nếu cần kết quả step khác
 
 QUY TẮC:
+- ĐA LƯỢT: ĐỌC [HỘI THOẠI GẦN ĐÂY] + [VIỆC ĐANG DỞ] trước khi plan. Câu hỏi mới có thể là
+  câu TRẢ LỜI cho lượt trước (vd lượt trước hỏi "loại nghỉ nào?", lượt này "phép năm" -> tiếp
+  tục flow đơn nghỉ, route leave_action). ĐỪNG hiểu câu ngắn cô lập thành câu hỏi mới.
 - Các step độc lập (depends_on rỗng) sẽ chạy SONG SONG -> tách retrieval/HR thành step riêng.
 - LUÔN kết thúc bằng đúng 1 step role "synthesize_recommend" depends_on mọi step dữ liệu.
 - Câu hỏi đơn giản chỉ cần 1 retrieval: 1 step rag_retrieve + 1 step synthesize_recommend.
@@ -51,6 +54,30 @@ Ví dụ:
 Mình cần tra chính sách nghỉ phép trong tài liệu nội bộ và đối chiếu dữ liệu cá nhân của bạn, rồi tổng hợp lại.
 {"route":"light|heavy","reasoning":"...","answer_hint":"...","steps":[{"id":1,"role":"...","input":"...","direction":"...","depends_on":[]}]}
 """
+
+
+def _memory_block(ctx: PlanContext) -> str:
+    """Bơm NGỮ CẢNH HỘI THOẠI (dialogue + summary + task-state) vào prompt planner -> hiểu
+    follow-up đa lượt (vd 'phép năm' nối tiếp 'tạo đơn nghỉ 3 ngày'). Rỗng -> '' (lượt đầu)."""
+    mem = getattr(ctx, "memory", None)
+    if mem is None:
+        return ""
+    parts: list[str] = []
+    summary = getattr(mem, "summary", "") or ""
+    if summary:
+        parts.append(f"[TÓM TẮT HỘI THOẠI TRƯỚC]\n{summary}")
+    dlg = getattr(mem, "dialogue", ()) or ()
+    if dlg:
+        convo = "\n".join(f"{t.role}: {t.content}" for t in dlg)
+        parts.append(f"[HỘI THOẠI GẦN ĐÂY]\n{convo}")
+    ts = getattr(mem, "task_state", None)
+    if ts is not None and getattr(ts, "status", "") == "pending":
+        parts.append(
+            f"[VIỆC ĐANG DỞ] flow={ts.flow} | đã có={ts.data} | còn thiếu={list(ts.missing)}\n"
+            "-> Nếu CÂU HỎI MỚI là câu TRẢ LỜI/bổ sung cho việc dở này, TIẾP TỤC flow đó "
+            "(route đúng role, vd leave_action), ĐỪNG coi là câu hỏi mới độc lập."
+        )
+    return ("\n\n".join(parts) + "\n\n") if parts else ""
 
 
 def _catalog_text(ctx: PlanContext) -> str:
@@ -97,7 +124,7 @@ class OrchestratorWorkersPlanner(Planner):
             return self._with_question(_fallback_plan(), ctx.question)
 
         valid_roles = {r.name for r in ctx.role_catalog}
-        user = f"DANH SÁCH ROLE:\n{_catalog_text(ctx)}\n\nCÂU HỎI: {ctx.question}"
+        user = f"DANH SÁCH ROLE:\n{_catalog_text(ctx)}\n\n{_memory_block(ctx)}CÂU HỎI MỚI NHẤT: {ctx.question}"
         err_hint = ""
         for attempt in range(2):
             # STREAM phần PROSE (suy nghĩ) của planner ra SSE NGAY (node=orchestrate) -> user thấy

@@ -42,6 +42,7 @@ class OrchestratorState(TypedDict, total=False):
     rag_top_k: int
     rag_score_threshold: float
     recent_messages: list  # memory provider nạp (milestone 7)
+    memory_context: Any    # MemoryContext (dialogue+summary+task_state+working_set) -> PlanContext
 
     # --- Plan do orchestrator/router sinh ---
     plan: Plan

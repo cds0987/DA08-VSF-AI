@@ -25,6 +25,12 @@ class Settings(BaseSettings):
 
     redis_url: str = "redis://localhost:6379/0"
 
+    # Memory module (history-context + task-state). default-off được (rollback): MEMORY_ENABLED=false
+    # -> orchestration bỏ qua memory, về hành vi cũ. recent_n=7 lượt verbatim + summary lượt cũ.
+    memory_enabled: bool = True
+    memory_recent_n: int = 7
+    memory_summarize_after: int = 12
+
     llm_mode: str = "openai"
     openai_api_key: str | None = None
     openai_llm_model: str = "gpt-5.4-nano"

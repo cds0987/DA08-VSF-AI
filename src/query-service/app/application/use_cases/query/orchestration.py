@@ -372,6 +372,22 @@ class QueryOrchestrationUseCase:
         except Exception as exc:  # noqa: BLE001 — memory lỗi KHÔNG chặn trả lời
             logger.warning("orchestrator_memory_failed: %s", str(exc)[:160])
 
+        # Memory module: dựng MemoryContext (dialogue 7 + summary + task_state + working_set) cho
+        # PLANNER -> route follow-up đúng (đa lượt). Reuse recent_messages đã fetch (không double).
+        # Fail-safe: lỗi/tắt -> MemoryContext.empty() (degrade, KHÔNG vỡ). load_context CHỈ gọi ở đây
+        # (boundary gate). dialogue đầu vào = RAW recent từ repo (memory tự cắt 7 + summary).
+        from app.agents.memory.builder import build_memory_client
+        from app.agents.memory.contracts import MemoryContext as _MemCtx
+        _raw_dialogue = [(m.role, m.content) for m in ctx_data.recent_messages]
+
+        async def _dialogue_loader(_uid: str, _cid: str | None) -> list[tuple[str, str]]:
+            return _raw_dialogue
+
+        _mem = build_memory_client(self._settings, dialogue_loader=_dialogue_loader,
+                                   make_model=self._make_model)
+        _conv_id = _ACTIVE_CONVERSATION_ID.get()
+        mem_ctx = await _mem.load_context(user.id, _conv_id, question) if _mem else _MemCtx.empty()
+
         await self._save_user_message(user.id, question)
 
         # Emit channel: node/role đẩy progress (Suy nghĩ / bước tool / token answer) vào queue;
@@ -411,6 +427,7 @@ class QueryOrchestrationUseCase:
                     "question": question, "user_id": user.id,
                     "allowed_doc_ids": list(allowed_doc_ids),
                     "recent_messages": recent_messages,
+                    "memory_context": mem_ctx,   # -> orchestrate node bơm vào PlanContext (planner đa lượt)
                 })
             except Exception as exc:  # noqa: BLE001 — fail-closed
                 logger.error("orchestrator_stream_failed: %s", str(exc)[:300], exc_info=True)

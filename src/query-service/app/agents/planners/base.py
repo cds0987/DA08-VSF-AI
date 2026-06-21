@@ -20,6 +20,7 @@ class PlanContext:
     emit: Callable[[dict], Any] | None = None    # SSE emit -> stream reasoning lúc lập kế hoạch
     tracer: Any = None                           # LangfuseTracer (best-effort) -> generation bước orchestrate
     trace: Any = None                            # trace handle của lượt query
+    memory: Any = None                           # MemoryContext (dialogue+summary+task_state+working_set)
 
 
 class Planner(ABC):
