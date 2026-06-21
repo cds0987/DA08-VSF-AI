@@ -228,9 +228,15 @@ Cập nhật lần cuối: 2026-06-22 (đã có adversarial; đang chạy crit S
     **2.100.000đ/ngày**.
   - IMG-A "thâm niên >10 năm +mấy ngày": không ra "5 ngày". IMG-C "phạt đi muộn >60'": "không có
     quy định" (số 250 nằm trong ảnh biểu đồ).
-- **Nguyên nhân (giả định):** ingest pdf có sinh thêm chunk (137 vs 71) → có vẻ ảnh CÓ được OCR,
-  nhưng **nội dung OCR từ ảnh không retrieve được** (embedding/score thấp, hoặc OCR bảng/biểu đồ
-  ra text vụn không khớp truy vấn tiếng Việt). → cần soi chunk thực tế đã index của pdf.
+- **Xác nhận (ISO mode, conv_id riêng/câu, 2-3 sample/needle):** IMG-A 0/3, IMG-B 0/3, IMG-C 0/2,
+  IMG-D 0/x — **TẤT CẢ miss dù lần này `cite=Y`** (claude_test ĐƯỢC retrieve). Tức là doc vào top-k
+  nhưng **nội dung trong ẢNH không nằm trong chunk text** → không phải lỗi ranking, là lỗi
+  **OCR/ index nội dung ảnh**. IMG-B trả 730.000 **ổn định cả 3 sample** (precision-fail nhất quán).
+- **Đã loại trừ:** KHÔNG phải do trần OCR — `MAX_OCR_PAGES=25`, `OCR_MIN_IMAGE_PIXELS=64`
+  (`rag-worker/.../local_parser.py:53-64`); doc chỉ 4 ảnh, thừa sức trong hạn mức.
+- **Nguyên nhân (giả định thu hẹp):** ingest pdf sinh thêm chunk (137 vs 71) → ảnh CÓ qua vision,
+  nhưng (a) OCR bảng/biểu đồ ra text vụn/sai số, hoặc (b) chunk-ảnh embed kém khớp truy vấn tiếng
+  Việt, hoặc (c) caption ảnh không gắn số. → khi fix cần soi chunk thực đã index của pdf/docx.
 - **Tác hại kép:** (1) miss thông tin; (2) **precision fail → trả số SAI từ doc khác** (nguy hiểm
   hơn cả từ chối — user tin con số sai). Đây là lỗi recall+precision nặng nhất của RAG.
 - **Hướng giải quyết (CHỜ DUYỆT):** (a) kiểm pipeline OCR ảnh (gpt-4o-mini vision) có index chunk
