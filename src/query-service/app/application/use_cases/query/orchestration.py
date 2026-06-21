@@ -31,6 +31,24 @@ from app.infrastructure.config import Settings
 
 logger = logging.getLogger(__name__)
 
+
+def _emit_guard(ev: dict) -> dict:
+    """Soi event SSE theo hợp đồng (sse_contract) — fail-safe: CHỈ cảnh báo, KHÔNG bao giờ
+    làm vỡ câu trả lời. Drift (phase/node lạ, done thiếu field) -> log để biết NGAY ở prod,
+    còn gate test chặn từ CI. Trả lại ev nguyên vẹn (chuỗi gọn: yield _emit_guard(ev)).
+
+    Import sse_contract LAZY (trong hàm) — app boot KHÔNG phụ thuộc app.agents (xem
+    test_orchestration_does_not_import_agents_at_module_load): agents lỗi -> react vẫn sống."""
+    try:
+        from app.agents.sse_contract import validate_event
+        problems = validate_event(ev)
+        if problems:
+            logger.warning("sse_contract_violation: %s | event_keys=%s",
+                           "; ".join(problems), sorted(ev.keys()))
+    except Exception:  # noqa: BLE001 — validate KHÔNG được làm vỡ stream
+        pass
+    return ev
+
 _ACTIVE_CONVERSATION_ID: ContextVar[str | None] = ContextVar("active_conversation_id", default=None)
 _ACTIVE_CONVERSATION_TITLE: ContextVar[str | None] = ContextVar("active_conversation_title", default=None)
 
@@ -443,7 +461,7 @@ class QueryOrchestrationUseCase:
                 streamed_tokens = True
             ev.setdefault("agent_mode", "orchestrator_workers")
             ev.setdefault("session_id", session_id)
-            yield ev
+            yield _emit_guard(ev)
         await task
 
         result = holder.get("result") or {}
@@ -484,16 +502,16 @@ class QueryOrchestrationUseCase:
         # fallback / no_info) -> word-chunk câu trả lời cuối để UI vẫn thấy chữ chạy.
         if not streamed_tokens:
             for token in _word_chunks(answer):
-                yield {
+                yield _emit_guard({
                     "token": token,
                     "phase": "generating",
                     "agent_mode": "orchestrator_workers",
                     "session_id": session_id,
-                }
+                })
                 await asyncio.sleep(0)
 
         message_id = await self._save_assistant(user.id, session_id, answer, sources, started)
-        yield {
+        yield _emit_guard({
             "done": True,
             "sources": sources,
             "retrieved": retrieved,  # pipeline-health: chunk lấy được (kể cả <threshold)
@@ -502,7 +520,7 @@ class QueryOrchestrationUseCase:
             "outcome": outcome_value,
             "agent_mode": "orchestrator_workers",
             "_answer": answer,
-        }
+        })
 
     async def _record_memory(self, mem: Any, user_id: str, conv_id: str | None, result: dict) -> None:
         """Ghi STM sau 1 lượt (orchestration boundary). working-set = bằng chứng đã lấy (rag/hr)
