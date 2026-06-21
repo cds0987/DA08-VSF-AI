@@ -1,0 +1,46 @@
+# HỢP ĐỒNG HTTP hr-service — server Pydantic là NGUỒN SỰ THẬT, client (dict thô) phải khớp.
+#
+# Vì sao: hr-service khai request bằng Pydantic model; query-service (HRLeaveClient) + mcp-service
+# (LeaveWriteTool) dựng DICT THÔ -> KHÔNG có compile-error nối 2 bên. hr-service đổi/rename/ thêm
+# field BẮT BUỘC -> client thiếu field -> 422 lúc CHẠY (vỡ luồng tạo/sửa/duyệt đơn nghỉ). File này
+# + infra/ci/http_contract_lint.py biến server-model thành GATE: client thiếu required = CI đỏ.
+#
+# Cơ chế: server_model (Pydantic) -> field required (annotation KHÔNG default). Mỗi client fn dựng
+# payload -> gom dict key. required ⊆ client_keys (client gửi đủ). Key lạ -> cảnh báo (Pydantic
+# mặc định bỏ qua extra; không fatal). leave_type VALUE đã được test_hr_intents/registry lo riêng.
+version: 1
+
+endpoints:
+  leave_create:
+    method: POST
+    path: /hr/leave-requests
+    server_file: src/hr-service/app/api/routes.py
+    server_model: LeaveCreateRequest
+    clients:
+      - {file: src/query-service/app/infrastructure/external/hr_leave_client.py, fn: create}
+      - {file: src/mcp-service/app/tools/leave_write.py, fn: create_leave_request}
+
+  leave_update:
+    method: PATCH
+    path: /hr/leave-requests/{request_id}
+    server_file: src/hr-service/app/api/routes.py
+    server_model: LeaveUpdateRequest
+    clients:
+      - {file: src/mcp-service/app/tools/leave_write.py, fn: update_leave_request}
+
+  leave_cancel:
+    method: POST
+    path: /hr/leave-requests/{request_id}/cancel
+    server_file: src/hr-service/app/api/routes.py
+    server_model: LeaveCancelRequest
+    clients:
+      - {file: src/query-service/app/infrastructure/external/hr_leave_client.py, fn: cancel}
+      - {file: src/mcp-service/app/tools/leave_write.py, fn: cancel_leave_request}
+
+  leave_decide:
+    method: POST
+    path: /hr/leave-requests/{request_id}/{action}
+    server_file: src/hr-service/app/api/routes.py
+    server_model: ApprovalActionRequest
+    clients:
+      - {file: src/query-service/app/infrastructure/external/hr_leave_client.py, fn: decide}
