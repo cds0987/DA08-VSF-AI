@@ -1,0 +1,127 @@
+# HỢP ĐỒNG NATS — máy đọc được (1 nguồn sự thật cho payload event liên-service).
+#
+# Vì sao: subjects.md là hợp đồng cho NGƯỜI đọc, nhưng KHÔNG có gì ép publisher/consumer
+# khớp nó -> dev đổi 1 bên (thêm/bỏ field) là lệch ÂM THẦM (vd doc.status đổi -> doc kẹt
+# PROCESSING; profile thiếu field -> ACL sai). File này + infra/ci/nats_contract_lint.py
+# biến hợp đồng thành GATE: lệch = CI đỏ TRƯỚC prod.
+#
+# Quy ước:
+#   meta              : field metadata (event_id/version/occurred_at) — wrapper publish tự thêm
+#                       (document-service _with_event_metadata / user-service build_user_event).
+#                       Linter KHÔNG soi meta ở publisher (wrapper lo); chỉ dùng để so subjects.md.
+#   business_required : field NGHIỆP VỤ publisher PHẢI gửi + consumer được phép yêu cầu.
+#   business_optional : field nghiệp vụ có thể vắng (consumer KHÔNG được 'required' nó).
+#   publisher_marker  : tên Call/FunctionDef nơi publisher dựng payload (linter quét key ở đó).
+#   consumer_markers  : các FunctionDef parse payload phía consumer (linter quét field 'required').
+#
+# THÊM/ĐỔI EVENT: sửa ở đây + subjects.md (cùng required) -> nats_contract_lint giữ 2 bên khớp.
+version: 1
+
+events:
+  doc.ingest:
+    publisher: document-service
+    consumers: [rag-worker]
+    stream: DOC_EVENTS
+    meta: [event_id, event_version, occurred_at]
+    business_required: [doc_id, gcs_key, document_name, file_type, classification, allowed_departments, allowed_user_ids]
+    business_optional: []
+    publisher_marker: publish_doc_ingest
+    publisher_file: src/document-service/app/application/use_cases/documents/upload_document_use_case.py
+    consumer_markers: [DocIngestConsumer]
+    consumer_files: [src/rag-worker/app/interfaces/nats/ingest_consumer.py]
+
+  doc.status:
+    publisher: rag-worker
+    consumers: [document-service]
+    stream: DOC_EVENTS
+    meta: [event_id, event_version, occurred_at]
+    business_required: [doc_id, status]
+    business_optional: [chunk_count, error]
+    publisher_marker: build_doc_status
+    publisher_file: src/rag-worker/app/interfaces/nats/ingest_consumer.py
+    consumer_markers: [_handle_status_message]
+    consumer_files: [src/document-service/app/infrastructure/messaging/nats_subscriber.py]
+
+  doc.access:
+    publisher: document-service
+    consumers: [query-service]
+    stream: DOC_EVENTS
+    meta: [event_id, event_version, occurred_at]
+    business_required: [doc_id, classification, allowed_departments, allowed_user_ids, deleted]
+    business_optional: []
+    publisher_marker: publish_doc_access
+    publisher_file: src/document-service/app/application/use_cases/documents/upload_document_use_case.py
+    consumer_markers: [parse_doc_access_event]
+    consumer_files: [src/query-service/app/infrastructure/messaging/nats_events.py]
+
+  hr.employee_profile.updated:
+    publisher: hr-service
+    consumers: [query-service]
+    stream: HR_EVENTS
+    meta: [event_id, event_version, occurred_at]
+    business_required: [user_id, account_type, department, employment_status]
+    business_optional: []
+    publisher_marker: publish_profile_updated
+    publisher_file: src/hr-service/app/infrastructure/user_events_subscriber.py
+    consumer_markers: [parse_hr_employee_profile_updated_event]
+    consumer_files: [src/query-service/app/infrastructure/messaging/nats_events.py]
+
+  notify.doc_new:
+    publisher: document-service
+    consumers: [query-service]
+    stream: NOTIFY_EVENTS
+    meta: [event_id, event_version, occurred_at]
+    business_required: [doc_id, document_name, classification, allowed_departments, allowed_user_ids]
+    business_optional: []
+    publisher_marker: publish_notify_doc_new
+    publisher_file: src/document-service/app/infrastructure/messaging/nats_subscriber.py
+    consumer_markers: [parse_notify_doc_new_event]
+    consumer_files: [src/query-service/app/infrastructure/messaging/nats_events.py]
+
+  # user.created / user.updated / user.deactivated / user.deleted — cùng payload (build_user_event).
+  # department KHÔNG thuộc required: user-service CỐ Ý không gửi (HR Service tự quản department —
+  # xem create_user_use_case.py). Để 'business_optional' -> consumer HR đọc .get(department,"").
+  user.created:
+    publisher: user-service
+    consumers: [hr-service]
+    stream: USER_EVENTS
+    meta: [event_id, event_version, occurred_at]
+    business_required: [user_id, email, role, account_type, is_active]
+    business_optional: [department]
+    publisher_marker: build_user_event
+    publisher_file: src/user-service/app/infrastructure/messaging/user_event_publisher.py
+    consumer_markers: [handle_user_event]
+    consumer_files: [src/hr-service/app/infrastructure/user_events_subscriber.py]
+  user.updated:
+    publisher: user-service
+    consumers: [hr-service]
+    stream: USER_EVENTS
+    meta: [event_id, event_version, occurred_at]
+    business_required: [user_id, email, role, account_type, is_active]
+    business_optional: [department]
+    publisher_marker: build_user_event
+    publisher_file: src/user-service/app/infrastructure/messaging/user_event_publisher.py
+    consumer_markers: [handle_user_event]
+    consumer_files: [src/hr-service/app/infrastructure/user_events_subscriber.py]
+  user.deactivated:
+    publisher: user-service
+    consumers: [hr-service]
+    stream: USER_EVENTS
+    meta: [event_id, event_version, occurred_at]
+    business_required: [user_id, email, role, account_type, is_active]
+    business_optional: [department]
+    publisher_marker: build_user_event
+    publisher_file: src/user-service/app/infrastructure/messaging/user_event_publisher.py
+    consumer_markers: [handle_user_event]
+    consumer_files: [src/hr-service/app/infrastructure/user_events_subscriber.py]
+  user.deleted:
+    publisher: user-service
+    consumers: [hr-service]
+    stream: USER_EVENTS
+    meta: [event_id, event_version, occurred_at]
+    business_required: [user_id, email, role, account_type, is_active]
+    business_optional: [department]
+    publisher_marker: build_user_event
+    publisher_file: src/user-service/app/infrastructure/messaging/user_event_publisher.py
+    consumer_markers: [handle_user_event]
+    consumer_files: [src/hr-service/app/infrastructure/user_events_subscriber.py]

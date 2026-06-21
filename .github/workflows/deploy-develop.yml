@@ -241,6 +241,22 @@ jobs:
       - name: Validate monitor_decision manifest (MOSA)
         run: python deploy/monitor_decision/scripts/validate_manifest.py
 
+  # ─────────────────── Phase 1e: NATS CONTRACT LINT ───────────────────
+  # Gác seam ASYNC liên-service: publisher/consumer + subjects.md PHẢI khớp hợp đồng máy
+  # (infra/nats/event-contracts.yaml). Bắt drift im lặng (publisher bớt field -> doc kẹt /
+  # ACL sai). Thuần tĩnh (AST), không hạ tầng. Chạy MỌI lần (seam này từng lệch `department`).
+  nats-contract-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pyyaml
+        run: python -m pip install --upgrade pip pyyaml
+      - name: Lint NATS event contracts (publisher/consumer/subjects.md ↔ yaml)
+        run: python infra/ci/nats_contract_lint.py
+
   # ─────────────────── Phase 1b: CONTRACT PARITY ──────────────────────
   # Guard CONTRACT giữa rag-worker (producer) và mcp-service (consumer): cùng
   # embedding model/dimension/collection. Lệch -> mcp search fail-closed. Không
@@ -358,7 +374,7 @@ jobs:
   # ───────────────────────── Phase GATE ─────────────────────────
   # Fail nếu BẤT KỲ test nào failure/cancelled. Job skipped (path không khớp) = pass.
   gate:
-    needs: [unit, frontend-test, contract, e2e, migration-lint, manifest-lint]
+    needs: [unit, frontend-test, contract, e2e, migration-lint, manifest-lint, nats-contract-lint]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -370,6 +386,7 @@ jobs:
             "contract=${{ needs.contract.result }}" \
             "migration-lint=${{ needs.migration-lint.result }}" \
             "manifest-lint=${{ needs.manifest-lint.result }}" \
+            "nats-contract-lint=${{ needs.nats-contract-lint.result }}" \
             "e2e=${{ needs.e2e.result }}"; do
             name="${nr%%=*}"; res="${nr#*=}"
             echo "  $name = $res"

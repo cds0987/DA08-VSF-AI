@@ -285,13 +285,16 @@ Payload example (`user.created`):
   "user_id": "4f44e7f7-....",
   "email": "admin@company.com",
   "role": "admin",
-  "department": "HR",
   "account_type": "internal",
   "is_active": true
 }
 ```
 
-Required fields: `event_id`, `event_version`, `occurred_at`, `user_id`, `email`, `role`, `department`, `account_type`, `is_active`.
+Required fields: `event_id`, `event_version`, `occurred_at`, `user_id`, `email`, `role`, `account_type`, `is_active`.
+
+> `department` KHÔNG nằm trong payload user-service: HR Service tự quản lý department (xem
+> `create_user_use_case.py`). Consumer HR đọc `payload.get("department","")` (optional). Hợp đồng
+> máy: `infra/nats/event-contracts.yaml` (`business_optional: [department]`). Đừng coi là required.
 
 - `user.updated`: cùng payload; HR cập nhật department/email/status.
 - `user.deactivated`: cùng payload với `is_active=false`; HR set `employment_status='inactive'`.
