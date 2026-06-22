@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import csv
+import logging
 import os
 import zipfile
 from collections.abc import Callable, Mapping
@@ -17,6 +18,8 @@ from app.domain.repositories.parser import ParsedArtifact, Parser
 from core_engine.ai import VisionImage
 from core_engine.ocr import ImageTextExtractor
 from core_engine.registry import Registry
+
+logger = logging.getLogger(__name__)
 
 _IMAGE_MIME_BY_SUFFIX = {
     "png": "image/png",
@@ -288,17 +291,26 @@ def _make_pymupdf_reader(params: Mapping[str, Any]) -> Reader:
             pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
             return _vision_image(pixmap.tobytes("png"), "image/png")
 
+        # GRACEFUL CAP (KHÔNG raise): tổng ảnh-OCR bị giới hạn bởi MAX_OCR_PAGES (chặn chi phí
+        # vision). Trước đây vượt trần -> raise -> doc FAIL 0 chunk (mất CẢ text-layer parse tốt).
+        # Nay: OCR tới trần rồi BỎ QUA ảnh dư (text-layer vẫn giữ) -> doc vẫn ingest. cost vẫn
+        # bounded = max_ocr_pages call. Thứ tự ưu tiên ngầm theo trang: scan/embedded (thiết yếu)
+        # trước vector-raster (bổ sung). Log số ảnh bị bỏ để quan sát.
         pages: list[_Page] = []
-        ocr_count = 0          # tổng ảnh-OCR đã gom (scan + embedded + vector-raster)
+        ocr_count = 0
+        dropped = 0
         with fitz.open(path) as doc:
             for page in doc:
                 text = _normalize_markdown(page.get_text("text"))
                 images: list[VisionImage] = []
                 if not text:
-                    # Trang scan / không có text-layer → rasterize cả trang cho vision.
-                    images.append(_rasterize(page))
+                    # Trang scan / không có text-layer → rasterize cả trang cho vision (nếu còn budget).
+                    if ocr_count < max_ocr_pages:
+                        images.append(_rasterize(page))
+                    else:
+                        dropped += 1
                 else:
-                    # Trang có chữ + ảnh nhúng → giữ text, vision riêng từng ảnh.
+                    # Trang có chữ + ảnh nhúng → giữ text, vision riêng từng ảnh (trong budget).
                     for img in page.get_images(full=True):
                         xref = img[0]
                         info = doc.extract_image(xref)
@@ -307,13 +319,12 @@ def _make_pymupdf_reader(params: Mapping[str, Any]) -> Reader:
                             continue
                         if info.get("width", 0) < min_pixels or info.get("height", 0) < min_pixels:
                             continue
+                        if ocr_count + len(images) >= max_ocr_pages:
+                            dropped += 1          # hết budget -> bỏ ảnh nhúng dư (text vẫn còn)
+                            continue
                         images.append(_vision_image(info["image"], mime))
-                    # Trang có chữ NHƯNG cũng có chart/bảng VẼ-VECTOR (nhiều nét vẽ) →
-                    # get_images không thấy vector → rasterize cả trang để OCR vớt số trong
-                    # chart/bảng vector. Giữ cả text-layer (merge ở parse()).
-                    # GRACEFUL: vector-raster là BỔ SUNG (text-layer vẫn còn) -> CHỈ thêm khi
-                    # còn budget dưới MAX_OCR_PAGES, KHÔNG để nó làm doc chart-heavy vượt trần ->
-                    # fail (text-layer mất hết). Ảnh scan/embedded (thiết yếu) vẫn giữ nguyên.
+                    # Trang có chữ NHƯNG có chart/bảng VẼ-VECTOR (nhiều nét vẽ) → get_images không
+                    # thấy vector → rasterize cả trang để OCR vớt số. BỔ SUNG: chỉ khi còn budget.
                     if vector_ocr and (ocr_count + len(images)) < max_ocr_pages:
                         try:
                             drawings = len(page.get_drawings())
@@ -323,13 +334,12 @@ def _make_pymupdf_reader(params: Mapping[str, Any]) -> Reader:
                             images.append(_rasterize(page))
                 ocr_count += len(images)
                 pages.append(_Page(text=text, images=images))
-        step = _ParseStep(pages=pages)
-        if step.total_images() > max_ocr_pages:
-            raise ValueError(
-                f"document requires OCR on {step.total_images()} images but exceeds "
-                f"MAX_OCR_PAGES ({max_ocr_pages})"
+        if dropped:
+            logger.warning(
+                "ocr_budget_capped path=%s ocr=%d dropped=%d max=%d (text-layer giữ nguyên)",
+                getattr(path, "name", str(path)), ocr_count, dropped, max_ocr_pages,
             )
-        return step
+        return _ParseStep(pages=pages)
 
     return reader
 

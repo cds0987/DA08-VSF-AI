@@ -46,8 +46,8 @@ class _FakeDoc:
     def __iter__(self):
         return iter(self._pages)
 
-    def extract_image(self, xref):  # pragma: no cover - không dùng khi images=[]
-        return {}
+    def extract_image(self, xref):
+        return {"ext": "png", "width": 100, "height": 100, "image": b"PNGDATA"}
 
 
 def _install_fake_fitz(monkeypatch, pages: list[_FakePage]) -> None:
@@ -104,11 +104,23 @@ def test_vector_raster_capped_at_budget_does_not_fail(tmp_path, monkeypatch):
     assert all(len(p.images) == 0 for p in step.pages[25:])   # còn lại bỏ qua (text-layer vẫn giữ)
 
 
-def test_essential_images_over_cap_still_raise(tmp_path, monkeypatch):
-    # 30 trang SCAN (ảnh thiết yếu, không text) > trần 25 -> VẪN raise (fail-closed bất biến cũ).
+def test_essential_images_over_cap_capped_not_failed(tmp_path, monkeypatch):
+    # 30 trang SCAN (ảnh thiết yếu) > trần 25 -> GRACEFUL CAP: KHÔNG raise, OCR 25 trang đầu,
+    # 5 trang sau bỏ qua (rỗng). Doc vẫn ingest thay vì fail 0 chunk.
     pages = [_FakePage("", drawings=0) for _ in range(30)]
     _install_fake_fitz(monkeypatch, pages)
     reader = local_parser._make_pymupdf_reader({"max_ocr_pages": 25})
-    import pytest as _pt
-    with _pt.raises(ValueError, match="MAX_OCR_PAGES"):
-        reader(_pdf(tmp_path))
+    step = reader(_pdf(tmp_path))                 # KHÔNG ném
+    assert step.total_images() == 25              # capped đúng trần (cost bounded)
+    assert sum(len(p.images) for p in step.pages[:25]) == 25
+    assert all(len(p.images) == 0 for p in step.pages[25:])
+
+
+def test_embedded_images_over_cap_capped(tmp_path, monkeypatch):
+    # 1 trang có text + 40 ảnh nhúng -> cap 25, KHÔNG raise; text-layer giữ nguyên.
+    pages = [_FakePage("Có chữ", drawings=0, images=[(i,) for i in range(40)])]
+    _install_fake_fitz(monkeypatch, pages)
+    reader = local_parser._make_pymupdf_reader({"max_ocr_pages": 25})
+    step = reader(_pdf(tmp_path))
+    assert step.total_images() == 25
+    assert step.pages[0].text == "Có chữ"

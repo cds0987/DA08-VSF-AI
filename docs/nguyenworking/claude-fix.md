@@ -6,34 +6,31 @@
 
 ---
 
-## FIX #1 — Vector-rasterize làm doc chart-heavy FAIL ingest (vượt MAX_OCR_PAGES) [2026-06-23]
+## FIX #1 — Doc nhiều ảnh FAIL ingest (vượt MAX_OCR_PAGES) → GRACEFUL CAP [2026-06-23]
 
 **Motivation.** Eval Section I bắt: `2402.04355v3.pdf` fail ingest (0 chunk) — *"requires OCR on
-43 images but exceeds MAX_OCR_PAGES (25)"*. Fix vector-rasterize (Section I) thêm 1 full-page raster
-cho MỖI trang có chart-vẽ-vector → doc nhiều trang-chart đẩy tổng ảnh-OCR vượt trần 25 → cả doc
-FAIL (mất sạch text-layer vốn parse tốt). Vector-raster chỉ là **bổ sung** (text-layer vẫn còn) nên
-KHÔNG được phép làm doc fail.
+43 images but exceeds MAX_OCR_PAGES(25)"*. Hai tầng:
+1. Fix vector-rasterize (Section I) thêm 1 raster/trang-chart → đẩy tổng vượt trần.
+2. Gốc sâu hơn: cơ chế cũ **raise** khi tổng ảnh > trần → doc FAIL **0 chunk**, mất CẢ text-layer
+   (vốn parse tốt). Re-upload sau khi cap vector-raster vẫn fail "38 images" → doc có 38 ảnh
+   EMBEDDED thiết yếu > 25. ⇒ raise-on-overflow là bug: làm mất nguyên 1 doc.
 
-**Solution.** Graceful degradation, KHÔNG đổi bất biến fail-closed cho ảnh THIẾT YẾU:
-- Ảnh thiết yếu (trang scan không-text, ảnh raster nhúng) → giữ nguyên; nếu RIÊNG chúng vượt trần
-  → vẫn raise (bất biến cũ).
-- Vector-raster (bổ sung) → CHỈ thêm khi còn budget dưới `MAX_OCR_PAGES`. Hết budget → bỏ qua
-  (doc vẫn ingest bằng text-layer + phần OCR đã vừa trần).
+**Solution.** **Graceful cap-and-continue** (KHÔNG raise nữa): OCR tới đúng trần `MAX_OCR_PAGES`
+rồi BỎ QUA ảnh dư; text-layer + phần OCR vừa trần vẫn ingest. Cost vẫn bounded = trần. Ưu tiên ngầm
+theo trang: scan/embedded (thiết yếu) trước vector-raster (bổ sung). Log số ảnh bị bỏ.
 
-**Implementation.** `src/rag-worker/app/infrastructure/external/local_parser.py` —
-`_make_pymupdf_reader.reader()`:
-- Thêm biến đếm chạy `ocr_count` (tổng ảnh-OCR đã gom qua các trang).
-- Điều kiện thêm vector-raster: `if vector_ocr and (ocr_count + len(images)) < max_ocr_pages:`
-  (trước đây thêm vô điều kiện khi `drawings >= threshold`).
-- `ocr_count += len(images)` mỗi trang. Check cuối `total_images() > max_ocr_pages -> raise` GIỮ
-  NGUYÊN (chỉ còn fire khi ảnh thiết yếu vượt trần).
-- Test `src/rag-worker/tests/infrastructure/test_pymupdf_vector_ocr.py`: +2 case —
-  `test_vector_raster_capped_at_budget_does_not_fail` (30 trang chart, trần 25 → total=25, KHÔNG
-  raise, 25 trang đầu có raster, còn lại bỏ qua) + `test_essential_images_over_cap_still_raise`
-  (30 trang scan → vẫn raise).
+**Implementation.** `src/rag-worker/app/infrastructure/external/local_parser.py`:
+- Thêm `import logging` + `logger`.
+- `_make_pymupdf_reader.reader()`: biến đếm chạy `ocr_count` + `dropped`.
+  - Trang scan: thêm raster CHỈ khi `ocr_count < max_ocr_pages`, else `dropped++`.
+  - Ảnh nhúng: trong loop, `if ocr_count + len(images) >= max_ocr_pages: dropped++; continue`.
+  - Vector-raster (bổ sung): chỉ khi `(ocr_count + len(images)) < max_ocr_pages`.
+  - **BỎ** `if total_images() > max_ocr_pages: raise ...` → thay bằng `logger.warning(ocr_budget_capped...)`.
+- Test `tests/infrastructure/test_pymupdf_vector_ocr.py`: 6 case —
+  vector-raster-capped, scan-over-cap-capped (KHÔNG raise, total=25), embedded-over-cap-capped
+  (40 ảnh→25, text giữ), + 3 case cũ (vector trigger/disable/scan). Fake `extract_image` trả ảnh hợp lệ.
 
 **Result.**
-- Unit: rag-worker vector-OCR tests 5/5 pass (local, mock fitz).
+- Unit: rag-worker vector-OCR tests **6/6 pass**.
 - CI/CD: ___ (điền sau push)
-- Playwright/Langfuse live: ___ (điền sau deploy — re-upload doc chart-heavy 2402.04355v3 → phải
-  indexed > 0 chunk; doc-ingest trace SUCCESS thay vì FAILED).
+- Playwright/Langfuse live: ___ (re-upload 2402.04355v3 → indexed >0 chunk, doc-ingest trace SUCCESS).
