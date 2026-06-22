@@ -34,6 +34,16 @@ function stepDotColor(s?: AgentPlanStep['status']): string {
         : 'bg-slate-300 dark:bg-white/25'
 }
 
+// Thu gọn/Xem thêm cho thought dài: clamp 6 dòng khi gọn, mở full khi bấm. Theo dõi theo key.
+const THOUGHT_CLAMP_CHARS = 280
+const expandedThoughts = ref<Record<string, boolean>>({})
+function isLongThought(text: string): boolean {
+  return text.length > THOUGHT_CLAMP_CHARS
+}
+function toggleThought(key: string) {
+  expandedThoughts.value[key] = !expandedThoughts.value[key]
+}
+
 const open = ref(false)
 
 // Nhãn + icon tool: ưu tiên hợp đồng SSE_TOOLS (1 nguồn sự thật), bổ sung vài nhãn cũ.
@@ -133,12 +143,21 @@ function resultLabel(e: TraceEntry): string {
               <span class="text-[12px] font-medium" :class="GROUP_STYLE[g].head">{{ GROUP_STYLE[g].title }}</span>
             </div>
             <!-- raw text / JSON: container gọn, nền nhẹ, scroll nội bộ, không phá layout -->
-            <div
-              v-for="(t, i) in (grouped[g] || [])"
-              :key="`${g}-${i}`"
-              class="mt-1.5 whitespace-pre-wrap break-words rounded-lg border border-slate-200/70 bg-slate-50/70 px-3 py-2 text-base leading-relaxed text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground"
-            >
-              {{ t.text }}
+            <div v-for="(t, i) in (grouped[g] || [])" :key="`${g}-${i}`" class="mt-1.5">
+              <div
+                class="whitespace-pre-wrap break-words rounded-lg border border-slate-200/70 bg-slate-50/70 px-3 py-2 text-base leading-relaxed text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground"
+                :class="isLongThought(t.text) && !expandedThoughts[`${g}-${i}`] && 'line-clamp-6'"
+              >
+                {{ t.text }}
+              </div>
+              <button
+                v-if="isLongThought(t.text)"
+                type="button"
+                class="mt-1 rounded px-1 text-[12px] font-medium text-blue-600 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 dark:text-blue-300"
+                @click="toggleThought(`${g}-${i}`)"
+              >
+                {{ expandedThoughts[`${g}-${i}`] ? 'Thu gọn' : 'Xem thêm' }}
+              </button>
             </div>
           </div>
 
