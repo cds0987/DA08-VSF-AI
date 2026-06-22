@@ -95,33 +95,51 @@ function resultLabel(e: TraceEntry): string {
       <ChevronRight class="h-3.5 w-3.5 transition-transform" :class="open && 'rotate-90'" />
     </button>
 
-    <div v-if="open" class="mt-1.5 space-y-2">
-      <!-- Các GROUP theo thứ tự hợp đồng. orchestrator kèm plan + tool (subagents). -->
-      <div v-for="g in visibleGroups" :key="g">
-        <div class="flex items-center gap-1.5 text-[12px] font-semibold" :class="GROUP_STYLE[g].head">
-          <component :is="GROUP_STYLE[g].icon" class="h-3.5 w-3.5" /> {{ GROUP_STYLE[g].title }}
+    <!-- Timeline dọc kiểu DeepSeek: 1 đường line liền mạch, mỗi GROUP = 1 mốc chính (dot + icon),
+         tool/plan = sub-step nằm dưới mốc. Chỉ đổi VISUAL, giữ nguyên dữ liệu/logic. -->
+    <div v-if="open" class="mt-2 pl-0.5">
+      <div v-for="(g, gi) in visibleGroups" :key="g" class="relative pb-4 pl-7 last:pb-0">
+        <!-- đường line dọc nối các mốc (ẩn ở mốc cuối) -->
+        <span
+          v-if="gi < visibleGroups.length - 1"
+          aria-hidden="true"
+          class="absolute left-[9px] top-6 bottom-0 w-px bg-slate-200 dark:bg-white/10"
+        />
+        <!-- dot/icon mốc chính -->
+        <span
+          aria-hidden="true"
+          class="absolute left-0 top-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-slate-200 dark:bg-background dark:ring-white/10"
+        >
+          <component :is="GROUP_STYLE[g].icon" class="h-3 w-3" :class="GROUP_STYLE[g].head" />
+        </span>
+
+        <!-- tiêu đề mốc + check hoàn thành -->
+        <div class="flex items-center gap-1.5">
+          <span class="text-[12px] font-medium" :class="GROUP_STYLE[g].head">{{ GROUP_STYLE[g].title }}</span>
+          <CheckCircle2 class="h-3 w-3 shrink-0 text-emerald-500" />
         </div>
 
-        <!-- suy nghĩ của các node thuộc group -->
-        <div v-for="(t, i) in (grouped[g] || [])" :key="`${g}-${i}`"
-          class="mt-1 max-h-40 overflow-y-auto rounded-lg border px-3 py-1.5 text-[11.5px] leading-relaxed text-slate-600 dark:text-muted-foreground"
-          :class="GROUP_STYLE[g].box">
+        <!-- raw text / JSON: container gọn, nền nhẹ, scroll nội bộ, không phá layout -->
+        <div
+          v-for="(t, i) in (grouped[g] || [])"
+          :key="`${g}-${i}`"
+          class="mt-1.5 max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-slate-200/70 bg-slate-50/70 px-2.5 py-1.5 text-[11px] leading-relaxed text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground"
+        >
           {{ t.text }}
         </div>
 
-        <!-- orchestrator: subagents (plan song song) + kết quả tool, THỤT LỀ (viền trái = phân cấp) -->
-        <div v-if="g === 'orchestrator' && (plan?.steps?.length || trace.length)"
-          class="mt-1.5 ml-2 space-y-1 border-l-2 border-blue-100 pl-3 dark:border-blue-500/20">
+        <!-- orchestrator: plan song song + kết quả tool = các sub-step nhỏ trong timeline -->
+        <div v-if="g === 'orchestrator' && (plan?.steps?.length || trace.length)" class="mt-2 space-y-1.5">
           <AgentPlanView v-if="plan?.steps?.length" :plan="plan" />
-          <div v-for="(e, i) in trace" :key="`t-${i}`"
-            class="rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2 dark:border-white/5 dark:bg-white/[0.03]">
-            <div class="flex items-center gap-2">
-              <component :is="TOOL_ICON[e.tool] ?? Search" class="h-3.5 w-3.5 shrink-0 text-blue-500" />
-              <span class="text-[12px] font-semibold text-slate-700 dark:text-foreground/80">{{ TOOL_LABEL[e.tool] ?? e.tool }}</span>
-              <span v-if="queryLabel(e)" class="flex-1 truncate text-[11.5px] text-slate-500 dark:text-muted-foreground">{{ queryLabel(e) }}</span>
+          <div v-for="(e, i) in trace" :key="`t-${i}`" class="relative pl-4">
+            <span aria-hidden="true" class="absolute left-0.5 top-[7px] h-1.5 w-1.5 rounded-full bg-slate-300 dark:bg-white/25" />
+            <div class="flex items-center gap-1.5">
+              <component :is="TOOL_ICON[e.tool] ?? Search" class="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-muted-foreground" />
+              <span class="text-[11.5px] font-medium text-slate-700 dark:text-foreground/80">{{ TOOL_LABEL[e.tool] ?? e.tool }}</span>
+              <span v-if="queryLabel(e)" class="flex-1 truncate text-[11px] text-slate-500 dark:text-muted-foreground">{{ queryLabel(e) }}</span>
               <CheckCircle2 class="h-3 w-3 shrink-0 text-emerald-500" />
             </div>
-            <div class="mt-1 pl-5 text-[11px] text-slate-500 dark:text-muted-foreground/80">{{ resultLabel(e) }}</div>
+            <div class="mt-0.5 pl-5 text-[11px] text-slate-400 dark:text-muted-foreground/70">{{ resultLabel(e) }}</div>
           </div>
         </div>
       </div>
