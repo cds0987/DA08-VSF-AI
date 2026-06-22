@@ -65,6 +65,14 @@ function chipLabel(c: Citation): string {
 
 const renderedContent = computed(() => {
   if (!props.data.content) return ''
+  // Đang stream: render markdown THÔ + con trỏ nhấp nháy, CHƯA inject chip (citation chưa có).
+  // Cùng node với bản cuối -> khi xong chỉ patch (chip thay [N]) chứ không remount -> không flash.
+  if (props.data.streaming) {
+    const html = md.render(props.data.content)
+    return DOMPurify.sanitize(
+      html.replace(/(<\/(?:p|li|h[1-6]|pre|blockquote)>)\s*$/, '<span class="streaming-cursor"></span>$1'),
+    )
+  }
   const rawHtml = md.render(props.data.content)
   const esc = (t: string) => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!))
   // Gộp run [N] liền nhau -> 1 chip logo VSF. Đẩy dấu câu cuối câu RA TRƯỚC chip
@@ -223,7 +231,7 @@ function nextCite() {
       </template>
     </div>
 
-    <div class="flex items-center gap-1 px-5 py-2">
+    <div v-if="!data.streaming" class="flex items-center gap-1 px-5 py-2">
       <!-- Retry button — only shown for interrupted (network) messages -->
       <Tooltip v-if="data.interrupted">
         <TooltipTrigger as-child>
@@ -344,6 +352,30 @@ function nextCite() {
 </template>
 
 <style scoped>
+/* Con trỏ stream — chèn qua v-html nên cần :deep(). Giữ y hệt StreamingBlock cũ. */
+:deep(.streaming-cursor) {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: middle;
+  border-radius: 9999px;
+  background-color: rgb(59 130 246);
+  animation: streaming-blink 0.9s steps(1, end) infinite;
+  box-shadow: 0 0 0.65rem rgb(59 130 246 / 0.35);
+}
+
+@keyframes streaming-blink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  55%,
+  100% {
+    opacity: 0;
+  }
+}
+
 .ai-response-markdown {
   --tw-prose-body: var(--foreground);
   --tw-prose-headings: var(--foreground);

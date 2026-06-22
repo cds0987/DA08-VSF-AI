@@ -191,6 +191,11 @@ export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
+  // Key ổn định cho cả lượt trả lời: placeholder-đang-stream và message-cuối dùng chung
+  // turnKey -> Vue PATCH cùng node thay vì remount (không flash khi stream xong).
+  turnKey?: string
+  // Đang stream token (placeholder tạm) -> render thô + con trỏ, ẩn chip/toolbar.
+  streaming?: boolean
   fallback?: boolean
   citations?: Citation[]
   sessionId?: string
