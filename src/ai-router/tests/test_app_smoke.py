@@ -18,7 +18,7 @@ os.environ.pop("AIROUTER_INTERNAL_TOKEN", None)   # bỏ auth để smoke /v1/ro
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app.main import app  # noqa: E402
+from app.main import app, router as app_router  # noqa: E402
 
 client = TestClient(app)
 
@@ -58,3 +58,25 @@ def test_metrics_exposes_per_key_and_counters():
     # leading indicator
     assert "airouter_resolve_total{" in body
     assert "airouter_keys_total " in body
+
+
+def test_rerank_routes_cohere_via_gateway(monkeypatch):
+    """POST /v1/rerank: alias cohere/rerank-4-pro -> capability rerank_api -> OpenRouter paid.
+    Mock _rerank_call (không gọi mạng) -> kiểm resolve + passthrough + _router meta."""
+    async def fake_call(dec, payload):
+        assert payload["model"] == "cohere/rerank-4-pro"   # alias đã resolve về model thật
+        assert payload["query"] == "thủ đô việt nam"
+        assert payload["documents"] == ["a", "b"]
+        return {"results": [{"index": 1, "relevance_score": 0.95},
+                            {"index": 0, "relevance_score": 0.4}],
+                "usage": {"search_units": 1, "cost": 0.0025}}
+    monkeypatch.setattr(app_router, "_rerank_call", fake_call)
+    r = client.post("/v1/rerank", json={
+        "model": "cohere/rerank-4-pro", "query": "thủ đô việt nam",
+        "documents": ["a", "b"], "top_n": 2,
+    })
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["results"][0]["index"] == 1            # giữ nguyên response Cohere
+    assert data["_router"]["endpoint"] == "rerank"     # đi qua gateway, đúng endpoint
+    assert data["_router"]["provider"] == "openrouter"

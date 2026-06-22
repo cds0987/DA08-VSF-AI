@@ -64,6 +64,19 @@ def _min_ocr_image_pixels() -> int:
     return int(os.getenv("OCR_MIN_IMAGE_PIXELS", "64"))
 
 
+def _vector_ocr_enabled() -> bool:
+    # Trang CÓ text-layer NHƯNG có chart/bảng VẼ-VECTOR (không phải ảnh raster) thì
+    # get_images() không thấy + text-layer gom số sai/thiếu → số trong chart bị mất.
+    # Bật để rasterize-cả-trang đem OCR khi phát hiện nhiều nét vẽ vector. Tắt = hành vi cũ.
+    return os.getenv("OCR_VECTOR_PAGES", "true").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _vector_drawings_threshold() -> int:
+    # Số đối tượng vẽ-vector (page.get_drawings) tối thiểu để coi trang là "có chart/bảng"
+    # đáng OCR. Trang chữ thường ~0-vài nét; bảng/chart = hàng chục (kẻ ô, trục, cột).
+    return int(os.getenv("OCR_VECTOR_DRAWINGS_THRESHOLD", "12"))
+
+
 def _resolve_local_source(source_uri: str) -> Path:
     if source_uri.startswith("file://"):
         candidate = Path(source_uri[len("file://") :])
@@ -261,6 +274,8 @@ def _make_pymupdf_reader(params: Mapping[str, Any]) -> Reader:
     min_pixels = int(params.get("min_image_pixels", _min_ocr_image_pixels()))
     scale = float(params.get("ocr_scale", _pdf_ocr_scale()))
     max_ocr_pages = int(params.get("max_ocr_pages", _max_ocr_pages()))
+    vector_ocr = bool(params.get("vector_ocr", _vector_ocr_enabled()))
+    vector_threshold = int(params.get("vector_drawings_threshold", _vector_drawings_threshold()))
 
     def reader(path: Path) -> _ParseStep:
         _ensure_source_file(path)
@@ -268,6 +283,11 @@ def _make_pymupdf_reader(params: Mapping[str, Any]) -> Reader:
             import fitz
         except ModuleNotFoundError as exc:
             raise ModuleNotFoundError("PyMuPDF is required to parse PDF sources") from exc
+
+        def _rasterize(page) -> VisionImage:
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+            return _vision_image(pixmap.tobytes("png"), "image/png")
+
         pages: list[_Page] = []
         with fitz.open(path) as doc:
             for page in doc:
@@ -275,8 +295,7 @@ def _make_pymupdf_reader(params: Mapping[str, Any]) -> Reader:
                 images: list[VisionImage] = []
                 if not text:
                     # Trang scan / không có text-layer → rasterize cả trang cho vision.
-                    pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
-                    images.append(_vision_image(pixmap.tobytes("png"), "image/png"))
+                    images.append(_rasterize(page))
                 else:
                     # Trang có chữ + ảnh nhúng → giữ text, vision riêng từng ảnh.
                     for img in page.get_images(full=True):
@@ -288,6 +307,17 @@ def _make_pymupdf_reader(params: Mapping[str, Any]) -> Reader:
                         if info.get("width", 0) < min_pixels or info.get("height", 0) < min_pixels:
                             continue
                         images.append(_vision_image(info["image"], mime))
+                    # Trang có chữ NHƯNG cũng có chart/bảng VẼ-VECTOR (nhiều nét vẽ) →
+                    # get_images không thấy vector → rasterize cả trang để OCR vớt số trong
+                    # chart/bảng vector. Giữ cả text-layer (merge ở parse()). Đếm nét vẽ để
+                    # KHÔNG raster trang chữ thuần (đỡ chi phí + tránh vượt MAX_OCR_PAGES).
+                    if vector_ocr:
+                        try:
+                            drawings = len(page.get_drawings())
+                        except Exception:  # noqa: BLE001 — get_drawings hiếm khi lỗi; fail-safe bỏ qua
+                            drawings = 0
+                        if drawings >= vector_threshold:
+                            images.append(_rasterize(page))
                 pages.append(_Page(text=text, images=images))
         step = _ParseStep(pages=pages)
         if step.total_images() > max_ocr_pages:

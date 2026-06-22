@@ -18,7 +18,7 @@ class Provider(str, Enum):
     OPENROUTER = "openrouter"
 
 
-Endpoint = Literal["chat", "responses", "embeddings"]
+Endpoint = Literal["chat", "responses", "embeddings", "rerank"]
 LimitKind = Literal["tokens_per_day", "requests_per_day", "budget_usd_per_day", "none"]
 
 

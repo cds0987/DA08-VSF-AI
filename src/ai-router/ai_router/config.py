@@ -77,6 +77,8 @@ class CapabilityConfig(BaseModel):
     quality_floor: str | None = None             # model id tối thiểu (tùy chọn)
     require_tools: bool = False                   # answer/agent
     require_vision: bool = False                  # ocr/caption
+    endpoint: str = "chat"                        # "chat" | "embeddings" | "rerank" — loại endpoint
+                                                  # provider của capability (rerank_api -> "rerank").
     pinned_model: str | None = None              # embed -> pin (BẪY embedding, PLAN §4b)
     # ❖ MOSA hook: strategy RIÊNG cho node này (None -> dùng selector global).
     # vd think: weighted_banded (gpt-5.4-mini + deepseek-flash blend).

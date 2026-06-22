@@ -398,6 +398,49 @@ class Router:
         data["_router"] = pub
         return data
 
+    async def rerank(self, body: dict) -> dict:
+        """Cohere /rerank qua gateway — GIỮ NGUYÊN Cohere rerank-4-pro@OpenRouter, chỉ chuẩn hoá
+        đi qua ai-router (1 cổng + accounting + cooldown + retry như chat/embeddings). KHÔNG dùng
+        OpenAI SDK (rerank không phải chat/embeddings) -> raw httpx POST {base_url}/rerank.
+        Account theo cost THẬT trong response (Cohere tính per search_unit, không theo token)."""
+        alias = body.get("model", "rerank_api")
+        last_err: Exception | None = None
+        for attempt in range(MAX_ATTEMPTS):
+            dec = await self.resolve(alias, est_tokens=0, endpoint="rerank")
+            if dec is None:
+                raise NoCapacityError(alias)
+            payload = {k: v for k, v in body.items() if k != "model"}
+            payload["model"] = dec.model_name           # cohere/rerank-4-pro (name_or qua OpenRouter)
+            t0 = time.monotonic()
+            try:
+                data = await self._rerank_call(dec, payload)
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                await self._handle_error(dec, "rerank_api", exc,
+                                         conversation_id=None, attempt=attempt)
+                continue
+            usage = Usage(cost_usd=_rerank_cost(data))
+            cost = await self.account(dec, usage, 0)
+            latency_ms = (time.monotonic() - t0) * 1000
+            self._emit_call(dec, "rerank_api", usage, status="ok", cost=cost)
+            self._trace_log("call_ok", dec, "rerank_api", conversation_id=None, status="ok",
+                            latency_ms=latency_ms, usage=usage, cost=cost)
+            data["_router"] = dec.public()
+            return data
+        raise RouterCallError(str(last_err) if last_err else "unknown")
+
+    async def _rerank_call(self, dec: RouteDecision, payload: dict) -> dict:
+        import httpx
+
+        headers = {"Content-Type": "application/json"}
+        if dec.api_key:
+            headers["Authorization"] = f"Bearer {dec.api_key}"
+        base = (dec.base_url or "https://openrouter.ai/api/v1").rstrip("/")
+        async with httpx.AsyncClient(timeout=self.settings.request_timeout) as client:
+            resp = await client.post(f"{base}/rerank", json=payload, headers=headers)
+            resp.raise_for_status()
+            return resp.json()
+
     # ----------------- control plane: drain key (HITL v1) -----------------
     async def drain_key(self, key_id: str, *, actor: str = "?", reason: str = "",
                         ttl: int = DRAIN_TTL_SECONDS) -> dict:
@@ -444,6 +487,15 @@ class Router:
             })
         return {"routing_version": self.table.version, "models": len(self.catalog),
                 "selector": self.table.selector.impl, "keys": keys}
+
+
+def _rerank_cost(data: dict) -> float | None:
+    """Lấy cost THẬT từ response Cohere /rerank (usage.cost). Không có -> None (account tự bỏ qua)."""
+    cost = (data.get("usage") or {}).get("cost")
+    try:
+        return float(cost) if cost is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _has_image(messages: list[dict] | None) -> bool:

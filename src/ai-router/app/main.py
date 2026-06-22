@@ -154,3 +154,19 @@ async def embeddings(req: Request,
         raise HTTPException(status_code=503, detail="no capacity for embed")
     except RouterCallError as exc:
         raise HTTPException(status_code=502, detail=f"upstream error: {exc}")
+
+
+@app.post("/v1/rerank")
+async def rerank(req: Request,
+                 authorization: str | None = Header(None),
+                 x_internal_token: str | None = Header(None)) -> JSONResponse:
+    """Cohere /rerank passthrough (model = alias capability rerank_api). GIỮ NGUYÊN Cohere
+    rerank-4-pro@OpenRouter — chuẩn hoá đi qua gateway (1 cổng + accounting/cooldown)."""
+    _auth(authorization, x_internal_token)
+    body = await req.json()
+    try:
+        return JSONResponse(await router.rerank(body))
+    except NoCapacityError:
+        raise HTTPException(status_code=503, detail="no capacity for rerank")
+    except RouterCallError as exc:
+        raise HTTPException(status_code=502, detail=f"upstream error: {exc}")

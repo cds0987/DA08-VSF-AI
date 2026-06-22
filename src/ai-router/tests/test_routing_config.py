@@ -88,7 +88,7 @@ def test_models_feasible_for_their_tier():
             tdef = TIER_DEFS.get(tname)
             if tdef is None:
                 continue
-            ep = "embeddings" if cap.pinned_model and tier == "(pinned)" else _endpoint_for_tier(tname)
+            ep = "embeddings" if cap.pinned_model and tier == "(pinned)" else cap.endpoint
             if tdef.provider == Provider.OPENAI and m.provider != "openai":
                 bad.append(f"{name}/{tier} '{mid}': provider!={Provider.OPENAI.value} (OpenAI key chỉ gọi model openai)")
             if tdef.model_free is not None and m.is_free != tdef.model_free:
@@ -114,7 +114,7 @@ def test_every_capability_resolves(cap_name):
     async def run():
         sel, _ = _selector()
         cap = TABLE.capabilities[cap_name]
-        endpoint = "embeddings" if cap.pinned_model else "chat"
+        endpoint = "embeddings" if cap.pinned_model else cap.endpoint
         req = ResolveRequest(
             capability=cap_name, cap_config=cap, est_tokens=50,
             has_tools=cap.require_tools, has_image=cap.require_vision, endpoint=endpoint,

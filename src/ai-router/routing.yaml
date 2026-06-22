@@ -26,6 +26,8 @@ aliases:
   default: answer
   # rag-worker gửi model THẬT (= embed_model fingerprint collection) -> map về capability embed.
   qwen/qwen3-embedding-4b: embed
+  # mcp gửi model THẬT cohere/rerank-4-pro -> capability rerank_api (Cohere /rerank endpoint).
+  cohere/rerank-4-pro: rerank_api
 
 # Bậc thang: OpenAI free -> OpenRouter free -> paid (PLAN §5.1). Model free_or có thể
 # đổi/biến mất (OpenRouter xoay free) -> selector tự bỏ qua tier nếu model không còn trong catalog.
@@ -119,7 +121,7 @@ capabilities:
           model: openai/gpt-4o-mini
           tier: free_oai
           band_tokens: 2500000
-  rerank:                           # LLM-as-reranker
+  rerank:                           # LLM-as-reranker (chat.completions) — GIỮ cho tương thích cũ.
     tiers: [free_oai, free_or, paid]
     models:
       free_oai: openai/gpt-4o-mini
@@ -128,6 +130,13 @@ capabilities:
         - qwen/qwen3-next-80b-a3b-instruct:free
         - openai/gpt-oss-120b:free
       paid: deepseek/deepseek-v4-flash
+  rerank_api:                       # Cohere /rerank endpoint (rerank-4-pro) qua OpenRouter — KHÁC
+                                    # rerank LLM ở trên. mcp gọi /v1/rerank; router proxy GIỮ NGUYÊN
+                                    # model + request/response Cohere, chỉ chuẩn hoá đi qua gateway.
+    tiers: [paid]                   # OpenRouter paid (key trả deepseek dùng chung credit). KHÔNG free.
+    endpoint: rerank                # endpoint provider riêng (Cohere /rerank), KHÔNG chat/embeddings
+    models:
+      paid: cohere/rerank-4-pro
   guardrail:
     tiers: [free_oai, free_or, paid]
     models:
@@ -152,11 +161,19 @@ capabilities:
       free_oai: openai/gpt-4o-mini
       free_or: google/gemma-4-31b-it:free
     require_vision: true
-  ocr:                              # ảnh/scan -> text (VISION)
-    tiers: [free_oai, free_or]
+  ocr:                              # ảnh/scan + chart/bảng-vector -> text (VISION)
+    tiers: [free_oai]               # CHỈ OpenAI — KHÔNG OpenRouter. gpt-5.4-mini (rẻ, vision tốt).
     models:
-      free_oai: openai/gpt-4o-mini
-      free_or: google/gemma-4-31b-it:free
+      free_oai: openai/gpt-5.4-mini
+    selector:                       # xoay 5 key gpt-5.4-mini; cạn CẢ -> degrade gpt-4o-mini (vẫn OpenAI)
+      impl: banded_rotation
+      params:
+        band_tokens: 2500000        # quota/key/ngày -> cạn 1 key xoay key kế (cùng model)
+        save_mode:                  # cạn CẢ 5 key -> gpt-4o-mini (OpenAI), KHÔNG sang OpenRouter
+          enabled: true
+          model: openai/gpt-4o-mini
+          tier: free_oai
+          band_tokens: 2500000
     require_vision: true
   embed:                            # ⚠️ PIN model cố định (BẪY embedding, PLAN §4b)
     tiers: [embed_or]              # qwen3-embedding-4b qua OpenRouter (rag-worker + query intent)

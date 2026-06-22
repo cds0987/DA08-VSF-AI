@@ -46,7 +46,9 @@ profiles:
         impl: ${RERANK_PROVIDER:-lexical}
         model: ${RERANK_MODEL:-gpt-4o-mini}
         base_url: ${RERANK_BASE_URL:-}
-        api_key: ${RERANK_API_KEY:-}
+        # cohere rerank đi QUA ai-router -> bearer = token gateway (AIROUTER_INTERNAL_TOKEN),
+        # KHÔNG phải key OpenRouter (key OpenRouter cho cohere nằm trong pool 5 key của ai-router).
+        api_key: ${AIROUTER_INTERNAL_TOKEN:-}
         timeout_seconds: ${RERANK_TIMEOUT_SECONDS:-30}
         params:
           batch_size: ${RERANK_BATCH_SIZE:-8}
