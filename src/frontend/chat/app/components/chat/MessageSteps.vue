@@ -9,7 +9,7 @@
 // TỰ HIỆN dưới group của nó, KHÔNG cần sửa file này. Node lạ chưa khai -> nodeGroup()
 // fallback 'orchestrator' -> vẫn hiện (KHÔNG bao giờ câm).
 import { computed } from 'vue'
-import { Search, Database, CheckCircle2, ChevronRight, Sparkles, GitBranch, ShieldCheck, FileSearch, Lightbulb, Loader2, XCircle, Circle } from '@lucide/vue'
+import { Search, Database, ChevronRight, Sparkles, GitBranch, ShieldCheck, FileSearch, Lightbulb, Loader2, XCircle, Circle } from '@lucide/vue'
 import type { TraceEntry, NodeModel, Thought, AgentPlan, AgentPlanStep } from '~/types'
 import { SSE_GROUPS, SSE_TOOLS, nodeGroup, type SseGroup } from '~/types/sse-contract.gen'
 
@@ -131,7 +131,6 @@ function resultLabel(e: TraceEntry): string {
             </span>
             <div class="flex items-center gap-1.5">
               <span class="text-[12px] font-medium" :class="GROUP_STYLE[g].head">{{ GROUP_STYLE[g].title }}</span>
-              <CheckCircle2 class="h-3 w-3 shrink-0 text-emerald-500" />
             </div>
             <!-- raw text / JSON: container gọn, nền nhẹ, scroll nội bộ, không phá layout -->
             <div
@@ -151,9 +150,8 @@ function resultLabel(e: TraceEntry): string {
                 <component :is="ROLE_ICON[s.role] ?? FileSearch" class="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-muted-foreground" />
                 <span class="flex-1 truncate font-medium text-slate-700 dark:text-foreground/80">{{ ROLE_LABEL[s.role] ?? s.role }}</span>
                 <Loader2 v-if="s.status === 'running'" class="h-3 w-3 shrink-0 animate-spin text-blue-400" />
-                <CheckCircle2 v-else-if="s.status === 'ok' || s.status === 'no_info'" class="h-3 w-3 shrink-0 text-emerald-500" />
                 <XCircle v-else-if="s.status === 'error'" class="h-3 w-3 shrink-0 text-red-400" />
-                <Circle v-else class="h-3 w-3 shrink-0 text-slate-300 dark:text-muted-foreground/40" />
+                <Circle v-else-if="!s.status || s.status === 'pending'" class="h-3 w-3 shrink-0 text-slate-300 dark:text-muted-foreground/40" />
               </div>
             </div>
 
@@ -163,7 +161,6 @@ function resultLabel(e: TraceEntry): string {
                 <component :is="TOOL_ICON[e.tool] ?? Search" class="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-muted-foreground" />
                 <span class="text-[11.5px] font-medium text-slate-700 dark:text-foreground/80">{{ TOOL_LABEL[e.tool] ?? e.tool }}</span>
                 <span v-if="queryLabel(e)" class="flex-1 truncate text-[11px] text-slate-500 dark:text-muted-foreground">{{ queryLabel(e) }}</span>
-                <CheckCircle2 class="h-3 w-3 shrink-0 text-emerald-500" />
               </div>
               <div class="mt-0.5 pl-5 text-[11px] text-slate-400 dark:text-muted-foreground/70">{{ resultLabel(e) }}</div>
             </div>
