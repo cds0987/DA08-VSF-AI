@@ -90,3 +90,25 @@ def test_scanned_page_still_rasterized(tmp_path, monkeypatch):
     reader = local_parser._make_pymupdf_reader({})
     step = reader(_pdf(tmp_path))
     assert len(step.pages[0].images) == 1  # bất biến cũ vẫn giữ
+
+
+def test_vector_raster_capped_at_budget_does_not_fail(tmp_path, monkeypatch):
+    # 30 trang chart-vector, trần 25 -> vector-raster CHỈ thêm tới budget (BỔ SUNG), KHÔNG raise.
+    pages = [_FakePage("Trang có chữ + chart", drawings=30) for _ in range(30)]
+    _install_fake_fitz(monkeypatch, pages)
+    reader = local_parser._make_pymupdf_reader({"vector_ocr": True, "vector_drawings_threshold": 12,
+                                                "max_ocr_pages": 25})
+    step = reader(_pdf(tmp_path))          # KHÔNG ném ValueError
+    assert step.total_images() == 25       # capped đúng trần
+    assert sum(len(p.images) for p in step.pages[:25]) == 25  # 25 trang đầu có raster
+    assert all(len(p.images) == 0 for p in step.pages[25:])   # còn lại bỏ qua (text-layer vẫn giữ)
+
+
+def test_essential_images_over_cap_still_raise(tmp_path, monkeypatch):
+    # 30 trang SCAN (ảnh thiết yếu, không text) > trần 25 -> VẪN raise (fail-closed bất biến cũ).
+    pages = [_FakePage("", drawings=0) for _ in range(30)]
+    _install_fake_fitz(monkeypatch, pages)
+    reader = local_parser._make_pymupdf_reader({"max_ocr_pages": 25})
+    import pytest as _pt
+    with _pt.raises(ValueError, match="MAX_OCR_PAGES"):
+        reader(_pdf(tmp_path))
