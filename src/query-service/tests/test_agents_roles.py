@@ -93,6 +93,22 @@ def test_hr_grounding_hint_blocks_money_fabrication():
     assert _grounding_hint("not-a-dict") == ""
 
 
+def test_hr_payroll_facts_injected_deterministic():
+    """P1-1: su that luong chen bang CODE vao output -> synthesize luon thay 'chi 1 ky',
+    khong phu thuoc LLM worker nho caveat (HALLU-1: '6 thang' tu 1 ky)."""
+    from app.agents.roles.hr_lookup import _payroll_facts
+    pl = {"payroll": [{"period": "2026-06", "gross_salary": 1663.0, "net_salary": 1413.55, "deductions": 249.45}]}
+    f = _payroll_facts(pl, "tổng lương 6 tháng")
+    assert "Chỉ có 1 kỳ" in f and "2026-06" in f and "1663.0" in f
+    assert "ĐƠN VỊ KHÔNG ghi" in f  # thieu currency -> canh bao
+    assert "KHÔNG tự cộng" in f
+    # dinh huong KHONG ve luong -> khong chen (tranh lo luong khi hoi viec khac)
+    assert _payroll_facts(pl, "số ngày phép còn lại") == ""
+    # co currency -> khong canh bao don vi
+    pl2 = {"payroll": [{"period": "2026-06", "net_salary": 1413.55, "currency": "VND"}]}
+    assert "ĐƠN VỊ KHÔNG ghi" not in _payroll_facts(pl2, "lương")
+
+
 async def test_synthesize_no_model_falls_back_no_info():
     out = await AGENT_REGISTRY.get("synthesize_recommend")(_ctx()).run(
         WorkerInput(4, "synthesize_recommend", "q", "d", upstream={1: "x"}))

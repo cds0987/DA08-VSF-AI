@@ -36,6 +36,36 @@ def _grounding_hint(payload: object) -> str:
     return "[SỰ THẬT KIỂM CHỨNG — bám ĐÚNG, KHÔNG vượt]\n" + "\n".join(notes) + "\n\n"
 
 
+_SALARY_KW = ("lương", "thu nhập", "salary", "payroll", "lĩnh", "thực nhận", "gross", "net", "thưởng")
+
+
+def _payroll_facts(payload: object, direction: str) -> str:
+    """Sự thật lương DETERMINISTIC (code) chèn THẲNG vào output worker -> synthesize LUÔN thấy
+    'chỉ có N kỳ' + đơn vị, KHÔNG phụ thuộc LLM worker có nhớ caveat hay không (HALLU-1: LLM hay
+    rút gọn bỏ mất 'chỉ 1 kỳ' -> downstream gán '6 tháng'). Chỉ chèn khi định hướng hỏi về lương."""
+    if not isinstance(payload, dict) or not direction:
+        return ""
+    if not any(k in direction.lower() for k in _SALARY_KW):
+        return ""
+    payroll = payload.get("payroll")
+    if not isinstance(payroll, list) or not payroll:
+        return ""
+    has_ccy = any(isinstance(r, dict) and r.get("currency") for r in payroll)
+    rows = []
+    for r in payroll:
+        if not isinstance(r, dict):
+            continue
+        parts = [f"kỳ {r.get('period', '?')}"]
+        for k in ("gross_salary", "net_salary", "deductions"):
+            if r.get(k) is not None:
+                parts.append(f"{k}={r[k]}")
+        rows.append("; ".join(parts))
+    unit = "" if has_ccy else " ĐƠN VỊ KHÔNG ghi trong hồ sơ (đừng tự thêm USD/VND)."
+    return (f"[LƯƠNG — SỰ THẬT HỒ SƠ] Chỉ có {len(payroll)} kỳ lương: " + " | ".join(rows)
+            + f".{unit} KHÔNG có dữ liệu nhiều tháng hơn -> nếu user hỏi 'tổng N tháng' mà N>"
+            f"{len(payroll)}, PHẢI nói rõ hồ sơ chỉ có {len(payroll)} kỳ, KHÔNG tự cộng/ngoại suy.\n")
+
+
 @register_agent("hr_lookup")
 class HrLookupRole(AgentRole):
     name = "hr_lookup"
@@ -91,4 +121,8 @@ class HrLookupRole(AgentRole):
             tracer=ctx.tracer, trace=ctx.trace, node=self.name,
         )
         # model lỗi/rỗng -> đưa full profile (synth deepseek tự hiểu) thay vì mất ngữ cảnh.
-        return WorkerOutput(task.step_id, self.name, extracted or profile_json, status="ok")
+        body = extracted or profile_json
+        # CHÈN sự thật lương deterministic LÊN ĐẦU -> synthesize không thể bịa '6 tháng' dù worker
+        # LLM rút gọn bỏ caveat (HALLU-1).
+        facts = _payroll_facts(payload, task.direction or "")
+        return WorkerOutput(task.step_id, self.name, (facts + body) if facts else body, status="ok")
