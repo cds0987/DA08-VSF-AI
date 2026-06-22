@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -34,6 +35,7 @@ CATALOG_PATH = os.path.join(_ROOT, "config", "model_catalog.json")
 
 CATALOG = load_catalog(CATALOG_PATH)
 TABLE = load_routing_table(ROUTING_PATH)
+SUPPLEMENT_PATH = os.path.join(_ROOT, "config", "openai_supplement.json")
 
 # env giả: 1 key OpenAI + 1 key OpenRouter (key OpenRouter phục vụ cả free_or lẫn paid).
 _FAKE_ENV = {"OPENAI_API_KEY_1": "sk-test-oai", "OPENROUTER_API_KEY_1": "sk-test-or"}
@@ -74,6 +76,26 @@ def test_referenced_models_exist_in_catalog():
             if CATALOG.get(mid) is None:
                 missing.append(f"{name}/{tier}: '{mid}'")
     assert not missing, "model id KHÔNG có trong catalog (gõ sai tên?):\n  " + "\n  ".join(missing)
+
+
+def test_non_chat_models_in_supplement_survive_catalog_rebuild():
+    """build_catalog.py fetch OpenRouter /models -> GHI ĐÈ catalog. /models chỉ có model
+    chat/completion; model endpoint embeddings/rerank KHÔNG có -> sẽ BỊ DROP khi rebuild nếu
+    không nằm trong openai_supplement.json (được merge lại). Test: mọi model của capability
+    có endpoint != chat PHẢI nằm trong supplement -> tồn tại sau rebuild ở prod.
+    (Regression: cohere/rerank-4-pro từng chỉ ở catalog committed -> rebuild drop -> rerank 503.)"""
+    import json
+    sup_ids = {m["id"] for m in json.loads(Path(SUPPLEMENT_PATH).read_text(encoding="utf-8"))}
+    missing: list[str] = []
+    for name, cap in TABLE.capabilities.items():
+        ep = "embeddings" if cap.pinned_model else cap.endpoint
+        if ep == "chat":
+            continue
+        for _tier, mid in _all_model_ids(cap):
+            if mid not in sup_ids:
+                missing.append(f"{name} ({ep}) '{mid}'")
+    assert not missing, ("model endpoint non-chat KHÔNG nằm trong openai_supplement.json -> "
+                         "sẽ bị build_catalog drop khi rebuild:\n  " + "\n  ".join(missing))
 
 
 def test_models_feasible_for_their_tier():

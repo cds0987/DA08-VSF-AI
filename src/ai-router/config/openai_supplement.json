@@ -43,5 +43,20 @@
     "supports_tools": false,
     "input_modalities": ["text"],
     "endpoint": "embeddings"
+  },
+  {
+    "id": "cohere/rerank-4-pro",
+    "provider": "cohere",
+    "name_native": "rerank-4-pro",
+    "name_or": "cohere/rerank-4-pro",
+    "context_length": 0,
+    "price_in_per_mtok": 0.0,
+    "price_out_per_mtok": 0.0,
+    "price_in_with_fee": 0.0,
+    "price_out_with_fee": 0.0,
+    "is_free": false,
+    "supports_tools": false,
+    "input_modalities": ["text"],
+    "endpoint": "rerank"
   }
 ]
