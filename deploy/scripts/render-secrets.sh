@@ -26,6 +26,9 @@ done
 # ít key hơn / tắt auth, KHÔNG chặn deploy. ai-router KHÔNG ai depends_on nên rỗng cũng an toàn.
 : "${AIROUTER_INTERNAL_TOKEN:=}"
 for n in 1 2 3 4 5; do eval ": \"\${OPENAI_API_KEY_$n:=}\""; eval ": \"\${OPENROUTER_API_KEY_$n:=}\""; done
+: "${RERANK_API_KEY:=}"   # optional: OpenRouter key cho rerank 'cohere' trả phí. THIẾU -> rỗng
+                          # -> CohereRerankReranker gọi /rerank không kèm Bearer -> 401 -> fallback
+                          # vector-order (non-fatal). Set GitHub Secret RERANK_API_KEY để bật.
 : "${ALERTMANAGER_SLACK_WEBHOOK:=}"   # optional: rỗng -> Alertmanager vẫn chạy, alert không gửi Slack (xem ở Prometheus)
 : "${VSF_OTEL_ENABLED:=0}"            # optional: 0 (mặc định, ai-router uvicorn thẳng) | 1 (bật OTel trace)
 
@@ -73,6 +76,7 @@ OPENROUTER_API_KEY_2=${OPENROUTER_API_KEY_2}
 OPENROUTER_API_KEY_3=${OPENROUTER_API_KEY_3}
 OPENROUTER_API_KEY_4=${OPENROUTER_API_KEY_4}
 OPENROUTER_API_KEY_5=${OPENROUTER_API_KEY_5}
+RERANK_API_KEY=${RERANK_API_KEY}
 EOF
 
 chmod 600 "$APP_DIR/.env" "$APP_DIR/deploy/env/secret.env"

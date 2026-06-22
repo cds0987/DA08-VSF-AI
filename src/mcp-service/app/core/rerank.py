@@ -179,6 +179,120 @@ class LlmReranker:
         return scores
 
 
+def _clamp01(value: object) -> float:
+    try:
+        numeric = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, min(1.0, numeric))
+
+
+class CohereRerankReranker:
+    """Rerank qua endpoint /rerank kiểu Cohere (OpenRouter proxy 'cohere/rerank-4-pro',
+    hoặc Cohere/Jina/Voyage trực tiếp). KHÁC LlmReranker (chat.completions): đây là rerank
+    endpoint CHUYÊN DỤNG -> 1 HTTP call cho cả batch, trả relevance_score 0..1 ĐÃ SORT giảm
+    dần. base_url + '/rerank' (vd https://openrouter.ai/api/v1/rerank).
+
+    Lỗi mạng/HTTP/parse -> fallback vector-order (non-fatal): citation luôn ra như LlmReranker,
+    KHÔNG để rerank hỏng làm RAG 0 nguồn.
+    """
+
+    def __init__(
+        self,
+        *,
+        model: str,
+        api_key: str,
+        base_url: str,
+        timeout_seconds: float,
+        passage_chars: int = 800,
+        post_fn: Callable[[str, list[str], int], Awaitable[dict]] | None = None,
+        fallback: Reranker | None = None,
+    ) -> None:
+        self._model = model
+        self._api_key = api_key
+        self._base_url = (base_url or "").rstrip("/")
+        self._timeout_seconds = timeout_seconds
+        self._passage_chars = max(1, int(passage_chars))
+        self._post_fn = post_fn or self._post_with_httpx
+        self._fallback = fallback or NoopReranker()
+
+    async def rerank(
+        self, query: str, hits: List[SearchHit], top_k: int, threshold: float
+    ) -> List[SearchHit]:
+        if not hits:
+            return []
+        documents = [self._passage_text(hit) for hit in hits]
+        top_n = max(1, min(top_k, len(documents)))
+        try:
+            data = await self._post_fn(query, documents, top_n)
+            results = data.get("results") or []
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "rerank_fallback provider=cohere candidate_count=%d error=%s", len(hits), exc
+            )
+            ordered = sorted(hits, key=lambda h: h.score, reverse=True)[:top_k]
+            for hit in ordered:
+                hit.score = 0.5
+            return ordered
+
+        scored: list[SearchHit] = []
+        for item in results:
+            idx = item.get("index")
+            if not isinstance(idx, int) or not (0 <= idx < len(hits)):
+                continue
+            score = _clamp01(item.get("relevance_score", 0.0))
+            hit = hits[idx]
+            hit.score = score
+            if score >= threshold:
+                scored.append(hit)  # API đã sort desc -> giữ nguyên thứ tự
+        result = scored[:top_k]
+        if not result:
+            # threshold lọc sạch -> giữ top-1 theo điểm API để không trả rỗng (như LlmReranker).
+            logger.warning(
+                "rerank_threshold_filtered_all provider=cohere candidates=%d threshold=%s",
+                len(hits), threshold,
+            )
+            best = max(
+                (r for r in results if isinstance(r.get("index"), int)
+                 and 0 <= r["index"] < len(hits)),
+                key=lambda r: _clamp01(r.get("relevance_score", 0.0)),
+                default=None,
+            )
+            if best is not None:
+                hit = hits[best["index"]]
+                hit.score = _clamp01(best.get("relevance_score", 0.0))
+                return [hit]
+            return sorted(hits, key=lambda h: h.score, reverse=True)[:1]
+        return result
+
+    async def _post_with_httpx(self, query: str, documents: list[str], top_n: int) -> dict:
+        import httpx
+
+        payload = {
+            "model": self._model,
+            "query": query,
+            "documents": documents,
+            "top_n": top_n,
+            "return_documents": False,  # không cần echo text -> payload nhẹ
+        }
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+            resp = await client.post(
+                f"{self._base_url}/rerank", json=payload, headers=headers
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    def _passage_text(self, hit: SearchHit) -> str:
+        body = (hit.child_text or hit.parent_text or "")[: self._passage_chars]
+        return f"{hit.caption}\n{body}".strip() if hit.caption else body
+
+    async def aclose(self) -> None:
+        return
+
+
 def build_reranker(settings: McpSettings | str) -> Reranker:
     normalized = settings if isinstance(settings, str) else settings.rerank_impl
     normalized = (normalized or "none").strip().lower()
@@ -197,6 +311,17 @@ def build_reranker(settings: McpSettings | str) -> Reranker:
             batch_size=settings.rerank_batch_size,
             passage_chars=settings.rerank_passage_chars,
         )
+    if normalized == "cohere":
+        if isinstance(settings, str):
+            raise ValueError("build_reranker('cohere') needs settings for model and endpoint.")
+        return CohereRerankReranker(
+            model=settings.rerank_model,
+            api_key=settings.rerank_api_key,
+            # KHÔNG fallback embed_base_url: ai-router không có /rerank. Bắt buộc RERANK_BASE_URL.
+            base_url=settings.rerank_base_url,
+            timeout_seconds=settings.rerank_timeout_seconds,
+            passage_chars=settings.rerank_passage_chars,
+        )
     raise ValueError(
-        f"RERANK_PROVIDER khong hop le: {normalized!r} (cho phep: none|lexical|llm)"
+        f"RERANK_PROVIDER khong hop le: {normalized!r} (cho phep: none|lexical|llm|cohere)"
     )

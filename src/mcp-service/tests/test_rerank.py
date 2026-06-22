@@ -4,7 +4,7 @@ import logging
 
 import pytest
 
-from app.core.rerank import LlmReranker
+from app.core.rerank import CohereRerankReranker, LlmReranker
 from app.core.vectorstore import SearchHit
 
 
@@ -65,6 +65,57 @@ async def test_llm_reranker_falls_back_to_noop_when_provider_fails(caplog: pytes
 
     assert [hit.chunk_id for hit in reranked] == ["fast", "slow"]
     assert "rerank_fallback" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_cohere_reranker_maps_index_sorts_and_filters() -> None:
+    # API trả results đã sort desc theo relevance_score, index trỏ về doc gốc.
+    async def post_fn(query: str, documents: list[str], top_n: int) -> dict:
+        assert query == "thủ đô việt nam"
+        assert top_n == 2  # min(top_k, len(docs))
+        return {"results": [
+            {"index": 1, "relevance_score": 0.94},
+            {"index": 0, "relevance_score": 0.48},
+            {"index": 2, "relevance_score": 0.10},
+        ]}
+
+    reranker = CohereRerankReranker(
+        model="cohere/rerank-4-pro", api_key="k", base_url="https://x/api/v1",
+        timeout_seconds=10.0, post_fn=post_fn,
+    )
+    hits = [_hit("hcm"), _hit("hanoi"), _hit("danang")]
+    reranked = await reranker.rerank("thủ đô việt nam", hits, top_k=2, threshold=0.35)
+
+    assert [h.chunk_id for h in reranked] == ["hanoi", "hcm"]  # sort theo score API
+    assert reranked[0].score == 0.94 and reranked[1].score == 0.48  # danang (0.10) bị threshold loại
+
+
+@pytest.mark.asyncio
+async def test_cohere_reranker_threshold_filters_all_keeps_top1() -> None:
+    async def post_fn(query: str, documents: list[str], top_n: int) -> dict:
+        return {"results": [{"index": 0, "relevance_score": 0.2}, {"index": 1, "relevance_score": 0.1}]}
+
+    reranker = CohereRerankReranker(
+        model="m", api_key="", base_url="https://x", timeout_seconds=10.0, post_fn=post_fn,
+    )
+    hits = [_hit("a"), _hit("b")]
+    reranked = await reranker.rerank("q", hits, top_k=2, threshold=0.9)  # lọc sạch
+    assert [h.chunk_id for h in reranked] == ["a"]  # giữ top-1 theo điểm API, không rỗng
+
+
+@pytest.mark.asyncio
+async def test_cohere_reranker_falls_back_to_vector_order_on_error(caplog: pytest.LogCaptureFixture) -> None:
+    async def post_fn(query: str, documents: list[str], top_n: int) -> dict:
+        raise TimeoutError("openrouter 503")
+
+    reranker = CohereRerankReranker(
+        model="m", api_key="", base_url="https://x", timeout_seconds=10.0, post_fn=post_fn,
+    )
+    hits = [_hit("slow", score=0.4), _hit("fast", score=0.9)]
+    caplog.set_level(logging.WARNING)
+    reranked = await reranker.rerank("q", hits, top_k=2, threshold=0.5)
+    assert [h.chunk_id for h in reranked] == ["fast", "slow"]  # vector-order
+    assert "rerank_fallback provider=cohere" in caplog.text
 
 
 def test_parse_scores_ignores_noise_and_clamps_values() -> None:
