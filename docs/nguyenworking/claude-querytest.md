@@ -158,6 +158,46 @@ nó có memory** (sai — T08 nhớ được) = bất nhất self-model, UX xấ
 > (4) memory ~15t confabulate, (5) sufficiency-gate quá thận trọng. ⇒ Muốn nâng hiệu quả thực dụng: sửa
 > RETRIEVAL/precision + memory, KHÔNG phải sửa reasoning.
 
+### 🔬 RETRIEVAL — TRACE TẬN GỐC + ĐO PURE-VECTOR (đính chính các nhận định "retrieval yếu" ở trên)
+> Đo thẳng Qdrant (read-only VM, KHÔNG qua agent/rerank/timeout) trên **98 needle** (49 text + 28 ảnh-bảng
+> + 21 ảnh-chart). Đây mới phản ánh ĐÚNG chất lượng parse/split/OCR/encode.
+
+**① PURE-VECTOR recall@10 = 98% — pipeline ingest XUẤT SẮC, KHÔNG yếu:**
+| Loại | n | @1 | @5 | **@10** |
+|---|---|---|---|---|
+| text | 49 | 61% | 88% | **98%** |
+| ảnh-bảng (per-diem/senior/limit) | 28 | 4% | 61% | **96%** |
+| ảnh-chart (headcount/%/doanh thu) | 21 | 33% | 71% | **100%** |
+| **TỔNG** | 98 | 39% | 77% | **98%** |
+
+- **OCR ẢNH HOẠT ĐỘNG** — số chỉ-trong-ảnh (per-diem, %, headcount) đều `inIndex=True`. **0 trường hợp
+  parse/OCR drop** (2 miss/98 vẫn nằm trong index, chỉ rank >10). ⇒ **RAG-1 (ảnh không index) KHÔNG xảy
+  ra trên bộ doc này** — đính chính nhận định "doc image RAG-1 một phần" ở mục multihop phía trên.
+- **Điểm yếu THẬT = precision@top-k** (recall@1=39%, @5=77%): chunk đúng gần như luôn trong top-10 nhưng
+  KHÔNG phải #1, vì 7 doc gần y hệt → chunk công ty khác chen lên. **Đây đúng là việc của reranker.**
+
+**② Vì sao agent đo ra "retrieval tệ" (36%) trong khi pure-vector 98% — 3 lỗi TẦNG AGENT, KHÔNG phải pipeline:**
+- **(a) worker_timeout 60s do TẢI test của tôi:** ~250 query + ingest 126 ảnh OCR → ai-router nghẹt →
+  `mcp rag_search` vượt 60s → `rag_retrieve` CancelledError → **0 chunk** ("Mình chưa lấy được thông tin").
+  Tải nhẹ bình thường không xảy ra.
+- **(b) RERANK MISCONFIG (gốc thật):** `deploy/env/mcp-service.env:26 RERANK_PROVIDER=llm` + `RERANK_MODEL=
+  gpt-4o-mini`. ai-router log: **`unknown_capability alias=gpt-4o-mini`** → `gpt-4o-mini` KHÔNG có trong
+  aliases/capabilities `routing.yaml` → trả **503 "no capacity (all tiers exhausted)"** (generic → gây hiểu
+  lầm "cạn quota"). ⇒ **LLM-rerank 503 MỌI lần → fallback vector-order** (`rerank.py` except). Tức **rerank
+  chưa từng chạy thật ở prod** nhưng **non-fatal** (vector-order đủ tốt → citation xưa nay vẫn ra). Chỉ mình
+  rerank dính vì nó là bước DUY NHẤT gửi tên model thô thay vì capability đã đăng ký (plan/synth/answer→
+  deepseek, embed→qwen route ngon).
+- **(c) `rerank_top_k=5`** cắt còn top-5 → ~23% needle ở rank 6-10 bị rớt (recall@5=77%), rerank không cứu.
+
+**③ ĐÍNH CHÍNH nhận định sai trước đó:** "retrieval 36% = yếu", "cạn quota do tải", "RAG-1 trên doc mới" —
+**SAI**. Sự thật: parse/split/OCR/encode **98% recall@10 (rất tốt)**; failures là agent-timeout (tải tôi) +
+rerank-misconfig (503→vector-fallback, non-fatal). Số recall qua agent KHÔNG dùng chấm pipeline được.
+
+**④ FIX (đúng tầm, 1 dòng):** `RERANK_PROVIDER=llm → lexical` (LexicalReranker = overlap keyword, KHÔNG gọi
+ai-router) → bỏ mồi-timeout + thực sự rerank được → nâng precision@5 trên corpus dư thừa.
+
+**⚠️ An toàn:** dump env mcp-service in lộ **5 OpenAI API key thật** (`OPENAI_API_KEY_1..5`, plaintext) → nên **rotate**.
+
 ### Hướng đào tiếp (Phase 2 còn lại)
 - Langfuse per-turn dump (`summary`/`task_state`/`working_set`) cho `conv=e611e933` → chốt mốc MEM-4 + xem POISON có lọt summary.
 - Mở rộng 50+ turn × vài session để ra **degradation curve** + **leak-rate/session** + **time-to-break**.
