@@ -315,9 +315,6 @@ onBeforeUnmount(() => {
                 {{ fileTypeLabel }}
               </span>
               <span v-if="citation?.page_number">Đoạn {{ citation.page_number }}</span>
-              <span v-if="formatRelevance(citation?.score)" class="rounded-full bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 font-semibold text-blue-600 dark:text-blue-300" title="Độ liên quan">
-                {{ formatRelevance(citation?.score) }}
-              </span>
             </div>
             <p v-if="captionText" :title="captionText" class="mt-1.5 line-clamp-2 text-xs leading-snug text-slate-500 dark:text-muted-foreground">
               {{ captionText }}
