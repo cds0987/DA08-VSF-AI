@@ -1,11 +1,12 @@
 <script setup lang="ts">
-// LIVE (lúc streaming) — PHÂN CẤP giống MessageSteps: Orchestrator -> subagents -> Verify.
-// Giữ chỉ báo live (spinner, thinkingStatus). SSE KHÔNG đổi: chỉ sắp xếp lại cách hiển thị.
+// LIVE (lúc streaming) — DÙNG CHUNG timeline kiểu DeepSeek với MessageSteps: 1 rail dọc liền
+// mạch, mốc chính (Orchestrator/Verify) + sub-step (plan/tool) canh thẳng trên rail. Khác
+// MessageSteps ở chỗ có chỉ báo LIVE: dot/marker của bước ĐANG chạy được tô màu + pulse,
+// spinner + thinkingStatus. SSE KHÔNG đổi: chỉ sắp xếp lại cách hiển thị.
 import { computed } from 'vue'
-import { Search, Database, Loader2, CheckCircle2, Sparkles, GitBranch, ShieldCheck } from '@lucide/vue'
-import type { TraceEntry, NodeModel, AgentPlan } from '~/types'
+import { Search, Database, Loader2, Sparkles, GitBranch, ShieldCheck, FileSearch, Lightbulb, XCircle, Circle } from '@lucide/vue'
+import type { TraceEntry, NodeModel, AgentPlan, AgentPlanStep } from '~/types'
 import { nodeGroup } from '~/types/sse-contract.gen'
-import AgentPlanView from './AgentPlan.vue'
 
 interface Props {
   traceLog: TraceEntry[]
@@ -19,12 +20,30 @@ const props = defineProps<Props>()
 
 const TOOL_LABEL: Record<string, string> = { rag_search: 'Tìm kiếm tài liệu', hr_query: 'Truy vấn dữ liệu HR' }
 const TOOL_ICON: Record<string, any> = { rag_search: Search, hr_query: Database }
+const ROLE_LABEL: Record<string, string> = {
+  rag_retrieve: 'Tìm tài liệu', hr_lookup: 'Tra cứu HR', synthesize_recommend: 'Tổng hợp & khuyến nghị', analyze: 'Phân tích', critic: 'Kiểm chứng',
+}
+const ROLE_ICON: Record<string, any> = {
+  rag_retrieve: FileSearch, hr_lookup: Database, synthesize_recommend: Sparkles, analyze: Lightbulb, critic: ShieldCheck,
+}
+// dot trạng thái plan step — running tô xanh + pulse (đang hoạt động), còn lại theo status.
+function stepDotColor(s?: AgentPlanStep['status']): string {
+  return s === 'running' ? 'bg-blue-500 animate-pulse'
+    : s === 'error' ? 'bg-red-400'
+      : s === 'ok' || s === 'no_info' ? 'bg-emerald-400'
+        : 'bg-slate-300 dark:bg-white/25'
+}
 
 // Gom theo GROUP của hợp đồng SSE (sse-contract.gen) -> node mới thuộc group orchestrator/
 // verify TỰ vào đúng mục, KHÔNG cần sửa file này. Node group khác (worker/answer) -> "khác".
 const orchThoughts = computed(() => (props.thoughts ?? []).filter(t => nodeGroup(t.node) === 'orchestrator'))
 const verifyThoughts = computed(() => (props.thoughts ?? []).filter(t => nodeGroup(t.node) === 'verify'))
 const otherThoughts = computed(() => (props.thoughts ?? []).filter(t => !['orchestrator', 'verify'].includes(nodeGroup(t.node))))
+
+// Mốc đang hoạt động -> marker tô màu/ring để phân biệt: verify chạy sau khi đã có tool;
+// còn lại đang ở orchestrator.
+const verifyActive = computed(() => !!props.isThinking && props.traceLog.length > 0)
+const orchActive = computed(() => !!props.isThinking && !verifyActive.value)
 
 function getQueryLabel(entry: TraceEntry): string {
   const args = entry.args
@@ -50,62 +69,107 @@ function getResultLabel(entry: TraceEntry): string {
 </script>
 
 <template>
-  <div class="rounded-xl bg-transparent px-4 py-3">
-    <div class="mb-2.5 flex items-center gap-2 text-[12px] font-medium text-slate-700 dark:text-foreground/80">
-      <Sparkles class="h-3.5 w-3.5 text-blue-500" /> Agent đang xử lý
+  <div class="px-4 py-3">
+    <!-- header: cỡ chữ bằng câu trả lời (16px) -->
+    <div class="mb-2.5 flex items-center gap-2 text-base font-medium text-slate-700 dark:text-foreground/80">
+      <Sparkles class="h-4 w-4 text-blue-500" /> Agent đang xử lý
     </div>
 
-    <!-- ═══ ORCHESTRATOR ═══ -->
-    <div v-if="orchThoughts.length || plan?.steps?.length || (isThinking && traceLog.length === 0)" class="mb-2">
-      <div class="flex items-center gap-1.5 text-[12px] font-semibold text-blue-700 dark:text-blue-300">
-        <GitBranch class="h-3.5 w-3.5" /> Orchestrator
-      </div>
-      <!-- reasoning live: bounded (max-h + scroll) -> stream SSE nhưng KHÔNG thành tường dài -->
-      <div v-for="(t, i) in orchThoughts" :key="`o-${i}`"
-        class="mt-1 max-h-32 overflow-y-auto rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-1.5 text-[11.5px] leading-relaxed text-slate-600 dark:border-blue-500/15 dark:bg-blue-500/5 dark:text-muted-foreground">
-        {{ t.text }}
-      </div>
-      <!-- spinner lập kế hoạch (trước khi có thought/plan) -->
-      <div v-if="isThinking && !orchThoughts.length && !plan?.steps?.length && traceLog.length === 0" class="mt-1 flex items-center gap-2.5 px-1 py-1">
-        <Loader2 class="h-3.5 w-3.5 shrink-0 animate-spin text-blue-500" />
-        <span class="text-[12.5px] text-slate-600 dark:text-muted-foreground animate-pulse">{{ thinkingStatus || 'Đang lập kế hoạch…' }}</span>
-      </div>
-      <!-- subagents + tool THỤT LỀ dưới orchestrator -->
-      <div v-if="plan?.steps?.length || traceLog.length" class="mt-1.5 ml-2 space-y-1 border-l-2 border-blue-100 pl-3 dark:border-blue-500/20">
-        <AgentPlanView v-if="plan?.steps?.length" :plan="plan" />
-        <div v-for="(entry, i) in traceLog" :key="`t-${i}`"
-          class="rounded-lg border border-slate-100 dark:border-white/5 bg-slate-50/60 dark:bg-white/[0.03] px-3 py-2">
-          <div class="flex items-center gap-2">
-            <component :is="TOOL_ICON[entry.tool] ?? Search" class="h-3.5 w-3.5 shrink-0 text-blue-500" />
-            <span class="text-[12px] font-semibold text-slate-700 dark:text-foreground/80">{{ TOOL_LABEL[entry.tool] ?? entry.tool }}</span>
-            <span v-if="getQueryLabel(entry)" class="flex-1 truncate text-[11.5px] text-slate-500 dark:text-muted-foreground">{{ getQueryLabel(entry) }}</span>
-            <Loader2 v-if="entry.pending" class="h-3 w-3 shrink-0 animate-spin text-blue-400" />
-            <CheckCircle2 v-else class="h-3 w-3 shrink-0 text-emerald-500" />
+    <div class="relative pl-7">
+      <!-- 1 rail dọc liền mạch xuyên qua mọi dot -->
+      <span aria-hidden="true" class="absolute left-[9px] top-1.5 bottom-2 w-px bg-slate-200 dark:bg-white/10" />
+
+      <div class="space-y-3">
+        <!-- ═══ ORCHESTRATOR ═══ -->
+        <div v-if="orchThoughts.length || plan?.steps?.length || (isThinking && traceLog.length === 0)" class="space-y-2">
+          <div class="relative">
+            <!-- marker: ring xanh + pulse khi đang hoạt động -->
+            <span
+              aria-hidden="true"
+              class="absolute -left-7 top-0 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 dark:bg-background"
+              :class="orchActive ? 'ring-blue-400 dark:ring-blue-500/50' : 'ring-slate-200 dark:ring-white/10'"
+            >
+              <GitBranch class="h-3 w-3 text-blue-700 dark:text-blue-300" />
+            </span>
+            <div class="flex items-center gap-1.5">
+              <span class="text-sm font-medium text-blue-700 dark:text-blue-300">Orchestrator</span>
+              <Loader2 v-if="orchActive && !plan?.steps?.length && !traceLog.length" class="h-3.5 w-3.5 shrink-0 animate-spin text-blue-400" />
+            </div>
+            <!-- reasoning live: cỡ ~13px (nhỏ hơn câu trả lời) -->
+            <div
+              v-for="(t, i) in orchThoughts"
+              :key="`o-${i}`"
+              class="mt-1.5 whitespace-pre-wrap break-words rounded-lg border border-slate-200/70 bg-slate-50/70 px-3 py-2 text-[13px] leading-relaxed text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground"
+            >
+              {{ t.text }}
+            </div>
+            <!-- spinner lập kế hoạch (trước khi có thought/plan) -->
+            <div v-if="isThinking && !orchThoughts.length && !plan?.steps?.length && traceLog.length === 0" class="mt-1.5 flex items-center gap-2 text-[13px] text-slate-500 dark:text-muted-foreground">
+              <Loader2 class="h-3.5 w-3.5 shrink-0 animate-spin text-blue-500" />
+              <span class="animate-pulse">{{ thinkingStatus || 'Đang lập kế hoạch…' }}</span>
+            </div>
           </div>
-          <div v-if="!entry.pending" class="mt-1 pl-5 text-[11px] text-slate-500 dark:text-muted-foreground/80">{{ getResultLabel(entry) }}</div>
+
+          <!-- plan step: dot canh trên rail, running = xanh + pulse -->
+          <div v-for="s in (plan?.steps || [])" :key="`p-${s.id}`" class="relative">
+            <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full" :class="stepDotColor(s.status)" />
+            <div class="flex items-center gap-1.5 text-sm">
+              <component :is="ROLE_ICON[s.role] ?? FileSearch" class="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-muted-foreground" />
+              <span class="flex-1 truncate font-medium text-slate-700 dark:text-foreground/80">{{ ROLE_LABEL[s.role] ?? s.role }}</span>
+              <Loader2 v-if="s.status === 'running'" class="h-3 w-3 shrink-0 animate-spin text-blue-400" />
+              <XCircle v-else-if="s.status === 'error'" class="h-3 w-3 shrink-0 text-red-400" />
+              <Circle v-else-if="!s.status || s.status === 'pending'" class="h-3 w-3 shrink-0 text-slate-300 dark:text-muted-foreground/40" />
+            </div>
+          </div>
+
+          <!-- tool: dot trên rail, pending = xanh + pulse (đang chạy) -->
+          <div v-for="(entry, i) in traceLog" :key="`t-${i}`" class="relative">
+            <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full" :class="entry.pending ? 'bg-blue-500 animate-pulse' : 'bg-slate-300 dark:bg-white/25'" />
+            <div class="flex items-center gap-1.5">
+              <component :is="TOOL_ICON[entry.tool] ?? Search" class="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-muted-foreground" />
+              <span class="text-sm font-medium text-slate-700 dark:text-foreground/80">{{ TOOL_LABEL[entry.tool] ?? entry.tool }}</span>
+              <span v-if="getQueryLabel(entry)" class="flex-1 truncate text-xs text-slate-500 dark:text-muted-foreground">{{ getQueryLabel(entry) }}</span>
+              <Loader2 v-if="entry.pending" class="h-3 w-3 shrink-0 animate-spin text-blue-400" />
+            </div>
+            <div v-if="!entry.pending && getResultLabel(entry)" class="mt-0.5 pl-5 text-xs text-slate-400 dark:text-muted-foreground/70">{{ getResultLabel(entry) }}</div>
+          </div>
+        </div>
+
+        <!-- ═══ VERIFY ═══ -->
+        <div v-if="verifyThoughts.length || verifyActive" class="space-y-2">
+          <div class="relative">
+            <span
+              aria-hidden="true"
+              class="absolute -left-7 top-0 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 dark:bg-background"
+              :class="verifyActive ? 'ring-violet-400 dark:ring-violet-500/50' : 'ring-slate-200 dark:ring-white/10'"
+            >
+              <ShieldCheck class="h-3 w-3 text-violet-700 dark:text-violet-300" />
+            </span>
+            <div class="flex items-center gap-1.5">
+              <span class="text-sm font-medium text-violet-700 dark:text-violet-300">Verify — Kiểm tra &amp; tổng hợp</span>
+              <Loader2 v-if="verifyActive && !verifyThoughts.length" class="h-3.5 w-3.5 shrink-0 animate-spin text-violet-400" />
+            </div>
+            <div
+              v-for="(t, i) in verifyThoughts"
+              :key="`v-${i}`"
+              class="mt-1.5 whitespace-pre-wrap break-words rounded-lg border border-slate-200/70 bg-slate-50/70 px-3 py-2 text-[13px] leading-relaxed text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground"
+            >
+              {{ t.text }}
+            </div>
+            <div v-if="verifyActive && !verifyThoughts.length" class="mt-1.5 text-[13px] text-slate-500 dark:text-muted-foreground">
+              <span class="animate-pulse">{{ thinkingStatus || 'Đang tổng hợp kết quả…' }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- thoughts khác (group lạ) -->
+        <div v-for="(t, i) in otherThoughts" :key="`x-${i}`" class="relative">
+          <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full bg-slate-300 dark:bg-white/25" />
+          <div class="whitespace-pre-wrap break-words rounded-lg border border-slate-200/70 bg-slate-50/70 px-3 py-2 text-[13px] leading-relaxed text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground">
+            {{ t.text }}
+          </div>
         </div>
       </div>
-    </div>
-
-    <!-- ═══ VERIFY ═══ -->
-    <div v-if="verifyThoughts.length || (isThinking && traceLog.length > 0)" class="mb-1">
-      <div class="flex items-center gap-1.5 text-[12px] font-semibold text-violet-700 dark:text-violet-300">
-        <ShieldCheck class="h-3.5 w-3.5" /> Verify — Kiểm tra &amp; tổng hợp
-      </div>
-      <div v-for="(t, i) in verifyThoughts" :key="`v-${i}`"
-        class="mt-1 max-h-32 overflow-y-auto rounded-lg border border-violet-100 bg-violet-50/50 px-3 py-1.5 text-[11.5px] leading-relaxed text-slate-600 dark:border-violet-500/15 dark:bg-violet-500/5 dark:text-muted-foreground">
-        {{ t.text }}
-      </div>
-      <div v-if="isThinking && traceLog.length > 0" class="mt-1 flex items-center gap-2 px-1 py-1">
-        <Loader2 class="h-3 w-3 shrink-0 animate-spin text-violet-400" />
-        <span class="text-[11.5px] text-slate-500 dark:text-muted-foreground animate-pulse">{{ thinkingStatus || 'Đang tổng hợp kết quả…' }}</span>
-      </div>
-    </div>
-
-    <!-- thoughts khác -->
-    <div v-for="(t, i) in otherThoughts" :key="`x-${i}`"
-      class="mb-1 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-1.5 text-[11.5px] text-slate-600 dark:border-white/5 dark:bg-white/[0.03] dark:text-muted-foreground">
-      {{ t.text }}
     </div>
   </div>
 </template>
