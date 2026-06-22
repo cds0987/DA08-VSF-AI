@@ -18,6 +18,7 @@ const session = useSessionStore()
 const isCollapsed = ref(true)
 const isAnimatingSidebar = ref(false)
 const isHoveringLogo = ref(false)
+const settingsOpen = ref(false)
 
 const ADMIN_NAV = [
   { label: 'Dashboard', to: '/', icon: LayoutDashboard },
@@ -53,7 +54,7 @@ const userInitials = computed(() => {
 <template>
   <!-- Sidebar -->
   <aside
-    class="flex shrink-0 flex-col relative z-50 transition-[width] duration-300 ease-in-out transform-gpu overflow-hidden h-full"
+    class="flex shrink-0 flex-col relative z-50 transition-[width] duration-300 ease-in-out transform-gpu overflow-hidden h-full bg-sidebar text-sidebar-foreground border-r border-sidebar-border"
     :class="[
       isCollapsed ? 'w-16' : 'w-[268px]',
     ]"
@@ -94,7 +95,7 @@ const userInitials = computed(() => {
 
               <div
                 v-if="isCollapsed"
-                class="absolute inset-0 z-20 flex items-center justify-center rounded-full bg-red-500/10 border border-red-500/20 text-[#0f172a]"
+                class="absolute inset-0 z-20 flex items-center justify-center rounded-full bg-red-500/10 border border-red-500/20 text-foreground"
                 :class="isHoveringLogo ? 'opacity-100' : 'opacity-0 pointer-events-none'"
               >
                 <PanelLeftOpen
@@ -109,7 +110,7 @@ const userInitials = computed(() => {
             v-show="!isCollapsed"
             class="flex flex-col leading-tight whitespace-nowrap overflow-hidden transition-opacity duration-300"
           >
-            <span class="text-[17px] font-extrabold tracking-tight text-[#0f172a] font-sans">
+            <span class="text-[17px] font-extrabold tracking-tight text-foreground font-sans">
               FeatureMind
             </span>
           </div>
@@ -118,7 +119,7 @@ const userInitials = computed(() => {
         <button
           v-show="!isCollapsed"
           @click="isCollapsed = true"
-          class="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900 bg-white border border-slate-200/50 shadow-sm cursor-pointer shrink-0 mr-4"
+          class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground bg-card border border-border shadow-sm cursor-pointer shrink-0 mr-4"
         >
           <PanelLeftClose
             class="h-5 w-5"
@@ -153,39 +154,44 @@ const userInitials = computed(() => {
     <div
       class="flex flex-col gap-1.5 shrink-0 w-full px-0 py-3"
     >
-      <!-- Standalone Settings Button -->
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            class="flex items-center rounded-md cursor-pointer shrink-0 h-9 transition-all w-full text-slate-600 hover:bg-slate-100 hover:text-slate-900 px-0 justify-start"
-          >
-            <div class="flex h-9 w-[64px] items-center justify-center shrink-0">
-              <Settings
-                class="shrink-0 h-5 w-5"
-              />
-            </div>
-            <span 
-              class="text-[13px] font-semibold whitespace-nowrap transition-opacity duration-300"
-              :class="isCollapsed ? 'opacity-0' : 'opacity-100'"
+      <!-- Standalone Settings Button (mở dialog Appearance: light/dark/system) -->
+      <Dialog v-model:open="settingsOpen">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              class="flex items-center rounded-md cursor-pointer shrink-0 h-9 transition-all w-full text-muted-foreground hover:bg-accent hover:text-foreground px-0 justify-start"
+              @click="settingsOpen = true"
             >
-              Settings
-            </span>
-          </button>
-        </TooltipTrigger>
-        <TooltipContent
-          v-if="isCollapsed"
-          side="right"
-          class="bg-white/90 backdrop-blur-md border-slate-200 text-slate-900 shadow-md"
-        >
-          Settings
-        </TooltipContent>
-      </Tooltip>
+              <div class="flex h-9 w-[64px] items-center justify-center shrink-0">
+                <Settings
+                  class="shrink-0 h-5 w-5"
+                />
+              </div>
+              <span
+                class="text-[13px] font-semibold whitespace-nowrap transition-opacity duration-300"
+                :class="isCollapsed ? 'opacity-0' : 'opacity-100'"
+              >
+                Settings
+              </span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent
+            v-if="isCollapsed"
+            side="right"
+            class="bg-popover/95 backdrop-blur-md border-border text-popover-foreground shadow-md"
+          >
+            Settings
+          </TooltipContent>
+        </Tooltip>
+        <SettingsDialog />
+      </Dialog>
 
       <!-- User Profile Dropdown -->
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
-            class="flex items-center rounded-md cursor-pointer shrink-0 h-12 transition-all px-0 w-full hover:bg-slate-100 justify-start"
+            class="flex items-center rounded-md cursor-pointer shrink-0 h-12 transition-all px-0 w-full hover:bg-accent justify-start"
           >
             <div class="flex h-12 w-[64px] items-center justify-center shrink-0">
               <div
@@ -198,12 +204,12 @@ const userInitials = computed(() => {
               class="min-w-0 flex-1 text-left flex flex-col justify-center transition-opacity duration-300"
               :class="isCollapsed ? 'opacity-0' : 'opacity-100'"
             >
-              <div class="truncate text-sm font-semibold text-slate-900 leading-tight">
+              <div class="truncate text-sm font-semibold text-foreground leading-tight">
                 {{ maskedEmail }}
               </div>
             </div>
-            <ChevronsUpDown 
-              class="h-4 w-4 text-slate-400 mr-2 shrink-0 transition-opacity duration-300" 
+            <ChevronsUpDown
+              class="h-4 w-4 text-muted-foreground mr-2 shrink-0 transition-opacity duration-300"
               :class="isCollapsed ? 'opacity-0' : 'opacity-100'"
             />
           </button>
@@ -212,12 +218,12 @@ const userInitials = computed(() => {
           side="right"
           align="end"
           :side-offset="12"
-          class="w-[180px] bg-white shadow-lg border-slate-100 text-slate-900 p-1.5"
+          class="w-[180px] bg-popover shadow-lg border-border text-popover-foreground p-1.5"
         >
           <DropdownMenuLabel>My Account</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            class="flex items-center gap-2 rounded-md px-2 py-1.5 cursor-pointer focus:bg-slate-50 focus:text-slate-900 text-red-600 focus:text-red-700"
+            class="flex items-center gap-2 rounded-md px-2 py-1.5 cursor-pointer focus:bg-accent text-red-600 focus:text-red-700 dark:text-red-400 dark:focus:text-red-300"
             @click="handleSignOut"
           >
             <LogOut class="h-4 w-4" />

@@ -12,7 +12,7 @@ const isLoginPage = computed(() => route.path === '/login')
   </div>
   <div
     v-else
-    class="flex h-screen w-full overflow-hidden relative bg-[#f8fafc] text-slate-900"
+    class="flex h-screen w-full overflow-hidden relative bg-background text-foreground"
   >
     <AppShell />
     <main
