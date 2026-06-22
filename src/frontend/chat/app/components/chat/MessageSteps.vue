@@ -136,7 +136,7 @@ function resultLabel(e: TraceEntry): string {
             <div
               v-for="(t, i) in (grouped[g] || [])"
               :key="`${g}-${i}`"
-              class="mt-1.5 max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-slate-200/70 bg-slate-50/70 px-2.5 py-1.5 text-[11px] leading-relaxed text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground"
+              class="mt-1.5 whitespace-pre-wrap break-words rounded-lg border border-slate-200/70 bg-slate-50/70 px-3 py-2 text-base leading-relaxed text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground"
             >
               {{ t.text }}
             </div>
