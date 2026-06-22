@@ -103,9 +103,9 @@ function getResultLabel(entry: TraceEntry): string {
             >
               {{ t.text }}
             </div>
-            <!-- trạng thái lập kế hoạch (trước khi có thought/plan) — shimmer thay cho spinner -->
+            <!-- trạng thái lập kế hoạch (trước khi có thought/plan) — text thường, KHÔNG shimmer -->
             <div v-if="isThinking && !orchThoughts.length && !plan?.steps?.length && traceLog.length === 0" class="mt-1.5 text-[13px] text-slate-500 dark:text-muted-foreground">
-              <span class="ai-shimmer">{{ thinkingStatus || 'Đang lập kế hoạch…' }}</span>
+              {{ thinkingStatus || 'Đang lập kế hoạch…' }}
             </div>
           </div>
 
@@ -152,7 +152,7 @@ function getResultLabel(entry: TraceEntry): string {
               {{ t.text }}
             </div>
             <div v-if="verifyActive && !verifyThoughts.length" class="mt-1.5 text-[13px] text-slate-500 dark:text-muted-foreground">
-              <span class="ai-shimmer">{{ thinkingStatus || 'Đang tổng hợp kết quả…' }}</span>
+              {{ thinkingStatus || 'Đang tổng hợp kết quả…' }}
             </div>
           </div>
         </div>
@@ -171,33 +171,36 @@ function getResultLabel(entry: TraceEntry): string {
 
 <style scoped>
 /* Hiệu ứng ánh sáng lướt ngang (DeepSeek-style) cho TIÊU ĐỀ bước đang chạy — thay cho spinner.
-   Base màu = currentColor (giữ đúng màu tiêu đề: blue/violet/slate); 1 dải sáng quét ngang. */
+   QUAN TRỌNG: background-color = currentColor làm NỀN base phủ KÍN chữ (giữ đúng màu tiêu đề
+   blue/violet/slate). Gradient chỉ là 1 DẢI SÁNG (phần còn lại trong suốt) chạy trên nền đó ->
+   dù dải sáng chạy ra ngoài vùng chữ thì nền base vẫn phủ -> KHÔNG bao giờ mất chữ. */
 .ai-shimmer {
+  background-color: currentColor;
   background-image: linear-gradient(
-    100deg,
-    currentColor 0%,
-    currentColor 40%,
-    color-mix(in srgb, currentColor 25%, #fff) 50%,
-    currentColor 60%,
-    currentColor 100%
+    90deg,
+    transparent 0%,
+    transparent 42%,
+    color-mix(in srgb, currentColor 30%, #fff) 50%,
+    transparent 58%,
+    transparent 100%
   );
   background-size: 200% 100%;
   background-repeat: no-repeat;
   -webkit-background-clip: text;
   background-clip: text;
-  /* KHÔNG set color:transparent — currentColor trong gradient cần giữ màu tiêu đề. Chỉ làm
-     trong suốt phần fill (webkit/blink); Firefox fallback hiển thị chữ màu thường (không shimmer). */
   -webkit-text-fill-color: transparent;
-  animation: ai-shimmer-sweep 1.6s linear infinite;
+  animation: ai-shimmer-sweep 1.8s linear infinite;
 }
+/* dải sáng vào từ trái (-100%) ra phải (200%); khi ra ngoài thì vô hình -> loop liền mạch. */
 @keyframes ai-shimmer-sweep {
-  0% { background-position: 150% 0; }
-  100% { background-position: -50% 0; }
+  0% { background-position: -100% 0; }
+  100% { background-position: 200% 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .ai-shimmer {
     animation: none;
     background-image: none;
+    background-color: transparent;
     -webkit-text-fill-color: currentColor;
   }
 }
