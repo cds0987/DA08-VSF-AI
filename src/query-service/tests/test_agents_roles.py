@@ -77,6 +77,22 @@ async def test_hr_lookup_extracts_profile():
     assert "annual_remaining" in out.output
 
 
+def test_hr_grounding_hint_blocks_money_fabrication():
+    """P1-1: sự thật code-side chống bịa — 1 kỳ lương không thể thành '6 tháng', thiếu đơn vị
+    không tự thêm USD/VND. (HALLU-1/UNIT-1: trace e5507b1a bịa '1.413,55 USD/6 tháng'.)"""
+    from app.agents.roles.hr_lookup import _grounding_hint
+    h = _grounding_hint({"payroll": [{"period": "2026-06", "gross_salary": 1663.0, "net_salary": 1413.55}]})
+    assert "1 kỳ" in h and "2026-06" in h
+    assert "USD/VND" in h  # cảnh báo KHÔNG tự thêm đơn vị
+    # nhiều kỳ + có currency -> không cảnh báo đơn vị
+    h2 = _grounding_hint({"payroll": [{"period": "2026-05", "currency": "VND"},
+                                      {"period": "2026-06", "currency": "VND"}]})
+    assert "2 kỳ" in h2 and "USD/VND" not in h2
+    # không có payroll -> rỗng (không nhiễu prompt)
+    assert _grounding_hint({"leave_balance": {"annual_remaining": 12}}) == ""
+    assert _grounding_hint("not-a-dict") == ""
+
+
 async def test_synthesize_no_model_falls_back_no_info():
     out = await AGENT_REGISTRY.get("synthesize_recommend")(_ctx()).run(
         WorkerInput(4, "synthesize_recommend", "q", "d", upstream={1: "x"}))
