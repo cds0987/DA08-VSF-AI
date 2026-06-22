@@ -30,7 +30,8 @@ theo trang: scan/embedded (thiết yếu) trước vector-raster (bổ sung). Lo
   vector-raster-capped, scan-over-cap-capped (KHÔNG raise, total=25), embedded-over-cap-capped
   (40 ảnh→25, text giữ), + 3 case cũ (vector trigger/disable/scan). Fake `extract_image` trả ảnh hợp lệ.
 
-**Result.**
+**Result.** ✅ XONG.
 - Unit: rag-worker vector-OCR tests **6/6 pass**.
-- CI/CD: ___ (điền sau push)
-- Playwright/Langfuse live: ___ (re-upload 2402.04355v3 → indexed >0 chunk, doc-ingest trace SUCCESS).
+- CI/CD: 2 commit (`1ef04e7` budget vector-raster, `214296e` graceful cap) đều **xanh + deploy**.
+- Playwright live: re-upload `2402.04355v3.pdf` (38 ảnh, TRƯỚC: fail 0 chunk "exceeds MAX_OCR_PAGES")
+  → SAU: **indexed = 283 chunks** (OCR 25 ảnh đầu + giữ text-layer). Doc không còn bị mất.
