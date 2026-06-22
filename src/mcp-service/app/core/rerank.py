@@ -107,7 +107,11 @@ class LlmReranker:
             return ordered
 
         scored.sort(key=lambda pair: pair[0], reverse=True)
-        return [hit for _, hit in scored[:top_k]]
+        result = [hit for _, hit in scored[:top_k]]
+        if not result:
+            logger.warning("rerank_threshold_filtered_all candidates=%d threshold=%s", len(hits), threshold)
+            return sorted(hits, key=lambda h: h.score, reverse=True)[:1]
+        return result
 
     async def _score_batch_with_openai(self, query: str, passages: list[str]) -> dict[int, float]:
         response = await self._openai_client().chat.completions.create(
