@@ -16,7 +16,7 @@ import { SSE_GROUPS, SSE_TOOLS, nodeGroup, type SseGroup } from '~/types/sse-con
 const props = defineProps<{ trace: TraceEntry[]; models?: NodeModel[]; thoughts?: Thought[]; plan?: AgentPlan }>()
 
 // Nhãn + icon role của plan step (subagent). Render INLINE trong timeline để dot nằm thẳng trên
-// rail — không qua AgentPlan.vue (component đó còn dùng ở Pipeline với layout grid song song).
+// rail. Pipeline.vue (live) cũng render inline cùng kiểu -> 2 nơi đồng bộ, không qua component riêng.
 const ROLE_LABEL: Record<string, string> = {
   rag_retrieve: 'Tìm tài liệu',
   hr_lookup: 'Tra cứu HR',
@@ -115,12 +115,12 @@ function resultLabel(e: TraceEntry): string {
     <!-- Header toggle -->
     <button
       v-if="trace.length || thoughts?.length || plan?.steps?.length"
-      class="group flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-muted-foreground dark:hover:bg-white/5 dark:hover:text-foreground"
+      class="group flex items-center gap-1.5 rounded-md px-2 py-1 text-base font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-muted-foreground dark:hover:bg-white/5 dark:hover:text-foreground"
       @click="open = !open"
     >
-      <Sparkles class="h-3.5 w-3.5 text-blue-500" />
+      <Sparkles class="h-4 w-4 text-blue-500" />
       <span>{{ trace.length ? `Agent đã thực hiện ${trace.length} bước` : 'Xem suy nghĩ của agent' }}</span>
-      <ChevronRight class="h-3.5 w-3.5 transition-transform" :class="open && 'rotate-90'" />
+      <ChevronRight class="h-4 w-4 transition-transform" :class="open && 'rotate-90'" />
     </button>
 
     <!-- Timeline dọc kiểu DeepSeek: MỘT đường line liền mạch chạy qua TẤT CẢ dot (mốc chính +
@@ -140,12 +140,12 @@ function resultLabel(e: TraceEntry): string {
               <component :is="GROUP_STYLE[g].icon" class="h-3 w-3" :class="GROUP_STYLE[g].head" />
             </span>
             <div class="flex items-center gap-1.5">
-              <span class="text-[12px] font-medium" :class="GROUP_STYLE[g].head">{{ GROUP_STYLE[g].title }}</span>
+              <span class="text-sm font-medium" :class="GROUP_STYLE[g].head">{{ GROUP_STYLE[g].title }}</span>
             </div>
-            <!-- raw text / JSON: container gọn, nền nhẹ, scroll nội bộ, không phá layout -->
+            <!-- raw text / JSON: cỡ chữ nhỏ hơn câu trả lời (~13px) kiểu DeepSeek, hiện full -->
             <div v-for="(t, i) in (grouped[g] || [])" :key="`${g}-${i}`" class="mt-1.5">
               <div
-                class="whitespace-pre-wrap break-words rounded-lg border border-slate-200/70 bg-slate-50/70 px-3 py-2 text-base leading-relaxed text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground"
+                class="whitespace-pre-wrap break-words rounded-lg border border-slate-200/70 bg-slate-50/70 px-3 py-2 text-[13px] leading-relaxed text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground"
                 :class="isLongThought(t.text) && !expandedThoughts[`${g}-${i}`] && 'line-clamp-6'"
               >
                 {{ t.text }}
@@ -165,7 +165,7 @@ function resultLabel(e: TraceEntry): string {
           <template v-if="g === 'orchestrator'">
             <div v-for="s in (plan?.steps || [])" :key="`p-${s.id}`" class="relative">
               <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full" :class="stepDotColor(s.status)" />
-              <div class="flex items-center gap-1.5 text-[11px]">
+              <div class="flex items-center gap-1.5 text-sm">
                 <component :is="ROLE_ICON[s.role] ?? FileSearch" class="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-muted-foreground" />
                 <span class="flex-1 truncate font-medium text-slate-700 dark:text-foreground/80">{{ ROLE_LABEL[s.role] ?? s.role }}</span>
                 <Loader2 v-if="s.status === 'running'" class="h-3 w-3 shrink-0 animate-spin text-blue-400" />
@@ -178,10 +178,10 @@ function resultLabel(e: TraceEntry): string {
               <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full bg-slate-300 dark:bg-white/25" />
               <div class="flex items-center gap-1.5">
                 <component :is="TOOL_ICON[e.tool] ?? Search" class="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-muted-foreground" />
-                <span class="text-[11.5px] font-medium text-slate-700 dark:text-foreground/80">{{ TOOL_LABEL[e.tool] ?? e.tool }}</span>
-                <span v-if="queryLabel(e)" class="flex-1 truncate text-[11px] text-slate-500 dark:text-muted-foreground">{{ queryLabel(e) }}</span>
+                <span class="text-sm font-medium text-slate-700 dark:text-foreground/80">{{ TOOL_LABEL[e.tool] ?? e.tool }}</span>
+                <span v-if="queryLabel(e)" class="flex-1 truncate text-xs text-slate-500 dark:text-muted-foreground">{{ queryLabel(e) }}</span>
               </div>
-              <div class="mt-0.5 pl-5 text-[11px] text-slate-400 dark:text-muted-foreground/70">{{ resultLabel(e) }}</div>
+              <div class="mt-0.5 pl-5 text-xs text-slate-400 dark:text-muted-foreground/70">{{ resultLabel(e) }}</div>
             </div>
           </template>
         </div>
