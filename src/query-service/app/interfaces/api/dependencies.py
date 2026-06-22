@@ -20,7 +20,6 @@ from app.infrastructure.db.postgres_conversation_repo import PostgresConversatio
 from app.infrastructure.db.postgres_document_access_repo import PostgresDocumentAccessRepository
 from app.infrastructure.db.postgres_notification_repo import PostgresNotificationRepository
 from app.infrastructure.db.postgres_user_access_profile_repo import PostgresUserAccessProfileRepository
-from app.infrastructure.external.langchain_mcp_client import LangChainMCPToolsLoader
 from app.infrastructure.external.mcp_client import MCPStreamableHttpClient, MockMCPClient
 from app.infrastructure.external.hr_leave_client import HRLeaveClient
 from app.infrastructure.external.intent_ai_client import (
@@ -280,20 +279,6 @@ def get_notification_service() -> NotificationService:
     )
 
 
-@lru_cache
-def get_langchain_mcp_tools_loader() -> LangChainMCPToolsLoader | None:
-    """
-    Build a LangChainMCPToolsLoader when both USE_LANGGRAPH and real MCP are active.
-    Returns None for mock mode (think_node falls back to build_langgraph_tools).
-    """
-    settings = get_settings()
-    if not settings.use_langgraph:
-        return None
-    if settings.mcp_mode.strip().lower() not in {"real", "mcp"}:
-        return None
-    return LangChainMCPToolsLoader(settings=settings, mcp_client=get_mcp_client())
-
-
 def get_node_model(node: str):
     """MosaChatModel cho 1 node (triage/think/answer) theo profiles.yaml.
 
@@ -367,7 +352,6 @@ def reset_state_for_tests() -> None:
     get_intent_llm_client.cache_clear()
     get_intent_classifier.cache_clear()
     get_query_router.cache_clear()
-    get_langchain_mcp_tools_loader.cache_clear()
     get_orchestrator_planner.cache_clear()
     get_observability_tracer.cache_clear()
     get_guardrails.cache_clear()

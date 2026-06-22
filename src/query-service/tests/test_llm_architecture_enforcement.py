@@ -23,7 +23,6 @@ _APP = Path(__file__).resolve().parents[1] / "app"
 # Thêm file vào đây = quyết định kiến trúc CÓ Ý THỨC (phải đảm bảo file đó đọc openai_base_url).
 _SDK_CALL_ALLOWLIST = {
     "infrastructure/external/langchain_chat_adapter.py",        # chat.completions (chuẩn, route)
-    "infrastructure/external/langchain_responses_adapter.py",   # responses (legacy, kill-switch)
     "infrastructure/external/openai_client.py",                 # legacy streaming client
     "infrastructure/external/intent_ai_client.py",              # intent embed + LLM
     "infrastructure/external/tool_decision_client.py",          # deprecated
@@ -115,7 +114,6 @@ def test_capability_set_matches_routing_yaml_no_drift():
 # ----------------------------------------------------------------- GATE 3
 @pytest.mark.parametrize("dotted", [
     "app.infrastructure.external.langchain_chat_adapter.OpenAIChatModel",
-    "app.infrastructure.external.langchain_responses_adapter.OpenAIResponsesChatModel",
 ])
 def test_adapter_preserves_basechatmodel_surface(dotted):
     import importlib

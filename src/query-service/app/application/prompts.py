@@ -1,7 +1,7 @@
 """
-Shared LLM system prompts for the LangGraph agent.
+Shared LLM system prompts.
 
-Single source-of-truth imported by langgraph_nodes and langchain_responses_adapter.
+Single source-of-truth imported by langchain_chat_adapter (build_agent_system_prompt).
 """
 from __future__ import annotations
 

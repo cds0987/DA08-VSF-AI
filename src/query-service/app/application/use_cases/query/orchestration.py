@@ -931,8 +931,8 @@ def _usage_from_acc(acc: dict, default_model: str) -> dict | None:
 
 def _collect_usage(final_state: Any, default_model: str) -> dict | None:
     """
-    Gom token usage từ mọi AIMessage trong final_state (triage + think + answer đều qua
-    OpenAIResponsesChatModel) -> {model, input_tokens, output_tokens, cached_tokens}.
+    Gom token usage từ mọi AIMessage trong final_state (các node đều qua
+    MosaChatModel/OpenAIChatModel) -> {model, input_tokens, output_tokens, cached_tokens}.
 
     Trả None nếu không có token nào (mock mode / model không trả usage) -> langfuse bỏ
     qua generation. model lấy từ response_metadata.model_name của AIMessage; nhiều model

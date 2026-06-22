@@ -19,7 +19,6 @@ class HealthResponse(BaseModel):
 
 from app.infrastructure.config import get_settings
 from app.interfaces.api.dependencies import (
-    get_langchain_mcp_tools_loader,
     get_mcp_client,
     get_nats_subscriber_manager,
     get_rate_limiter,
@@ -44,10 +43,6 @@ async def lifespan(app: FastAPI):
     manager = get_nats_subscriber_manager()
     if manager is not None:
         await manager.start()
-
-    tools_loader = get_langchain_mcp_tools_loader()
-    if tools_loader is not None:
-        await tools_loader.warmup()
 
     try:
         yield
