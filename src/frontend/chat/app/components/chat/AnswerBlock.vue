@@ -324,10 +324,6 @@ function nextCite() {
               <span class="text-[10px] text-slate-400">{{ popoverIndex + 1 }}/{{ popoverCitations.length }}</span>
             </template>
           </div>
-          <span
-            v-if="formatRelevance(activeCite.score)"
-            class="rounded-full bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300"
-          >{{ formatRelevance(activeCite.score) }}</span>
         </div>
         <!-- Title: logo VSF + tên tài liệu -->
         <div class="flex items-center gap-1.5 mb-1">
