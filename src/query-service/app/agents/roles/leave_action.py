@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from app.agents.base import AgentRole, WorkerInput, WorkerOutput
 from app.agents.registry import register_agent
@@ -52,7 +53,7 @@ date_spec: KHÔNG tự tính ngày. Mô tả mốc để tool resolve_date quy �
 - kind: "today" | "tomorrow" | "day_after_tomorrow" | "weekday" | "offset_days" | "absolute".
 - weekday (khi kind=weekday): "thu_2".."thu_7","chu_nhat" (thứ 2..CN). week_offset: 0=tuần này,1=tuần sau,-1=trước.
 - days (khi kind=offset_days): số ngày kể từ hôm nay.
-- date (khi kind=absolute): "YYYY-MM-DD" user nói rõ.
+- date (khi kind=absolute): "YYYY-MM-DD". Nếu user chỉ nói DD/MM (thiếu năm), dùng năm từ HÔM NAY ở đầu prompt.
 - span_days: số ngày nghỉ LIÊN TIẾP (vd "nghỉ 3 ngày từ thứ 2 tuần sau" -> kind=weekday,
   weekday=thu_2, week_offset=1, span_days=3). Nghỉ 1 ngày -> span_days=1.
 Nhiều ngày RỜI RẠC ("thứ 6 VÀ thứ 7 tuần sau") -> NHIỀU item, mỗi item 1 date_spec riêng.
@@ -96,11 +97,13 @@ class LeaveActionRole(AgentRole):
             # Không có model -> không parse được; hỏi làm rõ (an toàn, không bịa đơn).
             return WorkerOutput(task.step_id, self.name, _CLARIFY_FALLBACK, status="ok")
 
+        today_vn = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).strftime("%d/%m/%Y")
         history_txt = "\n".join(
             f"{r}: {c}" for r, c in (ctx.history or ()) if str(c or "").strip()
         )
         user = (
-            (f"HỘI THOẠI GẦN ĐÂY:\n{history_txt}\n\n" if history_txt else "")
+            f"HÔM NAY: {today_vn}\n"
+            + (f"HỘI THOẠI GẦN ĐÂY:\n{history_txt}\n\n" if history_txt else "")
             + f"CÂU MỚI NHẤT: {question}"
         )
         raw = await acomplete(model, _PARSE_SYSTEM, user,
