@@ -32,3 +32,6 @@ deploy/nginx/.htpasswd
 deploy/nginx/.htpasswd-qdrant
 .codegraph
 local-stack/
+# .pw-test/: harness test cục bộ (Playwright) — chứa creds Langfuse/login plaintext + ảnh/log
+# dung lượng lớn. KHÔNG commit (tránh lộ mật khẩu admin + Basic Auth).
+.pw-test/
