@@ -676,11 +676,33 @@ async def hr_profile(
             "kpi": perf.kpi, "reviewer_user_id": perf.reviewer_user_id,
         },
     }
+
+    # Nhân thân (bảng employees) — KHÔNG nằm trong 7 section trên. Chỉ expose nhóm an toàn
+    # (bỏ phone_number/date_of_birth — PII nhạy). manager_user_id là UUID -> resolve sang
+    # tên người quản lý (1 lookup phụ). emp None -> employee=null (LLM nói "chưa có thông tin",
+    # KHÔNG bịa). Không dev-mock: danh tính là master data (đồng bộ từ event user.*).
+    emp = await repo.get_employee_by_user_id(uid)
+    manager_name = None
+    if emp is not None and emp.manager_user_id:
+        mgr = await repo.get_employee_by_user_id(emp.manager_user_id)
+        manager_name = mgr.full_name if mgr is not None else None
+    data["employee"] = None if emp is None else {
+        "full_name": emp.full_name,
+        "department": emp.department,
+        "job_title": emp.job_title,
+        "employment_status": emp.employment_status,
+        "employee_code": emp.employee_code,
+        "company_email": emp.company_email,
+        "hire_date": emp.hire_date.isoformat() if emp.hire_date else None,
+        "manager_name": manager_name,
+    }
+
     # Audit 1 lần (profile chạm cả intent nhạy cảm payroll/benefits/performance — self-access).
     logger.info("hr_audit intent=profile user=%s result=%s", _mask_user_id(uid),
                 "found" if any(v for v in data.values()) else "empty")
     return {"intent": "profile", "data": data,
-            "summary": "Hồ sơ HR cá nhân (phép, đơn nghỉ, chấm công, onboarding, lương, phúc lợi, hiệu suất)."}
+            "summary": "Hồ sơ HR cá nhân (nhân thân: phòng ban, chức danh, quản lý; phép, đơn nghỉ, "
+                       "chấm công, onboarding, lương, phúc lợi, hiệu suất)."}
 
 
 @router.get("/health")

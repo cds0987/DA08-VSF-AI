@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime
+
 from fastapi.testclient import TestClient
 
 import app.core.config as core_config
@@ -9,6 +11,7 @@ from app.domain.entities.dtos import (
     AttendanceDTO,
     BenefitItemDTO,
     BenefitsDTO,
+    EmployeeDTO,
     LeaveBalanceDTO,
     LeaveRequestDTO,
     OnboardingDTO,
@@ -22,6 +25,28 @@ from app.main import app
 
 USER_HR = "11111111-1111-4111-8111-111111111111"
 USER_FINANCE = "22222222-2222-4222-8222-222222222222"
+USER_MANAGER = "33333333-3333-4333-8333-333333333333"
+
+
+def _employee(user_id: str, department: str, *, manager_user_id: str | None, full_name: str) -> EmployeeDTO:
+    now = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    return EmployeeDTO(
+        id=f"emp-{user_id[:8]}",
+        user_id=user_id,
+        account_type="internal",
+        employee_code="VSF-001",
+        company_email="user@vsf.local",
+        department=department,
+        job_title="AI Engineer",
+        manager_user_id=manager_user_id,
+        employment_status="active",
+        created_at=now,
+        updated_at=now,
+        full_name=full_name,
+        phone_number="0901234567",
+        date_of_birth=datetime.date(1995, 5, 20),
+        hire_date=datetime.date(2024, 3, 1),
+    )
 
 
 class FakeHrRepository(HrRepository):
@@ -48,7 +73,13 @@ class FakeHrRepository(HrRepository):
         return None
 
     async def get_employee_by_user_id(self, user_id):
-        return None
+        data = {
+            USER_HR: _employee(USER_HR, "Phong Ky thuat", manager_user_id=USER_MANAGER,
+                               full_name="Nguyen Van A"),
+            USER_MANAGER: _employee(USER_MANAGER, "Phong Ky thuat", manager_user_id=None,
+                                    full_name="Tran Thi Manager"),
+        }
+        return data.get(user_id)
 
     async def update_employee(self, *args, **kwargs):
         return None
@@ -372,3 +403,40 @@ def test_sensitive_intent_no_data_returns_404() -> None:
         headers={"X-Internal-Token": TOKEN},
     )
     assert response.status_code == 404
+
+
+def test_profile_includes_employee_identity() -> None:
+    """profile gộp thêm block 'employee' (nhân thân) — phòng ban, chức danh, tên quản lý."""
+    client = _client()
+    response = client.post(
+        "/hr/profile",
+        json={"user_id": USER_HR},
+        headers={"X-Internal-Token": TOKEN},
+    )
+    assert response.status_code == 200
+    emp = response.json()["data"]["employee"]
+    assert emp is not None
+    assert emp["department"] == "Phong Ky thuat"
+    assert emp["job_title"] == "AI Engineer"
+    assert emp["employment_status"] == "active"
+    assert emp["hire_date"] == "2024-03-01"
+    # manager_user_id (UUID) đã được resolve sang tên người quản lý.
+    assert emp["manager_name"] == "Tran Thi Manager"
+    # PII nhạy (KHÔNG expose) — không được lọt vào block employee.
+    assert "phone_number" not in emp
+    assert "date_of_birth" not in emp
+
+
+def test_profile_employee_null_when_no_record() -> None:
+    """User chưa có hồ sơ nhân thân -> employee=null (LLM nói 'chưa có thông tin', KHÔNG bịa)."""
+    client = _client()
+    response = client.post(
+        "/hr/profile",
+        json={"user_id": USER_FINANCE},
+        headers={"X-Internal-Token": TOKEN},
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["employee"] is None
+    # Các section khác vẫn hoạt động bình thường.
+    assert "leave_balance" in data
