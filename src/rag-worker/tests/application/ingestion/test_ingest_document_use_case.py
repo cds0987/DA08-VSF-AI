@@ -897,3 +897,6 @@ def test_classify_ingest_error_distinguishes_transient_and_permanent() -> None:
         == "transient"
     )
     assert classify_ingest_error(ChunkLimitExceededError("too many")) == "permanent"
+    # 0-chunk (OCR/scanned flake) -> transient: store_reconciler retry (cap 3) thay vì giết doc.
+    from app.application.use_cases.ingestion.ingest_document_use_case import EmptyIngestResultError
+    assert classify_ingest_error(EmptyIngestResultError("0 chunks")) == "transient"

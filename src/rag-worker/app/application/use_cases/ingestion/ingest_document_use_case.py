@@ -41,12 +41,16 @@ def classify_ingest_error(exc: BaseException) -> str:
             CaptionFallbackThresholdExceededError,
             TimeoutError,
             asyncio.TimeoutError,
+            # 0 chunk thường do OCR/vision (scanned PDF/ảnh) FLAKE transient -> 1 lần lỗi
+            # KHÔNG nên giết doc vĩnh viễn. Xếp transient -> store_reconciler retry (cap
+            # max_failed_reconcile_attempts=3); doc rỗng THẬT vẫn chốt fail sau 3 lần.
+            EmptyIngestResultError,
         ),
     ):
         return "transient"
     if is_qdrant_collection_missing_error(exc):
         return "transient"
-    if isinstance(exc, (PermanentAIError, EmptyIngestResultError, ChunkLimitExceededError)):
+    if isinstance(exc, (PermanentAIError, ChunkLimitExceededError)):
         return "permanent"
     return "permanent"
 
