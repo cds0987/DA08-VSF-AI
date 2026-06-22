@@ -137,6 +137,21 @@
   --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.551 0.027 264.364);
+
+  /* Semantic status colors: tách riêng cho dark để giữ contrast (sáng hơn, ít bão hoà hơn). */
+  --success: oklch(0.7 0.16 150);
+  --success-foreground: oklch(0.16 0.03 160);
+  --warning: oklch(0.82 0.16 76);
+  --warning-foreground: oklch(0.2 0.03 70);
+  --info: oklch(0.7 0.13 232);
+  --info-foreground: oklch(0.16 0.03 232);
+
+  /* Chart palette tuned cho nền tối (sáng/đậm hơn để nổi trên surface tối). */
+  --chart-1: oklch(0.7 0.19 41);
+  --chart-2: oklch(0.7 0.13 185);
+  --chart-3: oklch(0.72 0.15 227);
+  --chart-4: oklch(0.83 0.19 84);
+  --chart-5: oklch(0.77 0.19 70);
 }
 
 @layer base {
@@ -166,5 +181,12 @@
   }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background: rgba(0, 0, 0, 0.2);
+  }
+  /* Dark: thumb tối gần như vô hình trên nền tối -> dùng thumb sáng. */
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.14);
+  }
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.24);
   }
 }

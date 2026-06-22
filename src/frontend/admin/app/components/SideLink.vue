@@ -27,17 +27,17 @@ const active = computed(() => {
         :class="cn(
           'flex items-center rounded-md text-[13px] font-semibold overflow-hidden cursor-pointer shrink-0 h-9 transition-all w-full justify-start',
           active
-            ? 'bg-blue-50 text-blue-700 shadow-sm ring-1 ring-blue-100'
-            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+            ? 'bg-blue-50 text-blue-700 shadow-sm ring-1 ring-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-500/25'
+            : 'text-muted-foreground hover:bg-accent hover:text-foreground',
         )"
       >
         <div class="flex h-9 w-[64px] items-center justify-center shrink-0">
-          <component 
-            :is="item.icon" 
+          <component
+            :is="item.icon"
             :class="cn(
               'h-5 w-5 shrink-0',
-              active ? 'text-blue-600' : 'text-slate-500'
-            )" 
+              active ? 'text-blue-600 dark:text-blue-300' : 'text-muted-foreground'
+            )"
           />
         </div>
         <span
@@ -51,7 +51,7 @@ const active = computed(() => {
     <TooltipContent
       v-if="isCollapsed"
       side="right"
-      class="bg-white/90 backdrop-blur-md border-slate-200 text-slate-900 shadow-md"
+      class="bg-popover/95 backdrop-blur-md border-border text-popover-foreground shadow-md"
     >
       {{ item.label }}
     </TooltipContent>
