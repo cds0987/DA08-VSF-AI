@@ -316,6 +316,9 @@ export const useChatStore = defineStore('chat', () => {
   const conversationLoadError = ref<'error' | null>(null)
   const pipeline = ref<number>(-1)
   const streamingText = ref('')
+  // Key ổn định cho lượt trả lời đang chạy: placeholder-stream và message-cuối dùng chung
+  // -> Vue patch cùng node AnswerBlock thay vì remount (hết flash lúc stream xong).
+  const pendingAssistantId = ref('')
   const thinkingStatus = ref('')
   const traceLog = ref<TraceEntry[]>([])
   const modelsUsed = ref<{ node: string; model: string }[]>([])
@@ -677,6 +680,8 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     streamingText.value = ''
+    // Cấp key lượt MỚI ngay đầu lượt -> placeholder-stream và message-cuối khớp key.
+    pendingAssistantId.value = 'a-' + Date.now()
     thinkingStatus.value = ''
     traceLog.value = []
     modelsUsed.value = []
@@ -866,6 +871,9 @@ export const useChatStore = defineStore('chat', () => {
           // Ưu tiên id row server (ổn định qua reload -> patch được trạng thái action);
           // fallback id cục bộ khi done event không kèm message_id.
           id: result.message_id || ('a-' + Date.now()),
+          // Cùng turnKey với placeholder-stream -> Vue giữ nguyên node AnswerBlock, chỉ patch
+          // (bỏ cursor, [N]->chip, hiện toolbar) thay vì remount -> không flash.
+          turnKey: pendingAssistantId.value || undefined,
           role: 'assistant',
           content: extracted.content, // intro nếu là action, raw JSON đã được ẩn
           actions: extracted.actions,
@@ -998,6 +1006,7 @@ export const useChatStore = defineStore('chat', () => {
     conversationLoadError,
     pipeline,
     streamingText,
+    pendingAssistantId,
     thinkingStatus,
     traceLog,
     modelsUsed,

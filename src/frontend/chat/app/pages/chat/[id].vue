@@ -137,6 +137,7 @@ watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText
             :pipeline="chat.pipeline"
             :pipeline-stages="PIPELINE_STAGES"
             :streaming-text="chat.streamingText"
+            :streaming-turn-key="chat.pendingAssistantId"
             :thinking-status="chat.thinkingStatus"
             :trace-log="chat.traceLog"
             :models-used="chat.modelsUsed"
