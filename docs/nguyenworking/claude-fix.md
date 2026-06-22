@@ -31,11 +31,16 @@ hơn k). KHÔNG đụng reranker (cohere vẫn nguyên) — chỉ thêm tầng s
 - Test `tests/test_search_service.py`: +4 (cap+fill, fill-overcap, disabled-passthrough, rag_search
   dùng pool rộng + diversity). 15/15 pass.
 
-**Result.**
+**Result.** ✅ XONG (cải thiện rõ).
 - Unit: mcp search/config/rerank **15/15 pass**.
-- CI/CD: ___ (sau push)
-- Playwright/Langfuse live: ___ (re-query "similarity thresholds" → sources KHÔNG còn 1-doc-×5; +
-  re-eval doc nhỏ bị chôn xem recall cải thiện).
+- CI/CD: commit `1e68afd` **xanh + deploy** (mcp-service rebuild).
+- Re-eval live (cùng corpus 23 doc + 71 distractor): **real-retrieval 3/8 → 6/8** (+37.5pp) —
+  diversity giúp nhiều doc nổi lên → gt xuất hiện trong sources. ocr-vector/scan/parse giữ 100%.
+  ocr-raster 2/3→1/3 (noise n=3, query doc-nhỏ borderline). Net recall tăng.
+- **Giới hạn còn lại:** diversity ở tầng PER-CALL (mcp). Agent gọi rag_search nhiều lần →
+  AGGREGATE citation ở query-service vẫn có thể 1-doc nhiều chunk (vd query "similarity thresholds"
+  sources vẫn 2406.17374×7). Muốn diversity ở citation cuối → cần thêm 1 tầng dedup-diversity ở
+  query-service (FIX sau nếu cần). Nhưng RECALL (gt có mặt) đã cải thiện ở per-call.
 
 ---
 

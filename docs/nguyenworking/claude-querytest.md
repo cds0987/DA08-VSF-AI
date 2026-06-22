@@ -68,6 +68,13 @@ fix OCR gpt-5.4-mini + vector-rasterize + rerank-via-ai-router). Trước đó: 
 2. **MAX_OCR_PAGES vs vector-rasterize**: tách đếm raster-vector / nâng trần có kiểm soát cost.
 3. (đã xong trong phiên này) OCR gpt-5.4-mini + vector-rasterize + Cohere rerank qua ai-router.
 
+### ✅ ĐÃ FIX (2026-06-23, xem `claude-fix.md`)
+- **FIX #1** — MAX_OCR_PAGES: đổi raise→**graceful cap** (doc nhiều ảnh KHÔNG còn fail 0 chunk;
+  verify: `2402.04355v3` 38 ảnh → indexed 283 chunk).
+- **FIX #2** — rerank **diversity cap/doc** (`RERANK_MAX_PER_DOC=3`): chống 1-doc-thống-trị top-k.
+  Re-eval: **real-retrieval recall 3/8 → 6/8**. Giới hạn: per-call (citation aggregate ở
+  query-service vẫn có thể 1-doc nhiều chunk — tầng diversity cuối để sau nếu cần).
+
 ---
 
 ## H. 🧪 TEST PHASE 2 — LONG-SESSION + ADAPTIVE ADVERSARY (2026-06-22, CHỈ GHI NHẬN)
