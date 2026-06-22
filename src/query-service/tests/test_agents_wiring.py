@@ -23,14 +23,16 @@ def test_dependency_default_off_no_orchestrator(monkeypatch):
 
 
 def test_dependency_orchestrator_needs_langgraph_and_router(monkeypatch):
-    """Bật AGENT_MODE nhưng thiếu use_langgraph/base_url -> fail-safe về react."""
+    """Bật AGENT_MODE=orchestrator_workers nhưng thiếu use_langgraph/base_url -> FAIL-CLOSED
+    (raise rõ), KHÔNG âm thầm rơi về react (react không còn contract FE + bị CI chặn)."""
     monkeypatch.setenv("AGENT_MODE", "orchestrator_workers")
     from app.interfaces.api import dependencies as deps
 
     deps.get_settings.cache_clear()
     deps.get_orchestrator_planner.cache_clear()
-    # conftest ép USE_LANGGRAPH=false -> thiếu điều kiện -> react
-    assert deps._effective_agent_mode() == "react"
+    # conftest ép USE_LANGGRAPH=false -> thiếu điều kiện -> RAISE (không fallback)
+    with pytest.raises(RuntimeError, match="orchestrator_workers"):
+        deps._effective_agent_mode()
     deps.get_settings.cache_clear()
     deps.get_orchestrator_planner.cache_clear()
 

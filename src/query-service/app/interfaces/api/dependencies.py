@@ -4,8 +4,6 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.application.ports import AuthenticatedUser
-from app.application.langgraph_agent import build_langgraph_agent
-from app.application.langgraph_state import create_initial_state
 from app.application.intent_classifier import HybridIntentClassifier
 from app.application.query_router import QueryRouter
 from app.application.use_cases.query.orchestration import QueryOrchestrationUseCase
@@ -23,7 +21,6 @@ from app.infrastructure.db.postgres_document_access_repo import PostgresDocument
 from app.infrastructure.db.postgres_notification_repo import PostgresNotificationRepository
 from app.infrastructure.db.postgres_user_access_profile_repo import PostgresUserAccessProfileRepository
 from app.infrastructure.external.langchain_mcp_client import LangChainMCPToolsLoader
-from app.infrastructure.external.langchain_responses_adapter import OpenAIResponsesChatModel
 from app.infrastructure.external.mcp_client import MCPStreamableHttpClient, MockMCPClient
 from app.infrastructure.external.hr_leave_client import HRLeaveClient
 from app.infrastructure.external.intent_ai_client import (
@@ -221,11 +218,21 @@ def get_agent_manifest():
 
 def _effective_agent_mode() -> str:
     """mode hiệu lực = env AGENT_MODE (override) > agents.yaml. Chỉ bật orchestrator khi
-    use_langgraph + có ai-router base_url (model thật cho router/worker)."""
+    use_langgraph + có ai-router base_url (model thật cho router/worker).
+
+    FAIL-CLOSED: nếu yêu cầu orchestrator_workers (path prod DUY NHẤT, có CI gate
+    EXPECT_AGENT_MODE) mà thiếu điều kiện -> RAISE rõ ràng, KHÔNG âm thầm rơi về react.
+    Lý do: react không còn contract với FE + bị CI chặn -> degrade ngầm = vỡ UI/CI ở prod
+    (bẫy, không phải lưới an toàn). Sai cấu hình phải nổ sớm + rõ thay vì serve path chết."""
     settings = get_settings()
     mode = (settings.agent_mode or "").strip().lower() or get_agent_manifest().mode
     if mode == "orchestrator_workers" and not (settings.use_langgraph and settings.openai_base_url):
-        return "react"  # thiếu điều kiện -> fail-safe về path cũ
+        raise RuntimeError(
+            "AGENT_MODE=orchestrator_workers nhưng thiếu điều kiện "
+            f"(use_langgraph={settings.use_langgraph}, openai_base_url={'set' if settings.openai_base_url else 'MISSING'}). "
+            "Path orchestrator_workers là path prod duy nhất — KHÔNG fallback về react (FE/CI không hỗ trợ). "
+            "Cấu hình lại use_langgraph=true + OPENAI_BASE_URL (ai-router) trước khi chạy."
+        )
     return mode
 
 
@@ -254,7 +261,6 @@ def get_orchestration_use_case() -> QueryOrchestrationUseCase:
         mcp_client=get_mcp_client(),
         openai_client=get_openai_client(),
         route_decision_provider=get_query_router(),
-        langgraph_agent=get_langgraph_agent(),
         langfuse_tracer=get_observability_tracer(),
         guardrails=get_guardrails(),
         user_access_profile_repo=get_user_access_profile_repo(),
@@ -288,35 +294,6 @@ def get_langchain_mcp_tools_loader() -> LangChainMCPToolsLoader | None:
     return LangChainMCPToolsLoader(settings=settings, mcp_client=get_mcp_client())
 
 
-@lru_cache
-def get_langchain_model():
-    """Model LangGraph. Kill-switch LLM_MODEL_ADAPTER:
-      - "responses" (default): OpenAI Responses API (cũ, OpenAI-only) -> prod KHÔNG đổi.
-      - "chat": Chat Completions chuẩn -> route được qua ai-router (cân bằng key + fallback).
-    Khi OPENAI_BASE_URL set + adapter "chat": api_key=internal token, model=CAPABILITY name.
-    """
-    settings = get_settings()
-    if settings.llm_model_adapter == "chat":
-        from app.infrastructure.external.langchain_chat_adapter import OpenAIChatModel
-
-        routing = bool(settings.openai_base_url)
-        # Route -> Bearer = token nội bộ (router giữ key thật); fallback key thật khi auth off.
-        api_key = (settings.airouter_internal_token or settings.openai_api_key or "") if routing \
-            else (settings.openai_api_key or "")
-        return OpenAIChatModel(
-            api_key=api_key,
-            base_url=settings.openai_base_url,
-            # route -> gửi capability (router chọn model thật); direct -> tên model thật.
-            model=(settings.llm_capability if routing else settings.openai_llm_model),
-            timeout=float(settings.openai_timeout_seconds),
-        )
-    return OpenAIResponsesChatModel(
-        api_key=settings.openai_api_key or "",
-        model=settings.openai_llm_model,
-        timeout=float(settings.openai_timeout_seconds),
-    )
-
-
 def get_node_model(node: str):
     """MosaChatModel cho 1 node (triage/think/answer) theo profiles.yaml.
 
@@ -335,39 +312,6 @@ def get_node_model(node: str):
         timeout=float(settings.openai_timeout_seconds),
         max_output_tokens=settings.llm_max_output_tokens,
         direct_model=settings.openai_llm_model,
-    )
-
-
-@lru_cache
-def get_langgraph_agent():
-    """
-    Cached compiled LangGraph agent. Built once per process.
-    Only constructed when use_langgraph=True, otherwise returns None.
-
-    Adapter 'chat': mỗi node 1 MosaChatModel riêng (MOSA per-node) + tùy chọn tách answer.
-    Adapter 'responses' (legacy): 1 model dùng chung (back-compat, không đổi hành vi cũ).
-    """
-    settings = get_settings()
-    if not settings.use_langgraph:
-        return None
-    if settings.llm_model_adapter.strip().lower() == "chat":
-        models = {
-            "triage": get_node_model("triage"),
-            "think": get_node_model("think"),
-            "answer": get_node_model("answer"),
-        }
-        return build_langgraph_agent(
-            models=models,
-            mcp_client=get_mcp_client(),
-            tools_loader=get_langchain_mcp_tools_loader(),
-            split_answer=settings.agent_split_answer,
-            merged_reason=settings.agent_merged_reason,
-            verify_sufficiency=settings.agent_verify_sufficiency,
-        )
-    return build_langgraph_agent(
-        model=get_langchain_model(),
-        mcp_client=get_mcp_client(),
-        tools_loader=get_langchain_mcp_tools_loader(),
     )
 
 
@@ -423,9 +367,7 @@ def reset_state_for_tests() -> None:
     get_intent_llm_client.cache_clear()
     get_intent_classifier.cache_clear()
     get_query_router.cache_clear()
-    get_langchain_model.cache_clear()
     get_langchain_mcp_tools_loader.cache_clear()
-    get_langgraph_agent.cache_clear()
     get_orchestrator_planner.cache_clear()
     get_observability_tracer.cache_clear()
     get_guardrails.cache_clear()
