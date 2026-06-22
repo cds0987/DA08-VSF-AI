@@ -7,8 +7,66 @@
 > Công cụ: `.pw-test/harness.js` (stream/mem/reason), `harness_edge.js` (edge), `harness_adv.js`
 > (adversarial — bắt FULL answer). Mỗi scenario chạy nhiều sample, conversation mới mỗi sample.
 
-Cập nhật lần cuối: 2026-06-22 — **ĐÃ FIX + VERIFY LIVE + TRACE GỐC** một số mục. Xem
-**Section G = FIX ĐÃ LÀM & TÁI PHÂN LOẠI** (mới nhất) trước, rồi Section F (plan gốc).
+Cập nhật lần cuối: 2026-06-23 — **Section I = EVAL ĐA DẠNG PER-STEP rag-worker** (mới nhất, sau
+fix OCR gpt-5.4-mini + vector-rasterize + rerank-via-ai-router). Trước đó: Section G (FIX), F (plan).
+
+---
+
+## I. 🔬 EVAL ĐA DẠNG INGEST→PRECISION PER-STEP (2026-06-23, ĐO LIVE)
+
+> Mục tiêu: chấm CHẤT LƯỢNG TỪNG BƯỚC rag-worker (parse · OCR · chunk/embed · retrieval · rerank)
+> trên bộ doc ĐA DẠNG, sau khi deploy fix OCR (gpt-5.4-mini + rasterize trang vẽ-vector) + chuẩn
+> hoá Cohere rerank qua ai-router. Hạ tầng: `.pw-test/eval2/` (gen_corpus.py + pw_upload_corpus.js
+> + run_stepeval.py). Corpus **26 doc** = 6 tự sinh nhắm-từng-bước (ground-truth rõ) + 20 OpenRAGBench
+> (research EN, labeled) + **71 doc prod sẵn có làm distractor**. Chấm: in_index = đọc THẲNG chunk
+> Qdrant (OCR/parse có trích đúng số/mã không), retrieval = query `/query` gt-doc có trong sources +
+> rank, answer = answer chứa giá trị đúng. Đã verify+sửa 1 bug harness (norm cắt nhầm arXiv id) trước
+> khi chốt số -> số dưới là sạch.
+
+### Scorecard per-step
+| Bước | Mẫu | in_index (OCR/parse faithful) | retrieval (gt được lấy) | answer đúng |
+|---|---|---|---|---|
+| parse-text VN | 2 | 2/2 ✅ | 2/2 | 2/2 |
+| parse-text EN | 2 | 2/2 ✅ | 2/2 | 2/2 |
+| **OCR vector-chart** (fix mới) | 2 | 2/2 ✅ | 2/2 | 2/2 |
+| OCR scan full-page | 2 | 2/2 ✅ | 2/2 | 2/2 |
+| OCR raster-image nhúng | 3 | 3/3 ✅ | **2/3** 🟠 | 2/3 |
+| retrieval research (OpenRAGBench) | 8 | n/a | **3/8** 🔴 | n/a |
+
+### ✅ INGEST / PARSE / OCR — XUẤT SẮC (6/6 doc tự sinh faithful trong index)
+- **Parse text VN + EN**: mã/số trích đúng (`QD-VN-7731`, `1.250.000`, `SPEC-EN-4412`, `45`).
+- **OCR vector-chart (fix vector-rasterize CHẠY THẬT)**: `gen_vector_table` chunk Qdrant chứa CẢ
+  text-layer LẪN bản OCR-rasterize (artifact nhẹ "vé" thay "vẽ"), số `2.480.000` đúng → query
+  "công tác phí nước ngoài" trả đúng 2.480.000 (rank-1). Trang vẽ-vector giờ được vớt.
+- **OCR scan full-page**: `gen_scanned` (ảnh thuần) → `SCAN-5567`, `250.000` đúng.
+- **OCR raster nhúng**: `gen_raster_table` → bảng markdown + `5.500.000`, `RAS-3380` đúng.
+- ⇒ gpt-5.4-mini OCR + hybrid per-page (text + raster + vector-rasterize + scan) đều live & đúng số.
+
+### 🟠 INGEST robustness — 3/26 doc FAIL (cần lưu ý)
+- **`2402.04355v3`**: *"requires OCR on 43 images > MAX_OCR_PAGES(25)"* — **side-effect của fix
+  vector-rasterize**: doc nhiều trang-chart → mỗi trang +1 raster → vượt trần 25 → ingest CHẾT.
+  ⇒ cần: đếm raster-vector riêng / nâng trần / skip-khi-gần-trần (xem Plan fix).
+- **2 doc 13MB & 31MB**: *"source too large > MAX_SOURCE_SIZE_BYTES(10MB)"* — cap kích thước
+  pre-existing (paper lớn), KHÔNG phải bug; nâng cap nếu cần doc lớn.
+
+### 🔴 RETRIEVAL RECALL — điểm yếu chính (indexed ĐÚNG nhưng KHÔNG lấy ra)
+- **Doc nhỏ bị CHÔN**: `gen_mixed` (2 chunk, "doanh thu 42 tỷ") in_index=True nhưng rank=None —
+  bị 90+ doc khác lấn át. Khớp pattern RAG-1/contamination cũ: chunk-ít bị doc nhiều-chunk dìm.
+- **Research precision (OpenRAGBench 3/8)**: agent CÓ engage (trả lời thực chất) + CÓ retrieve
+  research paper, nhưng 5/8 lấy **sibling paper** thay vì gt (23 paper gần giống nhau → gt không
+  top). Khi lấy đúng thì luôn rank-1. ⇒ precision giữa doc cùng domain (đúng nút thắt #1 của report).
+  Lưu ý: query OpenRAGBench generic → sibling có thể cũng hợp lệ, nên 3/8 hơi under-state.
+- **rerank**: scores đa dạng 0.86–0.93 (≠0.5 fallback) → cohere rerank-4-pro chạy thật qua ai-router.
+
+### 🟡 SSE ổn định dưới tải
+- Query nặng (research EN, answer dài) + chạy ĐỒNG THỜI → stream "Response ended prematurely"
+  (server đóng kết nối giữa chừng). Tuần tự + giãn nhịp thì ổn. Khớp cảnh báo 503-storm khi tải cao.
+
+### Hướng fix (Plan — chi tiết ghi ở `claude-fix.md` khi làm)
+1. **Retrieval recall doc nhỏ / precision cross-doc** (ưu tiên cao): cải thiện ranking để chunk-ít
+   không bị dìm + dedup/diversify theo doc. (đụng mcp search/rerank top_k + có thể memory/MMR).
+2. **MAX_OCR_PAGES vs vector-rasterize**: tách đếm raster-vector / nâng trần có kiểm soát cost.
+3. (đã xong trong phiên này) OCR gpt-5.4-mini + vector-rasterize + Cohere rerank qua ai-router.
 
 ---
 
