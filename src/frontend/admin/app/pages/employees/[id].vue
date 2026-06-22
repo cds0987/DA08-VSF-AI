@@ -1,5 +1,18 @@
 <script setup lang="ts">
-import { ArrowLeft, Loader2, Save } from '@lucide/vue'
+import {
+  ArrowLeft,
+  Award,
+  CalendarClock,
+  CalendarDays,
+  CalendarOff,
+  ClipboardList,
+  Clock3,
+  Loader2,
+  Mail,
+  Save,
+  UserRound,
+  Wallet,
+} from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import PageHeader from '~/components/admin-ui/PageHeader.vue'
 import StatusBadge from '~/components/admin-ui/StatusBadge.vue'
@@ -150,11 +163,25 @@ const managerLabel = (emp: EmployeeItem) =>
       <template #actions>
         <NuxtLink
           to="/employees"
-          class="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-[12.5px] font-medium hover:bg-accent cursor-pointer"
+          class="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-[12.5px] font-medium transition-colors hover:bg-accent cursor-pointer"
         >
           <ArrowLeft class="h-3.5 w-3.5" />
           Back
         </NuxtLink>
+      </template>
+
+      <template v-if="employee" #meta>
+        <span class="font-medium text-foreground">{{ employee.full_name || employee.company_email }}</span>
+        <span v-if="employee.job_title" class="text-muted-foreground">· {{ employee.job_title }}</span>
+        <span
+          v-if="employee.employee_code"
+          class="inline-flex items-center rounded-md border border-border bg-accent/60 px-1.5 py-0.5 font-mono text-[11px] text-foreground"
+        >{{ employee.employee_code }}</span>
+        <span
+          v-if="employee.department"
+          class="inline-flex items-center rounded-md border border-border bg-accent/60 px-1.5 py-0.5 text-[11px] text-foreground"
+        >{{ employee.department }}</span>
+        <StatusBadge :status="employee.employment_status" />
       </template>
     </PageHeader>
 
@@ -175,121 +202,182 @@ const managerLabel = (emp: EmployeeItem) =>
       </div>
 
       <!-- content -->
-      <div v-else-if="employee" class="flex flex-col gap-6 max-w-2xl">
+      <div v-else-if="employee" class="mx-auto max-w-6xl">
+        <div class="grid grid-cols-1 gap-6 lg:grid-cols-12">
 
-        <!-- read-only info -->
-        <div class="rounded-lg border border-border bg-card p-5">
-          <h2 class="mb-4 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Profile Info</h2>
-          <dl class="grid grid-cols-2 gap-x-6 gap-y-3 text-[13px]">
-            <div>
-              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Email</dt>
-              <dd class="mt-0.5 text-foreground">{{ employee.company_email }}</dd>
-            </div>
-            <div>
-              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Status</dt>
-              <dd class="mt-0.5"><StatusBadge :status="employee.employment_status" /></dd>
-            </div>
-            <div>
-              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">User ID</dt>
-              <dd class="mt-0.5 font-mono text-[11px] text-muted-foreground">{{ employee.user_id }}</dd>
-            </div>
-            <div>
-              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Created</dt>
-              <dd class="mt-0.5 text-muted-foreground">{{ formatDate(employee.created_at) }}</dd>
-            </div>
-            <div>
-              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Updated</dt>
-              <dd class="mt-0.5 text-muted-foreground">{{ formatDate(employee.updated_at) }}</dd>
-            </div>
-          </dl>
-        </div>
+          <!-- main column -->
+          <div class="flex flex-col gap-6 lg:col-span-7">
 
-        <!-- HR overview: leave, payroll, attendance, performance -->
-        <div v-if="details" class="grid grid-cols-2 gap-4">
-          <!-- Leave balance -->
-          <div class="rounded-lg border border-border bg-card p-5">
-            <h2 class="mb-4 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Leave Balance</h2>
-            <div v-if="details.leave_balance" class="grid grid-cols-2 gap-4 text-[13px]">
-              <div>
-                <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Annual leave</dt>
-                <dd class="mt-0.5 text-foreground">
-                  <span class="text-lg font-semibold">{{ details.leave_balance.annual_remaining }}</span>
-                  <span class="text-muted-foreground"> / {{ details.leave_balance.annual_total }} days left</span>
-                </dd>
-                <dd class="text-[11px] text-muted-foreground">Used {{ details.leave_balance.annual_used }}</dd>
+            <!-- read-only info -->
+            <div class="rounded-xl border border-border bg-card p-5 shadow-sm">
+              <div class="mb-4 flex items-center gap-3">
+                <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[14px] font-semibold uppercase text-primary">
+                  {{ (employee.full_name || employee.company_email).slice(0, 2) }}
+                </div>
+                <div class="min-w-0">
+                  <p class="truncate text-[15px] font-semibold leading-tight text-foreground">
+                    {{ employee.full_name || employee.company_email }}
+                  </p>
+                  <p class="truncate text-[12px] text-muted-foreground">
+                    {{ employee.job_title || 'No job title' }}
+                  </p>
+                </div>
+                <StatusBadge :status="employee.employment_status" class="ml-auto" />
               </div>
-              <div>
-                <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Sick leave</dt>
-                <dd class="mt-0.5 text-foreground">
-                  <span class="text-lg font-semibold">{{ details.leave_balance.sick_remaining }}</span>
-                  <span class="text-muted-foreground"> / {{ details.leave_balance.sick_total }} days left</span>
-                </dd>
-                <dd class="text-[11px] text-muted-foreground">Used {{ details.leave_balance.sick_used }}</dd>
+
+              <dl class="grid grid-cols-1 gap-x-6 gap-y-3 border-t border-border pt-4 text-[13px] sm:grid-cols-2">
+                <div class="flex items-start gap-2">
+                  <Mail class="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <div class="min-w-0">
+                    <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Email</dt>
+                    <dd class="mt-0.5 truncate text-foreground">{{ employee.company_email }}</dd>
+                  </div>
+                </div>
+                <div class="flex items-start gap-2">
+                  <UserRound class="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <div class="min-w-0">
+                    <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">User ID</dt>
+                    <dd class="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{{ employee.user_id }}</dd>
+                  </div>
+                </div>
+                <div class="flex items-start gap-2">
+                  <CalendarDays class="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <div class="min-w-0">
+                    <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Created</dt>
+                    <dd class="mt-0.5 text-muted-foreground">{{ formatDate(employee.created_at) }}</dd>
+                  </div>
+                </div>
+                <div class="flex items-start gap-2">
+                  <Clock3 class="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <div class="min-w-0">
+                    <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Updated</dt>
+                    <dd class="mt-0.5 text-muted-foreground">{{ formatDate(employee.updated_at) }}</dd>
+                  </div>
+                </div>
+              </dl>
+            </div>
+
+            <!-- HR overview: leave, payroll, attendance, performance -->
+            <div v-if="details" class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <!-- Leave balance -->
+              <div class="rounded-xl border border-border bg-card p-5 shadow-sm transition-shadow hover:shadow-md">
+                <h2 class="mb-4 flex items-center gap-2 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <CalendarOff class="h-4 w-4" /> Leave Balance
+                </h2>
+                <div v-if="details.leave_balance" class="grid grid-cols-2 gap-4 text-[13px]">
+                  <div>
+                    <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Annual leave</dt>
+                    <dd class="mt-0.5 text-foreground">
+                      <span class="text-xl font-semibold tabular-nums">{{ details.leave_balance.annual_remaining }}</span>
+                      <span class="text-muted-foreground"> / {{ details.leave_balance.annual_total }} days</span>
+                    </dd>
+                    <dd class="text-[11px] text-muted-foreground">Used {{ details.leave_balance.annual_used }}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Sick leave</dt>
+                    <dd class="mt-0.5 text-foreground">
+                      <span class="text-xl font-semibold tabular-nums">{{ details.leave_balance.sick_remaining }}</span>
+                      <span class="text-muted-foreground"> / {{ details.leave_balance.sick_total }} days</span>
+                    </dd>
+                    <dd class="text-[11px] text-muted-foreground">Used {{ details.leave_balance.sick_used }}</dd>
+                  </div>
+                </div>
+                <div v-else class="flex flex-col items-center justify-center gap-1.5 py-4 text-center">
+                  <CalendarOff class="h-5 w-5 text-muted-foreground/40" />
+                  <p class="text-[12px] text-muted-foreground">No leave balance data.</p>
+                </div>
+              </div>
+
+              <!-- Payroll (latest period) -->
+              <div class="rounded-xl border border-border bg-card p-5 shadow-sm transition-shadow hover:shadow-md">
+                <h2 class="mb-4 flex items-center gap-2 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Wallet class="h-4 w-4" /> Payroll
+                </h2>
+                <div v-if="details.payroll" class="text-[13px]">
+                  <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Net salary · {{ details.payroll.period }}</dt>
+                  <dd class="mt-0.5 text-xl font-semibold tabular-nums text-foreground">{{ formatCurrency(details.payroll.net_salary) }}</dd>
+                  <dd class="mt-1 text-[11px] text-muted-foreground">
+                    Gross {{ formatCurrency(details.payroll.gross_salary) }} · Deductions {{ formatCurrency(details.payroll.deductions) }}
+                  </dd>
+                </div>
+                <div v-else class="flex flex-col items-center justify-center gap-1.5 py-4 text-center">
+                  <Wallet class="h-5 w-5 text-muted-foreground/40" />
+                  <p class="text-[12px] text-muted-foreground">No payroll data.</p>
+                </div>
+              </div>
+
+              <!-- Attendance (latest period) -->
+              <div class="rounded-xl border border-border bg-card p-5 shadow-sm transition-shadow hover:shadow-md">
+                <h2 class="mb-4 flex items-center gap-2 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <CalendarClock class="h-4 w-4" /> Attendance
+                </h2>
+                <div v-if="details.attendance" class="text-[13px]">
+                  <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Period {{ details.attendance.period }}</dt>
+                  <dd class="mt-2 grid grid-cols-3 gap-2 text-center">
+                    <div class="rounded-md border border-border bg-background px-2 py-1.5">
+                      <span class="block text-lg font-semibold tabular-nums text-foreground">{{ details.attendance.work_days }}</span>
+                      <span class="text-[10px] uppercase tracking-wider text-muted-foreground">Work days</span>
+                    </div>
+                    <div class="rounded-md border border-border bg-background px-2 py-1.5">
+                      <span class="block text-lg font-semibold tabular-nums text-foreground">{{ details.attendance.late_count }}</span>
+                      <span class="text-[10px] uppercase tracking-wider text-muted-foreground">Late</span>
+                    </div>
+                    <div class="rounded-md border border-border bg-background px-2 py-1.5">
+                      <span class="block text-lg font-semibold tabular-nums text-foreground">{{ details.attendance.absent_count }}</span>
+                      <span class="text-[10px] uppercase tracking-wider text-muted-foreground">Absent</span>
+                    </div>
+                  </dd>
+                </div>
+                <div v-else class="flex flex-col items-center justify-center gap-1.5 py-4 text-center">
+                  <CalendarClock class="h-5 w-5 text-muted-foreground/40" />
+                  <p class="text-[12px] text-muted-foreground">No attendance data.</p>
+                </div>
+              </div>
+
+              <!-- Performance (latest) -->
+              <div class="rounded-xl border border-border bg-card p-5 shadow-sm transition-shadow hover:shadow-md">
+                <h2 class="mb-4 flex items-center gap-2 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Award class="h-4 w-4" /> Performance
+                </h2>
+                <div v-if="details.performance" class="text-[13px]">
+                  <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Period {{ details.performance.period }}</dt>
+                  <dd class="mt-1">
+                    <span class="inline-flex items-center rounded-md border border-border bg-accent px-2 py-0.5 text-[12px] font-medium text-foreground">
+                      {{ details.performance.rating }}
+                    </span>
+                  </dd>
+                </div>
+                <div v-else class="flex flex-col items-center justify-center gap-1.5 py-4 text-center">
+                  <Award class="h-5 w-5 text-muted-foreground/40" />
+                  <p class="text-[12px] text-muted-foreground">No performance review.</p>
+                </div>
               </div>
             </div>
-            <p v-else class="text-[12px] text-muted-foreground">No leave balance data.</p>
-          </div>
 
-          <!-- Payroll (latest period) -->
-          <div class="rounded-lg border border-border bg-card p-5">
-            <h2 class="mb-4 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Payroll</h2>
-            <div v-if="details.payroll" class="text-[13px]">
-              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Net salary · {{ details.payroll.period }}</dt>
-              <dd class="mt-0.5 text-lg font-semibold text-foreground">{{ formatCurrency(details.payroll.net_salary) }}</dd>
-              <dd class="mt-1 text-[11px] text-muted-foreground">
-                Gross {{ formatCurrency(details.payroll.gross_salary) }} · Deductions {{ formatCurrency(details.payroll.deductions) }}
-              </dd>
+            <!-- Recent leave requests -->
+            <div v-if="details && details.leave_requests.length" class="rounded-xl border border-border bg-card p-5 shadow-sm">
+              <h2 class="mb-4 flex items-center gap-2 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <ClipboardList class="h-4 w-4" /> Recent Leave Requests
+              </h2>
+              <ul class="flex flex-col divide-y divide-border text-[13px]">
+                <li v-for="(req, i) in details.leave_requests" :key="i" class="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+                  <div class="min-w-0">
+                    <span class="font-medium text-foreground">{{ leaveTypeLabel(req.leave_type) }}</span>
+                    <span class="text-muted-foreground"> · {{ req.start_date }} → {{ req.end_date }} ({{ req.days_count }}d)</span>
+                  </div>
+                  <StatusBadge :status="req.status" />
+                </li>
+              </ul>
             </div>
-            <p v-else class="text-[12px] text-muted-foreground">No payroll data.</p>
           </div>
 
-          <!-- Attendance (latest period) -->
-          <div class="rounded-lg border border-border bg-card p-5">
-            <h2 class="mb-4 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Attendance</h2>
-            <div v-if="details.attendance" class="text-[13px]">
-              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Period {{ details.attendance.period }}</dt>
-              <dd class="mt-1 flex gap-4 text-foreground">
-                <span><span class="font-semibold">{{ details.attendance.work_days }}</span> work days</span>
-                <span><span class="font-semibold">{{ details.attendance.late_count }}</span> late</span>
-                <span><span class="font-semibold">{{ details.attendance.absent_count }}</span> absent</span>
-              </dd>
-            </div>
-            <p v-else class="text-[12px] text-muted-foreground">No attendance data.</p>
-          </div>
-
-          <!-- Performance (latest) -->
-          <div class="rounded-lg border border-border bg-card p-5">
-            <h2 class="mb-4 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Performance</h2>
-            <div v-if="details.performance" class="text-[13px]">
-              <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Period {{ details.performance.period }}</dt>
-              <dd class="mt-1">
-                <span class="inline-flex items-center rounded-md border border-border bg-accent px-2 py-0.5 text-[12px] font-medium text-foreground">
-                  {{ details.performance.rating }}
-                </span>
-              </dd>
-            </div>
-            <p v-else class="text-[12px] text-muted-foreground">No performance review.</p>
-          </div>
-        </div>
-
-        <!-- Recent leave requests -->
-        <div v-if="details && details.leave_requests.length" class="rounded-lg border border-border bg-card p-5">
-          <h2 class="mb-4 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Recent Leave Requests</h2>
-          <ul class="flex flex-col divide-y divide-border text-[13px]">
-            <li v-for="(req, i) in details.leave_requests" :key="i" class="flex items-center justify-between py-2 first:pt-0 last:pb-0">
-              <div>
-                <span class="font-medium text-foreground">{{ leaveTypeLabel(req.leave_type) }}</span>
-                <span class="text-muted-foreground"> · {{ req.start_date }} → {{ req.end_date }} ({{ req.days_count }}d)</span>
-              </div>
-              <StatusBadge :status="req.status" />
-            </li>
-          </ul>
-        </div>
-
-        <!-- editable form -->
-        <div class="rounded-lg border border-border bg-card p-5">
-          <h2 class="mb-4 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Edit HR Fields</h2>
-          <form class="flex flex-col gap-4" @submit.prevent="saveEmployee">
+          <!-- editable form (aside) -->
+          <div class="lg:col-span-5">
+            <div class="rounded-xl border border-border bg-card p-5 shadow-sm lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto">
+              <h2 class="mb-4 flex items-center gap-2 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <Save class="h-4 w-4" /> Edit HR Fields
+              </h2>
+              <form class="flex flex-col gap-4" @submit.prevent="saveEmployee">
 
             <div class="flex gap-3">
               <div class="flex-1">
@@ -299,7 +387,7 @@ const managerLabel = (emp: EmployeeItem) =>
                   v-model="form.full_name"
                   type="text"
                   placeholder="e.g. Nguyễn Văn A"
-                  class="w-full rounded-md border bg-background px-3 py-1.5 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                  class="w-full rounded-md border bg-background px-3 py-2 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
                   :class="saveErrors.full_name ? 'border-destructive' : 'border-input'"
                 >
                 <p v-if="saveErrors.full_name" class="mt-1 text-[11px] text-destructive">{{ saveErrors.full_name }}</p>
@@ -311,7 +399,7 @@ const managerLabel = (emp: EmployeeItem) =>
                   v-model="form.phone_number"
                   type="tel"
                   placeholder="e.g. 0901234567"
-                  class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                  class="w-full rounded-md border border-input bg-background px-3 py-2 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
                 >
               </div>
             </div>
@@ -323,7 +411,7 @@ const managerLabel = (emp: EmployeeItem) =>
                   id="emp-dob"
                   v-model="form.date_of_birth"
                   type="date"
-                  class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                  class="w-full rounded-md border border-input bg-background px-3 py-2 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
                 >
               </div>
               <div class="flex-1">
@@ -332,7 +420,7 @@ const managerLabel = (emp: EmployeeItem) =>
                   id="emp-hire"
                   v-model="form.hire_date"
                   type="date"
-                  class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                  class="w-full rounded-md border border-input bg-background px-3 py-2 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
                 >
               </div>
             </div>
@@ -342,7 +430,7 @@ const managerLabel = (emp: EmployeeItem) =>
               <select
                 id="emp-department"
                 v-model="form.department"
-                class="w-full rounded-md border bg-background px-3 py-1.5 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                class="w-full rounded-md border bg-background px-3 py-2 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
                 :class="saveErrors.department ? 'border-destructive' : 'border-input'"
               >
                 <option value="">— No department —</option>
@@ -359,7 +447,7 @@ const managerLabel = (emp: EmployeeItem) =>
                 v-model="form.employee_code"
                 type="text"
                 placeholder="e.g. EMP-001"
-                class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                class="w-full rounded-md border border-input bg-background px-3 py-2 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
               >
             </div>
 
@@ -370,7 +458,7 @@ const managerLabel = (emp: EmployeeItem) =>
                 v-model="form.job_title"
                 type="text"
                 placeholder="e.g. Backend Engineer"
-                class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                class="w-full rounded-md border border-input bg-background px-3 py-2 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
               >
             </div>
 
@@ -379,7 +467,7 @@ const managerLabel = (emp: EmployeeItem) =>
               <select
                 id="emp-manager"
                 v-model="form.manager_user_id"
-                class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                class="w-full rounded-md border border-input bg-background px-3 py-2 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
               >
                 <option value="">No manager</option>
                 <option
@@ -403,7 +491,10 @@ const managerLabel = (emp: EmployeeItem) =>
                 Save changes
               </button>
             </div>
-          </form>
+              </form>
+            </div>
+          </div>
+
         </div>
       </div>
     </div>
