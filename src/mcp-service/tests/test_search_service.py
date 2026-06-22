@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from app.core.config import McpSettings
-from app.core.search import SearchService
+from app.core.search import SearchService, diversify_by_document
 from app.core.vectorstore import SearchHit
 
 
@@ -110,3 +112,44 @@ async def test_rag_search_uses_configured_rerank_top_k_when_tool_omits_top_k() -
 
     assert [hit.chunk_id for hit in hits] == ["c1", "c2", "c3"]
     assert reranker.calls[0]["top_k"] == 3
+
+
+def _hit(cid, doc, score):
+    return SearchHit(chunk_id=cid, document_id=doc, score=score)
+
+
+def test_diversify_caps_per_doc_and_fills_to_k() -> None:
+    # doc A thống trị (A1..A4) + B,C -> cap 2/doc, k=4 -> A,A,B,C (đa dạng), KHÔNG toàn A.
+    hits = [_hit("A1", "A", 0.99), _hit("A2", "A", 0.98), _hit("A3", "A", 0.97),
+            _hit("A4", "A", 0.96), _hit("B1", "B", 0.90), _hit("C1", "C", 0.80)]
+    out = diversify_by_document(hits, k=4, max_per_doc=2)
+    assert [h.chunk_id for h in out] == ["A1", "A2", "B1", "C1"]   # A capped tại 2
+    assert {h.document_id for h in out} == {"A", "B", "C"}
+
+
+def test_diversify_fills_with_overcap_when_not_enough_docs() -> None:
+    # chỉ 2 doc nhưng k=4, cap=2 -> chọn A,A,B,B (đủ k, không trả ít hơn).
+    hits = [_hit("A1", "A", .9), _hit("A2", "A", .8), _hit("A3", "A", .7), _hit("B1", "B", .6)]
+    out = diversify_by_document(hits, k=4, max_per_doc=2)
+    assert [h.chunk_id for h in out] == ["A1", "A2", "B1", "A3"]   # bù A3 (vượt-cap) để đủ 4
+
+
+def test_diversify_disabled_passthrough() -> None:
+    hits = [_hit("A1", "A", .9), _hit("A2", "A", .8)]
+    assert diversify_by_document(hits, k=2, max_per_doc=0) == hits[:2]
+
+
+@pytest.mark.asyncio
+async def test_rag_search_applies_diversity_with_wider_pool() -> None:
+    embedder = StubEmbedder()
+    reader = StubReader([_hit("A1", "A", .99), _hit("A2", "A", .98), _hit("A3", "A", .97),
+                         _hit("B1", "B", .90), _hit("C1", "C", .80)])
+    reranker = StubReranker()
+    settings = dataclasses.replace(_settings(), rerank_top_k=2, rerank_max_per_doc=1,
+                                   rerank_diversity_pool=3)
+    service = SearchService(settings, embedder, reader, reranker)
+    hits = await service.rag_search("q", top_k=None)
+    # pool = min(#candidates=5, final_k(2)*3=6) = 5 -> rerank rộng hơn final_k(2)
+    assert reranker.calls[0]["top_k"] == 5
+    # cap 1/doc, k=2 -> A1,B1 (KHÔNG A1,A2)
+    assert [h.chunk_id for h in hits] == ["A1", "B1"]

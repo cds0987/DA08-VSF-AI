@@ -97,6 +97,11 @@ class McpSettings:
     top_k_candidates: int
     rerank_top_k: int
     rerank_threshold: float
+    # Đa dạng document trong kết quả rerank: tối đa N chunk/doc -> chống "1 doc thống trị top-k"
+    # (chôn doc nhỏ + giảm precision cross-doc). 0 = TẮT (giữ hành vi cũ). pool = nhân final_k để
+    # rerank rộng hơn rồi chọn đa dạng.
+    rerank_max_per_doc: int = 0
+    rerank_diversity_pool: int = 3
     # Graceful fallback: router (embed_base_url) down -> gọi THẲNG OpenAI bằng key dự phòng.
     # Trống = TẮT (giữ hành vi cũ). Bật khi flip embed_base_url -> ai-router để search KHÔNG sập.
     embed_fallback_base_url: str = ""
@@ -204,5 +209,7 @@ def load_settings(path: str | os.PathLike[str] | None = None) -> McpSettings:
         top_k_candidates=_int(retrieval.get("top_k_candidates"), 20),
         rerank_top_k=_int(retrieval.get("rerank_top_k"), 3),
         rerank_threshold=_float(retrieval.get("rerank_threshold"), 0.7),
+        rerank_max_per_doc=_int(retrieval.get("rerank_max_per_doc"), 0),
+        rerank_diversity_pool=_int(retrieval.get("rerank_diversity_pool"), 3),
         tools_profile=profile,
     )

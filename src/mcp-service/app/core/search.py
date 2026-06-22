@@ -9,6 +9,33 @@ from app.core.embedding import QueryEmbedder, build_embedder
 from app.core.rerank import Reranker, build_reranker
 from app.core.vectorstore import QdrantReader, SearchHit
 
+
+def diversify_by_document(hits: List[SearchHit], k: int, max_per_doc: int) -> List[SearchHit]:
+    """Chọn top-k giữ ĐA DẠNG document: tối đa `max_per_doc` chunk mỗi document, theo thứ tự
+    rerank (score giảm dần). Chống "1 doc thống trị top-k" -> doc nhỏ/đúng bị chôn + precision
+    cross-doc kém. Nếu cap để lại chỗ trống -> fill phần dư (chunk vượt-cap) theo thứ tự score
+    để KHÔNG trả ít hơn k khi còn ứng viên. max_per_doc<=0 -> bỏ qua (cắt thẳng top-k)."""
+    if max_per_doc <= 0 or k <= 0:
+        return hits[:k]
+    chosen: list[SearchHit] = []
+    leftover: list[SearchHit] = []
+    per: dict[str, int] = {}
+    for h in hits:
+        d = h.document_id or ""
+        if per.get(d, 0) < max_per_doc:
+            chosen.append(h)
+            per[d] = per.get(d, 0) + 1
+            if len(chosen) >= k:
+                return chosen
+        else:
+            leftover.append(h)
+    for h in leftover:                  # cap thiếu k -> bù bằng chunk vượt-cap (đã sort score)
+        if len(chosen) >= k:
+            break
+        chosen.append(h)
+    return chosen[:k]
+
+
 class SearchService:
     def __init__(
         self,
@@ -51,9 +78,18 @@ class SearchService:
             top_k=self._settings.top_k_candidates,
             document_ids=document_ids,
         )
-        return await self._reranker.rerank(
-            query, candidates, final_k, self._settings.rerank_threshold
+        max_per_doc = self._settings.rerank_max_per_doc
+        if max_per_doc <= 0:                                   # TẮT -> hành vi cũ
+            return await self._reranker.rerank(
+                query, candidates, final_k, self._settings.rerank_threshold
+            )
+        # Rerank POOL rộng hơn (final_k * pool) rồi chọn final_k đa dạng document -> doc khác
+        # (gồm doc đúng/nhỏ) có cơ hội nổi lên thay vì bị 1 doc chiếm hết top-k.
+        pool = min(len(candidates), max(final_k, final_k * self._settings.rerank_diversity_pool))
+        reranked = await self._reranker.rerank(
+            query, candidates, pool, self._settings.rerank_threshold
         )
+        return diversify_by_document(reranked, final_k, max_per_doc)
 
 
 def build_search_service(settings: McpSettings | None = None) -> SearchService:

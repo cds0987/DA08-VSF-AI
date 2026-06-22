@@ -6,6 +6,39 @@
 
 ---
 
+## FIX #2 — Retrieval: "1 doc thống trị top-k" chôn doc nhỏ/đúng → DIVERSITY cap/doc [2026-06-23]
+
+**Motivation.** Eval Section I: retrieval recall yếu — doc nhỏ indexed ĐÚNG nhưng rank=None (bị
+chôn); research precision 3/8. Soi 1 query ("similarity thresholds") thấy sources = `2406.17374`
+**×5** → 1 document chiếm gần hết top-k, đẩy doc khác (gồm gt) ra ngoài. Đây là gốc cross-doc
+precision + small-doc burial (đúng nút thắt #1 của report).
+
+**Solution.** Thêm bước CHỌN ĐA DẠNG DOCUMENT sau rerank (OOP, no-hardcode, configurable, MẶC ĐỊNH
+giữ hành vi cũ khi tắt): rerank một POOL rộng hơn (final_k × pool) rồi chọn final_k với tối đa
+`rerank_max_per_doc` chunk mỗi document; nếu cap thiếu k thì bù bằng chunk vượt-cap (không trả ít
+hơn k). KHÔNG đụng reranker (cohere vẫn nguyên) — chỉ thêm tầng selection ở SearchService.
+
+**Implementation.**
+- `src/mcp-service/app/core/search.py`: hàm thuần `diversify_by_document(hits, k, max_per_doc)`
+  (cap/doc theo thứ tự score, fill phần dư). `SearchService.rag_search`: nếu `max_per_doc>0` →
+  rerank pool = `min(#cands, max(final_k, final_k*diversity_pool))` rồi `diversify_by_document(...)`;
+  `max_per_doc<=0` → hành vi cũ (rerank thẳng final_k).
+- `src/mcp-service/app/core/config.py`: +2 field `rerank_max_per_doc` (default 0), `rerank_diversity_pool`
+  (default 3) + đọc từ retrieval config.
+- `src/mcp-service/config.yaml`: `rerank_max_per_doc: ${RERANK_MAX_PER_DOC:-0}`,
+  `rerank_diversity_pool: ${RERANK_DIVERSITY_POOL:-3}`.
+- `deploy/env/mcp-service.env`: BẬT `RERANK_MAX_PER_DOC=3`, `RERANK_DIVERSITY_POOL=3`.
+- Test `tests/test_search_service.py`: +4 (cap+fill, fill-overcap, disabled-passthrough, rag_search
+  dùng pool rộng + diversity). 15/15 pass.
+
+**Result.**
+- Unit: mcp search/config/rerank **15/15 pass**.
+- CI/CD: ___ (sau push)
+- Playwright/Langfuse live: ___ (re-query "similarity thresholds" → sources KHÔNG còn 1-doc-×5; +
+  re-eval doc nhỏ bị chôn xem recall cải thiện).
+
+---
+
 ## FIX #1 — Doc nhiều ảnh FAIL ingest (vượt MAX_OCR_PAGES) → GRACEFUL CAP [2026-06-23]
 
 **Motivation.** Eval Section I bắt: `2402.04355v3.pdf` fail ingest (0 chunk) — *"requires OCR on

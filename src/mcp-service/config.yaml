@@ -57,6 +57,8 @@ profiles:
         top_k_candidates: ${SEARCH_TOP_K:-20}
         rerank_top_k: ${RERANK_TOP_K:-5}
         rerank_threshold: ${RERANK_THRESHOLD:-0.05}
+        rerank_max_per_doc: ${RERANK_MAX_PER_DOC:-0}     # 0=tắt; >0 = đa dạng doc (chống 1-doc-thống-trị)
+        rerank_diversity_pool: ${RERANK_DIVERSITY_POOL:-3}
 
     # Quy đổi ngày tương đối -> YYYY-MM-DD (giờ VN). Pure-compute, BẬT mặc định
     # (không secret/dependency) — tắt qua TOOL_RESOLVE_DATE_ENABLED=0 nếu cần.
