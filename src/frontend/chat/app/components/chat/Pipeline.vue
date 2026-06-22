@@ -4,7 +4,7 @@
 // MessageSteps ở chỗ có chỉ báo LIVE: dot/marker của bước ĐANG chạy được tô màu + pulse,
 // spinner + thinkingStatus. SSE KHÔNG đổi: chỉ sắp xếp lại cách hiển thị.
 import { computed } from 'vue'
-import { Search, Database, Loader2, Sparkles, GitBranch, ShieldCheck, FileSearch, Lightbulb, XCircle, Circle } from '@lucide/vue'
+import { Search, Database, Sparkles, GitBranch, ShieldCheck, FileSearch, Lightbulb, XCircle } from '@lucide/vue'
 import type { TraceEntry, NodeModel, AgentPlan, AgentPlanStep } from '~/types'
 import { nodeGroup } from '~/types/sse-contract.gen'
 
@@ -26,9 +26,10 @@ const ROLE_LABEL: Record<string, string> = {
 const ROLE_ICON: Record<string, any> = {
   rag_retrieve: FileSearch, hr_lookup: Database, synthesize_recommend: Sparkles, analyze: Lightbulb, critic: ShieldCheck,
 }
-// dot trạng thái plan step — running tô xanh + pulse (đang hoạt động), còn lại theo status.
+// dot trạng thái plan step — running tô xanh (đang hoạt động, không pulse; hiệu ứng "đang chạy"
+// thể hiện bằng shimmer trên tiêu đề), còn lại theo status.
 function stepDotColor(s?: AgentPlanStep['status']): string {
-  return s === 'running' ? 'bg-blue-500 animate-pulse'
+  return s === 'running' ? 'bg-blue-500'
     : s === 'error' ? 'bg-red-400'
       : s === 'ok' || s === 'no_info' ? 'bg-emerald-400'
         : 'bg-slate-300 dark:bg-white/25'
@@ -92,8 +93,7 @@ function getResultLabel(entry: TraceEntry): string {
               <GitBranch class="h-3 w-3 text-blue-700 dark:text-blue-300" />
             </span>
             <div class="flex items-center gap-1.5">
-              <span class="text-sm font-medium text-blue-700 dark:text-blue-300">Orchestrator</span>
-              <Loader2 v-if="orchActive && !plan?.steps?.length && !traceLog.length" class="h-3.5 w-3.5 shrink-0 animate-spin text-blue-400" />
+              <span class="text-sm font-medium text-blue-700 dark:text-blue-300" :class="orchActive && 'ai-shimmer'">Orchestrator</span>
             </div>
             <!-- reasoning live: cỡ ~13px (nhỏ hơn câu trả lời) -->
             <div
@@ -103,10 +103,9 @@ function getResultLabel(entry: TraceEntry): string {
             >
               {{ t.text }}
             </div>
-            <!-- spinner lập kế hoạch (trước khi có thought/plan) -->
-            <div v-if="isThinking && !orchThoughts.length && !plan?.steps?.length && traceLog.length === 0" class="mt-1.5 flex items-center gap-2 text-[13px] text-slate-500 dark:text-muted-foreground">
-              <Loader2 class="h-3.5 w-3.5 shrink-0 animate-spin text-blue-500" />
-              <span class="animate-pulse">{{ thinkingStatus || 'Đang lập kế hoạch…' }}</span>
+            <!-- trạng thái lập kế hoạch (trước khi có thought/plan) — shimmer thay cho spinner -->
+            <div v-if="isThinking && !orchThoughts.length && !plan?.steps?.length && traceLog.length === 0" class="mt-1.5 text-[13px] text-slate-500 dark:text-muted-foreground">
+              <span class="ai-shimmer">{{ thinkingStatus || 'Đang lập kế hoạch…' }}</span>
             </div>
           </div>
 
@@ -115,21 +114,18 @@ function getResultLabel(entry: TraceEntry): string {
             <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full" :class="stepDotColor(s.status)" />
             <div class="flex items-center gap-1.5 text-sm">
               <component :is="ROLE_ICON[s.role] ?? FileSearch" class="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-muted-foreground" />
-              <span class="flex-1 truncate font-medium text-slate-700 dark:text-foreground/80">{{ ROLE_LABEL[s.role] ?? s.role }}</span>
-              <Loader2 v-if="s.status === 'running'" class="h-3 w-3 shrink-0 animate-spin text-blue-400" />
-              <XCircle v-else-if="s.status === 'error'" class="h-3 w-3 shrink-0 text-red-400" />
-              <Circle v-else-if="!s.status || s.status === 'pending'" class="h-3 w-3 shrink-0 text-slate-300 dark:text-muted-foreground/40" />
+              <span class="flex-1 truncate font-medium text-slate-700 dark:text-foreground/80" :class="s.status === 'running' && 'ai-shimmer'">{{ ROLE_LABEL[s.role] ?? s.role }}</span>
+              <XCircle v-if="s.status === 'error'" class="h-3 w-3 shrink-0 text-red-400" />
             </div>
           </div>
 
-          <!-- tool: dot trên rail, pending = xanh + pulse (đang chạy) -->
+          <!-- tool: dot trên rail xanh khi đang chạy; tiêu đề shimmer thay cho spinner -->
           <div v-for="(entry, i) in traceLog" :key="`t-${i}`" class="relative">
-            <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full" :class="entry.pending ? 'bg-blue-500 animate-pulse' : 'bg-slate-300 dark:bg-white/25'" />
+            <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full" :class="entry.pending ? 'bg-blue-500' : 'bg-slate-300 dark:bg-white/25'" />
             <div class="flex items-center gap-1.5">
               <component :is="TOOL_ICON[entry.tool] ?? Search" class="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-muted-foreground" />
-              <span class="text-sm font-medium text-slate-700 dark:text-foreground/80">{{ TOOL_LABEL[entry.tool] ?? entry.tool }}</span>
+              <span class="text-sm font-medium text-slate-700 dark:text-foreground/80" :class="entry.pending && 'ai-shimmer'">{{ TOOL_LABEL[entry.tool] ?? entry.tool }}</span>
               <span v-if="getQueryLabel(entry)" class="flex-1 truncate text-xs text-slate-500 dark:text-muted-foreground">{{ getQueryLabel(entry) }}</span>
-              <Loader2 v-if="entry.pending" class="h-3 w-3 shrink-0 animate-spin text-blue-400" />
             </div>
             <div v-if="!entry.pending && getResultLabel(entry)" class="mt-0.5 pl-5 text-xs text-slate-400 dark:text-muted-foreground/70">{{ getResultLabel(entry) }}</div>
           </div>
@@ -146,8 +142,7 @@ function getResultLabel(entry: TraceEntry): string {
               <ShieldCheck class="h-3 w-3 text-violet-700 dark:text-violet-300" />
             </span>
             <div class="flex items-center gap-1.5">
-              <span class="text-sm font-medium text-violet-700 dark:text-violet-300">Verify — Kiểm tra &amp; tổng hợp</span>
-              <Loader2 v-if="verifyActive && !verifyThoughts.length" class="h-3.5 w-3.5 shrink-0 animate-spin text-violet-400" />
+              <span class="text-sm font-medium text-violet-700 dark:text-violet-300" :class="verifyActive && 'ai-shimmer'">Verify — Kiểm tra &amp; tổng hợp</span>
             </div>
             <div
               v-for="(t, i) in verifyThoughts"
@@ -157,7 +152,7 @@ function getResultLabel(entry: TraceEntry): string {
               {{ t.text }}
             </div>
             <div v-if="verifyActive && !verifyThoughts.length" class="mt-1.5 text-[13px] text-slate-500 dark:text-muted-foreground">
-              <span class="animate-pulse">{{ thinkingStatus || 'Đang tổng hợp kết quả…' }}</span>
+              <span class="ai-shimmer">{{ thinkingStatus || 'Đang tổng hợp kết quả…' }}</span>
             </div>
           </div>
         </div>
@@ -173,3 +168,37 @@ function getResultLabel(entry: TraceEntry): string {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Hiệu ứng ánh sáng lướt ngang (DeepSeek-style) cho TIÊU ĐỀ bước đang chạy — thay cho spinner.
+   Base màu = currentColor (giữ đúng màu tiêu đề: blue/violet/slate); 1 dải sáng quét ngang. */
+.ai-shimmer {
+  background-image: linear-gradient(
+    100deg,
+    currentColor 0%,
+    currentColor 40%,
+    color-mix(in srgb, currentColor 25%, #fff) 50%,
+    currentColor 60%,
+    currentColor 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  /* KHÔNG set color:transparent — currentColor trong gradient cần giữ màu tiêu đề. Chỉ làm
+     trong suốt phần fill (webkit/blink); Firefox fallback hiển thị chữ màu thường (không shimmer). */
+  -webkit-text-fill-color: transparent;
+  animation: ai-shimmer-sweep 1.6s linear infinite;
+}
+@keyframes ai-shimmer-sweep {
+  0% { background-position: 150% 0; }
+  100% { background-position: -50% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-shimmer {
+    animation: none;
+    background-image: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}
+</style>
