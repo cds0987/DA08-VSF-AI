@@ -43,10 +43,7 @@ const greeting = computed(() => {
 </script>
 
 <template>
-  <div
-    class="relative flex flex-col items-center justify-center text-center pt-8"
-    style="contain: content"
-  >
+  <div class="relative flex flex-col items-center justify-center text-center pt-8">
     <!-- Nền trắng-xanh + sóng trang trí kiểu Gemini -->
     <div class="pointer-events-none fixed inset-0 -z-10 landing-aura" aria-hidden="true" />
     <svg
