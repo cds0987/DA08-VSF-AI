@@ -94,16 +94,18 @@ const greeting = computed(() => {
 </template>
 
 <style scoped>
-/* Quầng sáng trắng-xanh dịu, dồn về giữa và mờ dần ra rìa (giống Gemini) */
+/* Nền trắng-xanh kiểu Gemini: phủ kín toàn trang, xanh đậm ở giữa loang ra mép */
 .landing-aura {
   background:
     radial-gradient(
-      ellipse 70% 55% at 50% 42%,
-      rgba(96, 165, 250, 0.28) 0%,
-      rgba(147, 197, 253, 0.16) 35%,
-      rgba(219, 234, 254, 0.06) 60%,
-      transparent 80%
-    );
+      ellipse 90% 70% at 50% 40%,
+      rgba(59, 130, 246, 0.45) 0%,
+      rgba(96, 165, 250, 0.32) 28%,
+      rgba(147, 197, 253, 0.20) 50%,
+      rgba(191, 219, 254, 0.10) 70%,
+      rgba(239, 246, 255, 0.04) 100%
+    ),
+    linear-gradient(180deg, #f0f6ff 0%, #ffffff 100%);
   animation: aura-breathe 8s ease-in-out infinite;
 }
 
