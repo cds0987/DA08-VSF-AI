@@ -138,7 +138,7 @@ function initials(req: LeaveApproval): string {
         </div>
       </div>
       <button
-        class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-border px-2.5 py-1.5 text-[12px] font-medium text-slate-500 dark:text-foreground/70 transition hover:bg-slate-50 dark:hover:bg-accent disabled:opacity-50"
+        class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-border px-2.5 py-1.5 text-[12px] font-medium text-slate-500 dark:text-foreground/70 transition hover:bg-slate-50 dark:hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-50"
         :disabled="isLoading"
         @click="load"
       >
@@ -225,14 +225,14 @@ function initials(req: LeaveApproval): string {
           >
           <div class="mt-2 flex justify-end gap-2">
             <button
-              class="rounded-lg px-3 py-1.5 text-[12.5px] font-medium text-slate-500 dark:text-foreground/70 hover:bg-slate-100 dark:hover:bg-accent"
+              class="rounded-lg px-3 py-1.5 text-[12.5px] font-medium text-slate-500 dark:text-foreground/70 hover:bg-slate-100 dark:hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
               :disabled="actingId === req.id"
               @click="cancelReject(req)"
             >
               Hủy
             </button>
             <button
-              class="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-[12.5px] font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
+              class="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-[12.5px] font-semibold text-white transition hover:bg-red-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-50"
               :disabled="actingId === req.id"
               @click="confirmReject(req)"
             >
@@ -245,14 +245,14 @@ function initials(req: LeaveApproval): string {
         <!-- Nút hành động -->
         <div v-else class="mt-3 flex justify-end gap-2">
           <button
-            class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-border px-3 py-1.5 text-[13px] font-semibold text-slate-600 dark:text-foreground/80 transition hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 disabled:opacity-50"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-border px-3 py-1.5 text-[13px] font-semibold text-slate-600 dark:text-foreground/80 transition hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-50"
             :disabled="!!actingId"
             @click="startReject(req)"
           >
             <X class="h-3.5 w-3.5" /> Từ chối
           </button>
           <button
-            class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-1.5 text-[13px] font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
+            class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-1.5 text-[13px] font-semibold text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-50"
             :disabled="!!actingId"
             @click="approve(req)"
           >
