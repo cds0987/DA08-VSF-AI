@@ -35,6 +35,7 @@ const FIELD_LABELS: Record<string, string> = {
   intent: 'Ý định',
   reason: 'Lý do',
   reasoning: 'Lý do',
+  answer_hint: 'Gợi ý trả lời',
   decision: 'Quyết định',
   action: 'Hành động',
   tool: 'Hành động',
@@ -50,7 +51,7 @@ const FIELD_LABELS: Record<string, string> = {
 
 // Thứ tự field hiển thị (đọc theo logic: tuyến -> lý do -> các bước -> kết quả…).
 const FIELD_ORDER = [
-  'route', 'intent', 'reason', 'reasoning', 'decision', 'action', 'tool',
+  'route', 'intent', 'reason', 'reasoning', 'answer_hint', 'decision', 'action', 'tool',
   'steps', 'result', 'conclusion', 'summary', 'answer', 'message', 'note', 'status',
 ]
 
@@ -77,7 +78,8 @@ function clampLine(value: string, max = SUMMARY_MAX): string {
 function stringifyValue(value: unknown): string {
   if (value === null || value === undefined) return ''
   if (typeof value === 'string') return value
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : ''  // chặn NaN/Infinity
+  if (typeof value === 'boolean') return String(value)
   if (Array.isArray(value)) return value.map(stringifyValue).filter(Boolean).join(', ')
   return ''
 }
@@ -103,7 +105,7 @@ function formatStep(step: unknown, i: number): string {
   if (step && typeof step === 'object') {
     const s = step as Record<string, unknown>
     const role = typeof s.role === 'string' ? s.role : ''
-    const dir = stringifyValue(s.direction ?? s.text ?? s.intent ?? s.label)
+    const dir = stringifyValue(s.direction ?? s.input ?? s.text ?? s.intent ?? s.label)
     const label = ROLE_LABEL[role] ?? role
     if (label && dir) return `${n}. ${label} — ${dir}`
     if (label) return `${n}. ${label}`
@@ -143,48 +145,141 @@ function buildSections(obj: Record<string, unknown>): ThoughtDetailSection[] {
   return sections
 }
 
-function tryParseJson(text: string): unknown {
-  if (!/^[[{]/.test(text)) return undefined
-  try {
-    return JSON.parse(text)
-  } catch {
-    return undefined
+// ── DEFENSIVE: BE có thể nhét raw JSON/debug LẪN trong text (sai format). Coi text là
+//    nội dung KHÔNG tin cậy: dò + bóc khối JSON, KHÔNG để raw lộ ra first-level. ──
+
+// Index '{' hoặc '[' đầu tiên kể từ `from`. -1 nếu không có.
+function firstJsonStart(text: string, from: number): number {
+  for (let i = from; i < text.length; i++) {
+    const c = text[i]
+    if (c === '{' || c === '[') return i
   }
+  return -1
+}
+
+// Index dấu đóng khớp với mở tại `start`, TÔN TRỌNG chuỗi "" và ký tự thoát \". -1 nếu lệch.
+function matchJsonEnd(text: string, start: number): number {
+  let depth = 0
+  let inStr = false
+  let esc = false
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]
+    if (inStr) {
+      if (esc) esc = false
+      else if (ch === '\\') esc = true
+      else if (ch === '"') inStr = false
+      continue
+    }
+    if (ch === '"') inStr = true
+    else if (ch === '{' || ch === '[') depth++
+    else if (ch === '}' || ch === ']') {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+  return -1
+}
+
+interface ExtractedJson { jsonText: string; parsed: unknown; before: string; after: string }
+
+// Bóc KHỐI JSON top-level HỢP LỆ ĐẦU TIÊN trong text (chỉ JSON.parse, không eval). Quét lần lượt
+// từng vị trí '{'/'[' -> khớp ngoặc -> thử parse; khối hỏng thì thử khối kế. null nếu không có.
+export function extractFirstJsonObject(text: string): ExtractedJson | null {
+  for (let start = firstJsonStart(text, 0); start >= 0; start = firstJsonStart(text, start + 1)) {
+    const end = matchJsonEnd(text, start)
+    if (end < 0) continue
+    const jsonText = text.slice(start, end + 1)
+    try {
+      const parsed = JSON.parse(jsonText)
+      if (parsed && typeof parsed === 'object') {
+        return { jsonText, parsed, before: text.slice(0, start), after: text.slice(end + 1) }
+      }
+    } catch {
+      // khối nhìn như JSON nhưng hỏng -> bỏ qua, thử khối kế
+    }
+  }
+  return null
+}
+
+// Text "trông như JSON/debug" (để xử lý cả khi parse hỏng): có ngoặc kèm cặp "key":.
+const JSON_LIKE_RE = /[{[][\s\S]*?["'][^"']*["']\s*:/
+export function isDebugJsonLike(text: string): boolean {
+  return JSON_LIKE_RE.test(text) || /["']?(route|reasoning|steps|depends_on|answer_hint)["']?\s*:/.test(text)
+}
+
+// Bỏ MỌI khối JSON khỏi text -> còn lại phần ngôn ngữ tự nhiên sạch. Khối hợp lệ: bóc hẳn.
+// Khối nhìn-như-JSON nhưng hỏng (không khớp/không parse được): cắt từ vị trí mở -> KHÔNG dump payload.
+function stripJsonLikeBlocks(text: string): string {
+  let out = text
+  let guard = 0
+  let res = extractFirstJsonObject(out)
+  while (res && guard++ < 50) {
+    out = `${res.before} ${res.after}`
+    res = extractFirstJsonObject(out)
+  }
+  const idx = firstJsonStart(out, 0)
+  // Phần đuôi còn ngoặc + giống "key:" -> là JSON hỏng -> cắt bỏ (không để lộ/đổ thô).
+  if (idx >= 0 && /["']?[\w$]+["']?\s*:/.test(out.slice(idx))) {
+    out = out.slice(0, idx)
+  }
+  return out.replace(/\s+/g, ' ').trim()
+}
+
+// Dọn phần ngôn ngữ tự nhiên quanh khối JSON: bỏ khối JSON + nhiễu nhãn "Output JSON".
+function cleanNaturalLanguage(text: string): string {
+  return stripJsonLikeBlocks(text).replace(/^output\s*json[.:]?\s*/i, '').trim()
+}
+
+// Dựng kết quả từ 1 JSON đã parse (object/array) + phần NL hữu ích (nếu có).
+function summarizeParsed(parsed: unknown, naturalLanguage: string): ThoughtSummary {
+  const nl = cleanNaturalLanguage(naturalLanguage)
+  let sections: ThoughtDetailSection[]
+  let human: string
+  if (Array.isArray(parsed)) {
+    const lines = parsed.map(formatStep).filter(Boolean)
+    sections = lines.length ? [{ label: FIELD_LABELS.steps, lines }] : []
+    human = clampLine(parsed.map(stringifyValue).filter(Boolean).join(', '))
+  } else {
+    const obj = parsed as Record<string, unknown>
+    sections = buildSections(obj)
+    human = humanizeObject(obj)
+  }
+  // summary ưu tiên NL người dùng; không có thì lấy field có nghĩa; cuối cùng nhãn trung tính.
+  const summary = clampLine(nl || human) || 'Chi tiết suy luận'
+  // Giữ NL prefix DÀI (sẽ bị cắt ở summary) làm section không nhãn -> không mất thông tin.
+  const detail: ThoughtDetailSection[] = []
+  if (nl && nl.length > SUMMARY_MAX) detail.push({ label: '', lines: [nl] })
+  detail.push(...sections)
+  return { summary, detail, raw: JSON.stringify(parsed, null, 2) }
 }
 
 /**
- * Tóm tắt 1 thought cho timeline.
- *  - JSON/object: summary = khóa có nghĩa; detail = section có nhãn (human-readable);
- *    raw = JSON đẹp (cấp 2 "Xem dữ liệu thô").
- *  - JSON array: summary = nối phần tử; detail = "Các bước"; raw = JSON đẹp.
- *  - Text dài: summary cắt 1 dòng; detail = 1 section không nhãn chứa full text; raw = null.
- *  - Text ngắn: chỉ summary, không detail/raw.
+ * Tóm tắt 1 thought cho timeline (PHÒNG THỦ với text BE không tin cậy).
+ *  1. Có khối JSON HỢP LỆ (kể cả lẫn trong text): summary = NL/khóa có nghĩa; detail = section
+ *     human-readable; raw = JSON đẹp (cấp 2). First-level KHÔNG có ngoặc/nháy JSON.
+ *  2. Trông như JSON nhưng PARSE HỎNG: bóc/cắt khối -> chỉ giữ NL sạch; raw = null (không đổ thô).
+ *  3. Text thường dài: summary cắt 1 dòng; detail = 1 section không nhãn; raw = null.
+ *  4. Text ngắn: chỉ summary.
  */
 export function summarizeThought(raw?: string | null): ThoughtSummary {
   const text = (raw ?? '').trim()
   if (!text) return { summary: '', detail: [], raw: null }
 
-  const parsed = tryParseJson(text)
-  if (parsed && typeof parsed === 'object') {
-    if (Array.isArray(parsed)) {
-      const lines = parsed.map(formatStep).filter(Boolean)
-      const human = clampLine(parsed.map(stringifyValue).filter(Boolean).join(', '))
-      return {
-        summary: human || 'Chi tiết suy luận',
-        detail: lines.length ? [{ label: FIELD_LABELS.steps, lines }] : [],
-        raw: JSON.stringify(parsed, null, 2),
-      }
-    }
-    const obj = parsed as Record<string, unknown>
-    const human = humanizeObject(obj)
-    return {
-      // Object toàn nested -> human rỗng -> nhãn trung tính, TUYỆT ĐỐI không [object Object].
-      summary: human ? clampLine(human) : 'Chi tiết suy luận',
-      detail: buildSections(obj),
-      raw: JSON.stringify(parsed, null, 2),
-    }
+  // (1) JSON hợp lệ ở bất cứ đâu trong text -> render human-readable.
+  const extracted = extractFirstJsonObject(text)
+  if (extracted) {
+    return summarizeParsed(extracted.parsed, `${extracted.before} ${extracted.after}`)
   }
 
+  // (2) Trông như JSON/debug nhưng không parse được -> KHÔNG dump; bóc/cắt, giữ NL sạch.
+  if (isDebugJsonLike(text)) {
+    const cleaned = stripJsonLikeBlocks(text)
+    const summary = clampLine(cleaned) || 'Chi tiết suy luận'
+    const detail = cleaned.length > SUMMARY_MAX ? [{ label: '', lines: [cleaned] }] : []
+    return { summary, detail, raw: null }
+  }
+
+  // (3)(4) Text thường.
   const oneLine = text.replace(/\s+/g, ' ').trim()
   if (oneLine.length <= SUMMARY_MAX) return { summary: oneLine, detail: [], raw: null }
   return { summary: clampLine(oneLine), detail: [{ label: '', lines: [text] }], raw: null }
