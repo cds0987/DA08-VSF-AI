@@ -12,6 +12,7 @@ import { computed } from 'vue'
 import { Search, Database, ChevronRight, Sparkles, GitBranch, ShieldCheck, FileSearch, Lightbulb, Loader2, XCircle, Circle } from '@lucide/vue'
 import type { TraceEntry, NodeModel, Thought, AgentPlan, AgentPlanStep } from '~/types'
 import { SSE_GROUPS, SSE_TOOLS, nodeGroup, type SseGroup } from '~/types/sse-contract.gen'
+import { summarizeThought, truncateFilename, type ThoughtSummary } from '~/lib/timeline'
 
 const props = defineProps<{ trace: TraceEntry[]; models?: NodeModel[]; thoughts?: Thought[]; plan?: AgentPlan }>()
 
@@ -34,12 +35,9 @@ function stepDotColor(s?: AgentPlanStep['status']): string {
         : 'bg-slate-300 dark:bg-white/25'
 }
 
-// Thu gọn/Xem thêm cho thought dài: clamp 6 dòng khi gọn, mở full khi bấm. Theo dõi theo key.
-const THOUGHT_CLAMP_CHARS = 280
+// Mỗi thought hiện 1 dòng TÓM TẮT người đọc được; phần thô/JSON (nếu có) ẩn sau disclosure
+// "Xem chi tiết". Trạng thái mở theo key `${group}-${i}`, mặc định đóng.
 const expandedThoughts = ref<Record<string, boolean>>({})
-function isLongThought(text: string): boolean {
-  return text.length > THOUGHT_CLAMP_CHARS
-}
 function toggleThought(key: string) {
   expandedThoughts.value[key] = !expandedThoughts.value[key]
 }
@@ -85,6 +83,16 @@ const grouped = computed<Record<string, Thought[]>>(() => {
   return by
 })
 
+// Bản tóm tắt (summary + detail) cho mỗi thought, gom theo group — tránh gọi summarizeThought
+// lặp nhiều lần trong template.
+const groupedViews = computed<Record<string, ThoughtSummary[]>>(() => {
+  const by: Record<string, ThoughtSummary[]> = {}
+  for (const [g, list] of Object.entries(grouped.value)) {
+    by[g] = list.map(t => summarizeThought(t.text))
+  }
+  return by
+})
+
 // Group cần hiển thị, ĐÚNG THỨ TỰ SSE_GROUPS. orchestrator còn hiện khi có plan/trace.
 const visibleGroups = computed(() =>
   SSE_GROUPS.filter(g =>
@@ -102,7 +110,7 @@ function resultLabel(e: TraceEntry): string {
     const count = e.resultCount ?? 0
     if (count === 0) return 'Không tìm thấy kết quả'
     const docs = e.resultDocs ?? []
-    const docStr = docs.length ? ` — ${docs.slice(0, 3).join(', ')}${docs.length > 3 ? '…' : ''}` : ''
+    const docStr = docs.length ? ` — ${docs.slice(0, 3).map(d => truncateFilename(d)).join(', ')}${docs.length > 3 ? '…' : ''}` : ''
     return `${count} tài liệu${docStr}`
   }
   if (e.resultRaw) return e.resultRaw.slice(0, 80) + (e.resultRaw.length > 80 ? '…' : '')
@@ -120,7 +128,7 @@ function resultLabel(e: TraceEntry): string {
     >
       <Sparkles class="h-4 w-4 text-blue-500" />
       <span>{{ trace.length ? `Agent đã thực hiện ${trace.length} bước` : 'Xem suy nghĩ của agent' }}</span>
-      <ChevronRight class="h-4 w-4 transition-transform" :class="open && 'rotate-90'" />
+      <ChevronRight class="tl-chevron h-4 w-4 transition-transform" :class="open && 'rotate-90'" />
     </button>
 
     <!-- Timeline dọc kiểu DeepSeek: MỘT đường line liền mạch chạy qua TẤT CẢ dot (mốc chính +
@@ -142,22 +150,26 @@ function resultLabel(e: TraceEntry): string {
             <div class="flex items-center gap-1.5">
               <span class="text-sm font-medium" :class="GROUP_STYLE[g].head">{{ GROUP_STYLE[g].title }}</span>
             </div>
-            <!-- raw text / JSON: cỡ chữ nhỏ hơn câu trả lời (~13px) kiểu DeepSeek, hiện full -->
-            <div v-for="(t, i) in (grouped[g] || [])" :key="`${g}-${i}`" class="mt-1.5">
-              <div
-                class="whitespace-pre-wrap break-words rounded-lg border border-slate-200/70 bg-slate-50/70 px-3 py-2 text-[13px] leading-relaxed text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground"
-                :class="isLongThought(t.text) && !expandedThoughts[`${g}-${i}`] && 'line-clamp-6'"
-              >
-                {{ t.text }}
-              </div>
-              <button
-                v-if="isLongThought(t.text)"
-                type="button"
-                class="mt-1 rounded px-1 text-[12px] font-medium text-blue-600 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 dark:text-blue-300"
-                @click="toggleThought(`${g}-${i}`)"
-              >
-                {{ expandedThoughts[`${g}-${i}`] ? 'Thu gọn' : 'Xem thêm' }}
-              </button>
+            <!-- TÓM TẮT 1 dòng (không box nặng); JSON/raw dài ẩn sau "Xem chi tiết" -->
+            <div v-for="(view, i) in (groupedViews[g] || [])" :key="`${g}-${i}`" class="mt-1.5">
+              <p v-if="view.summary" class="text-[13px] leading-relaxed text-slate-600 dark:text-muted-foreground">
+                {{ view.summary }}
+              </p>
+              <template v-if="view.detail">
+                <button
+                  type="button"
+                  class="mt-1 inline-flex items-center gap-1 rounded px-1 text-[12px] font-medium text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-muted-foreground/70 dark:hover:text-foreground"
+                  :aria-expanded="!!expandedThoughts[`${g}-${i}`]"
+                  @click="toggleThought(`${g}-${i}`)"
+                >
+                  <ChevronRight class="tl-chevron h-3 w-3 transition-transform" :class="expandedThoughts[`${g}-${i}`] && 'rotate-90'" aria-hidden="true" />
+                  {{ expandedThoughts[`${g}-${i}`] ? 'Ẩn chi tiết' : 'Xem chi tiết' }}
+                </button>
+                <pre
+                  v-show="expandedThoughts[`${g}-${i}`]"
+                  class="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200/60 bg-slate-50/60 px-2.5 py-2 text-[12px] leading-relaxed text-slate-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground"
+                >{{ view.detail }}</pre>
+              </template>
             </div>
           </div>
 
@@ -189,3 +201,12 @@ function resultLabel(e: TraceEntry): string {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Tôn trọng prefers-reduced-motion: chevron không animate khi user yêu cầu giảm chuyển động. */
+@media (prefers-reduced-motion: reduce) {
+  .tl-chevron {
+    transition: none;
+  }
+}
+</style>

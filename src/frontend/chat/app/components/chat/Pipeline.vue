@@ -3,10 +3,11 @@
 // mạch, mốc chính (Orchestrator/Verify) + sub-step (plan/tool) canh thẳng trên rail. Khác
 // MessageSteps ở chỗ có chỉ báo LIVE: dot/marker của bước ĐANG chạy được tô màu + pulse,
 // spinner + thinkingStatus. SSE KHÔNG đổi: chỉ sắp xếp lại cách hiển thị.
-import { computed } from 'vue'
-import { Search, Database, Sparkles, GitBranch, ShieldCheck, FileSearch, Lightbulb, XCircle } from '@lucide/vue'
+import { computed, ref } from 'vue'
+import { Search, Database, Sparkles, GitBranch, ShieldCheck, FileSearch, Lightbulb, XCircle, ChevronRight } from '@lucide/vue'
 import type { TraceEntry, NodeModel, AgentPlan, AgentPlanStep } from '~/types'
 import { nodeGroup } from '~/types/sse-contract.gen'
+import { summarizeThought, truncateFilename } from '~/lib/timeline'
 
 interface Props {
   traceLog: TraceEntry[]
@@ -41,6 +42,17 @@ const orchThoughts = computed(() => (props.thoughts ?? []).filter(t => nodeGroup
 const verifyThoughts = computed(() => (props.thoughts ?? []).filter(t => nodeGroup(t.node) === 'verify'))
 const otherThoughts = computed(() => (props.thoughts ?? []).filter(t => !['orchestrator', 'verify'].includes(nodeGroup(t.node))))
 
+// Tóm tắt 1 dòng cho mỗi thought (raw/JSON ẩn sau "Xem chi tiết"). View song song với mảng gốc.
+const orchViews = computed(() => orchThoughts.value.map(t => summarizeThought(t.text)))
+const verifyViews = computed(() => verifyThoughts.value.map(t => summarizeThought(t.text)))
+const otherViews = computed(() => otherThoughts.value.map(t => summarizeThought(t.text)))
+
+// Trạng thái disclosure chi tiết theo key (`o-0`, `v-1`, `x-0`...), mặc định đóng.
+const expanded = ref<Record<string, boolean>>({})
+function toggleDetail(key: string) {
+  expanded.value[key] = !expanded.value[key]
+}
+
 // Mốc đang hoạt động -> marker tô màu/ring để phân biệt: verify chạy sau khi đã có tool;
 // còn lại đang ở orchestrator.
 const verifyActive = computed(() => !!props.isThinking && props.traceLog.length > 0)
@@ -61,7 +73,7 @@ function getResultLabel(entry: TraceEntry): string {
     const count = entry.resultCount ?? 0
     if (count === 0) return 'Không tìm thấy kết quả'
     const docs = entry.resultDocs ?? []
-    const docStr = docs.length > 0 ? ` — ${docs.slice(0, 2).join(', ')}${docs.length > 2 ? '...' : ''}` : ''
+    const docStr = docs.length > 0 ? ` — ${docs.slice(0, 2).map(d => truncateFilename(d)).join(', ')}${docs.length > 2 ? '...' : ''}` : ''
     return `${count} tài liệu${docStr}`
   }
   if (entry.tool === 'hr_query' && entry.resultRaw) return entry.resultRaw.slice(0, 60) + (entry.resultRaw.length > 60 ? '…' : '')
@@ -95,13 +107,26 @@ function getResultLabel(entry: TraceEntry): string {
             <div class="flex items-center gap-1.5">
               <span class="text-sm font-medium text-blue-700 dark:text-blue-300" :class="orchActive && 'ai-shimmer'">Orchestrator</span>
             </div>
-            <!-- reasoning live: cỡ ~13px (nhỏ hơn câu trả lời) -->
-            <div
-              v-for="(t, i) in orchThoughts"
-              :key="`o-${i}`"
-              class="mt-1.5 whitespace-pre-wrap break-words rounded-lg border border-slate-200/70 bg-slate-50/70 px-3 py-2 text-[13px] leading-relaxed text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground"
-            >
-              {{ t.text }}
+            <!-- reasoning live: TÓM TẮT 1 dòng; raw/JSON ẩn sau "Xem chi tiết" -->
+            <div v-for="(view, i) in orchViews" :key="`o-${i}`" class="mt-1.5">
+              <p v-if="view.summary" class="text-[13px] leading-relaxed text-slate-600 dark:text-muted-foreground">
+                {{ view.summary }}
+              </p>
+              <template v-if="view.detail">
+                <button
+                  type="button"
+                  class="mt-1 inline-flex items-center gap-1 rounded px-1 text-[12px] font-medium text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-muted-foreground/70 dark:hover:text-foreground"
+                  :aria-expanded="!!expanded[`o-${i}`]"
+                  @click="toggleDetail(`o-${i}`)"
+                >
+                  <ChevronRight class="tl-chevron h-3 w-3 transition-transform" :class="expanded[`o-${i}`] && 'rotate-90'" aria-hidden="true" />
+                  {{ expanded[`o-${i}`] ? 'Ẩn chi tiết' : 'Xem chi tiết' }}
+                </button>
+                <pre
+                  v-show="expanded[`o-${i}`]"
+                  class="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200/60 bg-slate-50/60 px-2.5 py-2 text-[12px] leading-relaxed text-slate-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground"
+                >{{ view.detail }}</pre>
+              </template>
             </div>
             <!-- trạng thái lập kế hoạch (trước khi có thought/plan) — text thường, KHÔNG shimmer -->
             <div v-if="isThinking && !orchThoughts.length && !plan?.steps?.length && traceLog.length === 0" class="mt-1.5 text-[13px] text-slate-500 dark:text-muted-foreground">
@@ -144,12 +169,25 @@ function getResultLabel(entry: TraceEntry): string {
             <div class="flex items-center gap-1.5">
               <span class="text-sm font-medium text-violet-700 dark:text-violet-300" :class="verifyActive && 'ai-shimmer'">Verify — Kiểm tra &amp; tổng hợp</span>
             </div>
-            <div
-              v-for="(t, i) in verifyThoughts"
-              :key="`v-${i}`"
-              class="mt-1.5 whitespace-pre-wrap break-words rounded-lg border border-slate-200/70 bg-slate-50/70 px-3 py-2 text-[13px] leading-relaxed text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground"
-            >
-              {{ t.text }}
+            <div v-for="(view, i) in verifyViews" :key="`v-${i}`" class="mt-1.5">
+              <p v-if="view.summary" class="text-[13px] leading-relaxed text-slate-600 dark:text-muted-foreground">
+                {{ view.summary }}
+              </p>
+              <template v-if="view.detail">
+                <button
+                  type="button"
+                  class="mt-1 inline-flex items-center gap-1 rounded px-1 text-[12px] font-medium text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-muted-foreground/70 dark:hover:text-foreground"
+                  :aria-expanded="!!expanded[`v-${i}`]"
+                  @click="toggleDetail(`v-${i}`)"
+                >
+                  <ChevronRight class="tl-chevron h-3 w-3 transition-transform" :class="expanded[`v-${i}`] && 'rotate-90'" aria-hidden="true" />
+                  {{ expanded[`v-${i}`] ? 'Ẩn chi tiết' : 'Xem chi tiết' }}
+                </button>
+                <pre
+                  v-show="expanded[`v-${i}`]"
+                  class="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200/60 bg-slate-50/60 px-2.5 py-2 text-[12px] leading-relaxed text-slate-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground"
+                >{{ view.detail }}</pre>
+              </template>
             </div>
             <div v-if="verifyActive && !verifyThoughts.length" class="mt-1.5 text-[13px] text-slate-500 dark:text-muted-foreground">
               {{ thinkingStatus || 'Đang tổng hợp kết quả…' }}
@@ -158,11 +196,26 @@ function getResultLabel(entry: TraceEntry): string {
         </div>
 
         <!-- thoughts khác (group lạ) -->
-        <div v-for="(t, i) in otherThoughts" :key="`x-${i}`" class="relative">
+        <div v-for="(view, i) in otherViews" :key="`x-${i}`" class="relative">
           <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full bg-slate-300 dark:bg-white/25" />
-          <div class="whitespace-pre-wrap break-words rounded-lg border border-slate-200/70 bg-slate-50/70 px-3 py-2 text-[13px] leading-relaxed text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground">
-            {{ t.text }}
-          </div>
+          <p v-if="view.summary" class="text-[13px] leading-relaxed text-slate-600 dark:text-muted-foreground">
+            {{ view.summary }}
+          </p>
+          <template v-if="view.detail">
+            <button
+              type="button"
+              class="mt-1 inline-flex items-center gap-1 rounded px-1 text-[12px] font-medium text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-muted-foreground/70 dark:hover:text-foreground"
+              :aria-expanded="!!expanded[`x-${i}`]"
+              @click="toggleDetail(`x-${i}`)"
+            >
+              <ChevronRight class="tl-chevron h-3 w-3 transition-transform" :class="expanded[`x-${i}`] && 'rotate-90'" aria-hidden="true" />
+              {{ expanded[`x-${i}`] ? 'Ẩn chi tiết' : 'Xem chi tiết' }}
+            </button>
+            <pre
+              v-show="expanded[`x-${i}`]"
+              class="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200/60 bg-slate-50/60 px-2.5 py-2 text-[12px] leading-relaxed text-slate-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground"
+            >{{ view.detail }}</pre>
+          </template>
         </div>
       </div>
     </div>
@@ -202,6 +255,9 @@ function getResultLabel(entry: TraceEntry): string {
     background-image: none;
     background-color: transparent;
     -webkit-text-fill-color: currentColor;
+  }
+  .tl-chevron {
+    transition: none;
   }
 }
 </style>
