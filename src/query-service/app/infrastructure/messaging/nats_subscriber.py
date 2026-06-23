@@ -7,6 +7,7 @@ from app.infrastructure.messaging.nats_events import (
     QueryNatsEventHandler,
     parse_doc_access_event,
     parse_hr_employee_profile_updated_event,
+    parse_leave_request_status_event,
     parse_notify_doc_new_event,
 )
 
@@ -33,6 +34,8 @@ class NatsSubscriberManager:
         ("doc.access", "QUERY_SERVICE_DOC_ACCESS", "QUERY_DOC_ACCESS"),
         ("notify.doc_new", "QUERY_SERVICE_NOTIFY_DOC_NEW", "QUERY_NOTIFY_DOC_NEW"),
         ("hr.employee_profile.updated", "QUERY_SERVICE_HR_PROFILE", "QUERY_HR_PROFILE"),
+        ("hr.leave_request.approved", "QUERY_SERVICE_LEAVE_APPROVED", "HR_EVENTS"),
+        ("hr.leave_request.rejected", "QUERY_SERVICE_LEAVE_REJECTED", "HR_EVENTS"),
     )
 
     async def start(self) -> None:
@@ -45,6 +48,8 @@ class NatsSubscriberManager:
             "doc.access": self._doc_access_callback,
             "notify.doc_new": self._notify_doc_new_callback,
             "hr.employee_profile.updated": self._hr_employee_profile_callback,
+            "hr.leave_request.approved": self._leave_request_status_callback,
+            "hr.leave_request.rejected": self._leave_request_status_callback,
         }
         # Resilient: lỗi 1 subscription (stream chưa sẵn) KHÔNG được làm chết startup —
         # query-service vẫn phải phục vụ HTTP (chat/query/dashboard).
@@ -112,6 +117,13 @@ class NatsSubscriberManager:
             msg,
             validate=parse_notify_doc_new_event,
             handle=self._handler.handle_notify_doc_new,
+        )
+
+    async def _leave_request_status_callback(self, msg: Any) -> None:
+        await self._handle_message(
+            msg,
+            validate=parse_leave_request_status_event,
+            handle=self._handler.handle_leave_request_status,
         )
 
     async def _hr_employee_profile_callback(self, msg: Any) -> None:

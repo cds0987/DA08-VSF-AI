@@ -24,9 +24,8 @@ function isNotificationEvent(value: unknown): value is NotificationEvent {
   return typeof value === 'object'
     && value !== null
     && event.type === 'notify'
-    && event.event === 'doc_new'
+    && ['doc_new', 'leave_approved', 'leave_rejected'].includes(event.event ?? '')
     && typeof event.message === 'string'
-    && typeof event.doc_id === 'string'
 }
 
 export const useNotificationStore = defineStore('notifications', () => {

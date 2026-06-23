@@ -34,6 +34,16 @@ class HrEmployeeProfileUpdatedEvent:
 
 
 @dataclass(frozen=True)
+class LeaveRequestStatusEvent:
+    request_id: str
+    requester_user_id: str
+    status: str
+    rejected_reason: str
+    event_id: str | None
+    occurred_at: datetime
+
+
+@dataclass(frozen=True)
 class NotifyDocNewEvent:
     doc_id: str
     document_name: str
@@ -109,6 +119,28 @@ class QueryNatsEventHandler:
         self._remember_fallback_key(fallback_key)
         return delivered
 
+    async def handle_leave_request_status(self, payload: dict[str, Any]) -> list:
+        if self._notification_service is None:
+            return []
+        event = parse_leave_request_status_event(payload)
+        if self._is_duplicate_event(event.event_id):
+            return []
+        fallback_key = f"{event.request_id}:{event.status}"
+        if event.event_id is None and self._is_duplicate_fallback_key(fallback_key):
+            return []
+        from app.infrastructure.messaging.notification_service import LeaveStatusEvent
+        delivered = await self._notification_service.publish_leave_status(
+            LeaveStatusEvent(
+                requester_user_id=event.requester_user_id,
+                request_id=event.request_id,
+                status=event.status,
+                rejected_reason=event.rejected_reason,
+            )
+        )
+        self._remember_event(event.event_id)
+        self._remember_fallback_key(fallback_key)
+        return delivered
+
     async def handle_hr_employee_profile_updated(self, payload: dict[str, Any]) -> None:
         if self._user_access_profile_repo is None:
             return
@@ -151,6 +183,17 @@ class QueryNatsEventHandler:
         expired_keys = [key for key, seen_at in store.items() if seen_at < cutoff]
         for key in expired_keys:
             store.pop(key, None)
+
+
+def parse_leave_request_status_event(payload: dict[str, Any]) -> LeaveRequestStatusEvent:
+    return LeaveRequestStatusEvent(
+        request_id=_required_str(payload, "request_id"),
+        requester_user_id=_required_str(payload, "requester_user_id"),
+        status=_required_str(payload, "status"),
+        rejected_reason=str(payload.get("rejected_reason") or ""),
+        event_id=_optional_str(payload.get("event_id")),
+        occurred_at=_event_time(payload.get("occurred_at")),
+    )
 
 
 def parse_doc_access_event(payload: dict[str, Any]) -> DocAccessEvent:
