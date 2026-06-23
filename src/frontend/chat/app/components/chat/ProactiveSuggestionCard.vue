@@ -23,7 +23,7 @@ function openDocument() {
   <div class="mt-3 flex flex-wrap gap-2">
     <button
       v-if="action.doc_id"
-      class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white dark:bg-card dark:border-white/10 px-3 py-1.5 text-sm font-medium text-slate-700 dark:text-foreground hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+      class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white dark:bg-card dark:border-white/10 px-3 py-1.5 text-sm font-medium text-slate-700 dark:text-foreground hover:bg-slate-50 dark:hover:bg-white/5 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
       @click="openDocument"
     >
       <FileText class="h-3.5 w-3.5" />
@@ -32,7 +32,7 @@ function openDocument() {
     <button
       v-for="s in action.suggestions"
       :key="s.label"
-      class="rounded-lg border border-indigo-200 bg-indigo-50 dark:bg-indigo-900/20 px-3 py-1.5 text-sm font-medium text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
+      class="rounded-lg border border-indigo-200 bg-indigo-50 dark:bg-indigo-900/20 px-3 py-1.5 text-sm font-medium text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
       @click="chat.ask(s.query, [], action.doc_id ? [action.doc_id] : undefined)"
     >
       {{ s.label }}

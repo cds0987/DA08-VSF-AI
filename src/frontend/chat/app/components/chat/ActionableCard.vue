@@ -307,7 +307,7 @@ const fieldClass
         <!-- Mặc định: gửi (server check trùng/overlap). -->
         <button
           v-if="!overlapWarning"
-          class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+          class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-50"
           :disabled="isSubmitting || !!error || isDuplicateBlocked"
           @click="submit(false)"
         >
@@ -322,7 +322,7 @@ const fieldClass
             Bạn vẫn muốn tạo đơn mới này?
           </span>
           <button
-            class="inline-flex items-center gap-2 rounded-lg border border-amber-300 dark:border-amber-500/40 bg-amber-500 px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-amber-600 disabled:opacity-50"
+            class="inline-flex items-center gap-2 rounded-lg border border-amber-300 dark:border-amber-500/40 bg-amber-500 px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-amber-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-50"
             :disabled="isSubmitting"
             @click="submit(true)"
           >
