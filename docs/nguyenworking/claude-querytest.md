@@ -256,6 +256,29 @@ ai-router) → bỏ mồi-timeout + thực sự rerank được → nâng precis
 
 **⚠️ An toàn:** dump env mcp-service in lộ **5 OpenAI API key thật** (`OPENAI_API_KEY_1..5`, plaintext) → nên **rotate**.
 
+### ⑤ ĐO LẠI SAU FIX (team đã đổi `RERANK_PROVIDER=cohere/rerank-4-pro` + diversity-cap, deploy live)
+> Team fix XỊN hơn đề xuất lexical: dùng **cross-encoder Cohere rerank-4-pro** (đăng ký alias `cohere/
+> rerank-4-pro→rerank_api` trong routing.yaml, hết `unknown_capability`) + **diversity cap per-doc**
+> (`rerank_max_per_doc=3`, commit `1e68afd`). Đo precision@1 qua agent live (đọc `done.sources` = thứ tự
+> sau rerank+diversity), 14 needle, 0 empty.
+
+| Loại | docP@1 | chunkP@1 | recall@5 | so baseline pure-vector @1 |
+|---|---|---|---|---|
+| **TEXT** (mã sự cố) | **7/7 (100%)** | 86% | 100% | **39% → 100%** ✅ |
+| **IMAGE** (per-diem bảng-ảnh) | **1/7 (14%)** | 14% | 57% | vẫn kẹt |
+
+- ✅ **TEXT: rerank cohere FIX THÀNH CÔNG** — precision@1 từ 39%→**100%**, đúng công ty #1 + đúng chunk #1 (86%).
+- ⚠️ **IMAGE per-diem vẫn 14%** — `top1` hầu hết per-diem query (B/C/D/E/F/G) đều ra **A_Vintravel #1** (1 doc
+  thống trị). **Gốc = CHUNKING/METADATA**: chunk bảng-ảnh per-diem chỉ chứa **dãy số, KHÔNG có tên công ty**
+  trong OCR → 7 bảng giống y hệt + thiếu tín hiệu công ty → rerank không phân biệt nổi → vớ đại 1 doc. (Text
+  thì chunk có "SEC-VTL-7741 + Vintravel" nên rerank match chuẩn.) **KHÔNG phải rerank kém** — là chunk thiếu
+  parent-context. Fix: **prepend tên công ty + section-title vào chunk ảnh-bảng** (cộng corpus đánh đố 7-doc-
+  giống-nhau là nhân tạo; prod doc đa dạng ít gặp).
+
+> **CHỐT precision@1:** rerank cohere đã đưa **text precision@1 lên 100%** (fix tốt). Còn lại 1 lỗ THẬT cho
+> **image-table**: chunk thiếu company/section context → near-duplicate tables lẫn nhau (precision@1=14%,
+> recall@5=57%). ⇒ Việc tiếp theo nếu muốn: **enrich metadata chunk ảnh-bảng** (không phải đụng rerank).
+
 ### Hướng đào tiếp (Phase 2 còn lại)
 - Langfuse per-turn dump (`summary`/`task_state`/`working_set`) cho `conv=e611e933` → chốt mốc MEM-4 + xem POISON có lọt summary.
 - Mở rộng 50+ turn × vài session để ra **degradation curve** + **leak-rate/session** + **time-to-break**.
