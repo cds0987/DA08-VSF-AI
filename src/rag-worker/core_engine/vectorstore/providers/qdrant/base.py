@@ -63,9 +63,9 @@ class QdrantBase(VectorStoreProvider):
         if getattr(self.config, "hybrid", False):
             # Named vector "dense" + "sparse" (khớp query mcp using=dense/sparse + RRF).
             idx, val = record.sparse_indices, record.sparse_values
-            if not idx:  # engine chưa điền -> encode từ bm25_text (CÙNG hàm với mcp)
-                from core_engine.vectorstore.sparse import sparse_encode
-                idx, val = sparse_encode(str(record.payload.get("bm25_text", "")))
+            if not idx:  # engine chưa điền -> encode BM25 document từ bm25_text
+                from core_engine.vectorstore.sparse import sparse_encode_document
+                idx, val = sparse_encode_document(str(record.payload.get("bm25_text", "")))
             return models.PointStruct(
                 id=point_id(record.chunk_id),
                 vector={
@@ -88,7 +88,11 @@ class QdrantBase(VectorStoreProvider):
                         size=self.config.dimension, distance=models.Distance.COSINE
                     ),
                 },
-                "sparse_vectors_config": {"sparse": models.SparseVectorParams()},
+                # modifier=IDF: Qdrant tự tính IDF từ corpus phía server -> BM25 thật
+                # (value document = TF bão hoà; value query = TF thô; score = Σ IDF·doc·query).
+                "sparse_vectors_config": {
+                    "sparse": models.SparseVectorParams(modifier=models.Modifier.IDF)
+                },
             }
         return {
             "vectors_config": models.VectorParams(

@@ -57,7 +57,14 @@ def _to_hit(payload: dict, score: float) -> SearchHit:
     )
 
 
-def _sparse_encode(text: str) -> tuple[list[int], list[float]]:
+def _sparse_encode_query(text: str) -> tuple[list[int], list[float]]:
+    """Phía QUERY của BM25 thật — ĐỐI XỨNG rag-worker sparse.sparse_encode_query.
+
+    value = TF thô của câu hỏi; IDF do Qdrant nhân (collection có SparseVectorParams
+    modifier=IDF). Index (token->bucket) PHẢI Y HỆT phía document để indices trùng.
+    Nếu sửa, PHẢI sửa rag-worker/core_engine/vectorstore/sparse.py + bump
+    SPARSE_ENCODING_VERSION ở contract.py (2 phía).
+    """
     tokens = re.findall(r"\w+", text.lower())
     if not tokens:
         return [], []
@@ -66,9 +73,8 @@ def _sparse_encode(text: str) -> tuple[list[int], list[float]]:
     for token, count in counts.items():
         idx = binascii.crc32(token.encode()) % (1 << 16)
         result[idx] = result.get(idx, 0) + count
-    total = sum(result.values())
     indices = sorted(result)
-    values = [result[i] / total for i in indices]
+    values = [float(result[i]) for i in indices]  # TF thô (KHÔNG chuẩn hoá; Qdrant nhân IDF)
     return indices, values
 
 
@@ -261,7 +267,7 @@ class QdrantReader:
         mode = await self._remote_mode(client)
 
         if mode == "hybrid":
-            sparse_idx, sparse_val = _sparse_encode(query_text)
+            sparse_idx, sparse_val = _sparse_encode_query(query_text)
             res = await client.query_points(
                 collection_name=self._index,
                 prefetch=[
@@ -298,7 +304,7 @@ class QdrantReader:
         client = self._local_client()
         try:
             doc_filter = self._build_filter(document_ids)
-            sparse_idx, sparse_val = _sparse_encode(query_text)
+            sparse_idx, sparse_val = _sparse_encode_query(query_text)
             res = client.query_points(
                 collection_name=self._index,
                 prefetch=[

@@ -18,6 +18,12 @@ from dataclasses import dataclass
 
 PAYLOAD_SCHEMA_VERSION = 1
 
+# Phiên bản thuật toán SPARSE (BM25). PHẢI khớp rag-worker/core_engine/contract.py.
+# Bump khi đổi cách encode sparse -> index_id đổi -> collection MỚI -> migrate. sparse_version
+# chỉ áp khi hybrid bật; =0 (dense-only) GIỮ NGUYÊN tên + fingerprint cũ (no-op).
+#   v1 = TF chuẩn-hoá-theo-tổng, KHÔNG IDF. v2 = BM25 thật (TF bão hoà + Modifier.IDF).
+SPARSE_ENCODING_VERSION = 2
+
 EMBED_MODELS: dict[str, dict[str, object]] = {
     "text-embedding-3-small": {"native": 1536, "allowed": "256..1536"},
     "text-embedding-3-large": {"native": 3072, "allowed": "256..3072"},
@@ -106,11 +112,13 @@ def model_tag(model: str) -> str:
     return MODEL_TAGS.get(normalized, _slug(normalized))
 
 
-def index_id(collection: str, model: str, dimension: int) -> str:
+def index_id(collection: str, model: str, dimension: int, *, sparse_version: int = 0) -> str:
     base = collection.strip()
     if not base:
         raise ValueError("VECTOR_COLLECTION must not be empty")
-    return f"{base}__{model_tag(model)}__d{int(dimension)}"
+    # sparse_version>0 (hybrid BM25) -> hậu tố __s{ver}; =0 -> giữ nguyên tên cũ.
+    suffix = f"__s{int(sparse_version)}" if sparse_version and int(sparse_version) > 0 else ""
+    return f"{base}__{model_tag(model)}__d{int(dimension)}{suffix}"
 
 
 def meta_collection_name(collection: str) -> str:
@@ -127,20 +135,21 @@ def vectorstore_fingerprint(
     embed_model: str,
     dimension: int | None,
     schema_version: int,
+    sparse_version: int = 0,
 ) -> str:
     resolved = resolve_dimension(embed_model, dimension)
-    payload = json.dumps(
-        {
-            "provider": provider.strip().lower(),
-            "collection": collection.strip(),
-            "embed_model": _normalize_model(embed_model),
-            "dimension": int(resolved),
-            "schema_version": int(schema_version),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+    payload: dict[str, object] = {
+        "provider": provider.strip().lower(),
+        "collection": collection.strip(),
+        "embed_model": _normalize_model(embed_model),
+        "dimension": int(resolved),
+        "schema_version": int(schema_version),
+    }
+    # Chỉ thêm key khi >0 -> fingerprint dense-only GIỮ NGUYÊN => không vỡ stamp prod.
+    if sparse_version and int(sparse_version) > 0:
+        payload["sparse_version"] = int(sparse_version)
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
 def resolve_vectorstore_contract(
@@ -150,6 +159,7 @@ def resolve_vectorstore_contract(
     embed_model: str,
     dimension: int | None,
     schema_version: int = PAYLOAD_SCHEMA_VERSION,
+    sparse_version: int = 0,
 ) -> ResolvedVectorstoreContract:
     resolved_dim = resolve_dimension(embed_model, dimension)
     normalized_model = _normalize_model(embed_model)
@@ -159,13 +169,16 @@ def resolve_vectorstore_contract(
         embed_model=normalized_model,
         dimension=resolved_dim,
         schema_version=int(schema_version),
-        index_id=index_id(collection, normalized_model, resolved_dim),
+        index_id=index_id(
+            collection, normalized_model, resolved_dim, sparse_version=sparse_version
+        ),
         fingerprint=vectorstore_fingerprint(
             provider=provider,
             collection=collection,
             embed_model=normalized_model,
             dimension=resolved_dim,
             schema_version=schema_version,
+            sparse_version=sparse_version,
         ),
     )
 

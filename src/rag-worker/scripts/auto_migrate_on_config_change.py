@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.application.use_cases.ingestion.store_reconciler import parse_object_key  # noqa: E402
 from app.interfaces.api.runtime import bootstrap_runtime, build_object_store_lister  # noqa: E402
+from core_engine.contract import index_id as build_index_id  # noqa: E402
 from core_engine.vectorstore.config import VectorStoreConfig  # noqa: E402
 
 
@@ -88,6 +89,14 @@ def _collection_ready(name: str) -> bool:
     return bool(count and int(count) > 0)
 
 
+def _points_count(name: str) -> int | None:
+    """Số điểm collection; None nếu chưa tồn tại (phân biệt với 0)."""
+    resp = _qdrant_request("GET", f"/collections/{name}")
+    if resp.get("status") != "ok":
+        return None
+    return int(resp.get("result", {}).get("points_count") or 0)
+
+
 def _schema_ok(name: str, hybrid: bool) -> bool:
     """Schema collection có ĐÚNG kỳ vọng không: hybrid -> phải có named 'dense' + sparse.
     Sai schema (vd 'default' unnamed do artifact cũ) -> cần XÓA để _ensure tạo lại đúng."""
@@ -107,12 +116,43 @@ def _delete_collection(name: str) -> bool:
     return resp.get("status") in ("ok", "acknowledged")
 
 
+def _try_scroll_copy(config: VectorStoreConfig, target: str, dry_run: bool) -> int | None:
+    """Đổi CHỈ sparse_version -> scroll-copy từ collection cũ (cùng model+dim, không hậu tố).
+
+    Trả None nếu KHÔNG áp dụng (hybrid off, hoặc source không tồn tại/trống -> caller
+    fallback reingest GCS). Trả int (rc của migrate) nếu đã chạy scroll-copy: 0 OK, !=0 fail loud.
+    """
+    if not getattr(config, "hybrid", False):
+        return None
+    source = build_index_id(
+        config.collection, config.embed_model, config.dimension, sparse_version=0
+    )
+    if source == target:
+        return None
+    src_n = _points_count(source)
+    if not src_n:  # None (chưa có) hoặc 0 -> không scroll-copy được
+        return None
+    print(f"  -> SCROLL-COPY: source '{source}' có {src_n} điểm -> tính lại sparse BM25 sang "
+          f"'{target}' (GIỮ dense, KHÔNG re-embed).")
+    from scripts.migrate_sparse_version import run as _migrate_run
+
+    rc = _migrate_run(dry_run, batch=256, limit=None, config=config)
+    if rc == 0:
+        print("  -> SCROLL-COPY OK." if not dry_run else "  -> SCROLL-COPY dry-run OK.")
+    else:
+        print(f"::error:: SCROLL-COPY FAIL (rc={rc}) — KHÔNG cutover. Sửa rồi deploy lại.",
+              file=sys.stderr)
+    return rc
+
+
 def _create_collection(name: str, dim: int, hybrid: bool) -> bool:
     """Tạo collection ĐÚNG SCHEMA ngay (deterministic) sau khi xóa -> worker upsert vào đúng
     chỗ, không phụ thuộc path bootstrap tạo nhầm unnamed. hybrid -> named dense + sparse."""
     if hybrid:
+        # modifier=idf -> Qdrant tính IDF server-side (BM25 thật). PHẢI khớp schema
+        # rag-worker tạo qua client (qdrant/base.py SparseVectorParams modifier=IDF).
         body = {"vectors": {"dense": {"size": int(dim), "distance": "Cosine"}},
-                "sparse_vectors": {"sparse": {}}}
+                "sparse_vectors": {"sparse": {"modifier": "idf"}}}
     else:
         body = {"vectors": {"size": int(dim), "distance": "Cosine"}}
     r1 = _qdrant_request("PUT", f"/collections/{name}", body)
@@ -215,10 +255,19 @@ async def _run(dry_run: bool, prefix: str, limit: int | None) -> int:
         print(f"  -> Collection '{target}' đã sẵn (có điểm) => NO-OP (config không đổi).")
         return 0
 
-    print(f"  -> Collection '{target}' CHƯA sẵn => embed-config ĐỔI, kích hoạt reingest.")
+    print(f"  -> Collection '{target}' CHƯA sẵn => config ĐỔI, kích hoạt migrate.")
     if not dry_run and not os.environ.get("_AUTOMIGRATE_YES"):
         print("  [refuse] cần --yes (hoặc _AUTOMIGRATE_YES=1) cho lần chạy thật.", file=sys.stderr)
         return 2
+
+    # ── Ưu tiên SCROLL-COPY (rẻ, KHÔNG re-embed) khi CHỈ đổi sparse_version ──────────
+    # Nếu collection cũ cùng model+dim (sparse_version=0) còn điểm -> chỉ cần tính lại sparse,
+    # giữ dense. Tránh re-embed toàn corpus (tốn ai-router). Chỉ FALLBACK reingest GCS khi
+    # không có source (đổi embed model/dim, hoặc collection cũ trống).
+    sc = _try_scroll_copy(config, target, dry_run)
+    if sc is not None:
+        return sc  # đã xử lý (0 = OK, !=0 = fail loud). KHÔNG fallback khi copy đã chạy.
+    print("  -> Không có source scroll-copy (đổi embed model/dim?) => FALLBACK reingest GCS.")
 
     # 1) SELF-TEST CẢ embed LẪN chat(ocr) qua ai-router (chống race 401 sau --force-recreate):
     #    chỉ reingest khi ai-router auth ổn cho CẢ 2 đường -> ocr job không dính transient 401.

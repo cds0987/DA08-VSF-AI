@@ -16,7 +16,11 @@ from typing import Any, Mapping
 
 import yaml
 
-from app.core.contract import ResolvedVectorstoreContract, resolve_vectorstore_contract
+from app.core.contract import (
+    SPARSE_ENCODING_VERSION,
+    ResolvedVectorstoreContract,
+    resolve_vectorstore_contract,
+)
 
 DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "config.yaml"
 
@@ -110,6 +114,14 @@ class McpSettings:
     timeout: int | None = None
     options: Mapping[str, Any] = field(default_factory=dict)
     tools_profile: Mapping[str, Any] = field(default_factory=dict)
+    # hybrid (BM25) -> contract trỏ collection __s{ver}. PHẢI khớp rag-worker VECTOR_HYBRID,
+    # nếu không mcp đọc collection khác producer ghi -> 0 sources. Detect schema query vẫn
+    # độc lập (dense/hybrid) — cờ này CHỈ quyết định TÊN collection (sparse_version).
+    hybrid: bool = False
+
+    @property
+    def sparse_version(self) -> int:
+        return SPARSE_ENCODING_VERSION if self.hybrid else 0
 
     def contract(self) -> ResolvedVectorstoreContract:
         return resolve_vectorstore_contract(
@@ -117,6 +129,7 @@ class McpSettings:
             collection=self.collection,
             embed_model=self.embed_model,
             dimension=self.dimension,
+            sparse_version=self.sparse_version,
         )
 
     @property
@@ -211,5 +224,11 @@ def load_settings(path: str | os.PathLike[str] | None = None) -> McpSettings:
         rerank_threshold=_float(retrieval.get("rerank_threshold"), 0.7),
         rerank_max_per_doc=_int(retrieval.get("rerank_max_per_doc"), 0),
         rerank_diversity_pool=_int(retrieval.get("rerank_diversity_pool"), 3),
+        # VECTOR_HYBRID PHẢI khớp rag-worker (env hoặc params.hybrid trong config.yaml) ->
+        # contract trỏ đúng collection __s{ver}. Mặc định OFF (collection dense/schema cũ).
+        hybrid=(
+            str(os.getenv("VECTOR_HYBRID") or params.get("hybrid") or "")
+            .strip().lower() in {"1", "true", "yes", "on"}
+        ),
         tools_profile=profile,
     )

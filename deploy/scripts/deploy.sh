@@ -117,20 +117,40 @@ docker compose $OBS up -d --no-build grafana node-exporter tempo loki \
 # Dọn cadvisor cũ (đã gỡ khỏi stack) nếu còn chạy orphan.
 docker rm -f da08-vsf-cadvisor-1 >/dev/null 2>&1 || true
 
-# ── Auto-migration on embed-config change (NON-FATAL, IDEMPOTENT) ───────────────────────
-# Đổi EMBED_MODEL/DIMENSION -> index_id collection MỚI -> script detect + enqueue reingest
-# toàn corpus (rag-worker tự tạo collection đúng schema). Deploy thường: collection đã sẵn
-# -> NO-OP. Qdrant chưa reachable -> ABORT an toàn (KHÔNG reingest oan). Hỏng KHÔNG chặn deploy.
-echo "==> 4aa) Auto-migration embed-config (NON-FATAL, idempotent)"
+# ── Auto-migration on config change (NON-FATAL, IDEMPOTENT) ─────────────────────────────
+# 2 nhánh trong cùng script (detect tự động):
+#   - Đổi EMBED_MODEL/DIMENSION -> index_id MỚI, KHÔNG có source cũ -> reingest GCS (chậm).
+#   - CHỈ đổi sparse_version (BM25) -> SCROLL-COPY từ collection cũ (giữ dense, tính lại sparse,
+#     ghi stamp). Rẻ, KHÔNG re-embed. Collection cũ nguyên vẹn để rollback (blue-green).
+# Deploy thường: collection đã sẵn -> NO-OP. Qdrant chưa reachable -> ABORT an toàn.
+echo "==> 4aa) Auto-migration config (NON-FATAL, idempotent)"
 sleep 8   # cho rag-worker + qdrant kịp sẵn sau up -d
 if AM_OUT=$(docker exec -w /app da08-vsf-rag-worker-1 \
      python scripts/auto_migrate_on_config_change.py --yes 2>&1); then AM_OK=1; else AM_OK=0; fi
 echo "$AM_OUT"
-# KHÔNG restart rag-worker: auto_migrate đã XÓA + TỰ TẠO lại collection hybrid ĐÚNG (cùng tên)
-# -> worker (state _ready cũ, cùng collection name) upsert vào collection ĐÃ TỒN TẠI -> không 404.
-# Restart từng gây cửa sổ auth-race (ai-router chưa ổn ngay sau recreate) -> ocr 401 transient.
 [ "$AM_OK" = 1 ] && echo "  auto-migration OK (NO-OP nếu collection đã sẵn)." \
   || echo "::warning::auto-migration skip/abort (Qdrant chưa sẵn / config không đổi / lỗi)."
+# Phát hiện CÓ migrate sparse lần này (để quyết cutover mcp). Tránh recreate mcp mỗi deploy.
+SPARSE_MIGRATED=0
+echo "$AM_OUT" | grep -q "SCROLL-COPY OK" && SPARSE_MIGRATED=1
+
+# ── 4ab) Verify BM25 collection + cutover mcp (CHỈ khi vừa migrate sparse) ───────────────
+# Điểm test deploy: schema IDF + count khớp + sparse query CHẠY. IN log lỗi THẬT (không nuốt
+# error). NON-FATAL ở đây (health-gate 5 + RAG smoke 5c là gác fatal); nhưng nếu verify OK và
+# vừa migrate -> recreate mcp để cutover SẠCH sang collection __s{ver} (mcp tự trỏ tên mới).
+echo "==> 4ab) Verify BM25 + cutover mcp (sparse_migrated=$SPARSE_MIGRATED)"
+if VB_OUT=$(docker exec -w /app da08-vsf-rag-worker-1 \
+     python scripts/verify_bm25_collection.py 2>&1); then VB_OK=1; else VB_OK=0; fi
+echo "$VB_OUT"
+if [ "$SPARSE_MIGRATED" = 1 ] && [ "$VB_OK" = 1 ]; then
+  echo "  BM25 verify OK + vừa migrate -> recreate mcp-service để cutover collection mới."
+  docker compose up -d --no-build --force-recreate mcp-service \
+    || echo "::warning::mcp recreate fail — kiểm tra docker compose logs mcp-service"
+elif [ "$SPARSE_MIGRATED" = 1 ]; then
+  echo "::error::BM25 verify FAIL sau migrate (xem log trên) — mcp KHÔNG cutover; smoke 5c sẽ chặn nếu hỏng."
+else
+  echo "  Không migrate sparse lần này -> bỏ qua cutover mcp (verify chỉ để chẩn đoán)."
+fi
 
 
 echo "==> 4b) LANGFUSE readiness PROD bằng KEY THẬT (NON-FATAL — chỉ cảnh báo)"

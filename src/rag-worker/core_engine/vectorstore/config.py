@@ -8,7 +8,12 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 from urllib.parse import urlparse, urlunparse
 
-from core_engine.contract import ResolvedVectorstoreContract, index_id, resolve_vectorstore_contract
+from core_engine.contract import (
+    SPARSE_ENCODING_VERSION,
+    ResolvedVectorstoreContract,
+    index_id,
+    resolve_vectorstore_contract,
+)
 
 DEFAULT_PROVIDER = "qdrant"
 DEFAULT_COLLECTION = "rag_chatbot"
@@ -78,8 +83,17 @@ class VectorStoreConfig:
     def mode(self) -> str:
         return self.deployment
 
+    @property
+    def sparse_version(self) -> int:
+        """Phiên bản sparse áp vào tên/contract: chỉ khi hybrid bật; dense-only -> 0
+        (giữ nguyên collection cũ). Bump SPARSE_ENCODING_VERSION = collection mới."""
+        return SPARSE_ENCODING_VERSION if self.hybrid else 0
+
     def index_id(self) -> str:
-        return index_id(self.collection, self.embed_model, self.dimension)
+        return index_id(
+            self.collection, self.embed_model, self.dimension,
+            sparse_version=self.sparse_version,
+        )
 
     def remote_client_kwargs(self) -> dict[str, Any]:
         """kwargs cho AsyncQdrantClient/QdrantClient remote: URL chuẩn hoá port 443
@@ -95,6 +109,7 @@ class VectorStoreConfig:
             collection=self.collection,
             embed_model=self.embed_model,
             dimension=self.dimension,
+            sparse_version=self.sparse_version,
         )
 
     def with_dimension(self, dimension: int) -> "VectorStoreConfig":
