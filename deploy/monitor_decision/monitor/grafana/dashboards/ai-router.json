@@ -1,203 +1,1124 @@
 {
   "title": "AI Router — Key × Model Ops",
   "uid": "ai-router-main",
-  "tags": ["vsf-ai", "ai-router", "llm", "cost"],
+  "tags": [
+    "vsf-ai",
+    "ai-router",
+    "llm",
+    "cost"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 5,
   "refresh": "30s",
-  "time": { "from": "now-6h", "to": "now" },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "links": [
-    { "title": "← Tổng quan", "type": "link", "url": "/d/vsf-ops-overview", "targetBlank": false },
-    { "title": "Langfuse (trace runtime) ↗", "type": "link", "url": "https://langfuse.vsfchat.cloud", "targetBlank": true },
-    { "title": "Spokes khác ↗", "type": "dashboards", "tags": ["vsf-ai"], "asDropdown": true }
+    {
+      "title": "← Tổng quan",
+      "type": "link",
+      "url": "/d/vsf-ops-overview",
+      "targetBlank": false
+    },
+    {
+      "title": "Langfuse (trace runtime) ↗",
+      "type": "link",
+      "url": "https://langfuse.vsfchat.cloud",
+      "targetBlank": true
+    },
+    {
+      "title": "Spokes khác ↗",
+      "type": "dashboards",
+      "tags": [
+        "vsf-ai"
+      ],
+      "asDropdown": true
+    }
   ],
   "templating": {
     "list": [
-      { "name": "key", "label": "Key", "type": "query", "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "query": "label_values(airouter_tokens_total, key_id)", "multi": true, "includeAll": true, "allValue": ".*",
-        "current": { "text": "All", "value": "$__all" }, "refresh": 2 },
-      { "name": "model", "label": "Model", "type": "query", "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "query": "label_values(airouter_tokens_total, model)", "multi": true, "includeAll": true, "allValue": ".*",
-        "current": { "text": "All", "value": "$__all" }, "refresh": 2 },
-      { "name": "capability", "label": "Capability", "type": "query", "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "query": "label_values(airouter_tokens_total, capability)", "multi": true, "includeAll": true, "allValue": ".*",
-        "current": { "text": "All", "value": "$__all" }, "refresh": 2 }
+      {
+        "name": "key",
+        "label": "Key",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(airouter_tokens_total, key_id)",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2
+      },
+      {
+        "name": "model",
+        "label": "Model",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(airouter_tokens_total, model)",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2
+      },
+      {
+        "name": "capability",
+        "label": "Capability",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(airouter_tokens_total, capability)",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2
+      }
     ]
   },
   "panels": [
-    { "id": 100, "type": "row", "title": "① Tổng quan (số tức thời / tháng)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 } },
     {
-      "id": 1, "type": "stat", "title": "Request /5m",
+      "id": 100,
+      "type": "row",
+      "title": "① Tổng quan (số tức thời / tháng)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Request /5m",
       "description": "sum(rate(airouter_calls_total[5m])) — tải tổng vào router (tức thời).",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
-      "fieldConfig": { "defaults": { "unit": "reqps", "color": { "mode": "fixed", "fixedColor": "#1f6feb" } } },
-      "targets": [ { "expr": "sum(rate(airouter_calls_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[5m]))", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#1f6feb"
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(airouter_calls_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[5m]))",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
     },
     {
-      "id": 2, "type": "stat", "title": "Token hôm nay",
+      "id": 2,
+      "type": "stat",
+      "title": "Token hôm nay",
       "description": "sum(airouter_key_tokens_today) — token tiêu trong NGÀY (reset nửa đêm UTC).",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
-      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "#388bfd" } } },
-      "targets": [ { "expr": "sum(airouter_key_tokens_today{key_id=~\"$key\"})", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#388bfd"
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(airouter_key_tokens_today{key_id=~\"$key\"})",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
     },
     {
-      "id": 3, "type": "stat", "title": "Cost THÁNG này ($)",
+      "id": 3,
+      "type": "stat",
+      "title": "Cost THÁNG này ($)",
       "description": "sum(airouter_key_cost_month_usd) — chi phí tích lũy THÁNG (gauge, không phụ thuộc khoảng xem).",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "color": { "mode": "fixed", "fixedColor": "#1f6feb" } } },
-      "targets": [ { "expr": "sum(airouter_key_cost_month_usd{key_id=~\"$key\"})", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#1f6feb"
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(airouter_key_cost_month_usd{key_id=~\"$key\"})",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
     },
     {
-      "id": 4, "type": "stat", "title": "Fallback rate (5m)",
+      "id": 4,
+      "type": "stat",
+      "title": "Fallback rate (5m)",
       "description": "% rơi khỏi tier ưu tiên. Cao = key OpenAI sắp cạn -> drift + tốn tiền.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "area" },
-      "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 0.1 }, { "color": "red", "value": 0.3 } ] } } },
-      "targets": [ { "expr": "(sum(rate(airouter_fallback_total[5m])) or vector(0)) / clamp_min(sum(rate(airouter_resolve_total[5m])) or vector(0), 1)", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 0.3
+              }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "(sum(rate(airouter_fallback_total[5m])) or vector(0)) / clamp_min(sum(rate(airouter_resolve_total[5m])) or vector(0), 1)",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
     },
     {
-      "id": 5, "type": "stat", "title": "Key đăng ký",
+      "id": 5,
+      "type": "stat",
+      "title": "Key đăng ký",
       "description": "airouter_keys_total — hụt so với kỳ vọng = secret render thiếu.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
-      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "#388bfd" } } },
-      "targets": [ { "expr": "airouter_keys_total", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
-    },
-    {
-      "id": 6, "type": "stat", "title": "Model lạ (drift, 6h)",
-      "description": "increase(airouter_model_unmatched_total[6h]) — model provider trả KHÔNG có trong catalog -> rebuild catalog.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
-      "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } } },
-      "targets": [ { "expr": "sum(increase(airouter_model_unmatched_total[6h])) or vector(0)", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
-    },
-
-    { "id": 200, "type": "row", "title": "② Key nào chạy Model nào — theo KHOẢNG THỜI GIAN đang chọn", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 } },
-    {
-      "id": 11, "type": "table", "title": "Ma trận Key × Model (token · cost · request — khoảng đang xem)",
-      "description": "Mỗi key gánh model nào, bao nhiêu token/cost/request trong KHOẢNG đang xem ($__range). Model = id CANONICAL (đã gom date).",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 9, "w": 14, "x": 0, "y": 6 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#388bfd"
+          }
+        }
+      },
       "targets": [
-        { "expr": "sum by (key_id, model, tier, provider) (increase(airouter_tokens_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[$__range]))", "format": "table", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } },
-        { "expr": "sum by (key_id, model) (increase(airouter_cost_usd_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[$__range]))", "format": "table", "instant": true, "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" } },
-        { "expr": "sum by (key_id, model) (increase(airouter_calls_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[$__range]))", "format": "table", "instant": true, "refId": "C", "datasource": { "type": "prometheus", "uid": "prometheus" } }
+        {
+          "expr": "airouter_keys_total",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Lệch tải key (RPM)",
+      "description": "(max-min)/avg của RPM giữa các key. ~0 = tải ĐỀU; cao = dồn 1 vài key.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 1.0
+              }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "(max(airouter_key_rpm{key_id=~\"$key\"}) - min(airouter_key_rpm{key_id=~\"$key\"})) / clamp_min(avg(airouter_key_rpm{key_id=~\"$key\"}), 0.01)",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 250,
+      "type": "row",
+      "title": "② Tải & Cost theo KEY (đều hay lệch?)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "panels": []
+    },
+    {
+      "id": 30,
+      "type": "bargauge",
+      "title": "Tải hiện tại theo key (RPM)",
+      "description": "airouter_key_rpm — request/phút mỗi key NGAY lúc này. Bằng nhau = đều; lệch = dồn key.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 6
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "color": {
+            "mode": "continuous-BlPu"
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "airouter_key_rpm{key_id=~\"$key\"}",
+          "legendFormat": "{{key_id}} ({{tier}})",
+          "format": "time_series",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "type": "bargauge",
+      "title": "Cost theo key ($, đang xem)",
+      "description": "sum by(key_id)(increase(airouter_cost_usd_total)) — tiền mỗi key trong khoảng đang xem.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 6
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "min": 0,
+          "color": {
+            "mode": "continuous-GrYlRd"
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (key_id) (increase(airouter_cost_usd_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[$__range]))",
+          "legendFormat": "{{key_id}}",
+          "format": "time_series",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "type": "bargauge",
+      "title": "Token hôm nay theo key",
+      "description": "airouter_key_tokens_today — token tích lũy hôm nay mỗi key (đều theo ngày?).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 6
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "continuous-BlPu"
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "airouter_key_tokens_today{key_id=~\"$key\"}",
+          "legendFormat": "{{key_id}} ({{tier}})",
+          "format": "time_series",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 200,
+      "type": "row",
+      "title": "③ Tải theo KEY & Token theo MODEL",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Tải theo KEY qua thời gian (req/s, stacked) — đều hay lệch",
+      "description": "sum by(key_id)(rate(airouter_calls_total[5m])). Cột mỗi key chồng lên — thấy ngay key nào gánh nhiều.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "targets": [
+        {
+          "expr": "sum by (key_id) (rate(airouter_calls_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[5m]))",
+          "legendFormat": "{{key_id}}",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
       ],
       "transformations": [
-        { "id": "merge", "options": {} },
-        { "id": "organize", "options": {
-          "excludeByName": { "Time": true, "__name__": true, "instance": true, "job": true, "service": true },
-          "renameByName": { "key_id": "Key", "model": "Model", "tier": "Tier", "provider": "Provider", "Value #A": "Token", "Value #B": "Cost ($)", "Value #C": "Request" },
-          "indexByName": { "key_id": 0, "model": 1, "tier": 2, "provider": 3, "Value #A": 4, "Value #B": 5, "Value #C": 6 }
-        } }
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "service": true
+            },
+            "renameByName": {
+              "key_id": "Key",
+              "model": "Model",
+              "tier": "Tier",
+              "provider": "Provider",
+              "Value #A": "Token",
+              "Value #B": "Cost ($)",
+              "Value #C": "Request"
+            },
+            "indexByName": {
+              "key_id": 0,
+              "model": 1,
+              "tier": 2,
+              "provider": 3,
+              "Value #A": 4,
+              "Value #B": 5,
+              "Value #C": 6
+            }
+          }
+        }
       ],
-      "fieldConfig": { "defaults": {}, "overrides": [ { "matcher": { "id": "byName", "options": "Cost ($)" }, "properties": [ { "id": "unit", "value": "currencyUSD" } ] } ] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "stacking": {
+              "mode": "normal"
+            },
+            "lineWidth": 0
+          }
+        }
+      }
     },
     {
-      "id": 12, "type": "timeseries", "title": "Token theo MODEL qua thời gian",
-      "description": "sum by(model)(rate(airouter_tokens_total[5m])) — deepseek/qwen-embed hiện rõ.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 9, "w": 10, "x": 14, "y": 6 },
-      "fieldConfig": { "defaults": { "color": { "mode": "continuous-BlPu" }, "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 20 } } },
-      "targets": [ { "expr": "sum by (model) (rate(airouter_tokens_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[5m]))", "legendFormat": "{{model}}", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+      "id": 12,
+      "type": "timeseries",
+      "title": "Token theo MODEL (stacked, 15m mượt)",
+      "description": "sum by(model)(rate(airouter_tokens_total[15m])) — cửa sổ rộng + stack -> hết răng cưa, đọc được xu hướng.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 35,
+            "stacking": {
+              "mode": "normal"
+            },
+            "lineWidth": 1
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (model) (rate(airouter_tokens_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[15m]))",
+          "legendFormat": "{{model}}",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
     },
-
-    { "id": 300, "type": "row", "title": "③ Theo Capability (think · triage · answer · guardrail · rerank · embed · caption · ocr)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 } },
     {
-      "id": 13, "type": "table", "title": "Mỗi capability dùng model nào · bao nhiêu (khoảng đang xem)",
+      "id": 300,
+      "type": "row",
+      "title": "③ Theo Capability (think · triage · answer · guardrail · rerank · embed · caption · ocr)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      }
+    },
+    {
+      "id": 13,
+      "type": "table",
+      "title": "Mỗi capability dùng model nào · bao nhiêu (khoảng đang xem)",
       "description": "TẤT CẢ capability (kể cả embed) trong 1 bảng — token/cost/request + model đang phục vụ. Hết 'embedding lạc lõng'.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 9, "w": 14, "x": 0, "y": 16 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
       "targets": [
-        { "expr": "sum by (capability, model) (increase(airouter_tokens_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[$__range]))", "format": "table", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } },
-        { "expr": "sum by (capability, model) (increase(airouter_cost_usd_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[$__range]))", "format": "table", "instant": true, "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" } },
-        { "expr": "sum by (capability, model) (increase(airouter_calls_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[$__range]))", "format": "table", "instant": true, "refId": "C", "datasource": { "type": "prometheus", "uid": "prometheus" } }
+        {
+          "expr": "sum by (capability, model) (increase(airouter_tokens_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[$__range]))",
+          "format": "table",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "expr": "sum by (capability, model) (increase(airouter_cost_usd_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[$__range]))",
+          "format": "table",
+          "instant": true,
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "expr": "sum by (capability, model) (increase(airouter_calls_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[$__range]))",
+          "format": "table",
+          "instant": true,
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
       ],
       "transformations": [
-        { "id": "merge", "options": {} },
-        { "id": "organize", "options": {
-          "excludeByName": { "Time": true, "__name__": true, "instance": true, "job": true, "service": true },
-          "renameByName": { "capability": "Capability", "model": "Model", "Value #A": "Token", "Value #B": "Cost ($)", "Value #C": "Request" },
-          "indexByName": { "capability": 0, "model": 1, "Value #A": 2, "Value #B": 3, "Value #C": 4 }
-        } },
-        { "id": "sortBy", "options": { "fields": {}, "sort": [ { "field": "Capability" } ] } }
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "service": true
+            },
+            "renameByName": {
+              "capability": "Capability",
+              "model": "Model",
+              "Value #A": "Token",
+              "Value #B": "Cost ($)",
+              "Value #C": "Request"
+            },
+            "indexByName": {
+              "capability": 0,
+              "model": 1,
+              "Value #A": 2,
+              "Value #B": 3,
+              "Value #C": 4
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Capability"
+              }
+            ]
+          }
+        }
       ],
-      "fieldConfig": { "defaults": {}, "overrides": [ { "matcher": { "id": "byName", "options": "Cost ($)" }, "properties": [ { "id": "unit", "value": "currencyUSD" } ] } ] }
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Cost ($)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              }
+            ]
+          }
+        ]
+      }
     },
     {
-      "id": 14, "type": "timeseries", "title": "Request theo capability qua thời gian",
+      "id": 14,
+      "type": "timeseries",
+      "title": "Request theo capability qua thời gian",
       "description": "sum by(capability)(rate(airouter_calls_total[5m])) — capability nào đang chạy nhiều.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 9, "w": 10, "x": 14, "y": 16 },
-      "fieldConfig": { "defaults": { "unit": "reqps", "color": { "mode": "continuous-BlPu" }, "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 15 } } },
-      "targets": [ { "expr": "sum by (capability) (rate(airouter_calls_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[5m]))", "legendFormat": "{{capability}}", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 25
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "continuous-BlPu"
+          },
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            },
+            "fillOpacity": 15
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (capability) (rate(airouter_calls_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[5m]))",
+          "legendFormat": "{{capability}}",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
     },
-
-    { "id": 400, "type": "row", "title": "④ Chi phí theo Model (khoảng đang xem)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 } },
     {
-      "id": 15, "type": "bargauge", "title": "Cost theo MODEL — khoảng đang xem ($)",
+      "id": 400,
+      "type": "row",
+      "title": "④ Chi phí theo Model (khoảng đang xem)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      }
+    },
+    {
+      "id": 15,
+      "type": "bargauge",
+      "title": "Cost theo MODEL — khoảng đang xem ($)",
       "description": "sum by(model)(increase(airouter_cost_usd_total)) — deepseek/paid KHÔNG còn $0.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
-      "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "min": 0, "color": { "mode": "continuous-BlPu" } } },
-      "targets": [ { "expr": "sum by (model) (increase(airouter_cost_usd_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[$__range]))", "legendFormat": "{{model}}", "format": "time_series", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "min": 0,
+          "color": {
+            "mode": "continuous-BlPu"
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (model) (increase(airouter_cost_usd_total{key_id=~\"$key\", model=~\"$model\", capability=~\"$capability\"}[$__range]))",
+          "legendFormat": "{{model}}",
+          "format": "time_series",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
     },
     {
-      "id": 16, "type": "bargauge", "title": "Free-tier quota còn lại theo key (%)",
-      "description": "remaining / limit — % quota NGÀY (free-tier) còn lại. Dùng % để so được oai (token/ngày) vs or (request/ngày) khác đơn vị. Paid không có trần ngày -> không hiện.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
-      "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "color": { "mode": "thresholds" }, "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 0.2 }, { "color": "green", "value": 0.5 } ] } } },
-      "targets": [ { "expr": "airouter_key_remaining{key_id=~\"$key\"} / clamp_min(airouter_key_limit{key_id=~\"$key\"}, 1)", "instant": true, "legendFormat": "{{key_id}} ({{tier}})", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+      "id": 500,
+      "type": "row",
+      "title": "⑤ Sức khỏe & drift",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      }
     },
-
-    { "id": 500, "type": "row", "title": "⑤ Sức khỏe & drift", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 34 } },
     {
-      "id": 17, "type": "timeseries", "title": "Fallback rate (tự co giãn trục)",
+      "id": 17,
+      "type": "timeseries",
+      "title": "Fallback rate (tự co giãn trục)",
       "description": "% request rơi khỏi tier ưu tiên. Trục Y auto theo giá trị thật.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 35 },
-      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "color": { "mode": "fixed", "fixedColor": "orange" }, "custom": { "fillOpacity": 10 } } },
-      "targets": [ { "expr": "sum(rate(airouter_fallback_total[5m])) / clamp_min(sum(rate(airouter_resolve_total[5m])), 1)", "legendFormat": "fallback rate", "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 44
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          },
+          "custom": {
+            "fillOpacity": 10
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(airouter_fallback_total[5m])) / clamp_min(sum(rate(airouter_resolve_total[5m])), 1)",
+          "legendFormat": "fallback rate",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
     },
     {
-      "id": 18, "type": "stat", "title": "429 /5m",
+      "id": 18,
+      "type": "stat",
+      "title": "429 /5m",
       "description": "sum(rate(airouter_key_429_total[5m])) — key bị quota/rate limit. 0 = không có (tốt).",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 35 },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
-      "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 0.01 } ] } } },
-      "targets": [ { "expr": "sum(rate(airouter_key_429_total[5m])) or vector(0)", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 44
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.01
+              }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(airouter_key_429_total[5m])) or vector(0)",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
     },
     {
-      "id": 19, "type": "stat", "title": "Resolve-fail /5m",
+      "id": 19,
+      "type": "stat",
+      "title": "Resolve-fail /5m",
       "description": "sum(rate(airouter_resolve_fail_total[5m])) — no_capacity / unknown_capability. 0 = tốt.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 35 },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
-      "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.01 } ] } } },
-      "targets": [ { "expr": "sum(rate(airouter_resolve_fail_total[5m])) or vector(0)", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 44
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.01
+              }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(airouter_resolve_fail_total[5m])) or vector(0)",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
     },
     {
-      "id": 20, "type": "stat", "title": "Drift model /5m",
+      "id": 20,
+      "type": "stat",
+      "title": "Drift model /5m",
       "description": "sum(rate(airouter_model_unmatched_total[5m])) — model lạ đang xuất hiện. 0 = tốt.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 39 },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
-      "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.01 } ] } } },
-      "targets": [ { "expr": "sum(rate(airouter_model_unmatched_total[5m])) or vector(0)", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 48
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.01
+              }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(airouter_model_unmatched_total[5m])) or vector(0)",
+          "instant": true,
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
     }
   ]
 }
