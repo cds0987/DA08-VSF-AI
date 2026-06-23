@@ -14,6 +14,9 @@ PAYLOAD_SCHEMA_VERSION = 1
 #   v1 = TF chuẩn-hoá-theo-tổng, KHÔNG IDF (BM25-lite cũ).
 #   v2 = BM25 thật: TF bão hoà (k1/b/avgdl) phía document + Modifier.IDF của Qdrant.
 # PHẢI khớp mcp-service/app/core/contract.py::SPARSE_ENCODING_VERSION.
+# GOTCHA (e2e 2026-06-23): hybrid bật ở producer (rag-worker) NHƯNG quên ở consumer (mcp)
+# -> 2 bên sinh index_id lệch (__s2 vs no-suffix) -> mcp_contract_verify_failed -> 0 sources.
+# => VECTOR_HYBRID phải set GIỐNG NHAU cho CẢ rag-worker LẪN mcp ở MỌI môi trường.
 SPARSE_ENCODING_VERSION = 2
 
 EMBED_MODELS: dict[str, dict[str, object]] = {

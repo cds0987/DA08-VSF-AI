@@ -22,6 +22,9 @@ PAYLOAD_SCHEMA_VERSION = 1
 # Bump khi đổi cách encode sparse -> index_id đổi -> collection MỚI -> migrate. sparse_version
 # chỉ áp khi hybrid bật; =0 (dense-only) GIỮ NGUYÊN tên + fingerprint cũ (no-op).
 #   v1 = TF chuẩn-hoá-theo-tổng, KHÔNG IDF. v2 = BM25 thật (TF bão hoà + Modifier.IDF).
+# GOTCHA (e2e 2026-06-23): hybrid bật ở producer (rag-worker) nhưng quên ở consumer (mcp)
+# -> index_id lệch (__s2 vs no-suffix) -> mcp_contract_verify_failed -> 0 sources. VECTOR_HYBRID
+# PHẢI set giống nhau cho CẢ 2 service ở mọi môi trường (common.env + docker-compose.e2e.yml).
 SPARSE_ENCODING_VERSION = 2
 
 EMBED_MODELS: dict[str, dict[str, object]] = {
