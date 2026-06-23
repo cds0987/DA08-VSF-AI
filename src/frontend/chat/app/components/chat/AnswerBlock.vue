@@ -2,13 +2,21 @@
 import {
   AlertTriangle,
   Check,
+  ChevronDown,
   Copy,
+  File as FileGeneric,
+  FileCode,
+  FileImage,
+  FileSpreadsheet,
   FileText,
+  Globe,
+  Presentation,
   RefreshCw,
   ThumbsDown,
   ThumbsUp,
 } from '@lucide/vue'
-import { citationHeadingPath, citationTeaser, cleanCitationLabel, cn, formatRelevance } from '~/lib/utils'
+import { buildCitationSources, citationFileKind, cn, sourceMeta } from '~/lib/utils'
+import type { CitationFileGroup } from '~/lib/utils'
 import type { ChatMessage, Citation } from '~/types'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
@@ -25,48 +33,34 @@ const emit = defineEmits<{
 }>()
 
 const copied = ref(false)
-
-const popoverCitations = ref<Citation[]>([])   // nhóm nguồn của chip đang hover
-const popoverIndex = ref(0)                    // trang carousel hiện tại
-const popoverStyle = ref({ top: '0px', left: '0px', transform: 'none' })
-let hideTimer: ReturnType<typeof setTimeout> | null = null
-// Ước lượng chiều cao popover để quyết định lật lên/xuống (transform translateY(-100%)
-// tự bù đúng chiều cao thật nên không cần đo chính xác).
-const POPOVER_EST_HEIGHT = 200
-
-const activeCite = computed(() => popoverCitations.value[popoverIndex.value] ?? null)
+const sourcesOpen = ref(false)   // disclosure "Tài liệu liên quan" — DeepSeek-style, mặc định gọn
 
 const md = new MarkdownIt({ html: true, breaks: true, linkify: true })
+
+// Gom citation theo tài liệu -> số nguồn + map ref->số. Dùng cho cả pill inline lẫn list nguồn.
+const citationSources = computed(() => buildCitationSources(props.data.citations))
 
 function resolveRef(n: number): Citation | undefined {
   return props.data.citations?.find(x => x.ref === n) ?? props.data.citations?.[n - 1]
 }
 
-// Tên tài liệu sạch cho nhãn chip: bỏ đuôi file + thay '_' bằng space (vd
-// "CNHC_Employee_Handbook.pdf" -> "CNHC Employee Handbook").
-function docNameLabel(doc?: string | null): string {
-  let s = (doc ?? '').trim()
-  if (!s) return ''
-  s = s.replace(/\.(pdf|docx?|pptx?|xlsx?|txt|md|csv|jpe?g|png|webp|gif)$/i, '')
-  return s.replace(/_+/g, ' ').replace(/\s+/g, ' ').trim()
+// Icon + màu theo nhóm loại tệp (không hardcode PDF).
+const GROUP_ICON: Record<CitationFileGroup, any> = {
+  pdf: FileText, doc: FileText, text: FileCode, web: Globe,
+  sheet: FileSpreadsheet, slide: Presentation, image: FileImage, unknown: FileGeneric,
 }
-
-// Nhãn chip citation INLINE: ưu tiên topic sạch (heading) -> tên tài liệu -> mới tới caption.
-// caption từ rag thường là ĐOẠN CHUNK THÔ (vd "tin và thông báo việc...", "time.") -> dùng
-// làm nhãn inline trông rất thô; caption đầy đủ vẫn nằm ở hover card. (heading_path có thể rỗng
-// với tài liệu ảnh/OCR -> fallback tên tài liệu cho nhãn vẫn có nghĩa.)
-function chipLabel(c: Citation): string {
-  const heads = citationHeadingPath(c.heading_path ?? [], c.document)
-  if (heads.length) return citationTeaser(heads[heads.length - 1])
-  const doc = docNameLabel(c.document)
-  if (doc) return citationTeaser(doc)
-  return citationTeaser(c.caption || c.snippet)
+const GROUP_ICON_CLASS: Record<CitationFileGroup, string> = {
+  pdf: 'text-rose-500', doc: 'text-blue-500', text: 'text-slate-400 dark:text-muted-foreground',
+  web: 'text-sky-500', sheet: 'text-emerald-500', slide: 'text-amber-500',
+  image: 'text-violet-500', unknown: 'text-slate-400 dark:text-muted-foreground',
 }
+function fileIcon(doc?: string | null) { return GROUP_ICON[citationFileKind(doc).group] }
+function fileIconClass(doc?: string | null) { return GROUP_ICON_CLASS[citationFileKind(doc).group] }
 
 const renderedContent = computed(() => {
   if (!props.data.content) return ''
-  // Đang stream: render markdown THÔ + con trỏ nhấp nháy, CHƯA inject chip (citation chưa có).
-  // Cùng node với bản cuối -> khi xong chỉ patch (chip thay [N]) chứ không remount -> không flash.
+  // Đang stream: render markdown THÔ + con trỏ nhấp nháy, CHƯA inject pill (citation chưa có).
+  // Cùng node với bản cuối -> khi xong chỉ patch ([N] thành pill) chứ không remount -> không flash.
   if (props.data.streaming) {
     const html = md.render(props.data.content)
     return DOMPurify.sanitize(
@@ -74,83 +68,47 @@ const renderedContent = computed(() => {
     )
   }
   const rawHtml = md.render(props.data.content)
+  const { refToNumber } = citationSources.value
   const esc = (t: string) => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!))
-  // Gộp run [N] liền nhau -> 1 chip logo VSF. Đẩy dấu câu cuối câu RA TRƯỚC chip
-  // (chip đứng SAU dấu chấm, không phải trước).
+  // [N] liền nhau -> pill số gọn kiểu DeepSeek; dedup theo SỐ NGUỒN trong cùng run; đẩy dấu
+  // câu RA TRƯỚC pill (pill đứng sau dấu chấm). data-ref = marker thô để mở đúng chunk đã trích.
   const withRefs = rawHtml.replace(/(\s*)((?:\[\d+\]\s*)+)([.,;:!?…]*)/g, (_m, lead, run, punct) => {
-    const refs = [...run.matchAll(/\[(\d+)\]/g)]
-      .map(m => parseInt(m[1]))
-      .filter(n => resolveRef(n))  // bỏ ref LLM bịa (không khớp source)
-    if (!refs.length) return punct  // ref bịa -> bỏ marker, GIỮ dấu câu
-    const first = resolveRef(refs[0])!
-    const teaser = esc(chipLabel(first))
-    const extra = refs.length > 1
-      ? `<span class="ml-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">+${refs.length - 1}</span>`
-      : ''
-    // aria-label nằm trong attribute -> phải escape cả dấu nháy kép, không chỉ &<>
-    const label = esc(`Xem nguồn: ${chipLabel(first)}`).replace(/"/g, '&quot;')
-    const chip = `<span class="citation-ref cursor-pointer select-none inline-flex items-center gap-1 align-baseline rounded-full bg-slate-100 dark:bg-white/10 pl-0.5 pr-1.5 py-0.5 mx-0.5 hover:bg-slate-200 dark:hover:bg-white/20" role="button" tabindex="0" aria-label="${label}" data-refs="${refs.join(',')}"><img src="/logo.png" alt="" class="h-3.5 w-3.5 rounded-full object-cover"/><span class="text-[11px] font-medium text-slate-600 dark:text-slate-300">${teaser}</span>${extra}</span>`
-    return `${punct}${lead || ' '}${chip}`
+    const markers = [...run.matchAll(/\[(\d+)\]/g)].map(m => parseInt(m[1]))
+    const seen = new Set<number>()
+    const pills: string[] = []
+    for (const marker of markers) {
+      const cit = resolveRef(marker)
+      const num = refToNumber[marker]
+      // Bỏ ref LLM bịa (không khớp source) + dedup nguồn trùng trong cùng cụm.
+      if (!cit || num === undefined || seen.has(num)) continue
+      seen.add(num)
+      const label = esc(`Nguồn ${num}: ${cit.document}`).replace(/"/g, '&quot;')
+      pills.push(`<span class="citation-ref cursor-pointer select-none inline-flex items-center justify-center align-baseline min-w-[18px] h-[18px] mx-0.5 px-1 rounded-md bg-slate-100 dark:bg-white/10 text-[11px] font-semibold leading-none text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/20" role="button" tabindex="0" aria-label="${label}" data-ref="${marker}">${num}</span>`)
+    }
+    if (!pills.length) return punct  // toàn ref bịa -> bỏ marker, GIỮ dấu câu
+    return `${punct}${lead || ' '}${pills.join('')}`
   })
-  return DOMPurify.sanitize(withRefs, { ADD_ATTR: ['data-refs', 'role', 'tabindex', 'aria-label'] })
+  return DOMPurify.sanitize(withRefs, { ADD_ATTR: ['data-ref', 'role', 'tabindex', 'aria-label'] })
 })
 
-function refsFromChip(chip: HTMLElement): Citation[] {
-  return (chip.dataset.refs ?? '')
-    .split(',')
-    .map(s => resolveRef(parseInt(s)))
-    .filter((c): c is Citation => Boolean(c))
-}
-
-function openChip(chip: HTMLElement) {
-  const list = refsFromChip(chip)
-  if (!list.length) return
-  // Chỉ dùng popoverIndex (vị trí carousel) khi popover đang mở ĐÚNG chip này; nếu
-  // click chip khác (vd touch không qua hover) thì index cũ vô nghĩa -> về nguồn đầu.
-  const sameChip = popoverCitations.value.length === list.length
-    && popoverCitations.value.every((c, i) => c === list[i])
-  const citation = list[sameChip ? popoverIndex.value : 0] ?? list[0]
-  emit('open-citation', citation)
+// Mở đúng chunk đã trích dẫn từ pill (data-ref = marker thô LLM phát).
+function openMarker(el: HTMLElement) {
+  const cit = resolveRef(parseInt(el.dataset.ref ?? ''))
+  if (cit) emit('open-citation', cit)
 }
 
 function handleContentClick(e: MouseEvent) {
-  // closest: click có thể trúng <img>/"+N" con bên trong chip
   const chip = (e.target as HTMLElement).closest('.citation-ref') as HTMLElement | null
-  if (chip) openChip(chip)
+  if (chip) openMarker(chip)
 }
 
-// Enter/Space mở citation khi chip đang focus (keyboard) — chip là role="button".
+// Enter/Space mở citation khi pill đang focus (keyboard) — pill là role="button".
 function handleContentKeydown(e: KeyboardEvent) {
   if (e.key !== 'Enter' && e.key !== ' ') return
   const chip = (e.target as HTMLElement).closest('.citation-ref') as HTMLElement | null
   if (!chip) return
   e.preventDefault()
-  openChip(chip)
-}
-
-// Hiện popover khi chip nhận focus bằng bàn phím (Tab), tái dùng logic định vị hover.
-function showPopoverForChip(chip: HTMLElement) {
-  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
-  const list = refsFromChip(chip)
-  if (!list.length) return
-  const rect = chip.getBoundingClientRect()
-  const left = Math.max(8, Math.min(rect.left + window.scrollX, window.innerWidth - 332))
-  // Lật lên trên nếu chỗ trống bên dưới không đủ (vd chip gần đáy màn hình).
-  const flipUp = window.innerHeight - rect.bottom < POPOVER_EST_HEIGHT && rect.top > window.innerHeight - rect.bottom
-  popoverStyle.value = flipUp
-    ? { top: `${rect.top + window.scrollY - 6}px`, left: `${left}px`, transform: 'translateY(-100%)' }
-    : { top: `${rect.bottom + window.scrollY + 6}px`, left: `${left}px`, transform: 'none' }
-  popoverCitations.value = list
-  popoverIndex.value = 0
-}
-
-function handleContentFocusIn(e: FocusEvent) {
-  const chip = (e.target as HTMLElement).closest('.citation-ref') as HTMLElement | null
-  if (chip) showPopoverForChip(chip)
-}
-
-function handleContentFocusOut() {
-  hideTimer = setTimeout(() => { popoverCitations.value = [] }, 200)
+  openMarker(chip)
 }
 
 function copyToClipboard() {
@@ -158,31 +116,6 @@ function copyToClipboard() {
   void navigator.clipboard.writeText(props.data.content)
   copied.value = true
   setTimeout(() => { copied.value = false }, 1500)
-}
-
-function handleContentMouseOver(e: MouseEvent) {
-  const chip = (e.target as HTMLElement).closest('.citation-ref') as HTMLElement | null
-  if (chip) showPopoverForChip(chip)
-}
-
-function handleContentMouseLeave() {
-  hideTimer = setTimeout(() => { popoverCitations.value = [] }, 200)
-}
-
-function keepPopover() {
-  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
-}
-
-function leavePopover() {
-  hideTimer = setTimeout(() => { popoverCitations.value = [] }, 200)
-}
-
-function prevCite() {
-  if (popoverIndex.value > 0) popoverIndex.value--
-}
-
-function nextCite() {
-  if (popoverIndex.value < popoverCitations.value.length - 1) popoverIndex.value++
 }
 </script>
 
@@ -212,10 +145,6 @@ function nextCite() {
         v-html="renderedContent"
         @click="handleContentClick"
         @keydown="handleContentKeydown"
-        @mouseover="handleContentMouseOver"
-        @mouseleave="handleContentMouseLeave"
-        @focusin="handleContentFocusIn"
-        @focusout="handleContentFocusOut"
       />
       <!-- Network interruption — ChatGPT style: no content received, show subtle placeholder -->
       <p
@@ -229,6 +158,39 @@ function nextCite() {
         <ProactiveSuggestionCard v-else-if="act.action_type === 'proactive_doc_suggestion'" :action="act" />
         <ActionableCard v-else :action="act" :message-id="data.id" />
       </template>
+    </div>
+
+    <!-- Nguồn: disclosure gọn kiểu DeepSeek — mặc định thu gọn, chi tiết chỉ mở khi cần -->
+    <div v-if="!data.streaming && citationSources.sources.length" class="px-5 pb-1">
+      <button
+        type="button"
+        class="group inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[13px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-muted-foreground dark:hover:bg-white/5 dark:hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+        :aria-expanded="sourcesOpen"
+        @click="sourcesOpen = !sourcesOpen"
+      >
+        <ChevronDown class="src-chevron h-3.5 w-3.5 transition-transform" :class="sourcesOpen && 'rotate-180'" aria-hidden="true" />
+        <span>Tài liệu liên quan · {{ citationSources.sources.length }} nguồn</span>
+      </button>
+
+      <div v-show="sourcesOpen" class="mt-1.5 flex flex-col gap-1">
+        <button
+          v-for="s in citationSources.sources"
+          :key="s.number"
+          type="button"
+          class="group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-slate-100 dark:hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+          :aria-label="`Nguồn ${s.number}: ${s.citation.document}`"
+          @click="emit('open-citation', s.citation)"
+        >
+          <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-slate-100 text-[11px] font-semibold text-slate-500 dark:bg-white/10 dark:text-slate-300">{{ s.number }}</span>
+          <component :is="fileIcon(s.citation.document)" class="h-4 w-4 shrink-0" :class="fileIconClass(s.citation.document)" aria-hidden="true" />
+          <span class="min-w-0 flex-1 truncate text-[13px] font-medium text-slate-700 dark:text-foreground/90">{{ s.citation.document }}</span>
+          <span class="flex shrink-0 items-center gap-1.5 text-[11px] text-slate-400 dark:text-muted-foreground">
+            <span v-if="sourceMeta(s.citation).section" class="max-w-[140px] truncate">{{ sourceMeta(s.citation).section }}</span>
+            <span v-if="sourceMeta(s.citation).page">{{ sourceMeta(s.citation).page }}</span>
+            <span v-if="sourceMeta(s.citation).relevance" class="tabular-nums">{{ sourceMeta(s.citation).relevance }}</span>
+          </span>
+        </button>
+      </div>
     </div>
 
     <div v-if="!data.streaming" class="flex items-center gap-1 px-5 py-2">
@@ -298,52 +260,6 @@ function nextCite() {
         </TooltipContent>
       </Tooltip>
     </div>
-
-    <Teleport to="body">
-      <div
-        v-if="activeCite"
-        :style="{ position: 'absolute', zIndex: '9999', width: '320px', top: popoverStyle.top, left: popoverStyle.left, transform: popoverStyle.transform }"
-        class="rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-card shadow-lg p-3 pointer-events-auto"
-        @mouseenter="keepPopover"
-        @mouseleave="leavePopover"
-      >
-        <!-- Header: điều hướng carousel (chỉ khi >1 nguồn) + score -->
-        <div class="flex items-center justify-between mb-1.5">
-          <div class="flex items-center gap-1">
-            <template v-if="popoverCitations.length > 1">
-              <button
-                class="flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30 dark:hover:bg-white/10 dark:hover:text-foreground"
-                :disabled="popoverIndex === 0"
-                @click="prevCite"
-              >‹</button>
-              <button
-                class="flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30 dark:hover:bg-white/10 dark:hover:text-foreground"
-                :disabled="popoverIndex === popoverCitations.length - 1"
-                @click="nextCite"
-              >›</button>
-              <span class="text-[10px] text-slate-400">{{ popoverIndex + 1 }}/{{ popoverCitations.length }}</span>
-            </template>
-          </div>
-        </div>
-        <!-- Title: logo VSF + tên tài liệu -->
-        <div class="flex items-center gap-1.5 mb-1">
-          <img src="/logo.png" alt="" class="h-4 w-4 rounded-full object-cover shrink-0" />
-          <span class="truncate text-[12px] font-semibold text-slate-800 dark:text-foreground">{{ activeCite.document }}</span>
-        </div>
-        <!-- Snippet (đoạn khớp nguyên văn ưu tiên; caption là tóm tắt AI -> dọn tiền tố) -->
-        <p class="line-clamp-3 text-[12px] leading-snug text-slate-600 dark:text-muted-foreground mb-1">
-          {{ activeCite.snippet?.trim() || cleanCitationLabel(activeCite.caption) }}
-        </p>
-        <!-- Breadcrumb section (nếu có heading) -->
-        <div
-          v-if="citationHeadingPath(activeCite.heading_path, activeCite.document).length"
-          class="flex items-center gap-1 text-[11px] text-slate-400"
-        >
-          <FileText class="h-3 w-3 shrink-0" />
-          <span class="truncate">{{ citationHeadingPath(activeCite.heading_path, activeCite.document).join(' › ') }}</span>
-        </div>
-      </div>
-    </Teleport>
   </div>
 </template>
 
@@ -387,20 +303,19 @@ function nextCite() {
   --tw-prose-pre-code: var(--foreground);
 }
 
-/* Chip render qua v-html nên scoped CSS cần :deep(). Prose ép img -> block + margin
- * dọc lớn làm chip kéo cao thành viên nang; override về inline để chip gọn. */
-.ai-response-markdown :deep(.citation-ref img) {
-  display: inline-block;
-  margin: 0;
-  vertical-align: middle;
-}
-
-/* Focus bàn phím (Tab) phải nhìn thấy rõ — chip là role="button". */
+/* Focus bàn phím (Tab) phải nhìn thấy rõ — pill là role="button". */
 .ai-response-markdown :deep(.citation-ref:focus-visible) {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
 .ai-response-markdown :deep(.citation-ref:focus:not(:focus-visible)) {
   outline: none;
+}
+
+/* Chevron disclosure nguồn — bỏ animation khi người dùng yêu cầu giảm chuyển động. */
+@media (prefers-reduced-motion: reduce) {
+  .src-chevron {
+    transition: none;
+  }
 }
 </style>
