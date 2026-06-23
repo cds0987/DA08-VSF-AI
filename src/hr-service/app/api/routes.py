@@ -650,8 +650,14 @@ async def hr_profile(
             "sick_used": lb.sick_used, "sick_remaining": lb.sick_remaining,
         },
         "leave_requests": [
-            {"leave_type": r.leave_type, "start_date": r.start_date, "end_date": r.end_date,
-             "days_count": r.days_count, "status": r.status}
+            {
+                "leave_type": r.leave_type, "start_date": r.start_date, "end_date": r.end_date,
+                "days_count": r.days_count, "status": r.status,
+                "status_label": {
+                    "pending": "chờ duyệt", "approved": "đã duyệt", "rejected": "từ chối",
+                    "cancelled": "đã huỷ",
+                }.get(r.status, r.status),
+            }
             for r in (lrs or [])
         ],
         "attendance": None if att is None else {
@@ -695,6 +701,7 @@ async def hr_profile(
         "company_email": emp.company_email,
         "hire_date": emp.hire_date.isoformat() if emp.hire_date else None,
         "manager_name": manager_name,
+        "leave_approver": manager_name,
     }
 
     # Audit 1 lần (profile chạm cả intent nhạy cảm payroll/benefits/performance — self-access).
