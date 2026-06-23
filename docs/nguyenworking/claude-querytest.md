@@ -366,7 +366,7 @@ cũ (giờ từ chối lưu số giả). ⇒ Hành vi model KHÔNG bị thao tú
 | DATE-1 | Đơn nghỉ nhận ngày quá khứ (1/3) / 0 ngày (3/3) + raw JSON | date/leave | 🟠 | rõ | ghi nhận |
 | LEAK-2 | Lộ scaffold "BƯỚC 1 — TỔNG HỢP…" + raw action JSON vào answer | leak | 🟡 | rõ | ghi nhận |
 | RAG-2 | Reasoning hỏng vì thiếu dữ-liệu-ảnh (cascade từ RAG-1) | rag/reason | 🟠 | — | ghi nhận |
-| RAG-3 | Retrieved-but-missed: có cite nhưng "không có mã" (TXT-1) | rag | 🟠 | — | ghi nhận |
+| RAG-3 | ~~Retrieved-but-missed: cite nhưng "không có mã" (TXT-1/CT-7741)~~ | rag | ~~🟠~~ | re-test | ✅ **RESOLVED bởi L1** — CT-7741 nay HIT 0.979 + trích đúng (G3) |
 | MEM-3 | ~~Memory bleed khi thiếu conversation_id~~ → KHÔNG conv_id = tiếp tục LATEST CHAT (contract legacy, có test) | memory | ~~🟡~~ | rõ | ⛔ **TÁI PHÂN LOẠI** — by design, KHÔNG phải bug (G2) |
 | STREAM-1 | verify_answer "nghĩ câm" gap 3-15s | stream | 🟡 | 3/3 | ghi nhận |
 | MEM-2 | leave carry-forward gap ~14s (leave_action câm) | stream | 🟡 | 3/3 | ghi nhận |
@@ -612,10 +612,13 @@ cũ (giờ từ chối lưu số giả). ⇒ Hành vi model KHÔNG bị thao tú
 - REASON-1 "thâm niên 11 năm tổng phép tối đa" cần `12 (Điều 2) + 5 (ảnh Phụ lục A) = 17`. Model
   lấy được 12 nhưng **không có +5 (do RAG-1)** → không ra 17. Lỗi suy luận GỐC ở recall ảnh.
 
-### [RAG-3] Retrieved-but-missed: có cite claude_test nhưng bảo "không có mã" — 🟠
-- TXT-1 "mã quy định thâm niên" (CT-7741): sources CÓ `claude_test_hr_policy.docx` (0.50) nhưng
-  answer "không tìm thấy mã quy định cụ thể". Chunk chứa mã không lọt top / model không trích ra.
-  (So sánh: QD-3092, SEC-5510 ở doc tương tự thì HIT — không nhất quán theo vị trí mã trong doc.)
+### [RAG-3] ✅ RESOLVED bởi L1 Contextual Retrieval — re-test 2026-06-23
+- TXT-1 "mã quy định thâm niên" (CT-7741): TRƯỚC L1 sources có doc (0.50) nhưng answer "không tìm
+  thấy mã". SAU L1 (lineage embed/bm25/rerank): **CT-7741 HIT** — `claude_test_hr_policy.docx` score
+  **0.979**, answer "mã CT-7741 [1][2]... Điều 3 — Thâm niên". SEC-5510 cũng HIT đúng (Chính sách Bảo mật).
+  → chunk-mã đã lọt top + trích đúng. RAG-3 không còn lặp.
+- Lưu ý: QD-3092 hỏi ra "không tìm thấy" — KHÔNG phải lỗi logic (cùng pipeline CT-7741/SEC-5510 HIT
+  hoàn hảo) mà là **corpus gap**: doc chứa QD-3092 thuộc nhóm C/D/F/G re-ingest fail (TODO idle re-ingest).
 
 ### [MEM-3] ⛔ TÁI PHÂN LOẠI — KHÔNG conversation_id = tiếp tục LATEST CHAT (by design, KHÔNG phải bug)
 - **Triệu chứng (lúc đầu tưởng bug):** gửi nhiều `/query` cùng user KHÔNG kèm `conversation_id` →
