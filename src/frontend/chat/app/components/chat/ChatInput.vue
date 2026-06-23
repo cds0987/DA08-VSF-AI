@@ -60,7 +60,7 @@ watch(() => props.input, (value) => {
     <form
       @submit.prevent="sendMessage"
       :class="cn(
-        'flex w-full rounded-2xl border border-slate-200 dark:border-white/5 bg-white dark:bg-chat-input shadow-lg focus-within:border-blue-400/50 dark:focus-within:border-blue-500/30 focus-within:ring-2 focus-within:ring-blue-100 dark:focus-within:ring-blue-900/20',
+        'flex w-full rounded-3xl border border-slate-200 dark:border-white/5 bg-white dark:bg-chat-input shadow-md transition-shadow focus-within:border-blue-400/50 dark:focus-within:border-blue-500/30 focus-within:ring-2 focus-within:ring-blue-100 dark:focus-within:ring-blue-900/20 focus-within:shadow-lg',
         isMultiline ? 'flex-col' : 'flex-row items-center gap-2 p-2',
       )"
     >
@@ -82,9 +82,9 @@ watch(() => props.input, (value) => {
           type="submit"
           :disabled="!input.trim() || isProcessing"
           :class="cn(
-            'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full disabled:cursor-not-allowed',
+            'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-[transform,background-color] disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500',
             input.trim() && !isProcessing
-              ? 'bg-purple-600 dark:bg-blue-600 text-white shadow-lg shadow-purple-500/20 dark:shadow-blue-500/10 hover:bg-purple-700 dark:hover:bg-blue-500'
+              ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20 hover:bg-blue-700 active:scale-[0.97]'
               : 'bg-slate-200 dark:bg-white/5 text-slate-400 dark:text-muted-foreground/40',
           )"
           aria-label="Send"

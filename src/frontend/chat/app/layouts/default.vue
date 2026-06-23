@@ -12,7 +12,7 @@ const isLoginPage = computed(() => route.path === '/login')
   </div>
   <div
     v-else
-    class="flex h-screen w-full overflow-hidden relative bg-background text-foreground transition-colors duration-300"
+    class="flex h-dvh w-full overflow-hidden relative bg-background text-foreground transition-colors duration-300"
   >
     <BackgroundEffects />
     <AppShell />
