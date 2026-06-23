@@ -1,15 +1,20 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { Download, ExternalLink, FileText, X } from '@lucide/vue'
+import {
+  Download, ExternalLink, FileText, X,
+  File as FileGeneric, FileCode, FileImage, FileSpreadsheet, Globe, Presentation,
+} from '@lucide/vue'
 import DOMPurify from 'dompurify'
 import MarkdownIt from 'markdown-it'
 import type { Citation } from '~/types'
 import documentService from '~/lib/api/documentService'
-import { citationHeadingPath, cleanCitationLabel, formatRelevance } from '~/lib/utils'
+import { citationFileKind, citationHeadingPath, cleanCitationLabel, formatRelevance } from '~/lib/utils'
+import { resolveViewerMode } from '~/lib/documentViewer'
 
-type ViewerMode = 'pdf' | 'html' | 'text' | 'image' | 'unsupported'
-type SupportedFileType = 'pdf' | 'docx' | 'txt' | 'xlsx' | 'csv' | 'pptx' | 'md' | ImageFileType
-type ImageFileType = 'png' | 'jpg' | 'jpeg' | 'gif' | 'bmp' | 'webp'
+// Chế độ RENDER của panel (gộp office/markdown/html-file vào 1 nhánh 'html' iframe).
+type ViewerMode = 'pdf' | 'html' | 'text' | 'image' | 'fallback'
+// Loại tệp office mà officeparser render được (docx/xlsx/csv/pptx).
+type OfficeFileType = 'docx' | 'xlsx' | 'csv' | 'pptx'
 
 const props = defineProps<{ citation: Citation | null }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -20,19 +25,8 @@ const markdown = new MarkdownIt({
   typographer: true,
 })
 const HIGHLIGHT_ID = 'vsf-citation-highlight'
-const imageFileTypes = new Set<ImageFileType>(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'])
-const supportedFileTypes = new Set<SupportedFileType>([
-  'pdf',
-  'docx',
-  'txt',
-  'xlsx',
-  'csv',
-  'pptx',
-  'md',
-  ...imageFileTypes,
-])
 
-const viewerMode = ref<ViewerMode>('unsupported')
+const viewerMode = ref<ViewerMode>('fallback')
 const fileUrl = ref<string | null>(null)
 const sourceUrl = ref<string | null>(null)
 const htmlContent = ref('')
@@ -54,6 +48,13 @@ function revokeObjectUrl() {
 
 const fileTypeLabel = computed(() => fileType.value ? fileType.value.toUpperCase() : '')
 const headingPath = computed(() => props.citation ? citationHeadingPath(props.citation.heading_path, props.citation.document) : [])
+
+// Icon fallback theo nhóm tệp (tái dùng citationFileKind của Phase 3 — 1 family @lucide).
+const FALLBACK_ICON = {
+  pdf: FileText, doc: FileText, text: FileCode, web: Globe,
+  sheet: FileSpreadsheet, slide: Presentation, image: FileImage, unknown: FileGeneric,
+} as const
+const fallbackIcon = computed(() => FALLBACK_ICON[citationFileKind(props.citation?.document).group])
 // Caption (tóm tắt AI) chỉ là mô tả phụ — dọn tiền tố số thứ tự và bỏ nếu trùng tên
 // tài liệu (đã hiển thị làm title) để tránh lặp.
 const captionText = computed(() => {
@@ -106,7 +107,7 @@ async function fetchFile(url: string, signal: AbortSignal): Promise<ArrayBuffer>
 
 async function renderOfficeFile(
   data: ArrayBuffer,
-  type: Exclude<SupportedFileType, 'pdf' | 'txt' | 'md'>,
+  type: OfficeFileType,
 ): Promise<string> {
   const { OfficeConverter } = await import('officeparser')
   const { value, messages } = await OfficeConverter.convert(
@@ -194,7 +195,7 @@ function createHtmlDocument(content: string, highlight: string): string {
 
 function resetViewer() {
   revokeObjectUrl()
-  viewerMode.value = 'unsupported'
+  viewerMode.value = 'fallback'
   fileUrl.value = null
   sourceUrl.value = null
   htmlContent.value = ''
@@ -227,14 +228,16 @@ watch(
       fileType.value = normalizedType
       sourceUrl.value = result.url
 
-      if (!supportedFileTypes.has(normalizedType as SupportedFileType)) {
-        viewerMode.value = 'unsupported'
-        errorMsg.value = `Không hỗ trợ xem trước tệp .${normalizedType || 'unknown'}`
+      const mode = resolveViewerMode(normalizedType)
+
+      // fallback: KHÔNG fetch bytes — thẻ đẹp "Mở/Tải tài liệu gốc" (xls/tif/tiff/type lạ).
+      if (mode === 'fallback') {
+        viewerMode.value = 'fallback'
         return
       }
 
-      const supportedType = normalizedType as SupportedFileType
-      if (imageFileTypes.has(supportedType as ImageFileType)) {
+      // image: dùng thẳng presigned URL, không fetch.
+      if (mode === 'image') {
         viewerMode.value = 'image'
         fileUrl.value = result.url
         return
@@ -242,8 +245,9 @@ watch(
 
       const data = await fetchFile(result.url, controller.signal)
       if (controller.signal.aborted) return
+      const highlight = newCitation.snippet?.trim() || newCitation.caption
 
-      if (supportedType === 'pdf') {
+      if (mode === 'pdf') {
         // Tải PDF qua blob same-origin để vượt qua origin check của PDF.js viewer.
         objectUrl = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }))
         viewerMode.value = 'pdf'
@@ -251,23 +255,32 @@ watch(
         return
       }
 
-      if (supportedType === 'txt') {
+      if (mode === 'text') {
         viewerMode.value = 'text'
         textContent.value = new TextDecoder('utf-8').decode(data)
         return
       }
 
-      if (supportedType === 'md') {
+      if (mode === 'markdown') {
         viewerMode.value = 'html'
         const source = new TextDecoder('utf-8').decode(data)
-        htmlContent.value = createHtmlDocument(markdown.render(source), newCitation.snippet?.trim() || newCitation.caption)
+        htmlContent.value = createHtmlDocument(markdown.render(source), highlight)
         return
       }
 
+      if (mode === 'html') {
+        // HTML/HTM gốc: DOMPurify + iframe sandbox SẴN CÓ (không nới lỏng) — như path md/office.
+        viewerMode.value = 'html'
+        const source = new TextDecoder('utf-8').decode(data)
+        htmlContent.value = createHtmlDocument(source, highlight)
+        return
+      }
+
+      // mode === 'office' (docx/xlsx/csv/pptx) qua officeparser.
       viewerMode.value = 'html'
       htmlContent.value = createHtmlDocument(
-        await renderOfficeFile(data, supportedType),
-        newCitation.snippet?.trim() || newCitation.caption,
+        await renderOfficeFile(data, normalizedType as OfficeFileType),
+        highlight,
       )
     } catch (error: any) {
       if (error?.name === 'AbortError') return
@@ -406,8 +419,36 @@ onBeforeUnmount(() => {
           class="max-h-full max-w-full object-contain"
         >
       </div>
-      <div v-else class="absolute inset-0 flex items-center justify-center bg-white dark:bg-card text-sm text-slate-400 dark:text-muted-foreground">
-        Không có bản xem trước
+      <!-- Fallback đẹp: type không render được tại đây (xls/tif/tiff/lạ) — KHÔNG phải lỗi -->
+      <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-white dark:bg-card p-6 text-center">
+        <div class="flex h-20 w-20 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 dark:bg-muted dark:text-muted-foreground">
+          <component :is="fallbackIcon" class="h-10 w-10" :stroke-width="1.5" aria-hidden="true" />
+        </div>
+        <div class="space-y-1">
+          <p class="text-sm font-semibold text-slate-700 dark:text-foreground">Không xem trước được tại đây</p>
+          <p class="text-xs text-slate-400 dark:text-muted-foreground">
+            Định dạng {{ fileTypeLabel || 'này' }} cần mở bằng ứng dụng phù hợp.
+          </p>
+        </div>
+        <div v-if="sourceUrl" class="flex flex-wrap items-center justify-center gap-2.5">
+          <a
+            :href="sourceUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+          >
+            <ExternalLink class="h-4 w-4" aria-hidden="true" />
+            Mở tài liệu gốc
+          </a>
+          <a
+            :href="sourceUrl"
+            :download="citation?.document"
+            class="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-border dark:text-foreground dark:hover:bg-accent"
+          >
+            <Download class="h-4 w-4" aria-hidden="true" />
+            Tải xuống
+          </a>
+        </div>
       </div>
     </div>
     <div v-else class="flex flex-1 items-center justify-center p-6 text-sm text-slate-400 dark:text-muted-foreground">
