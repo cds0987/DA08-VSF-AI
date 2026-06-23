@@ -27,6 +27,15 @@ class CaptionFallbackThresholdExceededError(RuntimeError):
     """Too many caption fallbacks indicate degraded AI quality for this document."""
 
 
+def _context_header(document_name: str, section_title: str) -> str:
+    """Lineage tài liệu chèn vào text embed/bm25 (Contextual Retrieval): tên tài liệu = tín
+    hiệu phân biệt giữa các document gần-trùng; mục = ngữ cảnh section. Cả 2 rỗng -> "" (no-op)."""
+    doc = (document_name or "").strip()
+    sec = (section_title or "").strip()
+    parts = [p for p in (doc, sec) if p]
+    return f"[Tài liệu: {' | Mục: '.join(parts)}]" if parts else ""
+
+
 @dataclass
 class IngestInput:
     document_id: str
@@ -262,6 +271,13 @@ class HaystackRagEngine:
             has_heading = bool(section.section_title) and section.section_title != "(no heading)"
             heading_path = [section.section_title] if has_heading else []
 
+            # Contextual Retrieval: mọi chunk MANG LINEAGE tài liệu (tên tài liệu + mục) trong
+            # text được EMBED (dense) + BM25 (sparse) -> phân biệt chunk gần-trùng giữa các
+            # document (vd bảng per-diem giống nhau ở nhiều tài liệu; chunk-từ-ảnh vốn chỉ có
+            # dãy số, không tự mang danh tính tài liệu). KHÔNG đổi payload schema: child_text/
+            # caption giữ nguyên raw; chỉ enrich biểu diễn searchable.
+            ctx_header = _context_header(doc.document_name, section.section_title if has_heading else "")
+
             caption = (
                 captions_by_index[parent_index] if self.captioner is not None else None
             )
@@ -271,14 +287,18 @@ class HaystackRagEngine:
                 # caption hiển thị: có captioner -> caption AI; không -> chính raw child.
                 display_caption = caption if caption is not None else child
                 chunk_ids.append(chunk_id)
-                # Vector dense embed THEO embed_target (caption_raw mặc định -> giữ literal).
-                embed_texts.append(self._embed_text_for(caption, child))
+                # Vector dense embed THEO embed_target (caption_raw mặc định -> giữ literal),
+                # CỘNG context-header lên đầu -> dense vector mã hoá danh tính tài liệu.
+                embed_texts.append(f"{ctx_header}\n{self._embed_text_for(caption, child)}")
                 payloads.append(
                     {
                         # child_text LUÔN = raw child (trước đây nhầm = caption -> chunk
                         # text bị thay bằng tóm tắt AI). caption giữ riêng ở field "caption".
                         "child_text": child,
-                        "bm25_text": f"{section.section_title} {child}" if has_heading else child,
+                        # bm25_text = context-header + (section_title) + child. child VẪN là
+                        # substring (test gác) -> sparse khớp cả tên tài liệu lẫn nội dung.
+                        "bm25_text": (f"{ctx_header} {section.section_title} {child}"
+                                      if has_heading else f"{ctx_header} {child}"),
                         "parent_id": parent_id,
                         "parent_text": section.parent_text,
                         "document_id": doc.document_id,

@@ -28,6 +28,17 @@ _RERANK_SYSTEM_PROMPT = (
 )
 
 
+def _doc_context(hit: SearchHit) -> str:
+    """Lineage tài liệu cho rerank passage -> cross-encoder phân biệt chunk GẦN-TRÙNG giữa các
+    document (vd bảng per-diem giống nhau ở nhiều tài liệu; chunk-từ-ảnh chỉ có dãy số). Dùng
+    metadata SẴN CÓ (document_name + heading_path) -> KHÔNG cần re-ingest."""
+    doc = str(getattr(hit, "document_name", "") or "").strip()
+    heads = getattr(hit, "heading_path", None) or []
+    sec = " / ".join(str(h).strip() for h in heads if str(h).strip())
+    parts = [p for p in (doc, sec) if p]
+    return f"[{' | '.join(parts)}]" if parts else ""
+
+
 class Reranker(Protocol):
     async def rerank(
         self, query: str, hits: List[SearchHit], top_k: int, threshold: float
@@ -151,8 +162,10 @@ class LlmReranker:
         return f"QUERY: {query}\n\nPASSAGES:\n{numbered_passages}"
 
     def _passage_text(self, hit: SearchHit) -> str:
+        ctx = _doc_context(hit)
         body = (hit.child_text or hit.parent_text)[: self._passage_chars]
-        return f"{hit.caption}\n{body}".strip()
+        core = f"{hit.caption}\n{body}".strip()
+        return f"{ctx}\n{core}".strip() if ctx else core
 
     @staticmethod
     def _normalize_score(value: float) -> float:
@@ -286,8 +299,10 @@ class CohereRerankReranker:
             return resp.json()
 
     def _passage_text(self, hit: SearchHit) -> str:
+        ctx = _doc_context(hit)
         body = (hit.child_text or hit.parent_text or "")[: self._passage_chars]
-        return f"{hit.caption}\n{body}".strip() if hit.caption else body
+        core = f"{hit.caption}\n{body}".strip() if hit.caption else body
+        return f"{ctx}\n{core}".strip() if ctx else core
 
     async def aclose(self) -> None:
         return
