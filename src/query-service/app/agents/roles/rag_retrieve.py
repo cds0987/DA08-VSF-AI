@@ -109,8 +109,9 @@ class RagRetrieveRole(AgentRole):
                             retrieved=len(used))
 
     async def _search(self, query: str):
+        doc_ids = set(self.ctx.allowed_doc_ids) | set(self.ctx.hint_doc_ids)
         return await self.ctx.mcp_client.rag_search(
             query=query,
-            document_ids=list(self.ctx.allowed_doc_ids),
+            document_ids=list(doc_ids),
             top_k=self.ctx.rag_top_k,
         )

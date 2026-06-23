@@ -62,6 +62,7 @@ class RoleContext:
     mcp_client: Any
     user_id: str
     allowed_doc_ids: tuple[str, ...] = ()
+    hint_doc_ids: tuple[str, ...] = ()
     rag_top_k: int = 5
     rag_score_threshold: float = 0.45
     make_model: Callable[[str], Any] | None = None
