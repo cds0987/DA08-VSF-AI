@@ -159,6 +159,15 @@ class OrchestratorWorkersPlanner(Planner):
     name = "orchestrator_workers"
 
     async def plan(self, ctx: PlanContext) -> Plan:
+        # EDGE: câu hỏi RỖNG/toàn khoảng-trắng -> KHÔNG gọi planner (tránh answer rỗng), hỏi lại
+        # ngay (route=light, steps rỗng -> verify_answer trả answer_hint). Tiết kiệm 1 LLM call.
+        if not (ctx.question or "").strip():
+            return Plan(
+                route="light", reasoning="câu hỏi rỗng",
+                answer_hint="Bạn chưa nhập nội dung câu hỏi. Mình hỗ trợ về nhân sự, chính sách, "
+                            "tài liệu và quy trình nội bộ — bạn nêu câu hỏi cụ thể giúp mình nhé.",
+                steps=[],
+            )
         # capability "plan" RIÊNG (không dùng chung "think") -> đổi model planner CHỈ sửa
         # routing.yaml (plan -> flash/pro), KHÔNG sửa code. Mỗi bước MOSA 1 ô model độc lập.
         model = ctx.make_model("plan") if ctx.make_model else None

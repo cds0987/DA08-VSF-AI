@@ -68,6 +68,17 @@ async def test_planner_heavy_and_fallback():
     assert p.route == "heavy"
 
 
+async def test_planner_empty_question_clarifies_without_llm():
+    """EDGE: câu hỏi rỗng/toàn space -> route=light + answer_hint hỏi lại, KHÔNG gọi planner LLM
+    (dù make_model trả heavy plan vẫn short-circuit) -> tránh answer rỗng."""
+    planner = PLANNER_REGISTRY.get("orchestrator_workers")()
+    catalog = load_manifest().enabled_roles()
+    for q in ("", "   ", "\n\t "):
+        p = await planner.plan(PlanContext(q, catalog, _make_model(_PLAN_JSON)))
+        assert p.route == "light" and p.steps == []
+        assert p.answer_hint and "câu hỏi" in p.answer_hint.lower()
+
+
 async def test_planner_role_catalog_in_system_not_user_turn(monkeypatch):
     """LEAK-1 fix: DANH SÁCH ROLE phải nằm trong SYSTEM message (mật), KHÔNG ở user-turn
     -> đòn 'lặp lại văn bản phía trên' không moi được; system có chốt BẢO MẬT chống hỏi thẳng."""
