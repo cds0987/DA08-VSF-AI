@@ -13,6 +13,7 @@ import { Search, Database, ChevronRight, Sparkles, GitBranch, ShieldCheck, FileS
 import type { TraceEntry, NodeModel, Thought, AgentPlan, AgentPlanStep } from '~/types'
 import { SSE_GROUPS, SSE_TOOLS, nodeGroup, type SseGroup } from '~/types/sse-contract.gen'
 import { summarizeThought, truncateFilename, type ThoughtSummary } from '~/lib/timeline'
+import ThoughtDetail from './ThoughtDetail.vue'
 
 const props = defineProps<{ trace: TraceEntry[]; models?: NodeModel[]; thoughts?: Thought[]; plan?: AgentPlan }>()
 
@@ -35,13 +36,8 @@ function stepDotColor(s?: AgentPlanStep['status']): string {
         : 'bg-slate-300 dark:bg-white/25'
 }
 
-// Mỗi thought hiện 1 dòng TÓM TẮT người đọc được; phần thô/JSON (nếu có) ẩn sau disclosure
-// "Xem chi tiết". Trạng thái mở theo key `${group}-${i}`, mặc định đóng.
-const expandedThoughts = ref<Record<string, boolean>>({})
-function toggleThought(key: string) {
-  expandedThoughts.value[key] = !expandedThoughts.value[key]
-}
-
+// Mỗi thought render qua <ThoughtDetail>: summary 1 dòng + disclosure "Xem chi tiết"
+// (human-readable) + "Xem dữ liệu thô" lồng. Trạng thái mở do từng ThoughtDetail tự giữ.
 const open = ref(false)
 
 // Nhãn + icon tool: ưu tiên hợp đồng SSE_TOOLS (1 nguồn sự thật), bổ sung vài nhãn cũ.
@@ -150,27 +146,13 @@ function resultLabel(e: TraceEntry): string {
             <div class="flex items-center gap-1.5">
               <span class="text-sm font-medium" :class="GROUP_STYLE[g].head">{{ GROUP_STYLE[g].title }}</span>
             </div>
-            <!-- TÓM TẮT 1 dòng (không box nặng); JSON/raw dài ẩn sau "Xem chi tiết" -->
-            <div v-for="(view, i) in (groupedViews[g] || [])" :key="`${g}-${i}`" class="mt-1.5">
-              <p v-if="view.summary" class="text-[13px] leading-relaxed text-slate-600 dark:text-muted-foreground">
-                {{ view.summary }}
-              </p>
-              <template v-if="view.detail">
-                <button
-                  type="button"
-                  class="mt-1 inline-flex items-center gap-1 rounded px-1 text-[12px] font-medium text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-muted-foreground/70 dark:hover:text-foreground"
-                  :aria-expanded="!!expandedThoughts[`${g}-${i}`]"
-                  @click="toggleThought(`${g}-${i}`)"
-                >
-                  <ChevronRight class="tl-chevron h-3 w-3 transition-transform" :class="expandedThoughts[`${g}-${i}`] && 'rotate-90'" aria-hidden="true" />
-                  {{ expandedThoughts[`${g}-${i}`] ? 'Ẩn chi tiết' : 'Xem chi tiết' }}
-                </button>
-                <pre
-                  v-show="expandedThoughts[`${g}-${i}`]"
-                  class="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200/60 bg-slate-50/60 px-2.5 py-2 text-[12px] leading-relaxed text-slate-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-muted-foreground"
-                >{{ view.detail }}</pre>
-              </template>
-            </div>
+            <!-- TÓM TẮT 1 dòng + chi tiết human-readable + raw lồng (do ThoughtDetail lo) -->
+            <ThoughtDetail
+              v-for="(view, i) in (groupedViews[g] || [])"
+              :key="`${g}-${i}`"
+              :view="view"
+              class="mt-1.5"
+            />
           </div>
 
           <!-- SUB-STEP (orchestrator): plan step + kết quả tool — dot nhỏ canh thẳng trên CÙNG rail -->
