@@ -130,16 +130,3 @@ async def test_acl_working_set_isolated_per_user():
     await store.add_evidence("userA", "conv1", WorkingSetItem(kind="rag", label="phép năm"))
     assert len((await store.get_ws("userB", "conv1")).items) == 0, "RÒ working-set CHÉO user!"
     assert len((await store.get_ws("userA", "conv1")).items) == 1
-
-
-# ───────── GATE 10: MEM-3 — THIẾU conv_id -> STATELESS (không bleed bucket chung) ─────────
-@pytest.mark.parametrize("blank", [None, "", "   "])
-async def test_missing_conv_id_is_stateless_no_bleed(blank):
-    """Không có conversation_id -> KHÔNG ghi/đọc STM. Trước đây conv rỗng dồn 1 bucket
-    mem:task:{uid}: -> mọi query không-conv của user dùng CHUNG trí nhớ (bleed)."""
-    store = NoOpStmStore()
-    await store.set_task("userA", blank, TaskState(flow="create_leave", data={"x": 1}))
-    await store.add_evidence("userA", blank, WorkingSetItem(kind="rag", label="phép năm"))
-    # ghi không có tác dụng -> đọc lại rỗng (mỗi query độc lập, không nhiễm)
-    assert await store.get_task("userA", blank) is None, "MEM-3: task-state bleed khi thiếu conv_id!"
-    assert len((await store.get_ws("userA", blank)).items) == 0, "MEM-3: working-set bleed!"

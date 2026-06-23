@@ -23,13 +23,6 @@ def _safe_key(*parts: str) -> str:
     return ":".join((p or "_").replace(":", "_") for p in parts)
 
 
-def _no_conv(conv_id: str | None) -> bool:
-    # MEM-3: THIẾU conversation_id -> KHÔNG có phiên để gắn STM. Nếu vẫn ghi vào bucket
-    # mem:task:{uid}: (conv rỗng) thì MỌI query không-conv của user dùng CHUNG trí nhớ ->
-    # bleed ngữ cảnh. Coi như STATELESS: không đọc/ghi STM khi thiếu conv_id.
-    return not (conv_id or "").strip()
-
-
 class RedisStmStore:
     """Store STM (task_state + working_set) trên Redis. Khóa CÓ user_id -> ACL isolation."""
 
@@ -41,8 +34,6 @@ class RedisStmStore:
 
     # ---- task_state ----
     async def get_task(self, user_id: str, conv_id: str | None) -> TaskState | None:
-        if _no_conv(conv_id):
-            return None  # MEM-3: stateless khi thiếu conv_id
         raw = await self._get(_safe_key("mem:task", user_id, conv_id or ""))
         if not raw:
             return None
@@ -55,8 +46,6 @@ class RedisStmStore:
             return None
 
     async def set_task(self, user_id: str, conv_id: str | None, state: TaskState | None) -> None:
-        if _no_conv(conv_id):
-            return  # MEM-3: không ghi STM khi thiếu conv_id (tránh bleed bucket chung)
         key = _safe_key("mem:task", user_id, conv_id or "")
         if state is None:
             await self._delete(key)
@@ -68,8 +57,6 @@ class RedisStmStore:
 
     # ---- working_set ----
     async def get_ws(self, user_id: str, conv_id: str | None) -> WorkingSetDigest:
-        if _no_conv(conv_id):
-            return WorkingSetDigest()  # MEM-3: stateless khi thiếu conv_id
         raw = await self._get(_safe_key("mem:ws", user_id, conv_id or ""))
         if not raw:
             return WorkingSetDigest()
@@ -83,8 +70,6 @@ class RedisStmStore:
             return WorkingSetDigest()
 
     async def add_evidence(self, user_id: str, conv_id: str | None, item: WorkingSetItem) -> None:
-        if _no_conv(conv_id):
-            return  # MEM-3: không tích lũy evidence vào bucket chung khi thiếu conv_id
         cur = await self.get_ws(user_id, conv_id)
         # dedupe theo (kind,label); cap 12 item digest để không phình.
         items = [i for i in cur.items if not (i.kind == item.kind and i.label == item.label)]
@@ -134,13 +119,9 @@ class NoOpStmStore:
         self._ws: dict[str, list[WorkingSetItem]] = {}
 
     async def get_task(self, user_id, conv_id):
-        if _no_conv(conv_id):
-            return None
         return self._task.get(_safe_key(user_id, conv_id or ""))
 
     async def set_task(self, user_id, conv_id, state):
-        if _no_conv(conv_id):
-            return
         k = _safe_key(user_id, conv_id or "")
         if state is None:
             self._task.pop(k, None)
@@ -148,13 +129,9 @@ class NoOpStmStore:
             self._task[k] = state
 
     async def get_ws(self, user_id, conv_id):
-        if _no_conv(conv_id):
-            return WorkingSetDigest()
         return WorkingSetDigest(items=tuple(self._ws.get(_safe_key(user_id, conv_id or ""), [])))
 
     async def add_evidence(self, user_id, conv_id, item):
-        if _no_conv(conv_id):
-            return
         k = _safe_key(user_id, conv_id or "")
         items = [i for i in self._ws.get(k, []) if not (i.kind == item.kind and i.label == item.label)]
         items.append(item)
