@@ -27,6 +27,7 @@ namespaces:
       - { name: airouter_key_cost_month_usd, type: gauge, labels: [key_id, secret_env, provider, tier] }
       - { name: airouter_key_cooldown,       type: gauge, labels: [key_id, secret_env, provider, tier] }
       - { name: airouter_key_limit,          type: gauge, labels: [key_id, secret_env, provider, tier] }   # trần quota/ngày (free-tier)
+      - { name: airouter_key_rpm,            type: gauge, labels: [key_id, secret_env, provider, tier] }   # RPM hiện tại/key (xem tải đều)
       # ── meta gauge ──
       - { name: airouter_keys_total,         type: gauge,   labels: [] }   # tổng key đăng ký
 
