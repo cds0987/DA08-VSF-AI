@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from .banded_rotation import BandedRotation
 from .base import ResolveRequest, Selector
+from .elastic_banded import ElasticBanded
 from .sticky_rotation import StickyRotationSoft
 from .weighted_banded import WeightedBanded
 
@@ -14,6 +15,7 @@ _REGISTRY: dict[str, type[Selector]] = {
     "banded_rotation": BandedRotation,          # ❖ DEFAULT toàn hệ (250K + save mode)
     "weighted_banded": WeightedBanded,          # node think: blend gpt + deepseek
     "sticky_rotation_soft": StickyRotationSoft,  # giữ làm lựa chọn thay thế
+    "elastic_banded": ElasticBanded,            # co giãn theo tải + rải đều/swap toàn pool
 }
 
 

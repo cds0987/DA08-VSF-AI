@@ -308,6 +308,9 @@ class Router:
                 last_err = exc
                 await self._handle_error(dec, capability, exc,
                                          conversation_id=conversation_id, attempt=attempt)
+            finally:
+                # Trả slot in-flight (selector elastic_banded). banded cũ token=None -> no-op.
+                await self.counters.release_inflight(dec.key_id, dec.inflight_token)
         raise RouterCallError(str(last_err) if last_err else "unknown")
 
     async def chat_stream(self, capability_alias: str, body: dict,
@@ -365,6 +368,9 @@ class Router:
             await self._handle_error(dec, capability, exc,
                                      conversation_id=conversation_id, attempt=0)
             raise
+        finally:
+            # Slot giữ SUỐT stream (hold dài) -> release khi stream xong/đứt.
+            await self.counters.release_inflight(dec.key_id, dec.inflight_token)
         cost = await self.account(dec, usage_seen, est) if usage_seen else None
         latency_ms = (time.monotonic() - t0) * 1000
         self._emit_call(dec, capability, usage_seen, status="ok", cost=cost)
@@ -385,6 +391,8 @@ class Router:
         except Exception as exc:  # noqa: BLE001
             await self._handle_error(dec, "embed", exc, conversation_id=None, attempt=0)
             raise
+        finally:
+            await self.counters.release_inflight(dec.key_id, dec.inflight_token)
         data = resp.model_dump()
         usage = extract_usage(data)
         cost = await self.account(dec, usage, est)
@@ -418,6 +426,7 @@ class Router:
                 last_err = exc
                 await self._handle_error(dec, "rerank_api", exc,
                                          conversation_id=None, attempt=attempt)
+                await self.counters.release_inflight(dec.key_id, dec.inflight_token)
                 continue
             usage = Usage(cost_usd=_rerank_cost(data))
             cost = await self.account(dec, usage, 0)
@@ -425,6 +434,7 @@ class Router:
             self._emit_call(dec, "rerank_api", usage, status="ok", cost=cost)
             self._trace_log("call_ok", dec, "rerank_api", conversation_id=None, status="ok",
                             latency_ms=latency_ms, usage=usage, cost=cost)
+            await self.counters.release_inflight(dec.key_id, dec.inflight_token)
             data["_router"] = dec.public()
             return data
         raise RouterCallError(str(last_err) if last_err else "unknown")

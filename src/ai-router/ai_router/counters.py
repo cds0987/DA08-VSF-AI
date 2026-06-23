@@ -13,6 +13,7 @@ Buckets:
 from __future__ import annotations
 
 import time
+import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 
@@ -21,6 +22,8 @@ DAY_TTL = 93_600       # 26h
 MONTH_TTL = 2_764_800  # 32d
 BAND_TTL = 3_600       # 1h — band là cửa sổ trượt rải tải, không cần bền
 SEQ_TTL = 93_600       # 26h — bộ đếm weighted round-robin theo capability
+INFLIGHT_STALE = 600   # 10' — hold treo (worker chết giữa stream) tự rớt khỏi đếm in-flight
+WIDTH_TTL = 600        # 10' — width là tín hiệu SỐNG; im tải -> tự co về hẹp (rẻ lại)
 
 
 def _now() -> datetime:
@@ -96,6 +99,25 @@ class Counters(ABC):
     @abstractmethod
     async def clear_drain(self, key_id: str) -> None: ...
 
+    # --- in-flight concurrency + elastic width (selector elastic_banded) ---
+    # Slot in-flight đồng thời per key (đo CONCURRENCY thật của stream dài — khác RPM/phút).
+    # acquire trả token (None nếu key đầy slot); release theo token; get để xếp least-loaded.
+    @abstractmethod
+    async def acquire_inflight(self, key_id: str, *, max_inflight: int) -> str | None: ...
+
+    @abstractmethod
+    async def release_inflight(self, key_id: str, token: str | None) -> None: ...
+
+    @abstractmethod
+    async def get_inflight(self, key_id: str) -> int: ...
+
+    # Width = số key đang active của scope (co giãn theo tải). State sống, chia sẻ qua Redis.
+    @abstractmethod
+    async def get_width(self, scope: str) -> int: ...
+
+    @abstractmethod
+    async def set_width(self, scope: str, n: int) -> None: ...
+
 
 # --------------------------------------------------------------------------- #
 # Redis backend — reserve qua Lua (atomic)
@@ -122,10 +144,26 @@ return 1
 """
 
 
+# In-flight acquire: ZSET per key, score=now. Dọn hold treo (> stale) -> đếm slot đang dùng;
+# còn chỗ (< max) thì ZADD token. Atomic -> X request đồng thời KHÔNG vượt slot/key.
+_INFLIGHT_LUA = """
+local now = tonumber(ARGV[1])
+local stale = tonumber(ARGV[2])
+local maxn = tonumber(ARGV[3])
+local token = ARGV[4]
+redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, now - stale)
+if redis.call('ZCARD', KEYS[1]) >= maxn then return 0 end
+redis.call('ZADD', KEYS[1], now, token)
+redis.call('EXPIRE', KEYS[1], math.ceil(stale))
+return 1
+"""
+
+
 class RedisCounters(Counters):
     def __init__(self, client) -> None:
         self._r = client
         self._reserve = client.register_script(_RESERVE_LUA)
+        self._inflight = client.register_script(_INFLIGHT_LUA)
 
     async def reserve(self, key_id, *, rpm_limit, daily_limit, daily_kind, est_tokens):
         now = _now()
@@ -210,6 +248,27 @@ class RedisCounters(Counters):
     async def clear_drain(self, key_id):
         await self._r.delete(f"drain:{key_id}")
 
+    async def acquire_inflight(self, key_id, *, max_inflight):
+        token = uuid.uuid4().hex
+        res = await self._inflight(keys=[f"inflight:{key_id}"],
+                                   args=[time.time(), INFLIGHT_STALE, max_inflight, token])
+        return token if int(res) == 1 else None
+
+    async def release_inflight(self, key_id, token):
+        if token:
+            await self._r.zrem(f"inflight:{key_id}", token)
+
+    async def get_inflight(self, key_id):
+        k = f"inflight:{key_id}"
+        await self._r.zremrangebyscore(k, 0, time.time() - INFLIGHT_STALE)
+        return int(await self._r.zcard(k))
+
+    async def get_width(self, scope):
+        return int(await self._r.get(f"width:{scope}") or 1)
+
+    async def set_width(self, scope, n):
+        await self._r.set(f"width:{scope}", int(n), ex=WIDTH_TTL)
+
 
 # --------------------------------------------------------------------------- #
 # In-memory backend — dev/test, 1 process. KHÔNG atomic xuyên process.
@@ -221,6 +280,8 @@ class MemoryCounters(Counters):
         self._mcool: dict[str, float] = {}             # model_id -> expire_at
         self._active: dict[str, int] = {}
         self._drain: dict[str, float] = {}             # key_id -> expire_at (drain TTL)
+        self._inflight: dict[str, list[tuple[str, float]]] = {}  # key_id -> [(token, ts)]
+        self._width: dict[str, int] = {}               # scope -> số key active
 
     def _get(self, k: str) -> float:
         v = self._d.get(k)
@@ -328,6 +389,34 @@ class MemoryCounters(Counters):
 
     async def clear_drain(self, key_id):
         self._drain.pop(key_id, None)
+
+    def _live_inflight(self, key_id: str) -> list[tuple[str, float]]:
+        cutoff = time.time() - INFLIGHT_STALE
+        lst = [t for t in self._inflight.get(key_id, []) if t[1] > cutoff]
+        self._inflight[key_id] = lst
+        return lst
+
+    async def acquire_inflight(self, key_id, *, max_inflight):
+        lst = self._live_inflight(key_id)
+        if len(lst) >= max_inflight:
+            return None
+        token = uuid.uuid4().hex
+        lst.append((token, time.time()))
+        return token
+
+    async def release_inflight(self, key_id, token):
+        if not token:
+            return
+        self._inflight[key_id] = [t for t in self._inflight.get(key_id, []) if t[0] != token]
+
+    async def get_inflight(self, key_id):
+        return len(self._live_inflight(key_id))
+
+    async def get_width(self, scope):
+        return self._width.get(scope, 1)
+
+    async def set_width(self, scope, n):
+        self._width[scope] = int(n)
 
 
 def create_counters(redis_url: str | None) -> Counters:

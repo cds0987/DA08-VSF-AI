@@ -38,9 +38,11 @@ capabilities:
     models:
       paid: deepseek/deepseek-v4-flash
     selector:                       # banded_rotation: dính 1 key tới khi phục vụ 150K -> xoay key kế.
-      impl: banded_rotation
+      impl: elastic_banded          # CO GIÃN theo tải + rải đều/swap toàn pool key
       params:
-        band_tokens: 150000
+        slot_per_key: 15            # ~concurrent/key trước khi nở thêm key; cạn slot -> save_mode
+        grow_at: 0.7
+        shrink_at: 0.25
         save_mode:                  # cạn HẾT key deepseek -> degrade gpt-4o-mini (tránh 503).
           enabled: true
           model: openai/gpt-4o-mini
@@ -56,9 +58,11 @@ capabilities:
     models:
       paid: deepseek/deepseek-v4-flash
     selector:
-      impl: banded_rotation
+      impl: elastic_banded          # CO GIÃN theo tải + rải đều/swap toàn pool key
       params:
-        band_tokens: 150000
+        slot_per_key: 15            # ~concurrent/key trước khi nở thêm key; cạn slot -> save_mode
+        grow_at: 0.7
+        shrink_at: 0.25
         save_mode:
           enabled: true
           model: openai/gpt-4o-mini
@@ -72,9 +76,11 @@ capabilities:
     models:
       paid: deepseek/deepseek-v4-flash
     selector:
-      impl: banded_rotation
+      impl: elastic_banded          # CO GIÃN theo tải + rải đều/swap toàn pool key
       params:
-        band_tokens: 150000
+        slot_per_key: 15            # ~concurrent/key trước khi nở thêm key; cạn slot -> save_mode
+        grow_at: 0.7
+        shrink_at: 0.25
         save_mode:
           enabled: true
           model: openai/gpt-4o-mini
@@ -98,10 +104,12 @@ capabilities:
     models:
       paid: deepseek/deepseek-v4-pro
     selector:
-      impl: banded_rotation
+      impl: elastic_banded          # CO GIÃN theo tải + rải đều/swap toàn pool key deepseek
       params:
-        band_tokens: 150000         # dính 1 key tới 150K token -> xoay key kế (cùng model).
-        save_mode:                  # cạn hết key deepseek -> gpt-4o-mini (tránh 503).
+        slot_per_key: 15            # ~concurrent/key; nở thêm key khi tải vượt; cạn -> save_mode
+        grow_at: 0.7
+        shrink_at: 0.25
+        save_mode:                  # cạn hết slot deepseek -> gpt-4o-mini (tránh 503).
           enabled: true
           model: openai/gpt-4o-mini
           tier: free_oai
@@ -113,9 +121,11 @@ capabilities:
     models:
       free_oai: openai/gpt-5.4-mini
     selector:
-      impl: banded_rotation
+      impl: elastic_banded          # CO GIÃN theo tải + rải đều 5 key gpt-5.4-mini
       params:
-        band_tokens: 2500000        # quota/key/ngày -> cạn thì xoay key kế (cùng model)
+        slot_per_key: 25            # OpenAI throughput cao -> slot rộng; rải đều, cạn -> save_mode
+        grow_at: 0.7
+        shrink_at: 0.25
         save_mode:
           enabled: true
           model: openai/gpt-4o-mini

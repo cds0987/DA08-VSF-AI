@@ -78,6 +78,9 @@ class RouteDecision(BaseModel):
     model_id: str                            # id catalog (để accounting/log)
     tier: str
     endpoint: Endpoint = "chat"
+    # Token slot in-flight (selector elastic_banded) — router release sau khi call xong.
+    # exclude=True: KHÔNG serialize ra response/log (nội bộ điều phối concurrency).
+    inflight_token: str | None = Field(default=None, exclude=True)
 
     def public(self) -> dict:
         """Log/giám sát — KHÔNG lộ api_key."""
