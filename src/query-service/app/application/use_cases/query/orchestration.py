@@ -412,6 +412,7 @@ class QueryOrchestrationUseCase:
                     mcp_client=self._mcp_client,
                     user_id=user.id,
                     allowed_doc_ids=tuple(allowed_doc_ids),
+                    hint_doc_ids=tuple(document_ids or []),
                     rag_top_k=self._settings.rag_top_k,
                     rag_score_threshold=self._settings.rag_score_threshold,
                     make_model=self._make_model,
