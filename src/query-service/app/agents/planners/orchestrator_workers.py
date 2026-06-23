@@ -112,6 +112,12 @@ def _memory_block(ctx: PlanContext) -> str:
             "[ĐÃ TRA PHIÊN NÀY]\n" + "\n".join(lines)
             + "\n-> Nếu thông tin trên ĐÃ ĐỦ cho câu mới thì ĐỪNG plan lại tool đó; CHỈ plan phần MỚI."
         )
+    if ctx.hint_doc_ids:
+        parts.append(
+            "[TÀI LIỆU NỘI BỘ ĐÃ CHỌN]\n"
+            f"User đang hỏi về tài liệu nội bộ cụ thể (doc_id: {', '.join(ctx.hint_doc_ids[:3])}).\n"
+            "-> KHÔNG từ chối. LUÔN route heavy → rag_retrieve để truy xuất tài liệu này."
+        )
     return ("\n\n".join(parts) + "\n\n") if parts else ""
 
 
