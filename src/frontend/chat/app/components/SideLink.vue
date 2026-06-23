@@ -26,10 +26,10 @@ const active = computed(() => {
       <NuxtLink
         :to="item.to"
         :class="cn(
-          'flex items-center rounded-md text-[13px] font-semibold overflow-hidden cursor-pointer shrink-0 h-9 transition-all w-full justify-start',
+          'flex items-center rounded-lg text-sm font-semibold overflow-hidden cursor-pointer shrink-0 h-9 transition-all w-full justify-start',
           active
-            ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 shadow-sm ring-1 ring-blue-100 dark:ring-blue-900/50'
-            : 'text-slate-600 dark:text-muted-foreground hover:bg-slate-100 dark:hover:bg-sidebar-accent hover:text-slate-900 dark:hover:text-sidebar-accent-foreground',
+            ? 'bg-slate-100 dark:bg-sidebar-accent text-slate-900 dark:text-sidebar-foreground'
+            : 'text-slate-900 dark:text-sidebar-foreground hover:bg-slate-100 dark:hover:bg-sidebar-accent',
         )"
       >
         <div class="flex h-9 w-[64px] items-center justify-center shrink-0">
