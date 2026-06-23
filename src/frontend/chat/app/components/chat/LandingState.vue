@@ -52,33 +52,15 @@ const greeting = computed(() => {
       aria-hidden="true"
     />
 
-    <div class="mb-6 relative group">
+    <div class="mb-6 relative">
+      <!-- Quầng sáng xanh tĩnh, đồng bộ accent với aura (bỏ pulse/bounce ồn) -->
       <div
-        class="absolute inset-0 rounded-full animate-pulse"
-        style="
-          background: radial-gradient(circle, rgba(239, 68, 68, 0.15) 0%, transparent 70%);
-          will-change: transform, opacity;
-          transform: translate3d(0, 0, 0);
-          backface-visibility: hidden;
-          perspective: 1000px;
-        "
+        class="pointer-events-none absolute inset-0 rounded-full"
+        style="background: radial-gradient(circle, rgba(59, 130, 246, 0.14) 0%, transparent 70%);"
+        aria-hidden="true"
       />
-
-      <div
-        class="relative z-10 flex h-20 w-20 items-center justify-center animate-bounce"
-        style="
-          animation-duration: 3s;
-          will-change: transform, filter;
-          transform: translate3d(0, 0, 0);
-          backface-visibility: hidden;
-          perspective: 1000px;
-        "
-      >
-        <OctopusLogo
-          :size="64"
-          class="saturate-100"
-          style="transform: translate3d(0, 0, 0); will-change: transform;"
-        />
+      <div class="relative z-10 flex h-20 w-20 items-center justify-center">
+        <OctopusLogo :size="64" class="saturate-100" />
       </div>
     </div>
 
