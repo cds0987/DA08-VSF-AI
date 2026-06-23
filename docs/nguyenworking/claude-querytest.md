@@ -367,7 +367,7 @@ cũ (giờ từ chối lưu số giả). ⇒ Hành vi model KHÔNG bị thao tú
 | LEAK-2 | Lộ scaffold "BƯỚC 1 — TỔNG HỢP…" + raw action JSON vào answer | leak | 🟡 | rõ | ghi nhận |
 | RAG-2 | Reasoning hỏng vì thiếu dữ-liệu-ảnh (cascade từ RAG-1) | rag/reason | 🟠 | — | ghi nhận |
 | RAG-3 | Retrieved-but-missed: có cite nhưng "không có mã" (TXT-1) | rag | 🟠 | — | ghi nhận |
-| MEM-3 | Memory bleed khi thiếu conversation_id (cùng user) | memory | 🟡 latent | rõ | ghi nhận |
+| MEM-3 | ~~Memory bleed khi thiếu conversation_id~~ → KHÔNG conv_id = tiếp tục LATEST CHAT (contract legacy, có test) | memory | ~~🟡~~ | rõ | ⛔ **TÁI PHÂN LOẠI** — by design, KHÔNG phải bug (G2) |
 | STREAM-1 | verify_answer "nghĩ câm" gap 3-15s | stream | 🟡 | 3/3 | ghi nhận |
 | MEM-2 | leave carry-forward gap ~14s (leave_action câm) | stream | 🟡 | 3/3 | ghi nhận |
 | STREAM-3 | hủy đơn nghỉ: dead-air 40s + chưa hỗ trợ + no carry-forward | stream/leave | 🟠 | E12 | ghi nhận |
@@ -617,15 +617,18 @@ cũ (giờ từ chối lưu số giả). ⇒ Hành vi model KHÔNG bị thao tú
   answer "không tìm thấy mã quy định cụ thể". Chunk chứa mã không lọt top / model không trích ra.
   (So sánh: QD-3092, SEC-5510 ở doc tương tự thì HIT — không nhất quán theo vị trí mã trong doc.)
 
-### [MEM-3] Memory bleed khi THIẾU conversation_id (cùng user) — 🟡 (latent)
-- **Triệu chứng:** gửi nhiều `/query` cùng user KHÔNG kèm `conversation_id` → câu sau trả lời
-  "như đã tra cứu ở lượt trước", `sources=[]` (không retrieve lại) → các "session" độc lập **dùng
-  chung trí nhớ**.
-- **Nguyên nhân (đã xác định trong code):** key STM = `mem:task:{user_id}:{conv_id or ""}`
-  (`agents/memory/redis_store.py:37,49`). Khi `conv_id` rỗng → tất cả query của user rơi vào **1
-  bucket `mem:task:{uid}:`** chung. (Không rò CHÉO user — user_id nằm trong key, đúng thiết kế.)
-- **Mức:** prod FE luôn gửi conv_id nên ít chạm; nhưng API/integration nào quên conv_id sẽ bị
-  trộn ngữ cảnh. **Latent** — ghi nhận, không gấp.
+### [MEM-3] ⛔ TÁI PHÂN LOẠI — KHÔNG conversation_id = tiếp tục LATEST CHAT (by design, KHÔNG phải bug)
+- **Triệu chứng (lúc đầu tưởng bug):** gửi nhiều `/query` cùng user KHÔNG kèm `conversation_id` →
+  câu sau "nhớ" câu trước (đọc lại nguyên văn) → tưởng "session độc lập dùng chung trí nhớ".
+- **Xác minh (2026-06-23):** đây là **CONTRACT LEGACY CỐ Ý, có test gác**:
+  `tests/test_conversations.py::test_legacy_query_without_conversation_id_uses_latest_chat` ép 2 query
+  KHÔNG conv_id phải vào **CÙNG 1 hội thoại** (`len(conversations)==1`). Cơ chế:
+  `postgres_conversation_repo.get_context(conv_id=None)` → `_latest_conversation(user)` (dòng 60-61) —
+  client cũ không quản conv_id thì **tiếp nối chat mới nhất**. Không rò CHÉO user (user_id trong query).
+- **Verify live 2 control:** (A) không conv_id: Q2 nhớ Q1 ✓ (đúng contract); (B) có conv_id: Q2 nhớ Q1 ✓.
+- **Bài học:** **KHÔNG được "fix" thành stateless** — sẽ vỡ contract legacy + test, và lệch hành vi
+  (dialogue tiếp nối latest chat nhưng task_state lại reset). Một bản fix STM-stateless đã thử rồi
+  **REVERT** (commit revert 547b8b9) vì lý do này. prod FE luôn gửi conv_id nên không chạm.
 - **Ảnh hưởng test:** làm sample#1 nhiễm sample#0 → đã re-run ảnh với conv_id riêng/câu (ISO mode)
   để xác nhận RAG-1 độc lập với bleed (kết quả ISO điền sau).
 
