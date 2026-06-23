@@ -24,6 +24,9 @@ BAND_TTL = 3_600       # 1h — band là cửa sổ trượt rải tải, không
 SEQ_TTL = 93_600       # 26h — bộ đếm weighted round-robin theo capability
 INFLIGHT_STALE = 600   # 10' — hold treo (worker chết giữa stream) tự rớt khỏi đếm in-flight
 WIDTH_TTL = 600        # 10' — width là tín hiệu SỐNG; im tải -> tự co về hẹp (rẻ lại)
+TPM_TTL = 90           # cửa sổ token/phút (OpenAI có trần TPM rõ) — như RPM nhưng đếm token
+# AIMD cho key OpenRouter (đa-upstream, KHÔNG có TPM cố định) -> TỰ DÒ trần qua 429:
+AIMD_INIT, AIMD_MIN, AIMD_MAX, AIMD_TTL = 8.0, 2.0, 64.0, 300
 
 
 def _now() -> datetime:
@@ -118,6 +121,23 @@ class Counters(ABC):
     @abstractmethod
     async def set_width(self, scope: str, n: int) -> None: ...
 
+    # --- TPM (OpenAI: trần token/phút RÕ) ---
+    @abstractmethod
+    async def tpm_reserve(self, key_id: str, *, amount: int, tpm_limit: int) -> bool: ...
+
+    @abstractmethod
+    async def get_tpm(self, key_id: str) -> int: ...
+
+    # --- AIMD adaptive limit (OpenRouter: trần DÒ qua 429, như TCP congestion) ---
+    @abstractmethod
+    async def get_aimd_limit(self, key_id: str) -> float: ...
+
+    @abstractmethod
+    async def aimd_grow(self, key_id: str) -> None: ...
+
+    @abstractmethod
+    async def aimd_shrink(self, key_id: str) -> None: ...
+
 
 # --------------------------------------------------------------------------- #
 # Redis backend — reserve qua Lua (atomic)
@@ -159,11 +179,23 @@ return 1
 """
 
 
+# TPM acquire: bucket token/phút/key. cur+amount ≤ limit -> INCRBY (atomic). OpenAI có trần rõ.
+_TPM_LUA = """
+local lim = tonumber(ARGV[1])
+local amt = tonumber(ARGV[2])
+local cur = tonumber(redis.call('GET', KEYS[1]) or '0')
+if cur + amt > lim then return 0 end
+redis.call('INCRBY', KEYS[1], amt); redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
+return 1
+"""
+
+
 class RedisCounters(Counters):
     def __init__(self, client) -> None:
         self._r = client
         self._reserve = client.register_script(_RESERVE_LUA)
         self._inflight = client.register_script(_INFLIGHT_LUA)
+        self._tpm = client.register_script(_TPM_LUA)
 
     async def reserve(self, key_id, *, rpm_limit, daily_limit, daily_kind, est_tokens):
         now = _now()
@@ -269,6 +301,27 @@ class RedisCounters(Counters):
     async def set_width(self, scope, n):
         await self._r.set(f"width:{scope}", int(n), ex=WIDTH_TTL)
 
+    async def tpm_reserve(self, key_id, *, amount, tpm_limit):
+        minute = _now().strftime("%Y%m%d%H%M")
+        res = await self._tpm(keys=[f"tpm:{key_id}:{minute}"], args=[tpm_limit, amount, TPM_TTL])
+        return int(res) == 1
+
+    async def get_tpm(self, key_id):
+        minute = _now().strftime("%Y%m%d%H%M")
+        return int(await self._r.get(f"tpm:{key_id}:{minute}") or 0)
+
+    async def get_aimd_limit(self, key_id):
+        v = await self._r.get(f"aimd:{key_id}")
+        return float(v) if v else AIMD_INIT
+
+    async def aimd_grow(self, key_id):
+        v = await self.get_aimd_limit(key_id)
+        await self._r.set(f"aimd:{key_id}", min(AIMD_MAX, v + 1.0), ex=AIMD_TTL)
+
+    async def aimd_shrink(self, key_id):
+        v = await self.get_aimd_limit(key_id)
+        await self._r.set(f"aimd:{key_id}", max(AIMD_MIN, v * 0.5), ex=AIMD_TTL)
+
 
 # --------------------------------------------------------------------------- #
 # In-memory backend — dev/test, 1 process. KHÔNG atomic xuyên process.
@@ -282,6 +335,7 @@ class MemoryCounters(Counters):
         self._drain: dict[str, float] = {}             # key_id -> expire_at (drain TTL)
         self._inflight: dict[str, list[tuple[str, float]]] = {}  # key_id -> [(token, ts)]
         self._width: dict[str, int] = {}               # scope -> số key active
+        self._aimd: dict[str, float] = {}              # key_id -> adaptive limit (OpenRouter)
 
     def _get(self, k: str) -> float:
         v = self._d.get(k)
@@ -417,6 +471,27 @@ class MemoryCounters(Counters):
 
     async def set_width(self, scope, n):
         self._width[scope] = int(n)
+
+    async def tpm_reserve(self, key_id, *, amount, tpm_limit):
+        minute = _now().strftime("%Y%m%d%H%M")
+        k = f"tpm:{key_id}:{minute}"
+        if self._get(k) + amount > tpm_limit:
+            return False
+        self._set(k, self._get(k) + amount, TPM_TTL)
+        return True
+
+    async def get_tpm(self, key_id):
+        minute = _now().strftime("%Y%m%d%H%M")
+        return int(self._get(f"tpm:{key_id}:{minute}"))
+
+    async def get_aimd_limit(self, key_id):
+        return self._aimd.get(key_id, AIMD_INIT)
+
+    async def aimd_grow(self, key_id):
+        self._aimd[key_id] = min(AIMD_MAX, self._aimd.get(key_id, AIMD_INIT) + 1.0)
+
+    async def aimd_shrink(self, key_id):
+        self._aimd[key_id] = max(AIMD_MIN, self._aimd.get(key_id, AIMD_INIT) * 0.5)
 
 
 def create_counters(redis_url: str | None) -> Counters:

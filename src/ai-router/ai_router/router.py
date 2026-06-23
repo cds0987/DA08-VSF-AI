@@ -161,6 +161,9 @@ class Router:
             dec.key_id, daily_kind=tdef.limit_kind if tdef else "none",
             est_tokens=est_tokens, real_tokens=usage.total_tokens, cost=cost,
         )
+        # AIMD additive-increase: call OpenRouter thành công -> nới trần dò (selector adaptive).
+        if dec.provider == Provider.OPENROUTER:
+            await self.counters.aimd_grow(dec.key_id)
         return cost
 
     async def cooldown(self, dec: RouteDecision) -> None:
@@ -247,6 +250,9 @@ class Router:
         elif kind == "rate":
             await self.counters.set_cooldown(dec.key_id, COOLDOWN_SECONDS)
             self.metrics.inc("airouter_key_429_total", {"key_id": dec.key_id, "kind": "rate"})
+            # AIMD multiplicative-decrease: 429-rate = chạm trần upstream -> co trần dò ×0.5.
+            if dec.provider == Provider.OPENROUTER:
+                await self.counters.aimd_shrink(dec.key_id)
         else:
             await self.cooldown_model(dec)
         self._emit_call(dec, capability, None, status=f"error_{kind}", cost=None)

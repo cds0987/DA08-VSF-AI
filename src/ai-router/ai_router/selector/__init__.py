@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+from .adaptive_balanced import AdaptiveBalanced
 from .banded_rotation import BandedRotation
 from .base import ResolveRequest, Selector
 from .elastic_banded import ElasticBanded
@@ -16,6 +17,7 @@ _REGISTRY: dict[str, type[Selector]] = {
     "weighted_banded": WeightedBanded,          # node think: blend gpt + deepseek
     "sticky_rotation_soft": StickyRotationSoft,  # giữ làm lựa chọn thay thế
     "elastic_banded": ElasticBanded,            # co giãn theo tải + rải đều/swap toàn pool
+    "adaptive_balanced": AdaptiveBalanced,      # OpenAI=TPM-headroom · OpenRouter=AIMD tự dò 429
 }
 
 

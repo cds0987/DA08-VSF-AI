@@ -38,11 +38,9 @@ capabilities:
     models:
       paid: deepseek/deepseek-v4-flash
     selector:                       # banded_rotation: dính 1 key tới khi phục vụ 150K -> xoay key kế.
-      impl: elastic_banded          # CO GIÃN theo tải + rải đều/swap toàn pool key
+      impl: adaptive_balanced       # OpenRouter(deepseek): AIMD tự dò trần qua 429 (không TPM cố định)
       params:
-        slot_per_key: 15            # ~concurrent/key trước khi nở thêm key; cạn slot -> save_mode
-        grow_at: 0.7
-        shrink_at: 0.25
+        tpm_per_key: 500000         # chỉ áp cho tier OpenAI; tier OR bỏ qua (dùng AIMD)
         save_mode:                  # cạn HẾT key deepseek -> degrade gpt-4o-mini (tránh 503).
           enabled: true
           model: openai/gpt-4o-mini
@@ -58,11 +56,9 @@ capabilities:
     models:
       paid: deepseek/deepseek-v4-flash
     selector:
-      impl: elastic_banded          # CO GIÃN theo tải + rải đều/swap toàn pool key
+      impl: adaptive_balanced       # OpenRouter(deepseek): AIMD tự dò trần qua 429 (không TPM cố định)
       params:
-        slot_per_key: 15            # ~concurrent/key trước khi nở thêm key; cạn slot -> save_mode
-        grow_at: 0.7
-        shrink_at: 0.25
+        tpm_per_key: 500000         # chỉ áp cho tier OpenAI; tier OR bỏ qua (dùng AIMD)
         save_mode:
           enabled: true
           model: openai/gpt-4o-mini
@@ -76,11 +72,9 @@ capabilities:
     models:
       paid: deepseek/deepseek-v4-flash
     selector:
-      impl: elastic_banded          # CO GIÃN theo tải + rải đều/swap toàn pool key
+      impl: adaptive_balanced       # OpenRouter(deepseek): AIMD tự dò trần qua 429 (không TPM cố định)
       params:
-        slot_per_key: 15            # ~concurrent/key trước khi nở thêm key; cạn slot -> save_mode
-        grow_at: 0.7
-        shrink_at: 0.25
+        tpm_per_key: 500000         # chỉ áp cho tier OpenAI; tier OR bỏ qua (dùng AIMD)
         save_mode:
           enabled: true
           model: openai/gpt-4o-mini
@@ -104,11 +98,9 @@ capabilities:
     models:
       paid: deepseek/deepseek-v4-pro
     selector:
-      impl: elastic_banded          # CO GIÃN theo tải + rải đều/swap toàn pool key deepseek
+      impl: adaptive_balanced       # OpenRouter deepseek-pro: AIMD tự dò trần qua 429
       params:
-        slot_per_key: 15            # ~concurrent/key; nở thêm key khi tải vượt; cạn -> save_mode
-        grow_at: 0.7
-        shrink_at: 0.25
+        tpm_per_key: 500000         # OR bỏ qua (AIMD)
         save_mode:                  # cạn hết slot deepseek -> gpt-4o-mini (tránh 503).
           enabled: true
           model: openai/gpt-4o-mini
@@ -121,11 +113,9 @@ capabilities:
     models:
       free_oai: openai/gpt-5.4-mini
     selector:
-      impl: elastic_banded          # CO GIÃN theo tải + rải đều 5 key gpt-5.4-mini
+      impl: adaptive_balanced       # OpenAI gpt-5.4-mini: TPM-headroom (trần token/phút RÕ)
       params:
-        slot_per_key: 25            # OpenAI throughput cao -> slot rộng; rải đều, cạn -> save_mode
-        grow_at: 0.7
-        shrink_at: 0.25
+        tpm_per_key: 500000         # 5 key OpenAI, mỗi key 500K token/phút -> rải đều theo TPM
         save_mode:
           enabled: true
           model: openai/gpt-4o-mini
