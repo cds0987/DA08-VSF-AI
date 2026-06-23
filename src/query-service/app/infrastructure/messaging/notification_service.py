@@ -8,6 +8,14 @@ from app.infrastructure.sse.connection_manager import ConnectionManager
 
 
 @dataclass(frozen=True)
+class LeaveStatusEvent:
+    requester_user_id: str
+    request_id: str
+    status: str
+    rejected_reason: str = ""
+
+
+@dataclass(frozen=True)
 class DocNewEvent:
     doc_id: str
     document_name: str
@@ -43,6 +51,29 @@ class NotificationService:
             delivered.append(notification)
             await self._connection_manager.push_to_user(user.id, payload)
         return delivered
+
+    async def publish_leave_status(self, event: LeaveStatusEvent) -> list[Notification]:
+        approved = event.status == "approved"
+        message = (
+            "Đơn nghỉ phép của bạn đã được duyệt ✅"
+            if approved else
+            "Đơn nghỉ phép của bạn bị từ chối ❌"
+            + (f" — {event.rejected_reason}" if event.rejected_reason else "")
+        )
+        payload = {
+            "type": "notify",
+            "event": "leave_approved" if approved else "leave_rejected",
+            "message": message,
+            "request_id": event.request_id,
+        }
+        notification = await self._repository.save(
+            user_id=event.requester_user_id,
+            event=payload["event"],
+            message=message,
+            doc_id=None,
+        )
+        await self._connection_manager.push_to_user(event.requester_user_id, payload)
+        return [notification]
 
     def _eligible_online_users(self, event: DocNewEvent) -> list[AuthenticatedUser]:
         return [

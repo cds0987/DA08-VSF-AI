@@ -133,10 +133,11 @@ export interface QueryDoneEvent {
 
 export interface NotificationEvent {
   type: 'notify'
-  event: 'doc_new' | 'leave_request_new'
+  event: 'doc_new' | 'leave_request_new' | 'leave_approved' | 'leave_rejected'
   id: string
   message: string
   doc_id: string | null
+  request_id?: string | null
   is_read: boolean
   created_at: string
 }
