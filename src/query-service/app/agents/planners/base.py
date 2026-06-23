@@ -21,6 +21,7 @@ class PlanContext:
     tracer: Any = None                           # LangfuseTracer (best-effort) -> generation bước orchestrate
     trace: Any = None                            # trace handle của lượt query
     memory: Any = None                           # MemoryContext (dialogue+summary+task_state+working_set)
+    hint_doc_ids: tuple[str, ...] = ()           # doc_ids từ proactive notification — orchestrator KHÔNG từ chối khi có
 
 
 class Planner(ABC):
