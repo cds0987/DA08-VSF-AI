@@ -102,6 +102,11 @@ fix OCR gpt-5.4-mini + vector-rasterize + rerank-via-ai-router). Trước đó: 
   thấy thông tin mã nhân viên của bạn trong hệ thống"* (đi tra HR thay vì nhớ hội thoại). Đối chứng:
   smoke recall ĐÚNG ở T3 (gần). ⇒ fact gài sớm **không sống** qua ~16 turn / khi summary nén — đúng giả
   thuyết "context dài làm rối/quên". Cần đo Langfuse `summary`/`working_set` per-turn để xác định mốc mất.
+  - **PHÁN QUYẾT (2026-06-23):** horizon ~15t là **DESIGN-LIMIT tunable** (fetch cap `agent_recent_k` +
+    SQL `LIMIT recent_k*2` + summary LLM lossy `client.py:46-50,85`), có GATE token-bound — **KHÔNG phải bug**.
+    Phần hại THẬT = **confabulation** (bịa chi tiết turn cũ thay vì nói "không nhớ xa"). Hướng anti-confab
+    harden + verify long-session **DEFER** (quyết của user) — gộp làm khi ở mạng sạch cùng STREAM dead-air
+    (tránh proxy domain nhiễu). prod FE đa lượt ngắn nên ít chạm.
 
 ### 🟡 XÁC NHẬN LẠI (đã biết)
 - **LEAK-2**: action JSON thô `{"action_type":"create_leave_request",…}` ra answer (T13/T15) — UX/contract.
