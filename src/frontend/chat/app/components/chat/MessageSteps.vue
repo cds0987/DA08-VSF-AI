@@ -119,7 +119,7 @@ function resultLabel(e: TraceEntry): string {
     <!-- Header toggle -->
     <button
       v-if="trace.length || thoughts?.length || plan?.steps?.length"
-      class="group flex items-center gap-1.5 rounded-md px-2 py-1 text-[14.5px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-muted-foreground dark:hover:bg-white/5 dark:hover:text-foreground"
+      class="group flex items-center gap-1.5 rounded-md px-2 py-1 text-base font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-muted-foreground dark:hover:bg-white/5 dark:hover:text-foreground"
       @click="open = !open"
     >
       <Sparkles class="h-4 w-4 text-blue-500" />
