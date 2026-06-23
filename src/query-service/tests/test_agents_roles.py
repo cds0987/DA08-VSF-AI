@@ -199,6 +199,25 @@ async def test_leave_action_creates_draft_json():
     assert item["start_date"] == "2026-06-22" and item["end_date"] == "2026-06-24"
 
 
+class _DatePastMCP:
+    """resolve_date giả trả LÙI NGÀY: start=hôm qua, end=hôm nay (vd 'nghỉ 2 ngày từ hôm qua')."""
+    async def call_tool(self, name, args):
+        return {"start_date": "2026-06-19", "end_date": "2026-06-20", "today": "2026-06-20"}
+
+
+async def test_leave_action_rejects_backdated_request():
+    """DATE-1: đơn LÙI NGÀY (start quá khứ, end=hôm nay) -> KHÔNG tạo đơn, hỏi lại mốc ngày.
+    Trước đây chỉ chặn end<today nên ca này lọt -> tạo đơn lùi ngày."""
+    model = _FakeModel('{"intent":"create","leave_type":"annual","items":[{"date_spec":'
+                       '{"kind":"offset_days","days":-1,"span_days":2},"reason":""}]}')
+    ctx = RoleContext(mcp_client=_DatePastMCP(), user_id="u1", make_model=lambda cap: model)
+    out = await AGENT_REGISTRY.get("leave_action")(ctx).run(
+        WorkerInput(1, "leave_action", "nghỉ 2 ngày từ hôm qua"))
+    assert out.status == "ok"
+    assert "action_type" not in out.output       # KHÔNG tạo đơn lùi ngày
+    assert "ngày" in out.output.lower()           # hỏi lại mốc ngày
+
+
 async def test_leave_action_clarifies_when_type_missing():
     """Không có loại nghỉ + lý do -> hỏi làm rõ (văn xuôi), KHÔNG bịa đơn annual."""
     model = _FakeModel('{"intent":"clarify","clarify":"Bạn muốn nghỉ loại nào — phép năm hay nghỉ ốm?"}')

@@ -194,9 +194,16 @@ class LeaveActionRole(AgentRole):
         end = res.get("end_date") or res.get("date")
         if not start or not end:
             return None
+        start, end = str(start), str(end)
+        # DATE-1: chặn range KHÔNG HỢP LỆ (end < start) -> đơn vô nghĩa.
+        if end < start:
+            return None
         today = res.get("today")
-        if today and str(end) < str(today):
-            return None  # cả khoảng nằm trong quá khứ
+        # DATE-1: chặn LÙI NGÀY -> chặn theo START (không chỉ end). Trước đây chỉ chặn
+        # end<today nên đơn "2 ngày TỪ HÔM QUA" (start=qua khứ, end=hôm nay) vẫn lọt -> tạo
+        # đơn lùi ngày. Nay start ĐÃ QUA -> từ chối, hỏi lại mốc ngày trong tương lai.
+        if today and start < str(today):
+            return None
         if ctx.emit:
             await ctx.emit({"phase": "observing", "tool": "resolve_date",
                             "tool_result_summary": {"raw": f"{start} → {end}"}})
