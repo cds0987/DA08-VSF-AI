@@ -594,43 +594,10 @@
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
-          }
-        }
-      ],
-      "transformations": [
-        {
-          "id": "merge",
-          "options": {}
-        },
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true,
-              "__name__": true,
-              "instance": true,
-              "job": true,
-              "service": true
-            },
-            "renameByName": {
-              "key_id": "Key",
-              "model": "Model",
-              "tier": "Tier",
-              "provider": "Provider",
-              "Value #A": "Token",
-              "Value #B": "Cost ($)",
-              "Value #C": "Request"
-            },
-            "indexByName": {
-              "key_id": 0,
-              "model": 1,
-              "tier": 2,
-              "provider": 3,
-              "Value #A": 4,
-              "Value #B": 5,
-              "Value #C": 6
-            }
-          }
+          },
+          "range": true,
+          "instant": false,
+          "format": "time_series"
         }
       ],
       "fieldConfig": {
