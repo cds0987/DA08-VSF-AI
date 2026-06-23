@@ -15,7 +15,7 @@ const hasDetail = () => props.view.detail.length > 0 || !!props.view.raw
 
 <template>
   <div>
-    <p v-if="view.summary" class="text-[13px] leading-relaxed text-slate-600 dark:text-muted-foreground">
+    <p v-if="view.summary" class="text-[13.5px] leading-relaxed text-slate-600 dark:text-muted-foreground">
       {{ view.summary }}
     </p>
 
@@ -32,7 +32,7 @@ const hasDetail = () => props.view.detail.length > 0 || !!props.view.raw
 
       <div
         v-show="open"
-        class="mt-1 max-h-[200px] overflow-auto rounded-md border border-slate-200/60 bg-slate-50/60 px-2.5 py-2 dark:border-white/10 dark:bg-white/[0.03]"
+        class="td-scroll mt-1 max-h-[200px] overflow-auto rounded-md border border-slate-200/60 bg-slate-50/60 px-2.5 py-2 dark:border-white/10 dark:bg-white/[0.03]"
       >
         <!-- Mức 1: section human-readable có nhãn (không ngoặc/nháy JSON) -->
         <div
@@ -49,7 +49,7 @@ const hasDetail = () => props.view.detail.length > 0 || !!props.view.raw
           <p
             v-for="(line, li) in sec.lines"
             :key="li"
-            class="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-slate-600 dark:text-muted-foreground"
+            class="whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-slate-600 dark:text-muted-foreground"
             :class="sec.label && 'mt-0.5'"
           >
             {{ line }}
@@ -69,7 +69,7 @@ const hasDetail = () => props.view.detail.length > 0 || !!props.view.raw
           </button>
           <pre
             v-show="rawOpen"
-            class="mt-1 max-h-[160px] overflow-auto whitespace-pre-wrap break-words rounded border border-slate-200/60 bg-white/60 px-2 py-1.5 text-[11px] leading-relaxed text-slate-500 dark:border-white/10 dark:bg-black/20 dark:text-muted-foreground/80"
+            class="td-scroll mt-1 max-h-[160px] overflow-auto whitespace-pre-wrap break-words rounded border border-slate-200/60 bg-white/60 px-2 py-1.5 text-[11.5px] leading-relaxed text-slate-500 dark:border-white/10 dark:bg-black/20 dark:text-muted-foreground/80"
           >{{ view.raw }}</pre>
         </template>
       </div>
@@ -78,6 +78,26 @@ const hasDetail = () => props.view.detail.length > 0 || !!props.view.raw
 </template>
 
 <style scoped>
+/* Dark mode scrollbar: hoà vào nền tối, không bị trắng lạc lõng. */
+:global(.dark) .td-scroll {
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  scrollbar-width: thin;
+}
+:global(.dark) .td-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+:global(.dark) .td-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+:global(.dark) .td-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+}
+:global(.dark) .td-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
 /* Tôn trọng prefers-reduced-motion: chevron không animate khi user yêu cầu giảm chuyển động. */
 @media (prefers-reduced-motion: reduce) {
   .td-chevron {

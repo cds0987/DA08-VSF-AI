@@ -122,7 +122,7 @@ const userInitials = computed(() => {
               >
                 <PanelLeftOpen
                   class="h-5 w-5 text-red-600"
-                  :stroke-width="2.5"
+                  :stroke-width="1.75"
                 />
               </div>
             </button>
@@ -145,7 +145,7 @@ const userInitials = computed(() => {
         >
           <PanelLeftClose
             class="h-5 w-5"
-            :stroke-width="2.5"
+            :stroke-width="1.75"
           />
         </button>
       </div>
@@ -191,6 +191,13 @@ const userInitials = computed(() => {
               </Tooltip>
             </div>
 
+            <!-- Đơn nghỉ phép: trang duyệt đơn (sếp thấy hàng đợi; nhân viên thấy rỗng) -->
+            <SideLink
+              :item="{ label: 'Đơn nghỉ phép', to: '/leave-approvals', icon: CalendarCheck }"
+              :is-collapsed="isCollapsed"
+              :disable-tooltip="isAnimatingSidebar"
+            />
+
             <!-- Search -->
             <div class="w-full">
               <Tooltip :disabled="isAnimatingSidebar" :ignore-non-keyboard-focus="true">
@@ -230,12 +237,6 @@ const userInitials = computed(() => {
               </Tooltip>
             </div>
 
-            <!-- Đơn nghỉ phép: trang duyệt đơn (sếp thấy hàng đợi; nhân viên thấy rỗng) -->
-            <SideLink
-              :item="{ label: 'Đơn nghỉ phép', to: '/leave-approvals', icon: CalendarCheck }"
-              :is-collapsed="isCollapsed"
-              :disable-tooltip="isAnimatingSidebar"
-            />
 
             <ChatHistory :is-collapsed="isCollapsed" :query="searchQuery" class="w-full flex flex-col flex-1 min-h-0" />
           </div>
