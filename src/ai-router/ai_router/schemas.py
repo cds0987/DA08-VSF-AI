@@ -100,3 +100,7 @@ class Usage(BaseModel):
     # trường này chỉ để observability (tách phần reasoning).
     reasoning_tokens: int = 0
     cost_usd: float | None = None            # OpenRouter trả thật; OpenAI = None -> tự tính
+    # cached_tokens: phần input ĐỌC TỪ CACHE (prompt caching DeepSeek/OpenAI tự động). Đã NẰM
+    # TRONG input_tokens -> KHÔNG trừ khi tính cost; chỉ để observability đo cache hit rate.
+    cached_tokens: int = 0
+    cache_discount: float | None = None      # OpenRouter trả: tỉ lệ tiết kiệm nhờ cache (None nếu không)

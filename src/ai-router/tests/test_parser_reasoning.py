@@ -33,3 +33,25 @@ def test_extract_usage_flat_reasoning_tokens():
 def test_extract_usage_no_reasoning_defaults_zero():
     resp = {"usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}
     assert extract_usage(resp).reasoning_tokens == 0
+
+
+def test_extract_usage_cached_tokens_prompt_details():
+    # Prompt caching (DeepSeek/OpenAI tự động): cached_tokens trong prompt_tokens_details.
+    resp = {"usage": {
+        "prompt_tokens": 1500,
+        "completion_tokens": 200,
+        "total_tokens": 1700,
+        "prompt_tokens_details": {"cached_tokens": 1200},
+        "cache_discount": 0.75,
+    }}
+    u = extract_usage(resp)
+    assert u.cached_tokens == 1200            # 1200/1500 input đọc từ cache (hit)
+    assert u.input_tokens == 1500             # cached ĐÃ nằm trong input -> KHÔNG trừ
+    assert u.cache_discount == 0.75
+
+
+def test_extract_usage_cache_defaults_zero_when_absent():
+    resp = {"usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}
+    u = extract_usage(resp)
+    assert u.cached_tokens == 0
+    assert u.cache_discount is None
