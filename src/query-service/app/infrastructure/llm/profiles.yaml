@@ -65,8 +65,11 @@ nodes:
   # (suy nghĩ ẩn) vừa viết câu trả lời -> trần phải gồm CẢ token nghĩ + answer -> nâng 4000 để
   # không CỤT (trước 2500 chỉ đủ answer, nay thêm reasoning của bước gộp).
   answer:
-    adapter: standard
+    adapter: openrouter_effort     # was: standard — cắt reasoning thừa khi viết câu trả lời cuối
     capability: answer
+    # effort=low: deepseek nghĩ GỌN khi verify+viết (chủ yếu format data đã thu thập, không cần
+    # CoT dài) -> ít token -> nhanh hơn. CoT verify VẪN stream ra panel (surfaces_reasoning_stream).
+    reasoning_effort: low
     max_output_tokens: 4000
 
   # Guardrail LLM-judge (input/output).
