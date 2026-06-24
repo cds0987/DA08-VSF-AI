@@ -10,6 +10,7 @@ import ChatMessages from '~/components/chat/ChatMessages.vue'
 import ChatInput from '~/components/chat/ChatInput.vue'
 import ChatTopBar from '~/components/chat/ChatTopBar.vue'
 import LandingState from '~/components/chat/LandingState.vue'
+import SelectionAskButton from '~/components/chat/SelectionAskButton.vue'
 
 const PIPELINE_STAGES = [
   { label: 'Searching knowledge base', icon: Search },
@@ -23,7 +24,14 @@ const chat = useChatStore()
 const router = useRouter()
 const route = useRoute()
 const scrollRef = ref<HTMLDivElement | null>(null)
+const chatInputRef = ref<InstanceType<typeof ChatInput> | null>(null)
 const hasConversation = computed(() => chat.messages.length > 0 || chat.pipeline >= 0)
+
+// Bôi đen text trong bot answer -> "Hỏi FeatureMind": lưu quote vào store + focus ô input.
+function onAsk(payload: { messageId: string | null; text: string }) {
+  chat.setQuote({ messageId: payload.messageId ?? '', text: payload.text })
+  chatInputRef.value?.focus()
+}
 let scrollRafId: number | null = null
 
 function scrollToBottom(behavior: ScrollBehavior) {
@@ -158,12 +166,16 @@ watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText
       <div class="pointer-events-none absolute bottom-0 left-0 right-0 z-20 h-40 bg-gradient-to-t from-background/80 to-transparent" />
       <div class="relative z-30 px-6 pb-6">
         <ChatInput
+          ref="chatInputRef"
           :input="chat.input"
           :is-processing="chat.pipeline >= 0"
           :show-quick-actions="!hasConversation"
+          :quote="chat.quote"
           @update:input="chat.setInput"
+          @clear-quote="chat.clearQuote"
           @send="question => chat.ask(question, PIPELINE_STAGES)"
         />
+        <SelectionAskButton @ask="onAsk" />
       </div>
     </div>
 

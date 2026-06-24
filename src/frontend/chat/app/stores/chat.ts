@@ -24,6 +24,8 @@ import {
 } from '~/lib/api/queryService'
 import { SSE_DONE_REQUIRED } from '~/types/sse-contract.gen'
 import { handleRefreshFailure, refreshAccessToken } from '~/lib/api/authRefresh'
+import { buildQuotedContent } from '~/lib/quote'
+import type { Quote } from '~/lib/quote'
 
 const HISTORY_KEY = 'eka.chat.conversations'
 
@@ -300,6 +302,7 @@ export const useChatStore = defineStore('chat', () => {
   const queryService = useQueryService()
   const sessionStore = useSessionStore()
   const input = ref('')
+  const quote = ref<Quote | null>(null)
   const files = ref<File[]>([])
   const messages = ref<ChatMessage[]>([])
   const conversations = ref<Conversation[]>([])
@@ -334,6 +337,13 @@ export const useChatStore = defineStore('chat', () => {
 
   function setInput(val: string) {
     input.value = val
+  }
+
+  function setQuote(q: Quote) {
+    quote.value = q
+  }
+  function clearQuote() {
+    quote.value = null
   }
 
   function addFiles(newFiles: File[]) {
@@ -645,6 +655,8 @@ export const useChatStore = defineStore('chat', () => {
   async function ask(q: string, pipelineStages: PipelineStage[], docIds?: string[] | null) {
     const question = q.trim()
     if (!question || pipeline.value >= 0) return
+    // Nếu user đã trích dẫn một đoạn bot answer, prepend thành blockquote vào nội dung gửi.
+    const content = buildQuotedContent(quote.value, question)
 
     const userId = sessionStore.user?.id
     if (!userId) {
@@ -662,6 +674,7 @@ export const useChatStore = defineStore('chat', () => {
     const controller = new AbortController()
     abortController = controller
     input.value = ''
+    quote.value = null
     files.value = []
 
     const wasNew = !currentConversationId.value
@@ -669,7 +682,7 @@ export const useChatStore = defineStore('chat', () => {
     messages.value.push({
       id: `m-${Date.now()}`,
       role: 'user',
-      content: question,
+      content,
       timestamp: new Date().toLocaleString(),
     })
     cacheCurrentConversation()
@@ -694,7 +707,7 @@ export const useChatStore = defineStore('chat', () => {
     let donePayload: QueryDoneEvent | null = null
     const conversationTitle = conversations.value.find(c => c.id === currentConversationId.value)?.title
     const request: QueryRequest = {
-      question,
+      question: content,
       user_id: String(userId),
       conversation_id: currentConversationId.value ?? undefined,
       trace_session: currentConversationId.value ?? undefined,
@@ -995,6 +1008,7 @@ export const useChatStore = defineStore('chat', () => {
 
   return {
     input,
+    quote,
     files,
     messages,
     conversations,
@@ -1015,6 +1029,8 @@ export const useChatStore = defineStore('chat', () => {
     panelCitation,
     isPanelOpen,
     setInput,
+    setQuote,
+    clearQuote,
     addFiles,
     removeFile,
     handleOpenCitation,

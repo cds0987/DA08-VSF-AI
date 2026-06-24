@@ -1,19 +1,24 @@
 <script setup lang="ts">
-import { FileText, ListChecks, Send, ShieldCheck, Sparkles, Zap } from '@lucide/vue'
+import { FileText, ListChecks, Send, ShieldCheck, Sparkles, X, Zap } from '@lucide/vue'
 import { cn } from '~/lib/utils'
+import { truncateQuote } from '~/lib/quote'
+import type { Quote } from '~/lib/quote'
 
 interface Props {
   input: string
   isProcessing: boolean
   showQuickActions?: boolean
+  quote?: Quote | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
   showQuickActions: false,
+  quote: null,
 })
 const emit = defineEmits<{
   (e: 'update:input', val: string): void
   (e: 'send', q: string): void
+  (e: 'clear-quote'): void
 }>()
 
 const isMultiline = ref(false)
@@ -75,6 +80,12 @@ watch(() => props.input, (value) => {
   }
   requestAnimationFrame(adjustHeight)
 })
+
+defineExpose({
+  focus() {
+    nextTick(() => textareaRef.value?.focus())
+  },
+})
 </script>
 
 <template>
@@ -83,6 +94,22 @@ watch(() => props.input, (value) => {
       @submit.prevent="sendMessage"
       class="flex w-full flex-col gap-3 rounded-3xl border border-slate-200/80 bg-white/95 p-3 shadow-xl shadow-blue-500/5 backdrop-blur-sm transition-colors focus-within:border-blue-400/60 focus-within:ring-4 focus-within:ring-blue-100/70 dark:border-white/10 dark:bg-chat-input dark:shadow-black/20 dark:focus-within:border-blue-500/30 dark:focus-within:ring-blue-900/20"
     >
+      <div
+        v-if="quote"
+        class="flex items-start gap-2 rounded-xl border-l-2 border-blue-400 bg-blue-50/70 px-3 py-2 dark:border-blue-500/60 dark:bg-white/5"
+      >
+        <p class="line-clamp-2 flex-1 text-xs leading-relaxed text-slate-600 dark:text-muted-foreground">
+          {{ truncateQuote(quote.text) }}
+        </p>
+        <button
+          type="button"
+          aria-label="Bỏ trích dẫn"
+          class="shrink-0 rounded-md p-0.5 text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:hover:text-foreground"
+          @click="emit('clear-quote')"
+        >
+          <X class="h-3.5 w-3.5" />
+        </button>
+      </div>
       <div class="flex items-center gap-2.5">
         <div
           class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-50 to-indigo-50 text-blue-500 dark:from-blue-900/30 dark:to-indigo-900/30 dark:text-blue-400"
