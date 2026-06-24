@@ -268,9 +268,9 @@ services:
 
   query-service:
     image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/query-service:${IMAGE_TAG:-develop}
-    # Scale 2 worker (2 event loop) gỡ nghẽn pre-plan ở tải cao (150). An toàn: 2 (không 3) để nhẹ
-    # CPU trên VM 4-core dùng chung; giữ newrelic-admin wrapper. REVERT: bỏ dòng command này.
-    command: ["newrelic-admin", "run-program", "uvicorn", "app.interfaces.api.main:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "2"]
+    # REVERT 2-worker: uvicorn --workers 2 gây "peer closed connection" cắt SSE 148/150 (regression
+    # streaming multi-worker). Về 1 worker (CMD Dockerfile) = known-good 150/150. Multi-worker+SSE
+    # cần điều tra riêng (uvicorn/proxy) trước khi bật lại.
     ports:
       - "8001:8001"
     env_file:
@@ -281,10 +281,6 @@ services:
       <<: *newrelic
       NEW_RELIC_APP_NAME: vsf-query-service
       DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/query_db
-      # asyncpg pool/repo: 2 worker × 4 repo × 8 = 64 < PG max_connections=100 (dư 36 cho service
-      # khác ~23). An toàn không cạn PG. REVERT: bỏ 2 dòng này (về default 10).
-      DB_POOL_MIN_SIZE: "2"
-      DB_POOL_MAX_SIZE: "8"
     depends_on:
       app-postgres:
         condition: service_healthy
