@@ -30,6 +30,9 @@ def _catalog() -> Catalog:
         ModelEntry(id="deepseek/deepseek-v4-flash", provider="deepseek", name_native="deepseek-v4-flash",
                    name_or="deepseek/deepseek-v4-flash", context_length=1000000, supports_tools=True,
                    is_free=False, price_out_with_fee=0.2, endpoint="chat"),
+        ModelEntry(id="xiaomi/mimo-v2.5", provider="xiaomi", name_native="mimo-v2.5",
+                   name_or="xiaomi/mimo-v2.5", context_length=1000000, supports_tools=True,
+                   is_free=False, price_out_with_fee=0.28, endpoint="chat"),
     ])
 
 
@@ -107,7 +110,26 @@ def test_openrouter_aimd_gates_and_adapts():
     asyncio.run(run())
 
 
+def test_model_split_round_robin():
+    """models.paid = [deepseek, xiaomi] -> CHIA TẢI round-robin ~50/50 (không failover-first)."""
+    async def run():
+        c = MemoryCounters()
+        cap = CapabilityConfig(tiers=["paid"],
+                               models={"paid": ["deepseek/deepseek-v4-flash", "xiaomi/mimo-v2.5"]})
+        sel = _sel(_or_registry(2), {"_c": c})
+        seen = Counter()
+        for _ in range(20):
+            d = await sel.resolve(ResolveRequest(capability="answer", cap_config=cap, est_tokens=50))
+            assert d is not None
+            await c.release_inflight(d.key_id, d.inflight_token)  # giải phóng để không cạn AIMD
+            seen[d.model_id] += 1
+        assert seen["deepseek/deepseek-v4-flash"] == 10 and seen["xiaomi/mimo-v2.5"] == 10, seen
+        print("OK model split RR:", dict(seen))
+    asyncio.run(run())
+
+
 if __name__ == "__main__":
     test_openai_spreads_by_tpm()
     test_openrouter_aimd_gates_and_adapts()
+    test_model_split_round_robin()
     print("\nALL ADAPTIVE TESTS PASSED")

@@ -103,3 +103,65 @@ Redis (chính xác đa-worker); `airouter_key_rpm` đã khai trong `metric-contr
 **CÁCH ĐÁNH GIÁ ĐÚNG (đọc `eval/load20/claude-knowledge/`):** tin SERVER-side (preplan log + Langfuse
 + /metrics), KHÔNG tin client-side đo từ 1 máy (thổi phồng) hay sau proxy công ty (buffer SSE → số ảo).
 Scale service SSE = REPLICA (không `--workers` — cắt SSE).
+
+## ĐO LƯỜNG ĐÚNG + RUNBOOK (interchange máy) — cập nhật 2026-06-24
+
+> Mục này để máy khác tiếp quản đo/điều tra mà không lần mò lại. Tất cả lệnh chạy từ máy user
+> (Windows git-bash), KHÔNG phải sandbox.
+
+### Access (đọc log/metric server — port 22 KHÔNG mở ra ngoài → IAP tunnel)
+```bash
+# 1) tunnel (giữ chạy nền). IP VM=35.240.193.13 (STATIC reserved 'vsf-rag-vm-ip' → resize/stop KHÔNG đổi IP).
+gcloud compute start-iap-tunnel vsf-rag-demo-vm 22 --zone=asia-southeast1-a --local-host-port=localhost:2225 &
+# 2) ssh (OS-Login user = ttnguyen1410_gmail_com; gcloud auth = ttnguyen1410@gmail.com OWNER)
+ssh -i ~/.ssh/google_compute_engine -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2225 ttnguyen1410_gmail_com@localhost "<cmd>"
+```
+- Container: `da08-vsf-{ai-router,query-service-1,query-service-2-1,app-postgres,qdrant,rag-worker,prometheus}-1`. Cần `sudo docker`.
+- Grafana `grafana.vsfchat.cloud` (Basic Auth `team`/`2EG4sxyGBGybDVVZ`, anon view sau đó) — dashboard `ai-router-main`.
+- Langfuse `langfuse.vsfchat.cloud` (Basic Auth như trên → app login `admin@company.com`/`e00015033a465bf1933b6e120b527d1f7198`).
+- Prometheus KHÔNG publish ra host → query qua container có python: `docker exec query-service-1 python -c "import urllib.request;..."` tới `http://prometheus:9090`.
+- Harness Node Playwright ở `.pw-test/` (KHÔNG dùng python sync_playwright — greenlet DLL fail; eval/load20 chạy được nếu `LOAD_N_BROWSERS=0`). Harness load `eval/load20/run_load20.py` (`LOAD_N_USERS=N LOAD_N_BROWSERS=0`).
+
+### 4 TẦNG latency — metric nào đo tầng nào (ĐỪNG lẫn)
+```
+request ─► QUERY-SERVICE ──────────────► AI-ROUTER ──► OpenRouter(15 upstream) ─► deepseek
+           [pre-plan: ctx+mem+graph]      [resolve 10ms] [create_ms = provider]
+           preplan_timing TOTAL_first_emit  airouter_ttfc_seconds (≈ create_ms)
+```
+| Câu hỏi | Nguồn ĐÚNG | Số đo (verified 2026-06-24) |
+|---|---|---|
+| User thấy dấu hiệu đầu (status)? | client/FE | **~0.1s** (anti-dead-air emit ngay) |
+| **User thấy TOKEN MODEL đầu (reasoning)?** | SSE phase=`thought` | **~1.1s IDLE → ~10s @150** (phụ thuộc tải) |
+| User thấy token TRẢ LỜI đầu? | SSE phase=`generating` | ~26s idle (pipeline plan→worker→synth→answer) |
+| Dead-air (pre-plan) server? | `orchestrator_preplan_timing TOTAL_first_emit` (query-service log) | ~1s idle → **6.4s @150** (DB contention) |
+| 1 LLM-call nhanh chậm? | `airouter_ttfc_seconds` per cap (Grafana) | idle ~1s → 4s p50/13s p99 @150 |
+| Tổng 1 lượt server? | Langfuse trace latency | ~33s @150 |
+
+### TTFC decompose (chat_stream_timing log ai-router) — 4s là PROVIDER, KHÔNG phải server
+`grep chat_stream_timing` → `resolve_ms/create_ms/ttfc_ms`. Verified: **resolve ~10ms (ai-router=0), ttfc≈create_ms
+= OpenRouter route + deepseek first-token = 100% provider.** Phương sai lớn (create p95 6s vs median 1.3s) =
+OpenRouter multiplex ~15 upstream (route nhà khác nhau). → 4s/13s là provider-under-load + variance, KHÔNG bug server.
+
+### Histogram windowing (BẪY hay gặp)
+- `airouter_*_seconds_bucket` = counter CỘNG DỒN. `histogram_quantile(.95, _bucket)` THÔ = ALL-TIME.
+- Phải bọc `rate(_bucket[window])` mới theo cửa sổ. Bảng dashboard dùng `[$__range]` = theo time-picker.
+- ⚠️ Load-test 150 user **nằm trong cửa sổ 3h** → vẫn nhiễm. Xem sạch: picker **15-30m** (loại test cũ) HOẶC chờ test trôi ra >3h.
+- Tail "2.40 min" = trần bucket 144s (đụng khi stress/timeout); @15m sạch tail ~50s.
+
+### CLIENT-1-máy ở tải cao = SỐ ẢO (đã chứng minh bằng mâu thuẫn vật lý)
+@150: client TTFT-answer **70s** > Langfuse total-turn server **33.5s** → token đầu KHÔNG THỂ tới sau khi
+turn đã xong → client đọc 125 SSE không kịp → thổi **~2-4×**. → tải cao CHỈ tin server-side. Client chỉ
+đúng ở **concurrency thấp** (sequential/≤5).
+
+### Quick-wins đã làm (2026-06-24, $0 hardware)
+1. **rag-worker NAK-storm** (`s3_artifact_store.delete_by_document` nuốt NoSuchKey + `ingest_consumer` nak(delay=5)):
+   doc.access(deleted)→delete NoSuchKey→nak-loop 35/s đốt **110% CPU idle** → fix → **1.14% CPU** (free ~1 core).
+2. **get_context 1 round-trip** (LATERAL, `postgres_conversation_repo`): giảm pool contention trong dead-air.
+3. **anti-dead-air** (`orchestration` emit status t≈0 + `Pipeline.vue` rotating hint): first-visible 112ms.
+
+### VM resize an toàn (cores+RAM, 1 VM)
+IP static → resize KHÔNG đổi IP → mọi expose (vsfchat/grafana/langfuse/qdrant qua Cloudflare→static IP)
+SỐNG. `stop → set-machine-type=e2-custom-N-MEM → start`. Disk persistent không đụng (data PG/Qdrant giữ).
+Để app DÙNG core mới = thêm REPLICA (1 worker=1 core; --workers cắt SSE) → kèm fix **SSE/notification fanout
+in-memory** (ConnectionManager) kẻo notification rớt xuyên replica. Dead-air @4core CHƯA chạm trần CPU
+(load 0.92/4, query-service 3% CPU; dead-air = DB/model latency, nâng core KHÔNG giảm dead-air).

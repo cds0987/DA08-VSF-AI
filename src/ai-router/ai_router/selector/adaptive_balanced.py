@@ -54,7 +54,7 @@ class AdaptiveBalanced(Selector):
                 and not await self.counters.is_drained(k.id)]
         if not live:
             return None
-        model = await self.pick_model(tier_name, tdef, req)
+        model = await self._pick_model_split(tier_name, tdef, req)
         if model is None:
             return None
         is_oai = tdef.provider == Provider.OPENAI
@@ -99,3 +99,24 @@ class AdaptiveBalanced(Selector):
             dec.inflight_token = token            # OR: router release + aimd_grow sau call
             return dec
         return None
+
+    async def _pick_model_split(self, tier_name, tdef, req):
+        """CHIA TẢI model (//hóa): nhiều model cấu hình cho 1 tier -> ROUND-ROBIN (vd deepseek 50%
+        + xiaomi 50%) thay vì failover-first. deepseek/xiaomi là 2 upstream GPU KHÁC nhau -> chia
+        đôi -> mỗi upstream nửa tải -> queue inference NÔNG hơn -> p99 ttfc THẤP hơn (gốc 12s là
+        queue upstream, KHÔNG phải credential/key). Cùng pool OR key nên AIMD vẫn cân key bình thường.
+        pinned -> pin; 0 khả thi -> auto rẻ nhất; bỏ model đang cooldown."""
+        if req.cap_config.pinned_model:
+            m = self.catalog.get(req.cap_config.pinned_model)
+            return m if self.feasible_model(m, tdef, req) else None
+        cands = []
+        for mid in req.cap_config.model_ids(tier_name):
+            m = self.catalog.get(mid)
+            if m and self.feasible_model(m, tdef, req) and not await self.counters.in_model_cooldown(m.id):
+                cands.append(m)
+        if not cands:
+            return await self.pick_model(tier_name, tdef, req)
+        if len(cands) == 1:
+            return cands[0]
+        seq = await self.counters.next_seq(f"{req.capability}:{tier_name}:msplit")
+        return cands[seq % len(cands)]
