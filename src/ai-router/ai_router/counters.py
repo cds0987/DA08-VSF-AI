@@ -12,6 +12,7 @@ Buckets:
 """
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -25,8 +26,13 @@ SEQ_TTL = 93_600       # 26h — bộ đếm weighted round-robin theo capabilit
 INFLIGHT_STALE = 600   # 10' — hold treo (worker chết giữa stream) tự rớt khỏi đếm in-flight
 WIDTH_TTL = 600        # 10' — width là tín hiệu SỐNG; im tải -> tự co về hẹp (rẻ lại)
 TPM_TTL = 90           # cửa sổ token/phút (OpenAI có trần TPM rõ) — như RPM nhưng đếm token
-# AIMD cho key OpenRouter (đa-upstream, KHÔNG có TPM cố định) -> TỰ DÒ trần qua 429:
-AIMD_INIT, AIMD_MIN, AIMD_MAX, AIMD_TTL = 8.0, 2.0, 64.0, 300
+# AIMD cho key OpenRouter (đa-upstream, KHÔNG có TPM cố định) -> TỰ DÒ trần qua 429.
+# INIT/MAX nới được qua ENV (thử nghiệm tải: burst lạnh cần headroom > số concurrent) mà KHÔNG
+# sửa code — default giữ NGUYÊN hành vi cũ (8/2/64/300). AIROUTER_AIMD_INIT=16 -> 5 OR key×16=80.
+AIMD_INIT = float(os.environ.get("AIROUTER_AIMD_INIT", "8"))
+AIMD_MIN = float(os.environ.get("AIROUTER_AIMD_MIN", "2"))
+AIMD_MAX = float(os.environ.get("AIROUTER_AIMD_MAX", "64"))
+AIMD_TTL = int(os.environ.get("AIROUTER_AIMD_TTL", "300"))
 
 
 def _now() -> datetime:
