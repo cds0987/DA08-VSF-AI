@@ -268,6 +268,9 @@ async def start_doc_access_subscription(
                 await msg.ack()
         except Exception as exc:  # noqa: BLE001 - lỗi tạm (vector store/DB...) -> nak retry
             log.warning("doc_access_delete_failed error=%s", exc)
-            await msg.nak()
+            try:
+                await msg.nak(delay=5)  # backoff -> KHÔNG redeliver tức thì (chặn NAK-storm đốt CPU)
+            except TypeError:  # client cũ không nhận delay
+                await msg.nak()
 
     return await broker.subscribe(subject, durable=durable, cb=_cb)

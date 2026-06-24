@@ -20,6 +20,17 @@ def _artifact_uri_scheme() -> str:
     return current_storage_uri_scheme()
 
 
+def _is_not_found(exc: Exception) -> bool:
+    """True nếu lỗi = object KHÔNG tồn tại (NoSuchKey / 404) — boto/GCS S3-compat shape khác nhau,
+    bắt theo cả response code lẫn message để chắc ăn."""
+    resp = getattr(exc, "response", None)
+    code = ""
+    if isinstance(resp, dict):
+        code = str(resp.get("Error", {}).get("Code", "")) or str(resp.get("ResponseMetadata", {}).get("HTTPStatusCode", ""))
+    msg = str(exc)
+    return code in ("NoSuchKey", "NoSuchUpload", "404", "NotFound") or "NoSuchKey" in msg or "Not Found" in msg
+
+
 def _safe_document_id(document_id: str) -> str:
     cleaned = document_id.strip()
     if cleaned and all(ch.isalnum() or ch in "-_" for ch in cleaned):
@@ -81,8 +92,16 @@ class S3ArtifactStore(ArtifactStore):
 
     async def delete_by_document(self, document_id: str) -> None:
         key = self._artifact_key(document_id)
-        await asyncio.to_thread(
-            self._get_client().delete_object,
-            Bucket=self._bucket,
-            Key=key,
-        )
+        try:
+            await asyncio.to_thread(
+                self._get_client().delete_object,
+                Bucket=self._bucket,
+                Key=key,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # GCS (S3-compat) ném NoSuchKey khi key ĐÃ mất; AWS thì no-op. Object biến mất =
+            # MỤC TIÊU của delete đã đạt -> coi là THÀNH CÔNG (idempotent). KHÔNG raise -> tránh
+            # handler doc.access nak() -> NATS redeliver vô hạn (NAK-storm đốt CPU 110%).
+            if _is_not_found(exc):
+                return
+            raise
