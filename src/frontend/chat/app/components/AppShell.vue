@@ -21,6 +21,8 @@ const route = useRoute()
 const isCollapsed = ref(true)
 const isAnimatingSidebar = ref(false)
 const isHoveringLogo = ref(false)
+// Settings giờ mở từ dropdown account (DeepSeek-style) -> dialog điều khiển bằng state.
+const settingsOpen = ref(false)
 
 function setSidebarCollapsed(value: boolean) {
   // Trong lúc transition width (300ms), các icon trượt dưới con trỏ đứng yên
@@ -75,9 +77,11 @@ const userInitials = computed(() => {
 <template>
   <!-- Sidebar -->
   <aside
-    class="flex shrink-0 flex-col relative z-50 h-full overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-300 ease-in-out transform-gpu"
+    class="flex shrink-0 flex-col relative z-50 h-full overflow-hidden text-sidebar-foreground transition-[width,background-color,border-color] duration-300 ease-in-out transform-gpu"
     :class="[
-      isCollapsed ? 'w-16' : 'w-[268px]',
+      isCollapsed
+        ? 'w-16 bg-transparent border-r border-transparent'
+        : 'w-[268px] bg-sidebar border-r border-sidebar-border',
       isAnimatingSidebar ? 'pointer-events-none' : '',
     ]"
     style="display: flex !important; isolation: isolate; contain: layout style paint; will-change: width, transform;"
@@ -159,6 +163,13 @@ const userInitials = computed(() => {
         <!-- App chat KHÔNG có trang admin (admin là app riêng) -> luôn hiển thị nav chat,
              kể cả account role admin. Tránh /leave-approvals lật shell sang nav admin. -->
         <div class="w-full flex flex-col gap-2 flex-1 min-h-0">
+          <!-- Nhóm nav: khi thu gọn -> khung bo tròn "lơ lửng" bao 3 icon (DeepSeek-style) -->
+          <div
+            class="flex flex-col"
+            :class="isCollapsed
+              ? 'mx-auto w-12 gap-1 rounded-2xl border border-slate-200/70 bg-white/80 p-1 shadow-sm dark:border-white/10 dark:bg-white/5'
+              : 'w-full gap-2'"
+          >
             <!-- New Chat Section -->
             <div class="w-full">
               <Tooltip :disabled="isAnimatingSidebar" :ignore-non-keyboard-focus="true">
@@ -167,7 +178,7 @@ const userInitials = computed(() => {
                     @click="handleNewChat"
                     class="group flex items-center rounded-lg overflow-hidden cursor-pointer shrink-0 h-9 transition-all w-full bg-transparent px-0 text-sm font-semibold text-slate-900 dark:text-sidebar-foreground hover:bg-slate-100 dark:hover:bg-sidebar-accent focus-visible:ring-0 outline-none"
                   >
-                    <div class="flex h-9 w-[64px] items-center justify-center shrink-0">
+                    <div class="flex h-9 items-center justify-center shrink-0" :class="isCollapsed ? 'w-full' : 'w-[64px]'">
                       <SquarePlus
                         class="h-5 w-5 shrink-0"
                         :class="!isCollapsed ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-muted-foreground'"
@@ -208,7 +219,7 @@ const userInitials = computed(() => {
                     class="relative group flex items-center overflow-hidden rounded-lg shrink-0 h-9 transition-all w-full bg-transparent shadow-none cursor-pointer hover:bg-slate-100 dark:hover:bg-sidebar-accent"
                     @click="isCollapsed && handleSearchClick()"
                   >
-                    <div class="flex h-9 w-[64px] items-center justify-center shrink-0">
+                    <div class="flex h-9 items-center justify-center shrink-0" :class="isCollapsed ? 'w-full' : 'w-[64px]'">
                       <Search
                         class="h-5 w-5 shrink-0 z-10"
                         :class="isCollapsed
@@ -236,8 +247,10 @@ const userInitials = computed(() => {
                 </TooltipContent>
               </Tooltip>
             </div>
+          </div>
+          <!-- /Nhóm nav khung bo tròn -->
 
-            <ChatHistory :is-collapsed="isCollapsed" :query="searchQuery" class="w-full flex flex-col flex-1 min-h-0" />
+          <ChatHistory :is-collapsed="isCollapsed" :query="searchQuery" class="w-full flex flex-col flex-1 min-h-0" />
           </div>
       </div>
     </div>
@@ -246,45 +259,21 @@ const userInitials = computed(() => {
     <div
       class="flex flex-col gap-1.5 shrink-0 w-full px-0 py-3"
     >
-      <NotificationCenter
-        :is-collapsed="isCollapsed"
-        :disable-tooltip="isAnimatingSidebar"
-      />
+      <!-- Thông báo: ẩn khi thu gọn (chỉ hiện khi sidebar mở) -->
+      <div v-show="!isCollapsed">
+        <NotificationCenter
+          :is-collapsed="isCollapsed"
+          :disable-tooltip="isAnimatingSidebar"
+        />
+      </div>
 
-      <!-- Standalone Settings Button -->
-      <Dialog>
-        <Tooltip :disabled="isAnimatingSidebar" :ignore-non-keyboard-focus="true">
-          <TooltipTrigger asChild>
-            <DialogTrigger asChild>
-              <button
-                class="flex items-center rounded-md cursor-pointer shrink-0 h-9 transition-all w-full text-slate-600 dark:text-muted-foreground hover:bg-slate-100 dark:hover:bg-sidebar-accent hover:text-slate-900 dark:hover:text-sidebar-accent-foreground px-0 justify-start"
-              >
-                <div class="flex h-9 w-[64px] items-center justify-center shrink-0">
-                  <Settings
-                    class="shrink-0 h-5 w-5"
-                  />
-                </div>
-                <span
-                  class="text-[13px] font-semibold whitespace-nowrap transition-opacity duration-300"
-                  :class="isCollapsed ? 'opacity-0' : 'opacity-100'"
-                >
-                  Settings
-                </span>
-              </button>
-            </DialogTrigger>
-          </TooltipTrigger>
-          <TooltipContent
-            v-if="isCollapsed"
-            side="right"
-            class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
-          >
-            Settings
-          </TooltipContent>
-        </Tooltip>
+      <!-- Settings dialog — KHÔNG trigger, mở từ dropdown account (state-controlled) -->
+      <Dialog v-model:open="settingsOpen">
         <SettingsDialog />
       </Dialog>
 
-      <!-- User Profile Dropdown -->
+      <!-- User Profile Dropdown (account) — chứa email, Settings, Sign out. Ẩn khi thu gọn. -->
+      <div v-show="!isCollapsed">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
@@ -315,9 +304,23 @@ const userInitials = computed(() => {
           side="right"
           align="end"
           :side-offset="12"
-          class="w-[180px] bg-white dark:bg-chat-input shadow-lg border-slate-100 dark:border-sidebar-border text-slate-900 dark:text-sidebar-foreground p-1.5"
+          class="w-[220px] bg-white dark:bg-chat-input shadow-lg border-slate-100 dark:border-sidebar-border text-slate-900 dark:text-sidebar-foreground p-1.5"
         >
-          <DropdownMenuLabel>My Account</DropdownMenuLabel>
+          <!-- Header: avatar + email (hữu ích khi sidebar thu gọn) -->
+          <DropdownMenuLabel class="flex items-center gap-2.5 px-2 py-1.5">
+            <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white">
+              {{ userInitials }}
+            </div>
+            <span class="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-900 dark:text-sidebar-foreground">{{ maskedEmail }}</span>
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator class="bg-slate-100 dark:bg-sidebar-accent" />
+          <DropdownMenuItem
+            class="flex items-center gap-2 rounded-md px-2 py-1.5 cursor-pointer focus:bg-slate-50 dark:focus:bg-sidebar-accent focus:text-slate-900 dark:focus:text-sidebar-accent-foreground"
+            @select="settingsOpen = true"
+          >
+            <Settings class="h-4 w-4" />
+            <span class="font-medium">Settings</span>
+          </DropdownMenuItem>
           <DropdownMenuSeparator class="bg-slate-100 dark:bg-sidebar-accent" />
           <DropdownMenuItem
             class="flex items-center gap-2 rounded-md px-2 py-1.5 cursor-pointer focus:bg-slate-50 dark:focus:bg-sidebar-accent focus:text-slate-900 dark:focus:text-sidebar-accent-foreground text-red-600 focus:text-red-700"
@@ -328,6 +331,7 @@ const userInitials = computed(() => {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      </div>
     </div>
   </aside>
 </template>
