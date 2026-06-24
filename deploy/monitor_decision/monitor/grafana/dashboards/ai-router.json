@@ -1086,6 +1086,181 @@
           }
         }
       ]
+    },
+    {
+      "id": 50,
+      "type": "row",
+      "collapsed": false,
+      "title": "⑥ Trải nghiệm user (TTFT · Latency · percentile)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 50
+      },
+      "panels": []
+    },
+    {
+      "id": 51,
+      "type": "table",
+      "title": "Trải nghiệm user — TTFT & Latency theo capability (p50/p95/p99 · avg)",
+      "description": "TTFT = time-to-first-chunk từ provider (ai-router thấy). Latency = tổng thời gian 1 call. p95/p99 từ histogram (rate theo khoảng đang xem). req/s = lưu lượng.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 51
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "instant": true,
+          "expr": "histogram_quantile(0.50, sum by(capability,le)(rate(airouter_ttfc_seconds_bucket{capability=~\"$capability\"}[$__range])))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "format": "table",
+          "instant": true,
+          "expr": "histogram_quantile(0.95, sum by(capability,le)(rate(airouter_ttfc_seconds_bucket{capability=~\"$capability\"}[$__range])))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "C",
+          "format": "table",
+          "instant": true,
+          "expr": "histogram_quantile(0.99, sum by(capability,le)(rate(airouter_ttfc_seconds_bucket{capability=~\"$capability\"}[$__range])))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "D",
+          "format": "table",
+          "instant": true,
+          "expr": "sum by(capability)(rate(airouter_call_latency_seconds_sum{capability=~\"$capability\"}[$__range])) / clamp_min(sum by(capability)(rate(airouter_call_latency_seconds_count{capability=~\"$capability\"}[$__range])),0.0001)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "E",
+          "format": "table",
+          "instant": true,
+          "expr": "histogram_quantile(0.95, sum by(capability,le)(rate(airouter_call_latency_seconds_bucket{capability=~\"$capability\"}[$__range])))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "F",
+          "format": "table",
+          "instant": true,
+          "expr": "histogram_quantile(0.99, sum by(capability,le)(rate(airouter_call_latency_seconds_bucket{capability=~\"$capability\"}[$__range])))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "G",
+          "format": "table",
+          "instant": true,
+          "expr": "sum by(capability)(rate(airouter_call_latency_seconds_count{capability=~\"$capability\"}[$__range]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "service": true
+            },
+            "renameByName": {
+              "capability": "Capability",
+              "Value #A": "TTFT p50",
+              "Value #B": "TTFT p95",
+              "Value #C": "TTFT p99",
+              "Value #D": "Latency avg",
+              "Value #E": "Latency p95",
+              "Value #F": "Latency p99",
+              "Value #G": "req/s"
+            },
+            "indexByName": {
+              "capability": 0,
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3,
+              "Value #D": 4,
+              "Value #E": 5,
+              "Value #F": 6,
+              "Value #G": 7
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Latency p95",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 2
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "req/s"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "reqps"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }

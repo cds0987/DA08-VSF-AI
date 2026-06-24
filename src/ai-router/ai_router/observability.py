@@ -15,6 +15,10 @@ from __future__ import annotations
 
 from threading import Lock
 
+# Bucket giây cho histogram latency/ttfc (dải LLM call 0.25-55s). Cumulative theo chuẩn Prometheus
+# -> Grafana histogram_quantile() tính p50/p95/p99; avg = rate(_sum)/rate(_count).
+LAT_BUCKETS: tuple[float, ...] = (0.25, 0.5, 1, 2, 3, 5, 8, 13, 21, 34, 55)
+
 
 def _esc(v: str) -> str:
     """Escape label value theo chuẩn Prometheus text exposition."""
@@ -36,6 +40,8 @@ class Metrics:
 
     def __init__(self) -> None:
         self._counters: dict[tuple[str, tuple[tuple[str, str], ...]], float] = {}
+        # histogram: key -> {"b": [count/bucket], "sum": float, "count": int}
+        self._hist: dict[tuple[str, tuple[tuple[str, str], ...]], dict] = {}
         self._lock = Lock()
 
     def inc(self, name: str, labels: dict[str, object] | None = None, amount: float = 1.0) -> None:
@@ -43,9 +49,28 @@ class Metrics:
         with self._lock:
             self._counters[key] = self._counters.get(key, 0.0) + amount
 
+    def observe(self, name: str, labels: dict[str, object] | None, value: float) -> None:
+        """Ghi 1 quan sát latency/ttfc (giây) vào histogram. Bucket cumulative -> p95/p99 ở Grafana."""
+        key = (name, tuple(sorted((k, str(v)) for k, v in (labels or {}).items())))
+        with self._lock:
+            h = self._hist.get(key)
+            if h is None:
+                h = {"b": [0] * len(LAT_BUCKETS), "sum": 0.0, "count": 0}
+                self._hist[key] = h
+            for i, le in enumerate(LAT_BUCKETS):
+                if value <= le:
+                    h["b"][i] += 1          # cumulative: obs ≤ le[i] tăng bucket i
+            h["sum"] += float(value)
+            h["count"] += 1
+
     def snapshot(self) -> list[tuple[str, dict[str, str], float]]:
         with self._lock:
             return [(name, dict(lbls), val) for (name, lbls), val in self._counters.items()]
+
+    def hist_snapshot(self) -> list[tuple[str, dict[str, str], dict]]:
+        with self._lock:
+            return [(name, dict(lbls), {"b": list(h["b"]), "sum": h["sum"], "count": h["count"]})
+                    for (name, lbls), h in self._hist.items()]
 
 
 def render_prometheus(snapshot: dict, metrics: Metrics) -> str:
@@ -99,5 +124,19 @@ def render_prometheus(snapshot: dict, metrics: Metrics) -> str:
             out.append(f"# TYPE {name} counter")
             seen_help.add(name)
         out.append(_line(name, labels, value))
+
+    # ── Histogram latency/ttfc (nguồn: in-process observe) -> p95/p99/avg ở Grafana ──
+    hist = metrics.hist_snapshot()
+    seen_h: set[str] = set()
+    for name, labels, h in sorted(hist, key=lambda s: s[0]):
+        if name not in seen_h:
+            out.append(f"# HELP {name} Latency giây (histogram).")
+            out.append(f"# TYPE {name} histogram")
+            seen_h.add(name)
+        for i, le in enumerate(LAT_BUCKETS):
+            out.append(_line(f"{name}_bucket", {**labels, "le": str(le)}, h["b"][i]))
+        out.append(_line(f"{name}_bucket", {**labels, "le": "+Inf"}, h["count"]))
+        out.append(_line(f"{name}_sum", labels, h["sum"]))
+        out.append(_line(f"{name}_count", labels, h["count"]))
 
     return "\n".join(out) + "\n"

@@ -309,6 +309,9 @@ class Router:
                 usage = extract_usage(data)
                 cost = await self.account(dec, usage, est)
                 latency_ms = (time.monotonic() - t0) * 1000
+                self.metrics.observe("airouter_call_latency_seconds",
+                                     {"capability": capability, "provider": dec.provider.value},
+                                     latency_ms / 1000.0)
                 self._emit_call(dec, capability, usage, status="ok", cost=cost)
                 self._trace_log("call_ok", dec, capability, conversation_id=conversation_id,
                                 status="ok", latency_ms=latency_ms, usage=usage, cost=cost)
@@ -363,6 +366,9 @@ class Router:
                         "create_ms=%.0f ttfc_ms=%.0f", capability, dec.model_name, est,
                         _resolve_ms, _create_ms, _ttfc_ms,
                     )
+                    self.metrics.observe("airouter_ttfc_seconds",
+                                         {"capability": capability, "provider": dec.provider.value},
+                                         _ttfc_ms / 1000.0)
                 data = chunk.model_dump()
                 first = not served_first
                 if data.get("model") and first:
@@ -386,6 +392,9 @@ class Router:
             await self.counters.release_inflight(dec.key_id, dec.inflight_token)
         cost = await self.account(dec, usage_seen, est) if usage_seen else None
         latency_ms = (time.monotonic() - t0) * 1000
+        self.metrics.observe("airouter_call_latency_seconds",
+                             {"capability": capability, "provider": dec.provider.value},
+                             latency_ms / 1000.0)
         self._emit_call(dec, capability, usage_seen, status="ok", cost=cost)
         self._trace_log("call_ok", dec, capability, conversation_id=conversation_id,
                         status="ok", latency_ms=latency_ms, usage=usage_seen, cost=cost)

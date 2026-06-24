@@ -30,6 +30,14 @@ namespaces:
       - { name: airouter_key_rpm,            type: gauge, labels: [key_id, secret_env, provider, tier] }   # RPM hiện tại/key (xem tải đều)
       # ── meta gauge ──
       - { name: airouter_keys_total,         type: gauge,   labels: [] }   # tổng key đăng ký
+      # ── histogram latency/ttfc (bảng 'Trải nghiệm user'): _bucket/_sum/_count chuẩn Prometheus.
+      #    TTFT = time-to-first-chunk từ provider; latency = tổng 1 call. p95/p99 = histogram_quantile.
+      - { name: airouter_ttfc_seconds_bucket,         type: histogram, labels: [capability, provider, le] }
+      - { name: airouter_ttfc_seconds_sum,            type: histogram, labels: [capability, provider] }
+      - { name: airouter_ttfc_seconds_count,          type: histogram, labels: [capability, provider] }
+      - { name: airouter_call_latency_seconds_bucket, type: histogram, labels: [capability, provider, le] }
+      - { name: airouter_call_latency_seconds_sum,    type: histogram, labels: [capability, provider] }
+      - { name: airouter_call_latency_seconds_count,  type: histogram, labels: [capability, provider] }
 
   vsf:
     description: "RED per-service từ OTel spanmetrics connector (otel-collector)."
