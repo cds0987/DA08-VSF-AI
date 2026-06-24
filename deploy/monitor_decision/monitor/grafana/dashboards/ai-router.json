@@ -944,7 +944,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(airouter_save_mode_total[5m]))",
+          "expr": "(sum(rate(airouter_save_mode_total[5m]))) or vector(0)",
           "instant": false,
           "datasource": {
             "type": "prometheus",
@@ -1551,7 +1551,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(airouter_fallback_total[5m])) / clamp_min(sum(rate(airouter_resolve_total[5m])), 1)",
+          "expr": "(sum(rate(airouter_fallback_total[5m])) / clamp_min(sum(rate(airouter_resolve_total[5m])), 1)) or vector(0)",
           "legendFormat": "fallback rate",
           "refId": "A",
           "datasource": {
