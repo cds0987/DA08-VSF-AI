@@ -319,7 +319,9 @@ services:
       # OTel auto-instrument: 1=BẬT (ép workers=1). Đã thử multi-worker -> KHÔNG giảm TTFT -> bật lại
       # để giữ trace. GIỮ AIROUTER_AIMD_INIT=16 (đo được: dẹp save_mode ở ≥50 mà không 429).
       VSF_OTEL_ENABLED: "1"
-      AIROUTER_AIMD_INIT: "16"      # nới trần inflight cold-start/key: 5 OR key×16=80 > 50 -> hết save_mode
+      AIROUTER_AIMD_INIT: "32"      # nâng trần deepseek ~150 user: 5 OR key×32=160 slot cold-burst.
+                                    # ⚠ chỉ tháo cap CỦA TA; nếu provider 429 hàng loạt -> trần thật
+                                    # là OpenRouter, phải THÊM KEY. AIMD vẫn tự co ×0.5 khi gặp 429.
       OTEL_SERVICE_NAME: ai-router
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_TRACES_EXPORTER: otlp
