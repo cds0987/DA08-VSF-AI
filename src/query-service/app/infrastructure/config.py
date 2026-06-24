@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # Memory module (history-context + task-state). default-off được (rollback): MEMORY_ENABLED=false
     # -> orchestration bỏ qua memory, về hành vi cũ. recent_n=7 lượt verbatim + summary lượt cũ.
     memory_enabled: bool = True
-    memory_recent_n: int = 7
+    memory_recent_n: int = 4
     memory_summarize_after: int = 12
 
     llm_mode: str = "openai"

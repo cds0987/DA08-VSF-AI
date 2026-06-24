@@ -528,7 +528,10 @@ class QueryOrchestrationUseCase:
                                if src.get("document_name")})
                 label = str(s.input or s.direction or "")[:80]
                 await mem.add_evidence(user_id, conv_id,
-                                       WorkingSetItem(kind="rag", label=label, detail={"docs": docs[:5]}))
+                                       WorkingSetItem(kind="rag", label=label, detail={
+                                           "docs": docs[:5],
+                                           "summary": str(out.output or "")[:400],
+                                       }))
             elif s.role == "hr_lookup":
                 await mem.add_evidence(user_id, conv_id,
                                        WorkingSetItem(kind="hr", label=str(s.direction or "hồ sơ HR")[:80]))
