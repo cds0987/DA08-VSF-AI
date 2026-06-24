@@ -32,7 +32,7 @@ const active = computed(() => {
             : 'hover:bg-slate-100 dark:hover:bg-sidebar-accent',
         )"
       >
-        <div class="flex h-9 w-[64px] items-center justify-center shrink-0">
+        <div class="flex h-9 items-center justify-center shrink-0" :class="isCollapsed ? 'w-full' : 'w-[64px]'">
           <component 
             :is="item.icon" 
             :class="cn(
