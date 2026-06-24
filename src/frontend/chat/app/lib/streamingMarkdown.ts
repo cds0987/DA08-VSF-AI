@@ -24,3 +24,42 @@ export function findLastBlockBoundary(src: string): number {
   }
   return lastBoundary
 }
+
+export interface StreamingRendererDeps {
+  render: (src: string) => string
+  sanitize: (html: string) => string
+}
+
+export interface StreamingRenderer {
+  toHtml: (content: string) => string
+  reset: () => void
+}
+
+// Cache phần prefix (các block đã hoàn tất) đã render+sanitize; mỗi frame chỉ render tail.
+export function createStreamingRenderer(deps: StreamingRendererDeps): StreamingRenderer {
+  let prefixSrc = ''
+  let prefixHtml = ''
+
+  function reset() {
+    prefixSrc = ''
+    prefixHtml = ''
+  }
+
+  function toHtml(content: string): string {
+    // Content không nối tiếp prefix đã cache (retry / lượt mới) -> bỏ cache.
+    if (prefixSrc && !content.startsWith(prefixSrc)) reset()
+
+    const boundary = findLastBlockBoundary(content)
+    if (boundary > prefixSrc.length) {
+      const src = content.slice(0, boundary)
+      prefixHtml = deps.sanitize(deps.render(src))
+      prefixSrc = src
+    }
+
+    const tail = content.slice(prefixSrc.length)
+    const tailHtml = tail ? deps.sanitize(deps.render(tail)) : ''
+    return prefixHtml + tailHtml
+  }
+
+  return { toHtml, reset }
+}
