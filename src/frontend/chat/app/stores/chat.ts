@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { useLocalStorage } from '@vueuse/core'
+import { useDebounceFn, useLocalStorage } from '@vueuse/core'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { useSessionStore } from './session'
 import type {
@@ -28,6 +28,7 @@ import { buildQuotedContent } from '~/lib/quote'
 import type { Quote } from '~/lib/quote'
 import { createStreamBuffer } from '~/lib/streamBuffer'
 import { createRafScheduler } from '~/lib/rafScheduler'
+import { buildHistorySnapshot } from '~/lib/historyPersist'
 
 const HISTORY_KEY = 'eka.chat.conversations'
 
@@ -418,17 +419,43 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function persistFallbackHistory() {
+  // Ghi snapshot xuống localStorage; nuốt QuotaExceededError (storage đầy -> giữ in-memory).
+  function writeSnapshot(next: Conversation[]) {
     try {
-      fallbackConversations.value = conversations.value.map((item) => ({
-        ...item,
-        messages: item.messages.map((message) => ({ ...message })),
-      }))
+      fallbackConversations.value = next
     } catch (err) {
-      // QuotaExceededError: storage đầy — giữ lịch sử in-memory, bỏ qua persist
       if (err instanceof DOMException && err.name === 'QuotaExceededError') return
       throw err
     }
+  }
+
+  // Ghi ĐẦY ĐỦ tức thì: clone toàn bộ. Dùng khi NHIỀU conversation đổi (load/sync/delete).
+  function persistAllNow() {
+    writeSnapshot(conversations.value.map((item) => ({
+      ...item,
+      messages: item.messages.map((message) => ({ ...message })),
+    })))
+  }
+
+  // Ghi TĂNG DẦN: clone CHỈ conversation hiện tại, tái dùng phần còn lại từ snapshot cũ.
+  function flushCurrent() {
+    writeSnapshot(buildHistorySnapshot(
+      conversations.value, currentConversationId.value, fallbackConversations.value,
+    ))
+  }
+
+  // Gom burst ghi ra khỏi critical path của click gửi.
+  const debouncedPersist = useDebounceFn(flushCurrent, 400)
+
+  // Hot path (chỉ conversation hiện tại đổi: send/done/feedback) -> debounce tăng dần.
+  function persistFallbackHistory() {
+    debouncedPersist()
+  }
+
+  // Đóng/ẩn tab -> flush ngay để không mất write cuối còn trong cửa sổ debounce.
+  if (import.meta.client) {
+    window.addEventListener('pagehide', flushCurrent)
+    document.addEventListener('visibilitychange', () => { if (document.hidden) flushCurrent() })
   }
 
   function activateConversation(conversation: Conversation) {
@@ -513,13 +540,13 @@ export const useChatStore = defineStore('chat', () => {
       const index = conversations.value.findIndex((item) => item.id === id)
       if (index >= 0) conversations.value.splice(index, 1, synced)
       if (currentConversationId.value === id) activateConversation(synced)
-      persistFallbackHistory()
+      persistAllNow()
       isUsingHistoryFallback.value = false
       return true
     } catch (err: any) {
       if (err?.response?.status === 404) {
         conversations.value = conversations.value.filter((item) => item.id !== id)
-        persistFallbackHistory()
+        persistAllNow()
         currentConversationId.value = null
         messages.value = []
         void router.replace('/chat')
@@ -579,7 +606,7 @@ export const useChatStore = defineStore('chat', () => {
         .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
 
       isUsingHistoryFallback.value = false
-      persistFallbackHistory()
+      persistAllNow()
       return true
     } catch {
       restoreFallbackHistory()
@@ -615,7 +642,7 @@ export const useChatStore = defineStore('chat', () => {
     }
     await queryService.deleteConversation(id)
     conversations.value = conversations.value.filter((conversation) => conversation.id !== id)
-    persistFallbackHistory()
+    persistAllNow()
     if (currentConversationId.value !== id) return
 
     currentConversationId.value = null
@@ -637,19 +664,13 @@ export const useChatStore = defineStore('chat', () => {
 
     const previousTitle = conv.title
     conv.title = title
-    fallbackConversations.value = conversations.value.map((item) => ({
-      ...item,
-      messages: item.messages.map((message) => ({ ...message })),
-    }))
+    persistAllNow()
 
     try {
       await queryService.renameConversation(id, title)
     } catch (error) {
       conv.title = previousTitle
-      fallbackConversations.value = conversations.value.map((item) => ({
-        ...item,
-        messages: item.messages.map((message) => ({ ...message })),
-      }))
+      persistAllNow()
       throw error
     }
   }
