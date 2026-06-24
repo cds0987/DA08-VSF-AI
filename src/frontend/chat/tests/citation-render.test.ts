@@ -26,15 +26,15 @@ test('AnswerBlock renders slim numbered citation pills wired to the source panel
   assert.match(block, /@keydown="handleContentKeydown"/)
   assert.match(block, /if \(e\.key !== 'Enter' && e\.key !== ' '\) return/)
 
-  // Compact source cards below the answer, clickable -> open document.
-  assert.match(block, /citationSources\.sources\.length/)
-  assert.match(block, /v-for="s in citationSources\.sources"/)
+  // Source cards: ONLY documents actually cited ([N] in the answer), not every retrieved chunk.
+  assert.match(block, /const citedSources = computed/)
+  assert.match(block, /citedSources\.length/)
+  assert.match(block, /v-for="s in citedSources"/)
   assert.match(block, /@click="emit\('open-citation', s\.citation\)"/)
   assert.match(block, /\{\{ s\.number \}\}/)
   assert.match(block, /\{\{ s\.citation\.document \}\}/)
-  assert.match(block, /sourceMeta\(s\.citation\)\.section/)
-  assert.match(block, /sourceMeta\(s\.citation\)\.page/)
-  assert.match(block, /sourceMeta\(s\.citation\)\.relevance/)
+  // Right-side metadata (section / page / relevance %) removed — only the document name shows.
+  assert.doesNotMatch(block, /sourceMeta/)
   // Keyboard focus ring on cards.
   assert.match(block, /focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500/)
 
