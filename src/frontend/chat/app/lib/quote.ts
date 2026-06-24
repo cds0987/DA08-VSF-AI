@@ -9,6 +9,8 @@ export interface SelectionProbe {
   inBotAnswer: boolean
   inEditable: boolean
   hasRect: boolean
+  // Đang giữ chuột kéo chọn — chưa buông. Khi true thì KHÔNG hiện nút (chờ buông chuột).
+  isSelecting: boolean
 }
 
 // Dựng nội dung gửi đi: mỗi dòng quote thành blockquote, rồi dòng trống + câu hỏi.
@@ -26,5 +28,5 @@ export function truncateQuote(text: string, max = 140): string {
 }
 
 export function shouldShowAskButton(p: SelectionProbe): boolean {
-  return Boolean(p.text.trim()) && !p.collapsed && p.inBotAnswer && !p.inEditable && p.hasRect
+  return Boolean(p.text.trim()) && !p.collapsed && p.inBotAnswer && !p.inEditable && p.hasRect && !p.isSelecting
 }

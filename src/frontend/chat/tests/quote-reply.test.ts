@@ -24,13 +24,15 @@ test('truncateQuote: collapses whitespace and adds ellipsis past max', () => {
 })
 
 test('shouldShowAskButton: true only when all conditions hold', () => {
-  const base = { text: 'hi', collapsed: false, inBotAnswer: true, inEditable: false, hasRect: true }
+  const base = { text: 'hi', collapsed: false, inBotAnswer: true, inEditable: false, hasRect: true, isSelecting: false }
   assert.equal(shouldShowAskButton(base), true)
   assert.equal(shouldShowAskButton({ ...base, text: '   ' }), false)
   assert.equal(shouldShowAskButton({ ...base, collapsed: true }), false)
   assert.equal(shouldShowAskButton({ ...base, inBotAnswer: false }), false)
   assert.equal(shouldShowAskButton({ ...base, inEditable: true }), false)
   assert.equal(shouldShowAskButton({ ...base, hasRect: false }), false)
+  // Đang giữ chuột kéo chọn -> chưa hiện nút (chỉ hiện khi buông chuột).
+  assert.equal(shouldShowAskButton({ ...base, isSelecting: true }), false)
 })
 
 test('AnswerBlock: vùng markdown có data-bot-answer + data-message-id', async () => {
