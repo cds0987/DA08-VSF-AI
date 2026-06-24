@@ -47,23 +47,42 @@ class PostgresConversationRepository(ConversationRepository):
     ) -> ConversationContext:
         pool = await self._get_pool()
         async with pool.acquire() as connection:
+            # Đường THƯỜNG (FE gửi conversation_id): conversation + messages trong 1 ROUND-TRIP
+            # (LATERAL) thay vì 2 query tuần tự -> giữ connection ngắn ~½ -> giảm pool contention
+            # dưới tải (ctx_ms ~2.5s@150 chủ yếu là chờ pool + round-trip, KHÔNG phải query — index
+            # (conversation_id, created_at DESC) đã có).
             if conversation_id:
-                conversation = await connection.fetchrow(
+                rows = await connection.fetch(
                     """
-                    SELECT id, user_id, summary
-                    FROM query_svc.conversations
-                    WHERE id = $1::uuid
+                    SELECT c.user_id, c.summary, m.role, m.content, m.created_at, m.sources
+                    FROM query_svc.conversations c
+                    LEFT JOIN LATERAL (
+                        SELECT role, content, created_at, sources
+                        FROM query_svc.messages
+                        WHERE conversation_id = c.id
+                        ORDER BY created_at DESC
+                        LIMIT $2
+                    ) m ON true
+                    WHERE c.id = $1::uuid
                     """,
                     conversation_id,
+                    recent_k * 2,
                 )
-                if conversation is not None and str(conversation["user_id"]) != user_id:
+                if not rows:
+                    return ConversationContext(summary=None, recent_messages=[])
+                if str(rows[0]["user_id"]) != user_id:
                     raise PermissionError("Conversation belongs to another user")
-            else:
-                conversation = await self._latest_conversation(connection, user_id)
+                summary = rows[0]["summary"]
+                msg_rows = [r for r in rows if r["role"] is not None]  # LEFT JOIN: rỗng -> 1 row NULL
+                return ConversationContext(
+                    summary=summary,
+                    recent_messages=[self._to_message(r) for r in reversed(msg_rows)],
+                )
 
+            # Đường hiếm (lượt đầu phiên, không có conversation_id): giữ 2 query.
+            conversation = await self._latest_conversation(connection, user_id)
             if conversation is None:
                 return ConversationContext(summary=None, recent_messages=[])
-
             rows = await connection.fetch(
                 """
                 SELECT role, content, created_at, sources
@@ -77,16 +96,17 @@ class PostgresConversationRepository(ConversationRepository):
             )
         return ConversationContext(
             summary=conversation["summary"],
-            recent_messages=[
-                Message(
-                    role=str(row["role"]),
-                    content=str(row["content"]),
-                    created_at=_aware(row["created_at"]),
-                    sources=json.loads(row["sources"]) if isinstance(row["sources"], str)
-                            else (row["sources"] or []),
-                )
-                for row in reversed(rows)
-            ],
+            recent_messages=[self._to_message(r) for r in reversed(rows)],
+        )
+
+    @staticmethod
+    def _to_message(row) -> Message:
+        return Message(
+            role=str(row["role"]),
+            content=str(row["content"]),
+            created_at=_aware(row["created_at"]),
+            sources=json.loads(row["sources"]) if isinstance(row["sources"], str)
+                    else (row["sources"] or []),
         )
 
     async def save_message(
