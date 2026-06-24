@@ -68,7 +68,8 @@ const renderedContent = computed(() => {
   // Đang stream: render markdown THÔ + con trỏ nhấp nháy, CHƯA inject pill (citation chưa có).
   // Cùng node với bản cuối -> khi xong chỉ patch ([N] thành pill) chứ không remount -> không flash.
   if (props.data.streaming) {
-    const html = streamingRenderer.toHtml(props.data.content)
+    // Strip [N] khỏi content lúc stream -> không hiện marker thô "[1][4]" (kì); pill render khi xong.
+    const html = streamingRenderer.toHtml(props.data.content.replace(/\[\d+\]/g, ''))
     return html.replace(/(<\/(?:p|li|h[1-6]|pre|blockquote)>)\s*$/, '<span class="streaming-cursor"></span>$1')
   }
   const rawHtml = md.render(props.data.content)
