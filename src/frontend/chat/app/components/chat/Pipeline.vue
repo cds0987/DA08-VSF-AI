@@ -77,7 +77,7 @@ function getResultLabel(entry: TraceEntry): string {
 <template>
   <div class="px-4 py-3">
     <!-- header: cỡ chữ bằng câu trả lời (16px) -->
-    <div class="mb-2.5 flex items-center gap-2 text-base font-medium text-slate-700 dark:text-foreground/80">
+    <div class="mb-2.5 flex items-center gap-2 text-[15px] font-medium text-slate-700 dark:text-foreground/80">
       <Sparkles class="h-4 w-4 text-slate-400 dark:text-muted-foreground" /> Agent đang xử lý
     </div>
 
@@ -98,12 +98,12 @@ function getResultLabel(entry: TraceEntry): string {
               <GitBranch class="h-3 w-3 text-slate-400 dark:text-muted-foreground" />
             </span>
             <div class="flex items-center gap-1.5">
-              <span class="text-sm font-medium text-slate-600 dark:text-foreground/80" :class="orchActive && 'ai-shimmer'">Orchestrator</span>
+              <span class="text-[15px] font-medium text-slate-600 dark:text-foreground/80" :class="orchActive && 'ai-shimmer'">Orchestrator</span>
             </div>
             <!-- reasoning live: summary + chi tiết human-readable + raw lồng (ThoughtDetail) -->
             <ThoughtDetail v-for="(view, i) in orchViews" :key="`o-${i}`" :view="view" class="mt-1.5" />
             <!-- trạng thái lập kế hoạch (trước khi có thought/plan) — text thường, KHÔNG shimmer -->
-            <div v-if="isThinking && !orchThoughts.length && !plan?.steps?.length && traceLog.length === 0" class="mt-1.5 text-[13px] text-slate-500 dark:text-muted-foreground">
+            <div v-if="isThinking && !orchThoughts.length && !plan?.steps?.length && traceLog.length === 0" class="mt-1.5 text-sm text-slate-500 dark:text-muted-foreground">
               {{ thinkingStatus || 'Đang lập kế hoạch…' }}
             </div>
           </div>
@@ -111,7 +111,7 @@ function getResultLabel(entry: TraceEntry): string {
           <!-- plan step: dot canh trên rail, running = xanh + pulse -->
           <div v-for="s in (plan?.steps || [])" :key="`p-${s.id}`" class="relative">
             <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full" :class="stepDotColor(s.status)" />
-            <div class="flex items-center gap-1.5 text-sm">
+            <div class="flex items-center gap-1.5 text-[15px]">
               <component :is="ROLE_ICON[s.role] ?? FileSearch" class="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-muted-foreground" />
               <span class="flex-1 truncate font-medium text-slate-700 dark:text-foreground/80" :class="s.status === 'running' && 'ai-shimmer'">{{ ROLE_LABEL[s.role] ?? s.role }}</span>
               <XCircle v-if="s.status === 'error'" class="h-3 w-3 shrink-0 text-red-400" />
@@ -123,10 +123,10 @@ function getResultLabel(entry: TraceEntry): string {
             <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full" :class="entry.pending ? 'bg-blue-500' : 'bg-slate-300 dark:bg-white/25'" />
             <div class="flex items-center gap-1.5">
               <component :is="TOOL_ICON[entry.tool] ?? Search" class="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-muted-foreground" />
-              <span class="text-sm font-medium text-slate-700 dark:text-foreground/80" :class="entry.pending && 'ai-shimmer'">{{ TOOL_LABEL[entry.tool] ?? entry.tool }}</span>
-              <span v-if="getQueryLabel(entry)" class="flex-1 truncate text-xs text-slate-500 dark:text-muted-foreground">{{ getQueryLabel(entry) }}</span>
+              <span class="text-[15px] font-medium text-slate-700 dark:text-foreground/80" :class="entry.pending && 'ai-shimmer'">{{ TOOL_LABEL[entry.tool] ?? entry.tool }}</span>
+              <span v-if="getQueryLabel(entry)" class="flex-1 truncate text-[13px] text-slate-500 dark:text-muted-foreground">{{ getQueryLabel(entry) }}</span>
             </div>
-            <div v-if="!entry.pending && getResultLabel(entry)" class="mt-0.5 pl-5 text-xs text-slate-400 dark:text-muted-foreground/70">{{ getResultLabel(entry) }}</div>
+            <div v-if="!entry.pending && getResultLabel(entry)" class="mt-0.5 pl-5 text-[13px] text-slate-400 dark:text-muted-foreground/70">{{ getResultLabel(entry) }}</div>
           </div>
         </div>
 
@@ -141,10 +141,10 @@ function getResultLabel(entry: TraceEntry): string {
               <ShieldCheck class="h-3 w-3 text-slate-400 dark:text-muted-foreground" />
             </span>
             <div class="flex items-center gap-1.5">
-              <span class="text-sm font-medium text-slate-600 dark:text-foreground/80" :class="verifyActive && 'ai-shimmer'">Verify — Kiểm tra &amp; tổng hợp</span>
+              <span class="text-[15px] font-medium text-slate-600 dark:text-foreground/80" :class="verifyActive && 'ai-shimmer'">Verify — Kiểm tra &amp; tổng hợp</span>
             </div>
             <ThoughtDetail v-for="(view, i) in verifyViews" :key="`v-${i}`" :view="view" class="mt-1.5" />
-            <div v-if="verifyActive && !verifyThoughts.length" class="mt-1.5 text-[13px] text-slate-500 dark:text-muted-foreground">
+            <div v-if="verifyActive && !verifyThoughts.length" class="mt-1.5 text-sm text-slate-500 dark:text-muted-foreground">
               {{ thinkingStatus || 'Đang tổng hợp kết quả…' }}
             </div>
           </div>

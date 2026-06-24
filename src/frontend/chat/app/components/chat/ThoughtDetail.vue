@@ -15,14 +15,14 @@ const hasDetail = () => props.view.detail.length > 0
 
 <template>
   <div>
-    <p v-if="view.summary" class="text-[13.5px] leading-relaxed text-slate-600 dark:text-muted-foreground">
+    <p v-if="view.summary" class="text-sm leading-relaxed text-slate-600 dark:text-muted-foreground">
       {{ view.summary }}
     </p>
 
     <template v-if="hasDetail()">
       <button
         type="button"
-        class="mt-1 inline-flex items-center gap-1 rounded px-1 text-[12px] font-medium text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-muted-foreground/70 dark:hover:text-foreground"
+        class="mt-1 inline-flex items-center gap-1 rounded px-1 text-[13px] font-medium text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-muted-foreground/70 dark:hover:text-foreground"
         :aria-expanded="open"
         @click="open = !open"
       >
@@ -43,14 +43,14 @@ const hasDetail = () => props.view.detail.length > 0
         >
           <p
             v-if="sec.label"
-            class="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400 dark:text-muted-foreground/70"
+            class="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-muted-foreground/70"
           >
             {{ sec.label }}
           </p>
           <p
             v-for="(line, li) in sec.lines"
             :key="li"
-            class="whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-slate-500 dark:text-muted-foreground"
+            class="whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-500 dark:text-muted-foreground"
             :class="sec.label && 'mt-0.5'"
           >
             {{ line }}
