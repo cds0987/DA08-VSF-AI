@@ -110,11 +110,19 @@ def _memory_block(ctx: PlanContext) -> str:
     if items:
         lines = []
         for it in items:
-            docs = it.detail.get("docs") if isinstance(it.detail, dict) else None
-            lines.append(f"- {it.kind}: {it.label}" + (f" (đã có: {', '.join(docs)})" if docs else ""))
+            detail = it.detail if isinstance(it.detail, dict) else {}
+            docs = detail.get("docs")
+            summary = detail.get("summary", "")
+            line = f"- {it.kind}: {it.label}"
+            if docs:
+                line += f" (tài liệu: {', '.join(docs)})"
+            if summary:
+                line += f"\n  Nội dung đã tóm tắt: {summary}"
+            lines.append(line)
         parts.append(
             "[ĐÃ TRA PHIÊN NÀY]\n" + "\n".join(lines)
-            + "\n-> Nếu thông tin trên ĐÃ ĐỦ cho câu mới thì ĐỪNG plan lại tool đó; CHỈ plan phần MỚI."
+            + "\n-> Câu hỏi làm rõ/follow-up về 'Nội dung đã tóm tắt' trên → route light, trả lời từ context."
+            + "\n-> Cần thông tin MỚI ngoài nội dung tóm tắt → route heavy."
         )
     if ctx.hint_doc_ids:
         parts.append(
