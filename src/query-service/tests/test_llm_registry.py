@@ -133,6 +133,16 @@ def test_plan_node_profile():
     assert prof.reasoning_effort == "low"
 
 
+def test_answer_node_profile():
+    # answer (verify_answer, sinh câu trả lời cuối) = openrouter_effort + effort=low: cắt reasoning
+    # thừa khi viết -> giảm latency cục deepseek lớn nhất còn lại. CoT verify vẫn stream ra panel.
+    prof = get_node_profile("answer")
+    assert prof.adapter == "openrouter_effort"
+    assert prof.capability == "answer"
+    assert prof.reasoning_effort == "low"
+    assert prof.max_output_tokens == 4000
+
+
 def test_per_node_max_output_tokens():
     # think (planner) nâng trần để reasoning + JSON đủ chỗ -> hết retry; node không khai -> None
     # (build_node_chat_model dùng trần chung). answer nâng để câu trả lời không cụt.

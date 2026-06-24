@@ -27,4 +27,4 @@ def test_build_node_model_still_builds_with_bad_profiles(monkeypatch):
     # Dù manifest hỏng, build_node_chat_model vẫn dựng được model chạy được.
     m = build_node_chat_model("answer", api_key="x", base_url="http://r/v1")
     assert isinstance(m, MosaChatModel)
-    assert m.adapter.name in {"standard", "reasoning_oai", "reasoning_or"}
+    assert m.adapter.name in {"standard", "reasoning_oai", "reasoning_or", "openrouter_effort"}

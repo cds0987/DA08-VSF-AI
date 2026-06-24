@@ -15,7 +15,7 @@ import {
   ThumbsDown,
   ThumbsUp,
 } from '@lucide/vue'
-import { buildCitationSources, citationFileKind, cn, sourceMeta } from '~/lib/utils'
+import { buildCitationSources, citationFileKind, cn } from '~/lib/utils'
 import type { CitationFileGroup } from '~/lib/utils'
 import type { ChatMessage, Citation } from '~/types'
 import MarkdownIt from 'markdown-it'
@@ -49,6 +49,20 @@ const citationSources = computed(() => buildCitationSources(props.data.citations
 function resolveRef(n: number): Citation | undefined {
   return props.data.citations?.find(x => x.ref === n) ?? props.data.citations?.[n - 1]
 }
+
+// CHỈ nguồn THỰC SỰ được trích trong câu trả lời (có [N] khớp source) — không liệt kê hết
+// mọi chunk đã lấy. Quét marker [N] trong content, map qua refToNumber, giữ số hợp lệ.
+const citedSources = computed(() => {
+  const content = props.data.content || ''
+  const { refToNumber, sources } = citationSources.value
+  const used = new Set<number>()
+  for (const m of content.matchAll(/\[(\d+)\]/g)) {
+    const marker = parseInt(m[1])
+    const num = refToNumber[marker]
+    if (num !== undefined && resolveRef(marker)) used.add(num)
+  }
+  return sources.filter(s => used.has(s.number))
+})
 
 // Icon + màu theo nhóm loại tệp (không hardcode PDF).
 const GROUP_ICON: Record<CitationFileGroup, any> = {
@@ -167,8 +181,8 @@ function copyToClipboard() {
       </template>
     </div>
 
-    <!-- Nguồn: disclosure gọn kiểu DeepSeek — mặc định thu gọn, chi tiết chỉ mở khi cần -->
-    <div v-if="!data.streaming && citationSources.sources.length" class="px-5 pb-1">
+    <!-- Nguồn: CHỈ tài liệu được trích trong câu trả lời (citedSources), không liệt kê hết chunk -->
+    <div v-if="!data.streaming && citedSources.length" class="px-5 pb-1">
       <button
         type="button"
         class="group inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[13px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-muted-foreground dark:hover:bg-white/5 dark:hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
@@ -176,12 +190,12 @@ function copyToClipboard() {
         @click="sourcesOpen = !sourcesOpen"
       >
         <ChevronDown class="src-chevron h-3.5 w-3.5 transition-transform" :class="sourcesOpen && 'rotate-180'" aria-hidden="true" />
-        <span>Tài liệu liên quan · {{ citationSources.sources.length }} nguồn</span>
+        <span>Tài liệu liên quan · {{ citedSources.length }} nguồn</span>
       </button>
 
       <div v-show="sourcesOpen" class="mt-1.5 flex flex-col gap-1">
         <button
-          v-for="s in citationSources.sources"
+          v-for="s in citedSources"
           :key="s.number"
           type="button"
           class="group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-slate-100 dark:hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
@@ -191,11 +205,6 @@ function copyToClipboard() {
           <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-slate-100 text-[11px] font-semibold text-slate-500 dark:bg-white/10 dark:text-slate-300">{{ s.number }}</span>
           <component :is="fileIcon(s.citation.document)" class="h-4 w-4 shrink-0" :class="fileIconClass(s.citation.document)" aria-hidden="true" />
           <span class="min-w-0 flex-1 truncate text-[13px] font-medium text-slate-700 dark:text-foreground/90">{{ s.citation.document }}</span>
-          <span class="flex shrink-0 items-center gap-1.5 text-[11px] text-slate-400 dark:text-muted-foreground">
-            <span v-if="sourceMeta(s.citation).section" class="max-w-[140px] truncate">{{ sourceMeta(s.citation).section }}</span>
-            <span v-if="sourceMeta(s.citation).page">{{ sourceMeta(s.citation).page }}</span>
-            <span v-if="sourceMeta(s.citation).relevance" class="tabular-nums">{{ sourceMeta(s.citation).relevance }}</span>
-          </span>
         </button>
       </div>
     </div>
