@@ -28,13 +28,11 @@ const ROLE_LABEL: Record<string, string> = {
 const ROLE_ICON: Record<string, any> = {
   rag_retrieve: FileSearch, hr_lookup: Database, synthesize_recommend: Sparkles, analyze: Lightbulb, critic: ShieldCheck,
 }
-// dot trạng thái plan step — running tô xanh (đang hoạt động, không pulse; hiệu ứng "đang chạy"
-// thể hiện bằng shimmer trên tiêu đề), còn lại theo status.
+// Dot trạng thái: bước ĐANG suy nghĩ -> XANH (đang hoạt động), xong/chờ -> XÁM, lỗi -> ĐỎ.
 function stepDotColor(s?: AgentPlanStep['status']): string {
-  return s === 'running' ? 'bg-blue-500'
-    : s === 'error' ? 'bg-red-400'
-      : s === 'ok' || s === 'no_info' ? 'bg-emerald-400'
-        : 'bg-slate-300 dark:bg-white/25'
+  return s === 'error' ? 'bg-red-400'
+    : s === 'running' ? 'bg-blue-500'
+      : 'bg-slate-300 dark:bg-white/25'
 }
 
 // Gom theo GROUP của hợp đồng SSE (sse-contract.gen) -> node mới thuộc group orchestrator/
@@ -80,7 +78,7 @@ function getResultLabel(entry: TraceEntry): string {
   <div class="px-4 py-3">
     <!-- header: cỡ chữ bằng câu trả lời (16px) -->
     <div class="mb-2.5 flex items-center gap-2 text-base font-medium text-slate-700 dark:text-foreground/80">
-      <Sparkles class="h-4 w-4 text-blue-500" /> Agent đang xử lý
+      <Sparkles class="h-4 w-4 text-slate-400 dark:text-muted-foreground" /> Agent đang xử lý
     </div>
 
     <div class="relative pl-7">
@@ -95,12 +93,12 @@ function getResultLabel(entry: TraceEntry): string {
             <span
               aria-hidden="true"
               class="absolute -left-7 top-0 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 dark:bg-background"
-              :class="orchActive ? 'ring-blue-400 dark:ring-blue-500/50' : 'ring-slate-200 dark:ring-white/10'"
+              :class="orchActive ? 'ring-slate-300 dark:ring-white/20' : 'ring-slate-200 dark:ring-white/10'"
             >
-              <GitBranch class="h-3 w-3 text-blue-700 dark:text-blue-300" />
+              <GitBranch class="h-3 w-3 text-slate-400 dark:text-muted-foreground" />
             </span>
             <div class="flex items-center gap-1.5">
-              <span class="text-sm font-medium text-blue-700 dark:text-blue-300" :class="orchActive && 'ai-shimmer'">Orchestrator</span>
+              <span class="text-sm font-medium text-slate-600 dark:text-foreground/80" :class="orchActive && 'ai-shimmer'">Orchestrator</span>
             </div>
             <!-- reasoning live: summary + chi tiết human-readable + raw lồng (ThoughtDetail) -->
             <ThoughtDetail v-for="(view, i) in orchViews" :key="`o-${i}`" :view="view" class="mt-1.5" />
@@ -138,12 +136,12 @@ function getResultLabel(entry: TraceEntry): string {
             <span
               aria-hidden="true"
               class="absolute -left-7 top-0 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 dark:bg-background"
-              :class="verifyActive ? 'ring-violet-400 dark:ring-violet-500/50' : 'ring-slate-200 dark:ring-white/10'"
+              :class="verifyActive ? 'ring-slate-300 dark:ring-white/20' : 'ring-slate-200 dark:ring-white/10'"
             >
-              <ShieldCheck class="h-3 w-3 text-violet-700 dark:text-violet-300" />
+              <ShieldCheck class="h-3 w-3 text-slate-400 dark:text-muted-foreground" />
             </span>
             <div class="flex items-center gap-1.5">
-              <span class="text-sm font-medium text-violet-700 dark:text-violet-300" :class="verifyActive && 'ai-shimmer'">Verify — Kiểm tra &amp; tổng hợp</span>
+              <span class="text-sm font-medium text-slate-600 dark:text-foreground/80" :class="verifyActive && 'ai-shimmer'">Verify — Kiểm tra &amp; tổng hợp</span>
             </div>
             <ThoughtDetail v-for="(view, i) in verifyViews" :key="`v-${i}`" :view="view" class="mt-1.5" />
             <div v-if="verifyActive && !verifyThoughts.length" class="mt-1.5 text-[13px] text-slate-500 dark:text-muted-foreground">
@@ -165,7 +163,7 @@ function getResultLabel(entry: TraceEntry): string {
 <style scoped>
 /* Hiệu ứng ánh sáng lướt ngang (DeepSeek-style) cho TIÊU ĐỀ bước đang chạy — thay cho spinner.
    QUAN TRỌNG: background-color = currentColor làm NỀN base phủ KÍN chữ (giữ đúng màu tiêu đề
-   blue/violet/slate). Gradient chỉ là 1 DẢI SÁNG (phần còn lại trong suốt) chạy trên nền đó ->
+   xám đơn sắc). Gradient chỉ là 1 DẢI SÁNG (phần còn lại trong suốt) chạy trên nền đó ->
    dù dải sáng chạy ra ngoài vùng chữ thì nền base vẫn phủ -> KHÔNG bao giờ mất chữ. */
 .ai-shimmer {
   background-color: currentColor;

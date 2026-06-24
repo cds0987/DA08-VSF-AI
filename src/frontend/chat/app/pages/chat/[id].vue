@@ -9,7 +9,6 @@ import { cn } from '~/lib/utils'
 import SourcePanel from '~/components/SourcePanel.vue'
 import ChatMessages from '~/components/chat/ChatMessages.vue'
 import ChatInput from '~/components/chat/ChatInput.vue'
-import ChatTopBar from '~/components/chat/ChatTopBar.vue'
 import LandingState from '~/components/chat/LandingState.vue'
 import SelectionAskButton from '~/components/chat/SelectionAskButton.vue'
 
@@ -105,7 +104,6 @@ function handleSend(question: string) {
     <div
       :class="cn('relative flex h-full flex-1 flex-col', chat.isPanelOpen && 'lg:pr-[min(40vw,480px)]')"
     >
-      <ChatTopBar />
       <div ref="scrollRef" class="flex-1 overflow-y-auto custom-scrollbar">
         <div class="mx-auto flex min-h-full w-full max-w-[860px] flex-col px-4 pb-32 pt-4 sm:px-6 lg:px-8">
           <div
