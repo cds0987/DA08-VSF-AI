@@ -125,11 +125,12 @@ def test_unknown_node_falls_back_to_standard():
 
 
 def test_plan_node_profile():
-    # plan = standard (KHÔNG cắt reasoning — để model nghĩ + stream; hiển thị xử lý ở FE).
+    # plan = openrouter_effort + effort=low: deepseek nghĩ GỌN (~5s thay vì 22s) mà CoT VẪN
+    # stream ra panel (adapter surfaces_reasoning_stream=True). Cắt phần nghĩ lan man = giảm latency.
     prof = get_node_profile("plan")
-    assert prof.adapter == "standard"
+    assert prof.adapter == "openrouter_effort"
     assert prof.capability == "plan"
-    assert prof.reasoning_effort is None
+    assert prof.reasoning_effort == "low"
 
 
 def test_per_node_max_output_tokens():

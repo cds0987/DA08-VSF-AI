@@ -58,13 +58,41 @@ async def test_llm_reranker_falls_back_to_noop_when_provider_fails(caplog: pytes
         passage_chars=100,
         score_batch=score_batch,
     )
-    hits = [_hit("slow", score=0.4), _hit("fast", score=0.9)]
+    # ≥3 hits để ĐI QUA nhánh LLM (≤2 hits giờ skip LLM — xem test bên dưới).
+    hits = [_hit("slow", score=0.4), _hit("fast", score=0.9), _hit("low", score=0.1)]
 
     caplog.set_level(logging.WARNING)
     reranked = await reranker.rerank("leave policy", hits, top_k=2, threshold=0.8)
 
     assert [hit.chunk_id for hit in reranked] == ["fast", "slow"]
     assert "rerank_fallback" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_llm_reranker_skips_llm_when_two_or_fewer_hits() -> None:
+    """≤2 hits: rerank LLM vô nghĩa (không có gì để xếp lại) -> sort vector score, KHÔNG gọi LLM."""
+    called = False
+
+    async def score_batch(query: str, passages: list[str]) -> dict[int, float]:
+        nonlocal called
+        called = True
+        return {0: 1.0, 1: 1.0}
+
+    reranker = LlmReranker(
+        model="gpt-4o-mini",
+        api_key="",
+        base_url="",
+        timeout_seconds=10.0,
+        batch_size=8,
+        passage_chars=100,
+        score_batch=score_batch,
+    )
+    hits = [_hit("low", score=0.3), _hit("high", score=0.8)]
+
+    reranked = await reranker.rerank("leave policy", hits, top_k=2, threshold=0.9)
+
+    assert called is False  # KHÔNG gọi LLM
+    assert [hit.chunk_id for hit in reranked] == ["high", "low"]  # sort theo vector score desc
 
 
 @pytest.mark.asyncio
