@@ -251,20 +251,27 @@ def _stats(xs: list[float]) -> dict:
 
 # ───────────────────────── orchestrate ─────────────────────────
 async def run(users: list[dict]) -> dict:
-    from playwright.async_api import async_playwright
-
     n_browser = min(N_BROWSERS, len(users))
     barrier = asyncio.Barrier(len(users))
     started = datetime.now(timezone.utc)
 
-    async with async_playwright() as pw:
+    async def _spawn(pw) -> list:
         tasks = []
         for k, u in enumerate(users):
             if k < n_browser:
                 tasks.append(asyncio.create_task(browser_user(u, barrier, pw)))
             else:
                 tasks.append(asyncio.create_task(sse_user(u, barrier)))
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        return await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Playwright (greenlet) CHỈ cần khi có browser-session -> N_BROWSERS=0 chạy thuần SSE-HTTP,
+    # KHÔNG import playwright (máy thiếu VC++ runtime vẫn đo được).
+    if n_browser > 0:
+        from playwright.async_api import async_playwright
+        async with async_playwright() as pw:
+            results = await _spawn(pw)
+    else:
+        results = await _spawn(None)
 
     ended = datetime.now(timezone.utc)
     recs = []
