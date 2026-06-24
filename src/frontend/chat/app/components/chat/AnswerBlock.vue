@@ -148,7 +148,7 @@ function copyToClipboard() {
         v-if="data.content"
         data-bot-answer
         :data-message-id="data.id"
-        class="ai-response-markdown prose prose-base prose-slate dark:prose-invert max-w-none font-medium text-slate-900 dark:text-foreground prose-p:font-medium prose-p:leading-relaxed prose-pre:bg-slate-50 dark:prose-pre:bg-background/50 prose-pre:border prose-pre:border-slate-200 dark:prose-pre:border-white/5 [overflow-wrap:anywhere]"
+        class="ai-response-markdown prose prose-base prose-slate dark:prose-invert max-w-none text-slate-900 dark:text-foreground prose-p:leading-relaxed prose-li:leading-relaxed prose-headings:font-semibold prose-headings:tracking-tight prose-strong:font-semibold prose-pre:bg-slate-50 dark:prose-pre:bg-background/50 prose-pre:border prose-pre:border-slate-200 dark:prose-pre:border-white/5 [overflow-wrap:anywhere]"
         v-html="renderedContent"
         @click="handleContentClick"
         @keydown="handleContentKeydown"
@@ -301,9 +301,10 @@ function copyToClipboard() {
   --tw-prose-lead: var(--foreground);
   --tw-prose-links: var(--primary);
   --tw-prose-bold: var(--foreground);
-  --tw-prose-counters: var(--foreground);
-  --tw-prose-bullets: var(--foreground);
-  --tw-prose-quotes: var(--foreground);
+  /* Marker list dịu (DeepSeek-style) — không cùng độ đậm với chữ. */
+  --tw-prose-counters: var(--muted-foreground);
+  --tw-prose-bullets: var(--muted-foreground);
+  --tw-prose-quotes: var(--muted-foreground);
   --tw-prose-captions: var(--muted-foreground);
   --tw-prose-kbd: var(--foreground);
   --tw-prose-code: var(--foreground);
