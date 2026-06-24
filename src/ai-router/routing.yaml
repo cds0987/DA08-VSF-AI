@@ -6,10 +6,10 @@ selector:
   impl: banded_rotation             # ❖ DEFAULT toàn hệ: xoay key mỗi 250K token (PLAN §11.2)
   params:
     band_tokens: 250000             # key active phục vụ >= 250K (est) -> xoay key kế
-    save_mode:                      # cạn MỌI tier -> ép gpt-4o-mini (OpenAI), bỏ trần free
+    save_mode:                      # cạn MỌI tier -> degrade xiaomi/mimo-v2.5 (OpenRouter, rẻ + reasoning), KHÔNG 503
       enabled: true
-      model: openai/gpt-4o-mini
-      tier: free_oai
+      model: xiaomi/mimo-v2.5
+      tier: paid
       band_tokens: 250000
 
 tiers:
@@ -41,10 +41,10 @@ capabilities:
       impl: adaptive_balanced       # OpenRouter(deepseek): AIMD tự dò trần qua 429 (không TPM cố định)
       params:
         tpm_per_key: 500000         # chỉ áp cho tier OpenAI; tier OR bỏ qua (dùng AIMD)
-        save_mode:                  # cạn HẾT key deepseek -> degrade gpt-4o-mini (tránh 503).
+        save_mode:                  # cạn slot deepseek -> degrade xiaomi/mimo-v2.5 (rẻ hơn gpt-4o-mini, đa dạng hoá khỏi deepseek).
           enabled: true
-          model: openai/gpt-4o-mini
-          tier: free_oai
+          model: xiaomi/mimo-v2.5
+          tier: paid
           band_tokens: 150000
     require_tools: false            # answer node KHÔNG bind tool -> deepseek-flash ok.
     quality_floor: null
@@ -61,8 +61,8 @@ capabilities:
         tpm_per_key: 500000         # chỉ áp cho tier OpenAI; tier OR bỏ qua (dùng AIMD)
         save_mode:
           enabled: true
-          model: openai/gpt-4o-mini
-          tier: free_oai
+          model: xiaomi/mimo-v2.5
+          tier: paid
           band_tokens: 150000
     require_tools: false
     quality_floor: null
@@ -77,8 +77,8 @@ capabilities:
         tpm_per_key: 500000         # chỉ áp cho tier OpenAI; tier OR bỏ qua (dùng AIMD)
         save_mode:
           enabled: true
-          model: openai/gpt-4o-mini
-          tier: free_oai
+          model: xiaomi/mimo-v2.5
+          tier: paid
           band_tokens: 150000
     require_tools: false
     quality_floor: null
@@ -101,10 +101,10 @@ capabilities:
       impl: adaptive_balanced       # OpenRouter deepseek-pro: AIMD tự dò trần qua 429
       params:
         tpm_per_key: 500000         # OR bỏ qua (AIMD)
-        save_mode:                  # cạn hết slot deepseek -> gpt-4o-mini (tránh 503).
+        save_mode:                  # cạn slot deepseek -> xiaomi/mimo-v2.5 (rẻ + reasoning, tránh 503).
           enabled: true
-          model: openai/gpt-4o-mini
-          tier: free_oai
+          model: xiaomi/mimo-v2.5
+          tier: paid
           band_tokens: 150000
   worker:                           # subagents song song (Orchestrator-Workers) — fetch+phân tích
                                     # PIN gpt-5.4-mini (OpenAI). Xoay 5 key ~2.5M token/key/ngày;
@@ -118,8 +118,8 @@ capabilities:
         tpm_per_key: 500000         # 5 key OpenAI, mỗi key 500K token/phút -> rải đều theo TPM
         save_mode:
           enabled: true
-          model: openai/gpt-4o-mini
-          tier: free_oai
+          model: xiaomi/mimo-v2.5
+          tier: paid
           band_tokens: 2500000
   rerank:                           # LLM-as-reranker (chat.completions) — GIỮ cho tương thích cũ.
     tiers: [free_oai, free_or, paid]
@@ -169,10 +169,10 @@ capabilities:
       impl: banded_rotation
       params:
         band_tokens: 2500000        # quota/key/ngày -> cạn 1 key xoay key kế (cùng model)
-        save_mode:                  # cạn CẢ 5 key -> gpt-4o-mini (OpenAI), KHÔNG sang OpenRouter
+        save_mode:                  # cạn CẢ 5 key -> xiaomi/mimo-v2.5 (OpenRouter, omnimodal hỗ trợ vision)
           enabled: true
-          model: openai/gpt-4o-mini
-          tier: free_oai
+          model: xiaomi/mimo-v2.5
+          tier: paid
           band_tokens: 2500000
     require_vision: true
   embed:                            # ⚠️ PIN model cố định (BẪY embedding, PLAN §4b)
