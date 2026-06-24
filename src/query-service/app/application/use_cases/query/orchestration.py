@@ -378,6 +378,13 @@ class QueryOrchestrationUseCase:
                 if _sp is not None:
                     _tracer.span_end(_sp)
 
+        # 🟢 ANTI-DEAD-AIR: phát status NGAY (t≈0) — TRƯỚC pre-plan ~5s -> hết màn hình TRỐNG.
+        # Reuse phase/node sẵn trong contract (KHÔNG đổi contract). FE rotate sub-status + hiệu
+        # ứng cho wait dài (outlier >25s không bị "đơ" 1 icon).
+        yield _emit_guard({"phase": "thinking", "node": "orchestrate",
+                           "status": "Đang tiếp nhận & đọc ngữ cảnh…",
+                           "session_id": session_id, "agent_mode": "orchestrator_workers"})
+
         # Context + ACL doc-ids = 2 DB read ĐỘC LẬP -> chạy SONG SONG (gather) thay vì tuần tự
         # (trước: acl nằm trong _run_graph, chạy sau). Giảm round-trip nối tiếp + xếp hàng pool.
         async with _span("preplan.fetch(context_parallel_acl)"):
@@ -421,6 +428,11 @@ class QueryOrchestrationUseCase:
         async with _span("preplan.load_context"):
             mem_ctx = await _mem.load_context(user.id, _conv_id, question) if _mem else _MemCtx.empty()
         _timing["mem"] = _time.monotonic()
+
+        # Status thứ 2 (giữa pre-plan) -> chuỗi biến hoá, không đứng im 1 dòng.
+        yield _emit_guard({"phase": "thinking", "node": "plan",
+                           "status": "Đang chuẩn bị kế hoạch…",
+                           "session_id": session_id, "agent_mode": "orchestrator_workers"})
 
         # DEFER save_user_message khỏi hot-path (fire-and-forget): bỏ 1 DB write TRƯỚC planner
         # (save 1.4-2.9s dưới burst 150). Lượt sau load mới cần -> ms-fast INSERT chắc chắn xong kịp.

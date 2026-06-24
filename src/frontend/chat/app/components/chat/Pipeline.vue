@@ -3,7 +3,7 @@
 // mạch, mốc chính (Orchestrator/Verify) + sub-step (plan/tool) canh thẳng trên rail. Khác
 // MessageSteps ở chỗ có chỉ báo LIVE: dot/marker của bước ĐANG chạy được tô màu + pulse,
 // spinner + thinkingStatus. SSE KHÔNG đổi: chỉ sắp xếp lại cách hiển thị.
-import { computed } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
 import { Search, Database, Sparkles, GitBranch, ShieldCheck, FileSearch, Lightbulb, XCircle } from '@lucide/vue'
 import type { TraceEntry, NodeModel, AgentPlan, AgentPlanStep } from '~/types'
 import { nodeGroup } from '~/types/sse-contract.gen'
@@ -19,6 +19,19 @@ interface Props {
   plan?: AgentPlan | null
 }
 const props = defineProps<Props>()
+
+// Rotating hint cho wait DÀI (outlier >25s / pre-plan chậm) — đổi 1 chuỗi mỗi 4s, CHỈ khi đang
+// nghĩ. RẺ: không per-token, không reflow (chỉ swap text); shimmer CSS lo phần "sống". Clear khi
+// dừng/unmount -> KHÔNG để timer rò. Dùng làm fallback khi chưa có status thật từ backend.
+const HINTS = ['Đang lập kế hoạch…', 'Đang phân tích yêu cầu…', 'Đang đối chiếu dữ liệu…', 'Sắp có kết quả…']
+const hintIdx = ref(0)
+const rotatingHint = computed(() => HINTS[hintIdx.value % HINTS.length])
+let hintTimer: ReturnType<typeof setInterval> | null = null
+watch(() => props.isThinking, (on) => {
+  if (on && !hintTimer) hintTimer = setInterval(() => { hintIdx.value++ }, 4000)
+  else if (!on && hintTimer) { clearInterval(hintTimer); hintTimer = null; hintIdx.value = 0 }
+}, { immediate: true })
+onUnmounted(() => { if (hintTimer) clearInterval(hintTimer) })
 
 const TOOL_LABEL: Record<string, string> = { rag_search: 'Tìm kiếm tài liệu', hr_query: 'Truy vấn dữ liệu HR' }
 const TOOL_ICON: Record<string, any> = { rag_search: Search, hr_query: Database }
@@ -104,7 +117,7 @@ function getResultLabel(entry: TraceEntry): string {
             <ThoughtDetail v-for="(view, i) in orchViews" :key="`o-${i}`" :view="view" class="mt-1.5" />
             <!-- trạng thái lập kế hoạch (trước khi có thought/plan) — text thường, KHÔNG shimmer -->
             <div v-if="isThinking && !orchThoughts.length && !plan?.steps?.length && traceLog.length === 0" class="mt-1.5 text-sm text-slate-500 dark:text-muted-foreground">
-              {{ thinkingStatus || 'Đang lập kế hoạch…' }}
+              {{ thinkingStatus || rotatingHint }}
             </div>
           </div>
 
@@ -145,7 +158,7 @@ function getResultLabel(entry: TraceEntry): string {
             </div>
             <ThoughtDetail v-for="(view, i) in verifyViews" :key="`v-${i}`" :view="view" class="mt-1.5" />
             <div v-if="verifyActive && !verifyThoughts.length" class="mt-1.5 text-sm text-slate-500 dark:text-muted-foreground">
-              {{ thinkingStatus || 'Đang tổng hợp kết quả…' }}
+              {{ thinkingStatus || rotatingHint }}
             </div>
           </div>
         </div>
