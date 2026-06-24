@@ -65,5 +65,13 @@ class InMemoryNotificationRepository(NotificationRepository):
                 return item
         return None
 
+    async def delete_by_doc_id(self, doc_id: str) -> int:
+        count = 0
+        for user_id in self._items:
+            before = len(self._items[user_id])
+            self._items[user_id] = [n for n in self._items[user_id] if n.doc_id != doc_id]
+            count += before - len(self._items[user_id])
+        return count
+
     def reset(self) -> None:
         self._items.clear()

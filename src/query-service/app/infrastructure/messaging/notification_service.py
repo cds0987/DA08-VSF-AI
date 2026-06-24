@@ -75,6 +75,9 @@ class NotificationService:
         await self._connection_manager.push_to_user(event.requester_user_id, payload)
         return [notification]
 
+    async def delete_doc_notifications(self, doc_id: str) -> int:
+        return await self._repository.delete_by_doc_id(doc_id)
+
     def _eligible_online_users(self, event: DocNewEvent) -> list[AuthenticatedUser]:
         return [
             user

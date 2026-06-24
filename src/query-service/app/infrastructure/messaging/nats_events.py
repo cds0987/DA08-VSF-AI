@@ -85,6 +85,8 @@ class QueryNatsEventHandler:
 
         if event.deleted:
             await self._document_access_repo.delete_access(event.doc_id)
+            if self._notification_service is not None:
+                await self._notification_service.delete_doc_notifications(event.doc_id)
         else:
             await self._document_access_repo.upsert_access(
                 document_id=event.doc_id,
