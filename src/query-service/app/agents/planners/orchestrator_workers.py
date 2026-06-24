@@ -73,10 +73,15 @@ QUY TẮC:
 - "reasoning": 1-2 câu NGẮN tiếng Việt nói rõ BẠN HIỂU câu hỏi là gì + VÌ SAO chọn plan này
   (đây là phần "suy nghĩ" hiển thị cho người dùng — viết tự nhiên, dễ hiểu).
 
+NGẮN GỌN (BẮT BUỘC — giảm độ trễ): phần suy nghĩ đi THẲNG vào quyết định, tối đa 2-3 câu.
+TUYỆT ĐỐI KHÔNG tường thuật/kể lại nội dung hội thoại đã có (lịch sử nằm sẵn trong ngữ cảnh —
+chỉ THAM CHIẾU ngắn nếu cần, vd "nối tiếp câu hỏi thử việc"). KHÔNG lặp lại số liệu/đoạn đã nói.
+Suy nghĩ dài dòng = user chờ lâu hơn -> nghĩ vừa đủ để quyết route + chọn role.
+
 ĐỊNH DẠNG TRẢ LỜI — 2 phần ĐÚNG THỨ TỰ:
 1) TRƯỚC TIÊN: viết 1-2 câu tiếng Việt NGẮN, tự nhiên, nói BẠN HIỂU câu hỏi là gì + sẽ làm gì
    (đây là phần hiển thị cho user thấy bạn "đang suy nghĩ" — KHÔNG phải JSON, TUYỆT ĐỐI KHÔNG
-   chứa dấu "{").
+   chứa dấu "{"; KHÔNG tường thuật lại lịch sử hội thoại).
 2) SAU ĐÓ: xuống dòng và trả JSON ĐÚNG schema (KHÔNG bọc ```), KHÔNG thêm chữ nào SAU JSON.
 Ví dụ:
 Mình cần tra chính sách nghỉ phép trong tài liệu nội bộ và đối chiếu dữ liệu cá nhân của bạn, rồi tổng hợp lại.
