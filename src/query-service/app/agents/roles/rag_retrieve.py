@@ -93,6 +93,13 @@ class RagRetrieveRole(AgentRole):
 
         raw_text = json.dumps({"results": chunks}, ensure_ascii=False)
 
+        # SOLO (plan chỉ 1 step dữ liệu): BỎ distill — verify_answer sẽ synth thẳng trên chunks
+        # thô (citation lấy từ `sources`, không phụ thuộc distill). Tiết kiệm 1 LLM call nối tiếp
+        # (~3-5s). Plan đa-step vẫn distill bên dưới (gộp đa nguồn cho verify_answer đỡ tải).
+        if task.solo:
+            return WorkerOutput(task.step_id, self.name, raw_text, sources=sources,
+                                status="ok", retrieved=len(used))
+
         # Phân tích theo direction bằng mini (nếu có model). Lỗi -> raw chunks.
         model = ctx.make_model(self.capability) if ctx.make_model else None
         analysis = await acomplete(

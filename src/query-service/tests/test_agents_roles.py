@@ -64,6 +64,39 @@ async def test_rag_retrieve_with_model_analyzes():
     assert out.output.startswith("PHAN TICH")
 
 
+class _SpyModel:
+    """Ghi nhận có bị gọi ainvoke (distill) hay không."""
+    def __init__(self):
+        self.called = False
+
+    async def ainvoke(self, msgs):
+        self.called = True
+        class R:
+            content = "DISTILL"
+        return R()
+
+
+async def test_rag_retrieve_solo_skips_distill():
+    # solo=True (plan 1 step) -> BỎ distill: KHÔNG gọi model, trả chunks thô + sources đủ.
+    spy = _SpyModel()
+    role = AGENT_REGISTRY.get("rag_retrieve")(_ctx(spy))
+    out = await role.run(WorkerInput(1, "rag_retrieve", "nghi phep", "trich", solo=True))
+    assert out.status == "ok"
+    assert spy.called is False            # KHÔNG gọi LLM distill
+    assert "results" in out.output        # trả chunks thô
+    assert len(out.sources) == 1          # citation vẫn đầy đủ
+    assert out.retrieved == 1
+
+
+async def test_rag_retrieve_non_solo_still_distills():
+    # solo=False (mặc định) -> giữ hành vi cũ: vẫn distill qua model.
+    spy = _SpyModel()
+    role = AGENT_REGISTRY.get("rag_retrieve")(_ctx(spy))
+    out = await role.run(WorkerInput(1, "rag_retrieve", "q", "trich"))
+    assert spy.called is True
+    assert out.output == "DISTILL"
+
+
 async def test_rag_retrieve_no_acl_no_info():
     ctx = RoleContext(mcp_client=_MockMCP(), user_id="u1", allowed_doc_ids=())
     out = await AGENT_REGISTRY.get("rag_retrieve")(ctx).run(WorkerInput(1, "rag_retrieve", "q"))

@@ -114,6 +114,9 @@ def build_orchestrator_graph(
         done = set(results.keys())
         ready = plan.ready_steps(done)
         sends: list[Send] = []
+        # solo: plan chỉ 1 step dữ liệu (đã strip synth/analyze) -> worker bỏ distill thừa
+        # (verify_answer synth thẳng trên data thô, tiết kiệm 1 LLM call nối tiếp).
+        solo = len(plan.steps) == 1
         for s in ready[:max_per_level]:
             sends.append(Send("worker", {
                 "step_id": s.id,
@@ -121,6 +124,7 @@ def build_orchestrator_graph(
                 "input": s.input,
                 "direction": s.direction,
                 "upstream": upstream_outputs(results, s.depends_on),
+                "solo": solo,
             }))
         return sends
 
@@ -177,6 +181,7 @@ def build_orchestrator_graph(
             input=payload.get("input", ""),
             direction=payload.get("direction", ""),
             upstream=payload.get("upstream", {}),
+            solo=payload.get("solo", False),
         )
         # Node bắt đầu chạy -> SSE (FE hiện subagent này "đang chạy" trong lane song song).
         if ctx.emit:
