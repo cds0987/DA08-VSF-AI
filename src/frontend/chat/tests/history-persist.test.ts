@@ -53,3 +53,18 @@ test('currentId null -> mọi conversation clone/tái dùng, không lỗi', () =
   assert.notEqual(snap[0], a)
   assert.equal(snap[0].messages[0].content, 'x')
 })
+
+import { readFile } from 'node:fs/promises'
+const root = new URL('../', import.meta.url)
+const read = (p: string) => readFile(new URL(p, root), 'utf8')
+
+test('chat.ts: hot-path debounce incremental, multi-conv path ghi đầy đủ, flush khi unload', async () => {
+  const src = await read('app/stores/chat.ts')
+  assert.match(src, /useDebounceFn/, 'phải dùng useDebounceFn')
+  assert.match(src, /function flushCurrent\(/, 'phải có flushCurrent (ghi tăng dần)')
+  assert.match(src, /function persistAllNow\(/, 'phải có persistAllNow (ghi đầy đủ)')
+  assert.match(src, /const debouncedPersist = useDebounceFn\(flushCurrent, 400\)/, 'debounce 400ms quanh flushCurrent')
+  assert.match(src, /buildHistorySnapshot\(/, 'flushCurrent dùng buildHistorySnapshot')
+  assert.match(src, /addEventListener\('pagehide', flushCurrent\)/, 'flush khi pagehide')
+  assert.match(src, /function persistFallbackHistory\(\)\s*\{\s*debouncedPersist\(\)/, 'persistFallbackHistory chỉ gọi debouncedPersist')
+})
