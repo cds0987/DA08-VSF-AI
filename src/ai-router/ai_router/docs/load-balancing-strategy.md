@@ -30,7 +30,7 @@
 resolve(capability) → theo tier:
   OpenAI pool   → chọn key MAX TPM-headroom; gate tpm_reserve(used+est ≤ 500K/phút)
   OpenRouter pool → chọn key MAX (limit−inflight); gate inflight < limit (AIMD)
-cạn pool → save_mode (gpt-4o-mini, OpenAI) — KHÔNG 503
+cạn pool → save_mode (xiaomi/mimo-v2.5, OpenRouter — rẻ hơn gpt-4o-mini ~2.1×) — KHÔNG 503
 ```
 
 - **TPM (OpenAI)**: bucket `tpm:{key}:{minute}` (atomic Lua). Rải đều theo token/phút, 1 key nhận
@@ -80,7 +80,7 @@ Redis (chính xác đa-worker); `airouter_key_rpm` đã khai trong `metric-contr
 
 **Kết quả đo tải concurrent (server-side, harness `eval/load20/`):**
 - Trần deepseek ≈ **150–160 concurrent** = 5 OpenRouter key × `AIROUTER_AIMD_INIT`. Nâng INIT 16→32
-  (env): provider **NỔI 150 (0×429**, AIMD không shrink), save_mode 69→17. Vượt → degrade gpt-4o-mini.
+  (env): provider **NỔI 150 (0×429**, AIMD không shrink), save_mode 69→17. Vượt → degrade xiaomi/mimo-v2.5 (rẻ hơn, reasoning + omnimodal).
 - **Nút thắt KHÔNG ở ai-router/provider** mà ở **GRAPH query-service** (pre-plan): router `ttfc`
   p50≈1.5s nhưng client thấy event đầu 8–20s ở tải cao. Gốc dead-air = `load_context` summarize-LLM
   mỗi turn (đã write-behind → cắt 5s). ai-router `--workers` đa-process KHÔNG giúp (nghẽn ở query-service).
