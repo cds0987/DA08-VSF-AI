@@ -357,8 +357,15 @@ class QueryOrchestrationUseCase:
         from app.agents.base import RoleContext
         from app.agents.graph_builder import build_orchestrator_graph
 
+        # ⏱️ DIAG dead-air: đo timing TỪNG bước pre-plan (chạy TRƯỚC khi span planner được tạo ->
+        # Langfuse KHÔNG trace khúc này). Log 1 dòng lúc emit SSE ĐẦU. Tạm để soi nút thắt, bỏ sau.
+        import time as _time
+        _t0 = _time.monotonic()
+        _timing: dict[str, float] = {}
+
         # Context + memory (provider chọn ở manifest; lỗi -> recent thô).
         ctx_data = await self._get_context(user.id, recent_k=self._settings.rag_top_k)
+        _timing["ctx"] = _time.monotonic()
         recent_messages = [(m.role, m.content) for m in ctx_data.recent_messages]
         try:
             if self._agent_manifest is not None:
@@ -391,8 +398,10 @@ class QueryOrchestrationUseCase:
                                    make_model=self._make_model)
         _conv_id = _ACTIVE_CONVERSATION_ID.get()
         mem_ctx = await _mem.load_context(user.id, _conv_id, question) if _mem else _MemCtx.empty()
+        _timing["mem"] = _time.monotonic()
 
         await self._save_user_message(user.id, question)
+        _timing["save"] = _time.monotonic()
 
         # Emit channel: node/role đẩy progress (Suy nghĩ / bước tool / token answer) vào queue;
         # ta DRAIN song song với graph.ainvoke -> SSE realtime (thay cho ainvoke "1 cục" trước
@@ -408,6 +417,7 @@ class QueryOrchestrationUseCase:
         async def _run_graph() -> None:
             try:
                 allowed_doc_ids = await self._get_allowed_doc_ids(user)
+                _timing["acl"] = _time.monotonic()
                 ctx = RoleContext(
                     mcp_client=self._mcp_client,
                     user_id=user.id,
@@ -428,6 +438,7 @@ class QueryOrchestrationUseCase:
                     ctx=ctx, manifest=self._agent_manifest,
                     planner=self._orchestrator_planner, make_model=self._make_model,
                 )
+                _timing["graph"] = _time.monotonic()
                 holder["result"] = await graph.ainvoke({
                     "question": question, "user_id": user.id,
                     "allowed_doc_ids": list(allowed_doc_ids),
@@ -440,10 +451,25 @@ class QueryOrchestrationUseCase:
                 await progress_q.put(_SENTINEL)
 
         task = asyncio.create_task(_run_graph())
+        _first_logged = False
         while True:
             ev = await progress_q.get()
             if ev is _SENTINEL:
                 break
+            if not _first_logged:  # ⏱️ DIAG: dòng đầu = bóc tách dead-air theo bước pre-plan
+                _first_logged = True
+                _g = _timing.get("graph", _t0)
+                logger.info(
+                    "orchestrator_preplan_timing ctx_ms=%.0f mem_ms=%.0f save_ms=%.0f "
+                    "acl_ms=%.0f graph_ms=%.0f plan_first_ms=%.0f TOTAL_first_emit_ms=%.0f",
+                    (_timing.get("ctx", _t0) - _t0) * 1000,
+                    (_timing.get("mem", _t0) - _timing.get("ctx", _t0)) * 1000,
+                    (_timing.get("save", _t0) - _timing.get("mem", _t0)) * 1000,
+                    (_timing.get("acl", _t0) - _timing.get("save", _t0)) * 1000,
+                    (_g - _timing.get("acl", _t0)) * 1000,
+                    (_time.monotonic() - _g) * 1000,
+                    (_time.monotonic() - _t0) * 1000,
+                )
             if ev.get("token"):
                 streamed_tokens = True
             ev.setdefault("agent_mode", "orchestrator_workers")

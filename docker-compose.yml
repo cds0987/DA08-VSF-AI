@@ -268,9 +268,6 @@ services:
 
   query-service:
     image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/query-service:${IMAGE_TAG:-develop}
-    # ⚗️ THỬ NGHIỆM TẢI (2026-06-24): scale 3 worker (3 event loop) gỡ kẹt pre-plan dưới burst.
-    # Giữ newrelic-admin wrapper. REVERT: bỏ dòng command này (về CMD Dockerfile = 1 worker).
-    command: ["newrelic-admin", "run-program", "uvicorn", "app.interfaces.api.main:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "3"]
     ports:
       - "8001:8001"
     env_file:
@@ -281,10 +278,6 @@ services:
       <<: *newrelic
       NEW_RELIC_APP_NAME: vsf-query-service
       DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/query_db
-      # ⚗️ Cap asyncpg pool/repo để 3 worker × 4 repo × max KHÔNG cạn PG max_connections=100
-      # (3×4×4=48 + service khác ~23 = 71 < 100). REVERT: bỏ 2 dòng này (về default 10).
-      DB_POOL_MIN_SIZE: "1"
-      DB_POOL_MAX_SIZE: "4"
     depends_on:
       app-postgres:
         condition: service_healthy
@@ -323,12 +316,10 @@ services:
       # ra Internet) -> auth không cần. Rỗng -> _auth() return sớm (bỏ qua). Dứt điểm 401 "invalid
       # internal token" (worker cache client key stale / lệch token lúc deploy). Override env_file.
       AIROUTER_INTERNAL_TOKEN: ""
-      # ⚗️ THỬ NGHIỆM TẢI (2026-06-24): TẠM tắt OTel để chạy MULTI-WORKER -> nhiều event loop gánh
-      # SSE (OTel auto-instrument không tương thích fork -> trước ép workers=1). State ở Redis nên
-      # multi-worker AN TOÀN cho load-balance. REVERT: VSF_OTEL_ENABLED="1" + bỏ UVICORN_WORKERS/AIMD.
-      VSF_OTEL_ENABLED: "0"
-      UVICORN_WORKERS: "3"          # 3 event loop (VM 4 vCPU, chừa 1 core cho service khác)
-      AIROUTER_AIMD_INIT: "16"      # nới trần inflight cold-start/key: 5 OR key×16=80 > 50 -> giảm save_mode
+      # OTel auto-instrument: 1=BẬT (ép workers=1). Đã thử multi-worker -> KHÔNG giảm TTFT -> bật lại
+      # để giữ trace. GIỮ AIROUTER_AIMD_INIT=16 (đo được: dẹp save_mode ở ≥50 mà không 429).
+      VSF_OTEL_ENABLED: "1"
+      AIROUTER_AIMD_INIT: "16"      # nới trần inflight cold-start/key: 5 OR key×16=80 > 50 -> hết save_mode
       OTEL_SERVICE_NAME: ai-router
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_TRACES_EXPORTER: otlp
