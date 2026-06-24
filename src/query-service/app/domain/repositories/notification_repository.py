@@ -39,3 +39,7 @@ class NotificationRepository(ABC):
     @abstractmethod
     async def mark_read_for_user(self, user_id: str, notification_id: str) -> Notification | None:
         """Mark one notification as read if it belongs to the user."""
+
+    @abstractmethod
+    async def delete_by_doc_id(self, doc_id: str) -> int:
+        """Delete all notifications for a document (called when doc is deleted). Returns count deleted."""
