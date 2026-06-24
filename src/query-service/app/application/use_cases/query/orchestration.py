@@ -359,12 +359,26 @@ class QueryOrchestrationUseCase:
 
         # ⏱️ DIAG dead-air: đo timing TỪNG bước pre-plan (chạy TRƯỚC khi span planner được tạo ->
         # Langfuse KHÔNG trace khúc này). Log 1 dòng lúc emit SSE ĐẦU. Tạm để soi nút thắt, bỏ sau.
+        import contextlib as _ctxlib
         import time as _time
         _t0 = _time.monotonic()
         _timing: dict[str, float] = {}
+        _tracer = self._tracer
+
+        # ⏱️ Child span cho TỪNG bước pre-plan -> Langfuse HIỆN khúc 6-12s "vô hình" (trước span
+        # planner) vỡ theo bước trên timeline. Best-effort, lỗi span KHÔNG làm vỡ luồng.
+        @_ctxlib.asynccontextmanager
+        async def _span(_name: str):
+            _sp = _tracer.span_start(_lang_trace, _name) if (_tracer and _lang_trace) else None
+            try:
+                yield
+            finally:
+                if _sp is not None:
+                    _tracer.span_end(_sp)
 
         # Context + memory (provider chọn ở manifest; lỗi -> recent thô).
-        ctx_data = await self._get_context(user.id, recent_k=self._settings.rag_top_k)
+        async with _span("preplan.get_context"):
+            ctx_data = await self._get_context(user.id, recent_k=self._settings.rag_top_k)
         _timing["ctx"] = _time.monotonic()
         recent_messages = [(m.role, m.content) for m in ctx_data.recent_messages]
         try:
@@ -397,10 +411,12 @@ class QueryOrchestrationUseCase:
         _mem = build_memory_client(self._settings, dialogue_loader=_dialogue_loader,
                                    make_model=self._make_model)
         _conv_id = _ACTIVE_CONVERSATION_ID.get()
-        mem_ctx = await _mem.load_context(user.id, _conv_id, question) if _mem else _MemCtx.empty()
+        async with _span("preplan.load_context"):
+            mem_ctx = await _mem.load_context(user.id, _conv_id, question) if _mem else _MemCtx.empty()
         _timing["mem"] = _time.monotonic()
 
-        await self._save_user_message(user.id, question)
+        async with _span("preplan.save_user_message"):
+            await self._save_user_message(user.id, question)
         _timing["save"] = _time.monotonic()
 
         # Emit channel: node/role đẩy progress (Suy nghĩ / bước tool / token answer) vào queue;
@@ -416,7 +432,8 @@ class QueryOrchestrationUseCase:
 
         async def _run_graph() -> None:
             try:
-                allowed_doc_ids = await self._get_allowed_doc_ids(user)
+                async with _span("preplan.get_allowed_doc_ids"):
+                    allowed_doc_ids = await self._get_allowed_doc_ids(user)
                 _timing["acl"] = _time.monotonic()
                 ctx = RoleContext(
                     mcp_client=self._mcp_client,
