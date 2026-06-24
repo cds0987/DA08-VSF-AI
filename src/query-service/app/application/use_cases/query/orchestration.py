@@ -415,8 +415,14 @@ class QueryOrchestrationUseCase:
             mem_ctx = await _mem.load_context(user.id, _conv_id, question) if _mem else _MemCtx.empty()
         _timing["mem"] = _time.monotonic()
 
-        async with _span("preplan.save_user_message"):
-            await self._save_user_message(user.id, question)
+        # DEFER save_user_message khỏi hot-path (fire-and-forget): bỏ 1 DB write TRƯỚC planner
+        # (save 1.4-2.9s dưới burst 150). Lượt sau load mới cần -> ms-fast INSERT chắc chắn xong kịp.
+        # Giữ ref tới khi stream xong; lỗi -> log, KHÔNG chặn trả lời.
+        def _save_done(_t: asyncio.Task) -> None:
+            if not _t.cancelled() and _t.exception() is not None:
+                logger.warning("deferred_save_user_message_failed: %s", str(_t.exception())[:160])
+        _save_task = asyncio.create_task(self._save_user_message(user.id, question))
+        _save_task.add_done_callback(_save_done)
         _timing["save"] = _time.monotonic()
 
         # Emit channel: node/role đẩy progress (Suy nghĩ / bước tool / token answer) vào queue;

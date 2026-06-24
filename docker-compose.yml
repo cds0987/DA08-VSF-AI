@@ -51,6 +51,9 @@ services:
   # ⚠ Mất VM = mất DB -> nên cron pg_dump đẩy GCS để backup.
   app-postgres:
     image: postgres:16-alpine
+    # CHUẨN BỊ MỞ RỘNG CORE: max_connections 100->200 (mặc định 100 là trần cứng cho replica×pool;
+    # 200 đủ 4 replica × 4 repo × 8 = 128). shared_buffers 128MB->512MB cho nhiều connection (VM dư RAM).
+    command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=512MB"]
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
