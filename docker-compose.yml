@@ -268,6 +268,9 @@ services:
 
   query-service:
     image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/query-service:${IMAGE_TAG:-develop}
+    # ⚗️ THỬ NGHIỆM TẢI (2026-06-24): scale 3 worker (3 event loop) gỡ kẹt pre-plan dưới burst.
+    # Giữ newrelic-admin wrapper. REVERT: bỏ dòng command này (về CMD Dockerfile = 1 worker).
+    command: ["newrelic-admin", "run-program", "uvicorn", "app.interfaces.api.main:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "3"]
     ports:
       - "8001:8001"
     env_file:
@@ -278,6 +281,10 @@ services:
       <<: *newrelic
       NEW_RELIC_APP_NAME: vsf-query-service
       DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/query_db
+      # ⚗️ Cap asyncpg pool/repo để 3 worker × 4 repo × max KHÔNG cạn PG max_connections=100
+      # (3×4×4=48 + service khác ~23 = 71 < 100). REVERT: bỏ 2 dòng này (về default 10).
+      DB_POOL_MIN_SIZE: "1"
+      DB_POOL_MAX_SIZE: "4"
     depends_on:
       app-postgres:
         condition: service_healthy

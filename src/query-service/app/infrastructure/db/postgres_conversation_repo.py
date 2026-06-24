@@ -2,6 +2,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 import json
+import os
 
 from app.domain.entities.conversation import ConversationContext, Message
 from app.domain.repositories.conversation_repository import ConversationRepository
@@ -411,7 +412,11 @@ class PostgresConversationRepository(ConversationRepository):
     async def _get_pool(self):
         if self._pool is None:
             asyncpg = _import_asyncpg()
-            self._pool = await asyncpg.create_pool(self._database_url)
+            self._pool = await asyncpg.create_pool(
+                self._database_url,
+                min_size=int(os.environ.get("DB_POOL_MIN_SIZE", "1")),
+                max_size=int(os.environ.get("DB_POOL_MAX_SIZE", "10")),
+            )
         return self._pool
 
     async def _latest_conversation(self, connection, user_id: str):

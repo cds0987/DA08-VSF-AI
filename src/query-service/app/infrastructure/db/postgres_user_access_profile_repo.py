@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 
 from app.domain.repositories.user_access_profile_repository import (
@@ -85,5 +86,9 @@ class PostgresUserAccessProfileRepository(UserAccessProfileRepository):
     async def _get_pool(self):
         if self._pool is None:
             asyncpg = _import_asyncpg()
-            self._pool = await asyncpg.create_pool(self._database_url)
+            self._pool = await asyncpg.create_pool(
+                self._database_url,
+                min_size=int(os.environ.get("DB_POOL_MIN_SIZE", "1")),
+                max_size=int(os.environ.get("DB_POOL_MAX_SIZE", "10")),
+            )
         return self._pool
