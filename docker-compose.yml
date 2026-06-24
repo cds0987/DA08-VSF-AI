@@ -268,9 +268,9 @@ services:
 
   query-service:
     image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/query-service:${IMAGE_TAG:-develop}
-    # REVERT 2-worker: uvicorn --workers 2 gây "peer closed connection" cắt SSE 148/150 (regression
-    # streaming multi-worker). Về 1 worker (CMD Dockerfile) = known-good 150/150. Multi-worker+SSE
-    # cần điều tra riêng (uvicorn/proxy) trước khi bật lại.
+    # SCALE NGANG bằng REPLICA (query-service + query-service-2): mỗi container 1 uvicorn process
+    # = SSE AN TOÀN (KHÁC --workers đa-process gây "peer closed" cắt SSE). nginx `upstream query_pool`
+    # round-robin qua 2 replica -> chia tải event-loop+DB ở 150. ports chỉ ở replica-1 (debug).
     ports:
       - "8001:8001"
     env_file:
@@ -281,6 +281,9 @@ services:
       <<: *newrelic
       NEW_RELIC_APP_NAME: vsf-query-service
       DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/query_db
+      # 2 replica × 4 repo × 8 = 64 < PG max_connections=100 (dư cho service khác ~23).
+      DB_POOL_MIN_SIZE: "2"
+      DB_POOL_MAX_SIZE: "8"
     depends_on:
       app-postgres:
         condition: service_healthy
@@ -296,6 +299,38 @@ services:
       test: ["CMD", "curl", "-fsS", "http://localhost:8001/health"]
       interval: 10s
       timeout: 8s          # nới 5->8s: đỡ "unhealthy" giả khi /health chậm dưới burst 150
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  # Replica-2: clone query-service, KHÔNG bind host port -> nginx tới qua tên service (upstream).
+  query-service-2:
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/query-service:${IMAGE_TAG:-develop}
+    env_file:
+      - ./deploy/env/common.env
+      - ./deploy/env/query-service.env
+      - ./deploy/env/secret.env
+    environment:
+      <<: *newrelic
+      NEW_RELIC_APP_NAME: vsf-query-service
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/query_db
+      DB_POOL_MIN_SIZE: "2"
+      DB_POOL_MAX_SIZE: "8"
+    depends_on:
+      app-postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      redis:
+        condition: service_started
+      nats-bootstrap:
+        condition: service_completed_successfully
+      query-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 8s
       retries: 12
       start_period: 20s
     restart: unless-stopped
@@ -511,6 +546,7 @@ services:
       - user-service
       - document-service
       - query-service
+      - query-service-2
       - mcp-service
       - hr-service
       - rag-worker
