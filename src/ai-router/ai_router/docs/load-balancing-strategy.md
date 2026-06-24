@@ -84,6 +84,11 @@ Redis (chính xác đa-worker); `airouter_key_rpm` đã khai trong `metric-contr
 - **Nút thắt KHÔNG ở ai-router/provider** mà ở **GRAPH query-service** (pre-plan): router `ttfc`
   p50≈1.5s nhưng client thấy event đầu 8–20s ở tải cao. Gốc dead-air = `load_context` summarize-LLM
   mỗi turn (đã write-behind → cắt 5s). ai-router `--workers` đa-process KHÔNG giúp (nghẽn ở query-service).
+- **RE-BENCHMARK @150 sau commit `af8014a` (gather get_context ∥ get_allowed_doc_ids) — 2026-06-24,
+  server-side**: dead-air (TOTAL_first_emit) p50 **5.78s** · p95 7.98s (CŨ ~10s → **−42%**); 150/150,
+  9 save_mode, 0×429. Phân rã p50: `acl_ms` ÂM (overlap mem = gather chạy đúng), `save`=0 (defer),
+  `ctx`=2.5s = đòn kế. ⚠️ Client 1-máy @150 báo dead-air 34s = thổi phồng ~6× → CHỈ tin server-side.
+  Cách đo: IAP tunnel + `docker logs` 2 replica grep `orchestrator_preplan_timing` + diff `/metrics`.
 
 **Metric mới phục vụ giám sát (observability.py + router.py):**
 - `airouter_ttfc_seconds`, `airouter_call_latency_seconds` (HISTOGRAM, label capability+provider) →
