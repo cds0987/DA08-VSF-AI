@@ -21,13 +21,16 @@ namespaces:
       - { name: airouter_resolve_fail_total, type: counter, labels: [capability, reason] }
       # ── drift catalog: model provider trả KHÔNG có trong catalog (WS-A) -> cần rebuild catalog ──
       - { name: airouter_model_unmatched_total, type: counter, labels: [model, capability] }
-      # ── per-key gauge (Redis snapshot) ──
-      - { name: airouter_key_tokens_today,   type: gauge, labels: [key_id, secret_env, provider, tier] }
-      - { name: airouter_key_remaining,      type: gauge, labels: [key_id, secret_env, provider, tier] }
-      - { name: airouter_key_cost_month_usd, type: gauge, labels: [key_id, secret_env, provider, tier] }
-      - { name: airouter_key_cooldown,       type: gauge, labels: [key_id, secret_env, provider, tier] }
-      - { name: airouter_key_limit,          type: gauge, labels: [key_id, secret_env, provider, tier] }   # trần quota/ngày (free-tier)
-      - { name: airouter_key_rpm,            type: gauge, labels: [key_id, secret_env, provider, tier] }   # RPM hiện tại/key (xem tải đều)
+      # ── per-key gauge (Redis snapshot). Nhãn theo PROVIDER (bỏ 'tier free_*' gây hiểu lầm) ──
+      - { name: airouter_key_tokens_today,      type: gauge, labels: [key_id, secret_env, provider] }   # token quota-counter (chỉ tier có limit token)
+      - { name: airouter_key_tokens_real_today, type: gauge, labels: [key_id, secret_env, provider] }   # token THẬT mọi tier (gồm paid OR)
+      - { name: airouter_key_remaining,      type: gauge, labels: [key_id, secret_env, provider] }
+      - { name: airouter_key_cost_month_usd, type: gauge, labels: [key_id, secret_env, provider] }
+      - { name: airouter_key_cooldown,       type: gauge, labels: [key_id, secret_env, provider] }
+      - { name: airouter_key_limit,          type: gauge, labels: [key_id, secret_env, provider] }
+      - { name: airouter_key_rpm,            type: gauge, labels: [key_id, secret_env, provider] }   # RPM hiện tại/key
+      - { name: airouter_key_inflight,       type: gauge, labels: [key_id, secret_env, provider] }   # concurrency in-flight (bắt nghẽn)
+      - { name: airouter_key_aimd_limit,     type: gauge, labels: [key_id, secret_env, provider] }   # trần AIMD dò động (OpenRouter)
       # ── meta gauge ──
       - { name: airouter_keys_total,         type: gauge,   labels: [] }   # tổng key đăng ký
       # ── histogram latency/ttfc (bảng 'Trải nghiệm user'): _bucket/_sum/_count chuẩn Prometheus.

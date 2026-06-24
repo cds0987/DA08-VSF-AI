@@ -509,12 +509,18 @@ class Router:
             u = await self.counters.usage(k.id, tdef.limit_kind if tdef else "none")
             limit = k.limit.value
             remaining = max(limit - u["daily_used"], 0) if k.limit.kind != "none" else None
+            # Concurrency saturation (bắt nghẽn KHÔNG cần log): inflight thật + trần AIMD (OR).
+            inflight = await self.counters.get_inflight(k.id)
+            aimd = (await self.counters.get_aimd_limit(k.id)
+                    if k.provider == Provider.OPENROUTER else None)
             keys.append({
                 "key_id": k.id, "secret_env": k.api_key_env,
                 "provider": k.provider.value, "tier": k.tier,
                 "limit_kind": k.limit.kind, "limit": limit,
                 "used_today": u["daily_used"], "remaining": remaining,
+                "tokens_real": await self.counters.obs_tokens_today(k.id),  # token THẬT mọi tier
                 "rpm_now": u["rpm"], "cost_month": u["cost_month"], "cooldown": u["cooldown"],
+                "inflight": inflight, "aimd_limit": aimd,
                 "drained": await self.counters.is_drained(k.id),
             })
         return {"routing_version": self.table.version, "models": len(self.catalog),

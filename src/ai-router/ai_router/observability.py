@@ -92,20 +92,30 @@ def render_prometheus(snapshot: dict, metrics: Metrics) -> str:
         "# TYPE airouter_key_cooldown gauge",
         "# HELP airouter_key_limit Trần quota/ngày theo key.",
         "# TYPE airouter_key_limit gauge",
+        "# HELP airouter_key_tokens_real_today Token THẬT dùng hôm nay theo key (MỌI tier, gồm paid).",
+        "# TYPE airouter_key_tokens_real_today gauge",
+        "# HELP airouter_key_inflight Request đang in-flight theo key (concurrency — bắt nghẽn).",
+        "# TYPE airouter_key_inflight gauge",
+        "# HELP airouter_key_aimd_limit Trần AIMD inflight hiện tại theo key (OpenRouter, dò động).",
+        "# TYPE airouter_key_aimd_limit gauge",
     ]
     for k in snapshot.get("keys", []):
+        # Nhãn theo PROVIDER (KHÔNG còn 'free_*' tier gây hiểu lầm: 1 key phục vụ cả free lẫn paid).
         # secret_env: định danh GitHub secret (oai-3 -> OPENAI_API_KEY_3) cho devops.
         lbl = {
             "key_id": k.get("key_id", ""),
             "secret_env": k.get("secret_env", ""),
             "provider": k.get("provider", ""),
-            "tier": k.get("tier", ""),
         }
         out.append(_line("airouter_key_tokens_today", lbl, k.get("used_today", 0) or 0))
+        out.append(_line("airouter_key_tokens_real_today", lbl, k.get("tokens_real", 0) or 0))
         if k.get("remaining") is not None:
             out.append(_line("airouter_key_remaining", lbl, k.get("remaining")))
         out.append(_line("airouter_key_cost_month_usd", lbl, k.get("cost_month", 0.0) or 0.0))
         out.append(_line("airouter_key_rpm", lbl, k.get("rpm_now", 0) or 0))
+        out.append(_line("airouter_key_inflight", lbl, k.get("inflight", 0) or 0))
+        if k.get("aimd_limit") is not None:
+            out.append(_line("airouter_key_aimd_limit", lbl, k.get("aimd_limit")))
         out.append(_line("airouter_key_cooldown", lbl, 1 if k.get("cooldown") else 0))
         out.append(_line("airouter_key_limit", lbl, k.get("limit", 0) or 0))
 

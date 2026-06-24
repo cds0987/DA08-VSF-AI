@@ -226,10 +226,20 @@ class RedisCounters(Counters):
             if diff:
                 await self._r.incrby(dkey, diff)
                 await self._r.expire(dkey, DAY_TTL)
+        # OBSERVABILITY: token THẬT mọi tier (gồm paid/OpenRouter limit_kind=none) -> dashboard
+        # token-per-key đúng (hết 'OR = 0' dù deepseek chạy). Tách khỏi quota counter.
+        if real_tokens:
+            otk = f"obs_tok:{key_id}:{day}"
+            await self._r.incrby(otk, int(real_tokens))
+            await self._r.expire(otk, DAY_TTL)
         if cost:
             ckey = f"cost:{key_id}:{month}"
             await self._r.incrbyfloat(ckey, float(cost))
             await self._r.expire(ckey, MONTH_TTL)
+
+    async def obs_tokens_today(self, key_id):
+        day = _now().strftime("%Y%m%d")
+        return int(await self._r.get(f"obs_tok:{key_id}:{day}") or 0)
 
     async def set_cooldown(self, key_id, seconds):
         await self._r.set(f"cooldown:{key_id}", "1", ex=seconds)
@@ -378,9 +388,16 @@ class MemoryCounters(Counters):
         if daily_kind == "tokens_per_day":
             dkey = _daily_key(daily_kind, key_id, day)
             self._set(dkey, self._get(dkey) + (int(real_tokens) - int(est_tokens)), DAY_TTL)
+        if real_tokens:
+            otk = f"obs_tok:{key_id}:{day}"
+            self._set(otk, self._get(otk) + int(real_tokens), DAY_TTL)
         if cost:
             ckey = f"cost:{key_id}:{month}"
             self._set(ckey, self._get(ckey) + float(cost), MONTH_TTL)
+
+    async def obs_tokens_today(self, key_id):
+        day = _now().strftime("%Y%m%d")
+        return int(self._get(f"obs_tok:{key_id}:{day}"))
 
     async def set_cooldown(self, key_id, seconds):
         self._cool[key_id] = time.time() + seconds
