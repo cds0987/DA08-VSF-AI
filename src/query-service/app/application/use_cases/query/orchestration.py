@@ -99,6 +99,8 @@ class QueryOrchestrationUseCase:
         self._mcp_client = mcp_client
         self._openai_client = openai_client
         self._summarizer = summarizer
+        # Giữ ref task nền (summary update fire-and-forget) -> không bị GC giữa chừng.
+        self._bg_tasks: set = set()
         # MOSA Orchestrator-Workers (mode=orchestrator_workers). Mặc định react ->
         # các field này None -> _stream_inner đi path langgraph/legacy cũ KHÔNG đổi.
         self._agent_mode = (agent_mode or "react").strip().lower()
@@ -898,7 +900,12 @@ class QueryOrchestrationUseCase:
                 create_if_missing=False,
             )
             message_id = str(stored.id) if stored is not None else None
-            await self._maybe_update_summary(user_id)
+            # FIRE-AND-FORGET: gộp summary là memory phụ cho lượt SAU, KHÔNG liên quan câu trả lời
+            # hiện tại -> KHÔNG chặn event `done` (trước đây await -> treo ~2-4s/lượt khi hội thoại
+            # dài vì 1 LLM call). Chạy nền; giữ ref tránh GC; lỗi -> best-effort (đã try/except trong).
+            t = asyncio.create_task(self._maybe_update_summary(user_id))
+            self._bg_tasks.add(t)
+            t.add_done_callback(self._bg_tasks.discard)
         else:
             await self._conversation_repo.save_message(
                 user_id,

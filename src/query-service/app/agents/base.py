@@ -23,6 +23,9 @@ class WorkerInput:
     direction: str = ""
     # upstream: output các step mà step này depends_on (dep_id -> output).
     upstream: dict[int, Any] = field(default_factory=dict)
+    # solo: True = step dữ liệu DUY NHẤT của plan -> worker có thể BỎ bước distill thừa
+    # (verify_answer tự synth trên data thô). Set bởi graph_builder khi plan chỉ 1 step.
+    solo: bool = False
 
 
 @dataclass(frozen=True)
