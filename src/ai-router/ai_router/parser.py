@@ -66,8 +66,15 @@ def extract_usage(resp: Any) -> Usage:
     # một số provider -> reasoning_tokens phẳng. Đã nằm trong output_tokens (chỉ để observ).
     details = _get(u, "completion_tokens_details") or {}
     reasoning = int(_get(details, "reasoning_tokens") or _get(u, "reasoning_tokens") or 0)
+    # cached_tokens: prompt caching tự động (DeepSeek/OpenAI). Shape chuẩn: prompt_tokens_details
+    # .cached_tokens; một số provider trả phẳng cached_tokens. cache_discount: OpenRouter trả USD%.
+    prompt_details = _get(u, "prompt_tokens_details") or {}
+    cached = int(_get(prompt_details, "cached_tokens") or _get(u, "cached_tokens") or 0)
+    discount = _get(u, "cache_discount")
     return Usage(
         input_tokens=in_tok, output_tokens=out_tok, total_tokens=total,
         reasoning_tokens=reasoning,
         cost_usd=float(cost) if cost is not None else None,
+        cached_tokens=cached,
+        cache_discount=float(discount) if discount is not None else None,
     )

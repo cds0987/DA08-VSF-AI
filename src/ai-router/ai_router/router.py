@@ -210,6 +210,9 @@ class Router:
                 self.metrics.inc("airouter_tokens_total", labels, float(usage.total_tokens))
             if cost:
                 self.metrics.inc("airouter_cost_usd_total", labels, float(cost))
+            # Cache hit: prompt caching (DeepSeek/OpenAI tự động) -> đo % input đọc từ cache.
+            if usage.cached_tokens:
+                self.metrics.inc("airouter_cached_tokens_total", labels, float(usage.cached_tokens))
 
     def _trace_log(self, event: str, dec: RouteDecision | None, capability: str, *,
                    conversation_id: str | None, status: str, latency_ms: float | None = None,
@@ -233,6 +236,10 @@ class Router:
         if usage is not None:
             extra.update({"tokens_in": usage.input_tokens, "tokens_out": usage.output_tokens,
                           "tokens_total": usage.total_tokens})
+            if usage.cached_tokens:
+                extra["tokens_cached"] = usage.cached_tokens
+            if usage.cache_discount is not None:
+                extra["cache_discount"] = round(usage.cache_discount, 4)
         if cost is not None:
             extra["cost_usd"] = round(cost, 6)
         if error is not None:
