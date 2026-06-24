@@ -6,6 +6,7 @@ from app.infrastructure.messaging.nats_events import (
     InvalidNatsEventPayload,
     QueryNatsEventHandler,
     parse_doc_access_event,
+    parse_hr_department_renamed_event,
     parse_hr_employee_profile_updated_event,
     parse_leave_request_status_event,
     parse_notify_doc_new_event,
@@ -36,6 +37,9 @@ class NatsSubscriberManager:
         ("hr.employee_profile.updated", "QUERY_SERVICE_HR_PROFILE", "QUERY_HR_PROFILE"),
         ("hr.leave_request.approved", "QUERY_SERVICE_LEAVE_APPROVED", "HR_EVENTS"),
         ("hr.leave_request.rejected", "QUERY_SERVICE_LEAVE_REJECTED", "HR_EVENTS"),
+        ("hr.leave_request.cancelled", "QUERY_SERVICE_LEAVE_CANCELLED", "HR_EVENTS"),
+        ("hr.department.renamed", "QUERY_SERVICE_DEPT_RENAMED", "HR_EVENTS"),
+        ("user.deleted", "QUERY_SERVICE_USER_DELETED", "USER_EVENTS"),
     )
 
     async def start(self) -> None:
@@ -50,6 +54,9 @@ class NatsSubscriberManager:
             "hr.employee_profile.updated": self._hr_employee_profile_callback,
             "hr.leave_request.approved": self._leave_request_status_callback,
             "hr.leave_request.rejected": self._leave_request_status_callback,
+            "hr.leave_request.cancelled": self._leave_request_status_callback,
+            "hr.department.renamed": self._dept_renamed_callback,
+            "user.deleted": self._user_deleted_callback,
         }
         # Resilient: lỗi 1 subscription (stream chưa sẵn) KHÔNG được làm chết startup —
         # query-service vẫn phải phục vụ HTTP (chat/query/dashboard).
@@ -125,6 +132,23 @@ class NatsSubscriberManager:
             validate=parse_leave_request_status_event,
             handle=self._handler.handle_leave_request_status,
         )
+
+    async def _dept_renamed_callback(self, msg: Any) -> None:
+        await self._handle_message(
+            msg,
+            validate=parse_hr_department_renamed_event,
+            handle=self._handler.handle_hr_department_renamed,
+        )
+
+    async def _user_deleted_callback(self, msg: Any) -> None:
+        try:
+            payload = json.loads(msg.data)
+            if isinstance(payload, dict):
+                await self._handler.handle_user_deleted(payload)
+            await msg.ack()
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning("user_deleted_callback_error error=%s", exc)
+            await msg.ack()
 
     async def _hr_employee_profile_callback(self, msg: Any) -> None:
         await self._handle_message(

@@ -53,22 +53,27 @@ class NotificationService:
         return delivered
 
     async def publish_leave_status(self, event: LeaveStatusEvent) -> list[Notification]:
-        approved = event.status == "approved"
-        message = (
-            "Đơn nghỉ phép của bạn đã được duyệt ✅"
-            if approved else
-            "Đơn nghỉ phép của bạn bị từ chối ❌"
-            + (f" — {event.rejected_reason}" if event.rejected_reason else "")
-        )
+        if event.status == "approved":
+            message = "Đơn nghỉ phép của bạn đã được duyệt ✅"
+            event_type = "leave_approved"
+        elif event.status == "cancelled":
+            message = "Đơn nghỉ phép của bạn đã bị huỷ 🚫"
+            event_type = "leave_cancelled"
+        else:
+            message = (
+                "Đơn nghỉ phép của bạn bị từ chối ❌"
+                + (f" — {event.rejected_reason}" if event.rejected_reason else "")
+            )
+            event_type = "leave_rejected"
         payload = {
             "type": "notify",
-            "event": "leave_approved" if approved else "leave_rejected",
+            "event": event_type,
             "message": message,
             "request_id": event.request_id,
         }
         notification = await self._repository.save(
             user_id=event.requester_user_id,
-            event=payload["event"],
+            event=event_type,
             message=message,
             doc_id=None,
         )

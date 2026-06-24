@@ -28,3 +28,7 @@ class DocumentAccessRepository(ABC):
     @abstractmethod
     async def delete_access(self, document_id: str) -> None:
         """Delete local ACL projection when doc.access deleted=true arrives."""
+
+    @abstractmethod
+    async def rename_department(self, old_name: str, new_name: str) -> int:
+        """Replace old department name with new one in all allowed_departments arrays. Returns count updated."""

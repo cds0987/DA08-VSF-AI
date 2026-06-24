@@ -69,6 +69,14 @@ class PostgresUserAccessProfileRepository(UserAccessProfileRepository):
             employment_status=str(row["employment_status"]),
         )
 
+    async def delete_profile(self, user_id: str) -> None:
+        pool = await self._get_pool()
+        async with pool.acquire() as connection:
+            await connection.execute(
+                "DELETE FROM query_svc.user_access_profile WHERE user_id = $1::uuid",
+                user_id,
+            )
+
     async def close(self) -> None:
         if self._pool is not None:
             await self._pool.close()

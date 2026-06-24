@@ -1053,6 +1053,21 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
 
         return await asyncio.to_thread(_decide)
 
+    async def rename_department(self, old_name: str, new_name: str) -> int:
+        from app.infrastructure.db.models import Employee
+
+        def _rename() -> int:
+            with self._session() as session:
+                count = (
+                    session.query(Employee)
+                    .filter(Employee.department == old_name)
+                    .update({"department": new_name}, synchronize_session=False)
+                )
+                session.commit()
+                return count
+
+        return await asyncio.to_thread(_rename)
+
     async def aclose(self) -> None:
         def _dispose() -> None:
             if self._engine is not None:

@@ -65,6 +65,10 @@ class InMemoryNotificationRepository(NotificationRepository):
                 return item
         return None
 
+    async def delete_by_user_id(self, user_id: str) -> int:
+        items = self._items.pop(user_id, [])
+        return len(items)
+
     async def delete_by_doc_id(self, doc_id: str) -> int:
         count = 0
         for user_id in self._items:

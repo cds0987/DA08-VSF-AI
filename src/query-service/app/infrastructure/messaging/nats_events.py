@@ -44,6 +44,14 @@ class LeaveRequestStatusEvent:
 
 
 @dataclass(frozen=True)
+class HrDepartmentRenamedEvent:
+    old_department: str
+    new_department: str
+    event_id: str | None
+    occurred_at: datetime
+
+
+@dataclass(frozen=True)
 class NotifyDocNewEvent:
     doc_id: str
     document_name: str
@@ -60,12 +68,16 @@ class QueryNatsEventHandler:
         document_access_repo: DocumentAccessRepository | None = None,
         notification_service: NotificationService | None = None,
         user_access_profile_repo: UserAccessProfileRepository | None = None,
+        conversation_repo: Any | None = None,
+        access_cache: Any | None = None,
         processed_event_max_size: int = 10000,
         processed_event_ttl_seconds: int = 86400,
     ) -> None:
         self._document_access_repo = document_access_repo
         self._notification_service = notification_service
         self._user_access_profile_repo = user_access_profile_repo
+        self._conversation_repo = conversation_repo
+        self._access_cache = access_cache
         self._processed_event_ids: OrderedDict[str, datetime] = OrderedDict()
         self._doc_access_seen_at: dict[str, datetime] = {}
         self._notify_fallback_keys: OrderedDict[str, datetime] = OrderedDict()
@@ -87,6 +99,12 @@ class QueryNatsEventHandler:
             await self._document_access_repo.delete_access(event.doc_id)
             if self._notification_service is not None:
                 await self._notification_service.delete_doc_notifications(event.doc_id)
+            if self._access_cache is not None:
+                for uid in event.allowed_user_ids:
+                    try:
+                        await self._access_cache.delete(uid)
+                    except Exception:  # noqa: BLE001
+                        pass
         else:
             await self._document_access_repo.upsert_access(
                 document_id=event.doc_id,
@@ -156,7 +174,51 @@ class QueryNatsEventHandler:
             employment_status=event.employment_status,
             occurred_at=event.occurred_at,
         )
+        if self._access_cache is not None:
+            try:
+                await self._access_cache.delete(event.user_id)
+            except Exception:  # noqa: BLE001
+                pass
         self._remember_event(event.event_id)
+
+    async def handle_hr_department_renamed(self, payload: dict[str, Any]) -> None:
+        if self._document_access_repo is None:
+            return
+        event = parse_hr_department_renamed_event(payload)
+        if self._is_duplicate_event(event.event_id):
+            return
+        await self._document_access_repo.rename_department(event.old_department, event.new_department)
+        if self._access_cache is not None:
+            try:
+                await self._access_cache.flush_all()
+            except Exception:  # noqa: BLE001
+                pass
+        self._remember_event(event.event_id)
+
+    async def handle_user_deleted(self, payload: dict[str, Any]) -> None:
+        user_id = _optional_str(payload.get("user_id") or payload.get("id"))
+        if not user_id:
+            return
+        if self._conversation_repo is not None:
+            try:
+                await self._conversation_repo.clear_history(user_id)
+            except Exception:  # noqa: BLE001
+                pass
+        if self._notification_service is not None:
+            try:
+                await self._notification_service._repository.delete_by_user_id(user_id)
+            except Exception:  # noqa: BLE001
+                pass
+        if self._user_access_profile_repo is not None:
+            try:
+                await self._user_access_profile_repo.delete_profile(user_id)
+            except Exception:  # noqa: BLE001
+                pass
+        if self._access_cache is not None:
+            try:
+                await self._access_cache.delete(user_id)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _is_duplicate_event(self, event_id: str | None) -> bool:
         self._prune_store(self._processed_event_ids)
@@ -185,6 +247,15 @@ class QueryNatsEventHandler:
         expired_keys = [key for key, seen_at in store.items() if seen_at < cutoff]
         for key in expired_keys:
             store.pop(key, None)
+
+
+def parse_hr_department_renamed_event(payload: dict[str, Any]) -> HrDepartmentRenamedEvent:
+    return HrDepartmentRenamedEvent(
+        old_department=_required_str(payload, "old_department"),
+        new_department=_required_str(payload, "new_department"),
+        event_id=_optional_str(payload.get("event_id")),
+        occurred_at=_event_time(payload.get("occurred_at")),
+    )
 
 
 def parse_leave_request_status_event(payload: dict[str, Any]) -> LeaveRequestStatusEvent:

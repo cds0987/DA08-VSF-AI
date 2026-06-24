@@ -309,6 +309,8 @@ def get_nats_subscriber_manager() -> NatsSubscriberManager | None:
         document_access_repo=get_document_access_repo(),
         notification_service=get_notification_service(),
         user_access_profile_repo=get_user_access_profile_repo(),
+        conversation_repo=get_conversation_repo(),
+        access_cache=get_access_cache(),
         processed_event_max_size=settings.nats_processed_event_max_size,
         processed_event_ttl_seconds=settings.nats_processed_event_ttl_seconds,
     )

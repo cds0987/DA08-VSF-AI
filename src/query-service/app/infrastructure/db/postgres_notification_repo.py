@@ -98,6 +98,15 @@ class PostgresNotificationRepository(NotificationRepository):
             )
         return _notification_from_row(row) if row else None
 
+    async def delete_by_user_id(self, user_id: str) -> int:
+        pool = await self._get_pool()
+        async with pool.acquire() as connection:
+            result = await connection.execute(
+                "DELETE FROM query_svc.notifications WHERE user_id = $1::uuid",
+                user_id,
+            )
+        return int(result.split()[-1]) if result else 0
+
     async def delete_by_doc_id(self, doc_id: str) -> int:
         pool = await self._get_pool()
         async with pool.acquire() as connection:
