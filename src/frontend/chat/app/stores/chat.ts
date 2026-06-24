@@ -26,6 +26,8 @@ import { SSE_DONE_REQUIRED } from '~/types/sse-contract.gen'
 import { handleRefreshFailure, refreshAccessToken } from '~/lib/api/authRefresh'
 import { buildQuotedContent } from '~/lib/quote'
 import type { Quote } from '~/lib/quote'
+import { createStreamBuffer } from '~/lib/streamBuffer'
+import { createRafScheduler } from '~/lib/rafScheduler'
 
 const HISTORY_KEY = 'eka.chat.conversations'
 
@@ -702,6 +704,10 @@ export const useChatStore = defineStore('chat', () => {
     plan.value = null
     pipeline.value = 0
     let fullContent = ''
+    const buffer = createStreamBuffer({
+      commit: (delta) => { streamingText.value += delta },
+      ...createRafScheduler(),
+    })
     let completed = false
     let hasStartedStreaming = false
     let donePayload: QueryDoneEvent | null = null
@@ -752,7 +758,7 @@ export const useChatStore = defineStore('chat', () => {
             if (payload.token) {
               hasStartedStreaming = true
               fullContent += payload.token
-              streamingText.value += payload.token
+              buffer.push(payload.token)
               pipeline.value = pipelineStages.length
               thinkingStatus.value = ''
             }
@@ -909,6 +915,7 @@ export const useChatStore = defineStore('chat', () => {
         assistant.fallback = result.fallback === true
 
         messages.value.push(assistant)
+        buffer.dispose()
         streamingText.value = ''
         pipeline.value = -1
         cacheCurrentConversation()
@@ -942,6 +949,7 @@ export const useChatStore = defineStore('chat', () => {
       }
     } finally {
       if (abortController === controller) abortController = null
+      buffer.dispose()
       streamingText.value = ''
       thinkingStatus.value = ''
       pipeline.value = -1
