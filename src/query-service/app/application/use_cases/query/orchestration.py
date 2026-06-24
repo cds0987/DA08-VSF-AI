@@ -378,10 +378,15 @@ class QueryOrchestrationUseCase:
                 if _sp is not None:
                     _tracer.span_end(_sp)
 
-        # Context + memory (provider chọn ở manifest; lỗi -> recent thô).
-        async with _span("preplan.get_context"):
-            ctx_data = await self._get_context(user.id, recent_k=self._settings.rag_top_k)
+        # Context + ACL doc-ids = 2 DB read ĐỘC LẬP -> chạy SONG SONG (gather) thay vì tuần tự
+        # (trước: acl nằm trong _run_graph, chạy sau). Giảm round-trip nối tiếp + xếp hàng pool.
+        async with _span("preplan.fetch(context_parallel_acl)"):
+            ctx_data, _allowed_doc_ids = await asyncio.gather(
+                self._get_context(user.id, recent_k=self._settings.rag_top_k),
+                self._get_allowed_doc_ids(user),
+            )
         _timing["ctx"] = _time.monotonic()
+        _timing["acl"] = _timing["ctx"]   # acl chạy SONG SONG với context -> cùng mốc
         recent_messages = [(m.role, m.content) for m in ctx_data.recent_messages]
         try:
             if self._agent_manifest is not None:
@@ -440,9 +445,7 @@ class QueryOrchestrationUseCase:
 
         async def _run_graph() -> None:
             try:
-                async with _span("preplan.get_allowed_doc_ids"):
-                    allowed_doc_ids = await self._get_allowed_doc_ids(user)
-                _timing["acl"] = _time.monotonic()
+                allowed_doc_ids = _allowed_doc_ids   # đã fetch SONG SONG với context (gather ở trên)
                 ctx = RoleContext(
                     mcp_client=self._mcp_client,
                     user_id=user.id,
