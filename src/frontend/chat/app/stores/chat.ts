@@ -664,19 +664,13 @@ export const useChatStore = defineStore('chat', () => {
 
     const previousTitle = conv.title
     conv.title = title
-    fallbackConversations.value = conversations.value.map((item) => ({
-      ...item,
-      messages: item.messages.map((message) => ({ ...message })),
-    }))
+    persistAllNow()
 
     try {
       await queryService.renameConversation(id, title)
     } catch (error) {
       conv.title = previousTitle
-      fallbackConversations.value = conversations.value.map((item) => ({
-        ...item,
-        messages: item.messages.map((message) => ({ ...message })),
-      }))
+      persistAllNow()
       throw error
     }
   }
