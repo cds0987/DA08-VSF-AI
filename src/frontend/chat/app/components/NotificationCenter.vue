@@ -6,11 +6,8 @@ import { useNotificationStore } from '~/stores/notifications'
 import { useChatStore } from '~/stores/chat'
 import type { NotificationItem } from '~/types'
 
-defineProps<{
-  isCollapsed: boolean
-  disableTooltip?: boolean
-}>()
-
+// Nút chuông floating ở góc trên-phải khu nội dung (default layout) -> luôn thấy badge
+// dù sidebar đóng hay mở. Không còn phụ thuộc trạng thái sidebar.
 const notifications = useNotificationStore()
 const chat = useChatStore()
 const router = useRouter()
@@ -81,37 +78,29 @@ async function handleDismiss(event: MouseEvent, item: NotificationItem) {
 </script>
 
 <template>
-  <Tooltip :disabled="disableTooltip" :ignore-non-keyboard-focus="true">
+  <Tooltip :ignore-non-keyboard-focus="true">
     <TooltipTrigger as-child>
-      <div class="w-full">
+      <div>
         <DropdownMenu v-model:open="isOpen">
           <DropdownMenuTrigger as-child>
             <button
-              class="flex h-9 w-full shrink-0 cursor-pointer items-center justify-start rounded-md px-0 text-slate-600 transition-all hover:bg-slate-100 hover:text-slate-900 dark:text-muted-foreground dark:hover:bg-sidebar-accent dark:hover:text-sidebar-accent-foreground"
+              class="relative flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-slate-200/70 bg-white/70 text-slate-600 shadow-sm backdrop-blur-md transition-colors hover:bg-white hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-white/10 dark:bg-white/5 dark:text-muted-foreground dark:hover:bg-white/10 dark:hover:text-foreground"
               aria-label="Thông báo"
             >
-              <div class="relative flex h-9 w-[64px] shrink-0 items-center justify-center">
-                <Bell class="h-5 w-5 shrink-0" />
-                <span
-                  v-if="notifications.unreadCount > 0"
-                  class="absolute right-3 top-0.5 flex min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-4 text-white"
-                >
-                  {{ notifications.unreadCount > 99 ? '99+' : notifications.unreadCount }}
-                </span>
-              </div>
+              <Bell class="h-[18px] w-[18px] shrink-0" />
               <span
-                class="whitespace-nowrap text-[13px] font-semibold transition-opacity duration-300"
-                :class="isCollapsed ? 'opacity-0' : 'opacity-100'"
+                v-if="notifications.unreadCount > 0"
+                class="absolute -right-1 -top-1 flex min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-4 text-white ring-2 ring-background"
               >
-                Thông báo
+                {{ notifications.unreadCount > 99 ? '99+' : notifications.unreadCount }}
               </span>
             </button>
           </DropdownMenuTrigger>
 
           <DropdownMenuContent
-        side="right"
+        side="bottom"
         align="end"
-        :side-offset="12"
+        :side-offset="8"
         class="w-[360px] border-slate-200 dark:border-border bg-white dark:bg-popover p-0 text-slate-900 dark:text-popover-foreground shadow-xl"
       >
         <div class="flex items-center justify-between border-b border-slate-100 dark:border-border px-4 py-3">
@@ -185,8 +174,7 @@ async function handleDismiss(event: MouseEvent, item: NotificationItem) {
       </div>
     </TooltipTrigger>
     <TooltipContent
-      v-if="isCollapsed"
-      side="right"
+      side="bottom"
       class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
     >
       Thông báo

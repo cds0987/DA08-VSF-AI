@@ -259,14 +259,6 @@ const userInitials = computed(() => {
     <div
       class="flex flex-col gap-1.5 shrink-0 w-full px-0 py-3"
     >
-      <!-- Thông báo: ẩn khi thu gọn (chỉ hiện khi sidebar mở) -->
-      <div v-show="!isCollapsed">
-        <NotificationCenter
-          :is-collapsed="isCollapsed"
-          :disable-tooltip="isAnimatingSidebar"
-        />
-      </div>
-
       <!-- Settings dialog — KHÔNG trigger, mở từ dropdown account (state-controlled) -->
       <Dialog v-model:open="settingsOpen">
         <SettingsDialog />
