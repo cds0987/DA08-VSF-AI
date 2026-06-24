@@ -82,6 +82,22 @@ class RedisStmStore:
     async def invalidate_ws(self, user_id: str, conv_id: str | None) -> None:
         await self._delete(_safe_key("mem:ws", user_id, conv_id or ""))
 
+    # ---- rolling summary (write-behind: hot-path ĐỌC cache; refresh NỀN sau turn) ----
+    # Trả (summary | None, n_older_lúc_tính). None = chưa có cache (cold).
+    async def get_summary(self, user_id: str, conv_id: str | None) -> tuple[str | None, int]:
+        raw = await self._get(_safe_key("mem:summary", user_id, conv_id or ""))
+        if not raw:
+            return (None, 0)
+        try:
+            d = json.loads(raw)
+            return (d.get("s") or "", int(d.get("n") or 0))
+        except Exception:  # noqa: BLE001
+            return (None, 0)
+
+    async def set_summary(self, user_id: str, conv_id: str | None, summary: str, n_older: int) -> None:
+        payload = json.dumps({"s": summary, "n": int(n_older)}, ensure_ascii=False)
+        await self._setex(_safe_key("mem:summary", user_id, conv_id or ""), payload)
+
     # ---- low-level (best-effort) ----
     async def _get(self, key: str) -> str | None:
         try:
@@ -117,6 +133,7 @@ class NoOpStmStore:
     def __init__(self) -> None:
         self._task: dict[str, TaskState] = {}
         self._ws: dict[str, list[WorkingSetItem]] = {}
+        self._summary: dict[str, tuple[str, int]] = {}
 
     async def get_task(self, user_id, conv_id):
         return self._task.get(_safe_key(user_id, conv_id or ""))
@@ -140,8 +157,14 @@ class NoOpStmStore:
     async def invalidate_ws(self, user_id, conv_id):
         self._ws.pop(_safe_key(user_id, conv_id or ""), None)
 
+    async def get_summary(self, user_id, conv_id):
+        return self._summary.get(_safe_key(user_id, conv_id or ""), (None, 0))
+
+    async def set_summary(self, user_id, conv_id, summary, n_older):
+        self._summary[_safe_key(user_id, conv_id or "")] = (summary, int(n_older))
+
     def reset(self) -> None:
-        self._task.clear(); self._ws.clear()
+        self._task.clear(); self._ws.clear(); self._summary.clear()
 
 
 def _import_redis():

@@ -10,6 +10,7 @@ Tách service sau = viết adapter MemoryClient khác (HTTP), MOSA KHÔNG đổi
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Awaitable, Callable
 
@@ -39,6 +40,10 @@ class InProcessMemoryClient:
         self._make_model = make_model
         self._recent_n = max(1, recent_n)
         self._summarize_after = summarize_after
+        # Write-behind: chỉ re-summarize NỀN khi older tăng >= ngưỡng này (tiết kiệm cost gpt-4o-mini
+        # + đỡ summarize mỗi turn). Giữ ref task nền để không bị GC giữa chừng.
+        self._summary_refresh_every = max(1, recent_n // 2)
+        self._bg_tasks: set[asyncio.Task] = set()
 
     async def load_context(self, user_id: str, conversation_id: str | None, query: str) -> MemoryContext:
         try:
@@ -47,7 +52,14 @@ class InProcessMemoryClient:
             summary = ""
             older = msgs[: len(msgs) - len(recent)]
             if len(msgs) > self._summarize_after and older:
-                summary = await self._summarize(older)
+                # WRITE-BEHIND: đọc summary cache (TỨC THÌ, không gọi LLM trên hot-path). Nếu chưa có
+                # (cold) hoặc older đã tăng đủ ngưỡng -> đặt lịch re-summarize NỀN cho turn sau.
+                # Hot-path KHÔNG bao giờ chờ summarize -> cắt 5-16s dead-air. Summary trễ tối đa
+                # vài lượt; recent_n verbatim bù phần đó. Cold turn đầu: summary rỗng (chấp nhận).
+                cached_sum, cached_n = await self._stm.get_summary(user_id, conversation_id)
+                summary = cached_sum or ""
+                if cached_sum is None or (len(older) - cached_n) >= self._summary_refresh_every:
+                    self._schedule_summary_refresh(user_id, conversation_id, older)
             task = await self._stm.get_task(user_id, conversation_id)
             ws = await self._stm.get_ws(user_id, conversation_id)
             prefs: tuple[Pref, ...] = ()  # STUB Phase sau (LTM)
@@ -58,6 +70,27 @@ class InProcessMemoryClient:
         except Exception as exc:  # noqa: BLE001 — fail-safe: memory KHÔNG được làm vỡ query
             logger.warning("memory_load_context_failed: %s", str(exc)[:160])
             return MemoryContext.empty()
+
+    def _schedule_summary_refresh(
+        self, user_id: str, conversation_id: str | None, older: list[tuple[str, str]],
+    ) -> None:
+        """Đặt lịch re-summarize NỀN (fire-and-forget). Giữ ref để task không bị GC; lỗi -> nuốt."""
+        try:
+            t = asyncio.create_task(self._refresh_summary(user_id, conversation_id, list(older)))
+            self._bg_tasks.add(t)
+            t.add_done_callback(self._bg_tasks.discard)
+        except RuntimeError:  # không có event loop đang chạy (không nên xảy ra ở async path)
+            pass
+
+    async def _refresh_summary(
+        self, user_id: str, conversation_id: str | None, older: list[tuple[str, str]],
+    ) -> None:
+        try:
+            s = await self._summarize(older)
+            if s:
+                await self._stm.set_summary(user_id, conversation_id, s, len(older))
+        except Exception as exc:  # noqa: BLE001 — refresh nền KHÔNG được làm vỡ gì
+            logger.warning("memory_summary_refresh_failed: %s", str(exc)[:160])
 
     async def record_turn(self, user_id, conversation_id, role, content, meta=None) -> None:
         # Dialogue được conversation repo lưu (luồng hiện tại). Hook consolidation/preference
