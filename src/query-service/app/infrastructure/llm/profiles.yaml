@@ -47,8 +47,11 @@ nodes:
   # phải giảm nghĩ. max cao để JSON không cụt. (adapter openrouter_effort vẫn có sẵn để hot-config
   # cắt nghĩ per-node SAU NÀY nếu cần — hiện KHÔNG dùng.)
   plan:
-    adapter: standard
+    adapter: openrouter_effort     # was: standard — cắt độ nghĩ deepseek (reasoning:{effort})
     capability: plan
+    # effort=low: deepseek nghĩ GỌN (~5s thay vì 22s với 1500+ token CoT lan man) mà vẫn đủ chất
+    # cho việc route+decompose. CoT VẪN stream ra panel Orchestrator (adapter surfaces_reasoning).
+    reasoning_effort: low
     max_output_tokens: 3000
 
   # Bước THINK 2 = TỔNG HỢP + VERIFY. Mặc định synth -> deepseek-v4-flash; muốn chất hơn đổi

@@ -94,6 +94,10 @@ class LlmReranker:
     ) -> List[SearchHit]:
         if not hits:
             return []
+        # ≤2 hits: rerank LLM KHÔNG thêm giá trị (không có gì để xếp lại) -> skip 1 LLM call,
+        # sort theo vector score là đủ. Tiết kiệm latency khi Qdrant trả ít kết quả.
+        if len(hits) <= 2:
+            return sorted(hits, key=lambda h: h.score, reverse=True)[:top_k]
 
         scored: list[tuple[float, SearchHit]] = []
         try:

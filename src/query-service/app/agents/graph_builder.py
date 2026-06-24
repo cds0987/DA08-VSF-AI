@@ -261,6 +261,16 @@ def build_orchestrator_graph(
         else:
             refs_block = "(không có nguồn tài liệu — KHÔNG dùng [N])"
 
+        # RAG MISS TUYỆT ĐỐI (không text, không source) -> KHÔNG gọi synth LLM (vô ích, chỉ để
+        # model nói "chưa có thông tin" mất 5-8s). Trả fallback NGAY. Có BẤT KỲ data nào -> bỏ qua
+        # nhánh này, để LLM synth bình thường.
+        if not data_text.strip() and not sources_ref:
+            if ctx.emit:
+                await ctx.emit({"phase": "thinking", "node": "verify",
+                                "status": "Không tìm được dữ liệu phù hợp."})
+            return {"answer": "Mình chưa tìm được thông tin phù hợp. Bạn thử hỏi lại theo "
+                              "cách khác hoặc liên hệ HR/IT Helpdesk nhé.", "sources": []}
+
         # Không có model (mock/test) -> gộp text thô (vẫn trả sources cho FE).
         if make_model is None:
             return {"answer": data_text or
