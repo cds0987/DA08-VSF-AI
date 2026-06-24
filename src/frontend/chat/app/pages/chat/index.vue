@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { AlertTriangle, BookOpen, Database, Search, Wand2 } from '@lucide/vue'
 import { toast } from 'vue-sonner'
-import { useDebounceFn } from '@vueuse/core'
+import { useChatAutoScroll } from '~/composables/useChatAutoScroll'
 import { useSessionStore } from '~/stores/session'
 import { useChatStore } from '~/stores/chat'
 import { cn } from '~/lib/utils'
@@ -21,29 +21,10 @@ const PIPELINE_STAGES = [
 const session = useSessionStore()
 const chat = useChatStore()
 const router = useRouter()
-const scrollRef = ref<HTMLDivElement | null>(null)
 const hasConversation = computed(() => chat.messages.length > 0 || chat.pipeline >= 0)
-let scrollRafId: number | null = null
-
-function scrollToBottom(behavior: ScrollBehavior) {
-  scrollRef.value?.scrollTo({ top: scrollRef.value.scrollHeight, behavior })
-}
-
-const smoothScrollToBottom = useDebounceFn(() => {
-  if (scrollRafId || chat.isHistoryLoading) return
-  scrollToBottom('smooth')
-}, 16)
-
-function scheduleInstantScroll() {
-  if (!import.meta.client) return
-  if (scrollRafId) cancelAnimationFrame(scrollRafId)
-  scrollRafId = requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      scrollToBottom('auto')
-      scrollRafId = null
-    })
-  })
-}
+const { scrollRef, scheduleAutoScroll, scheduleInstantScroll } = useChatAutoScroll(
+  computed(() => chat.isHistoryLoading),
+)
 
 async function submitFeedback(messageId: string, score: 1 | -1) {
   try {
@@ -76,8 +57,13 @@ watch(
 
 watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText], () => {
   if (chat.isHistoryLoading) { scheduleInstantScroll(); return }
-  nextTick(smoothScrollToBottom)
+  nextTick(() => scheduleAutoScroll())
 })
+
+function handleSend(question: string) {
+  chat.ask(question, PIPELINE_STAGES)
+  scheduleInstantScroll()
+}
 </script>
 
 <template>
@@ -137,7 +123,7 @@ watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText
           :is-processing="chat.pipeline >= 0"
           :show-quick-actions="!hasConversation"
           @update:input="chat.setInput"
-          @send="question => chat.ask(question, PIPELINE_STAGES)"
+          @send="handleSend"
         />
       </div>
     </div>
