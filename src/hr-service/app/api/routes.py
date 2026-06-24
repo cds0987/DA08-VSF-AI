@@ -731,6 +731,31 @@ async def list_departments(
     return {"departments": departments}
 
 
+class RenameDeptRequest(BaseModel):
+    new_name: str
+
+
+@router.post("/hr/departments/{old_name}/rename")
+async def rename_department(
+    old_name: str,
+    body: RenameDeptRequest,
+    repo: HrRepository = Depends(get_repo),
+    publisher: Any = Depends(get_publisher),
+) -> dict[str, Any]:
+    """Đổi tên department — cascade update tất cả employee + publish event để query-service cập nhật ACL."""
+    if not old_name.strip() or not body.new_name.strip():
+        raise HTTPException(status_code=422, detail="Tên department không được rỗng")
+    if old_name == body.new_name:
+        return {"updated_employees": 0, "old_name": old_name, "new_name": body.new_name}
+    count = await repo.rename_department(old_name, body.new_name)
+    await _publish_event(publisher, "hr.department.renamed", {
+        "old_department": old_name,
+        "new_department": body.new_name,
+    })
+    logger.info("hr_dept_rename old=%s new=%s employees_updated=%d", old_name, body.new_name, count)
+    return {"updated_employees": count, "old_name": old_name, "new_name": body.new_name}
+
+
 @public_router.get("/hr/employees/departments")
 async def list_employee_departments(
     repo: HrRepository = Depends(get_repo),

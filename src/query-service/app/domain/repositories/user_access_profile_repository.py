@@ -26,3 +26,7 @@ class UserAccessProfileRepository(ABC):
     @abstractmethod
     async def get_profile(self, user_id: str) -> UserAccessProfile | None:
         """Return the locally cached user access profile, or None if not yet projected."""
+
+    @abstractmethod
+    async def delete_profile(self, user_id: str) -> None:
+        """Delete user access profile (called when user is deleted)."""

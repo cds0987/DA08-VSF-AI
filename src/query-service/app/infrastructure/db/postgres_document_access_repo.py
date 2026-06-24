@@ -81,6 +81,22 @@ class PostgresDocumentAccessRepository(DocumentAccessRepository):
                 document_id,
             )
 
+    async def rename_department(self, old_name: str, new_name: str) -> int:
+        pool = await self._get_pool()
+        async with pool.acquire() as connection:
+            result = await connection.execute(
+                """
+                UPDATE query_svc.document_access
+                SET allowed_departments = array_replace(allowed_departments, $1, $2),
+                    updated_at = now()
+                WHERE $1 = ANY(allowed_departments)
+                """,
+                old_name,
+                new_name,
+            )
+        parts = (result or "").split()
+        return int(parts[-1]) if parts and parts[-1].isdigit() else 0
+
     async def close(self) -> None:
         if self._pool is not None:
             await self._pool.close()

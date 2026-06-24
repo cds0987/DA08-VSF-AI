@@ -133,7 +133,7 @@ export interface QueryDoneEvent {
 
 export interface NotificationEvent {
   type: 'notify'
-  event: 'doc_new' | 'leave_request_new' | 'leave_approved' | 'leave_rejected'
+  event: 'doc_new' | 'leave_request_new' | 'leave_approved' | 'leave_rejected' | 'leave_cancelled'
   id: string
   message: string
   doc_id: string | null

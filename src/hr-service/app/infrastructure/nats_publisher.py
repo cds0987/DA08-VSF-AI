@@ -21,8 +21,8 @@ LEAVE_REQUEST_SUBJECTS = [
     "hr.leave_request.approved",
     "hr.leave_request.rejected",
 ]
-HR_EVENT_SUBJECTS = {"hr.employee_profile.updated", *LEAVE_REQUEST_SUBJECTS}
-JETSTREAM_STREAMS = {"HR_EVENTS": ["hr.employee_profile.updated", *LEAVE_REQUEST_SUBJECTS]}
+HR_EVENT_SUBJECTS = {"hr.employee_profile.updated", "hr.department.renamed", *LEAVE_REQUEST_SUBJECTS}
+JETSTREAM_STREAMS = {"HR_EVENTS": ["hr.employee_profile.updated", "hr.department.renamed", *LEAVE_REQUEST_SUBJECTS]}
 
 
 @dataclass

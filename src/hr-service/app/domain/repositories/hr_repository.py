@@ -120,6 +120,10 @@ class HrRepository(ABC):
         Mặc định [] — override trong PostgresHrRepository."""
         return []
 
+    async def rename_department(self, old_name: str, new_name: str) -> int:
+        """Đổi tên department trong bảng employees. Mặc định 0 — override trong PostgresHrRepository."""
+        return 0
+
     @abstractmethod
     async def aclose(self) -> None:
         raise NotImplementedError

@@ -45,5 +45,9 @@ class InMemoryUserAccessProfileRepository(UserAccessProfileRepository):
             employment_status=str(record["employment_status"]),
         )
 
+    async def delete_profile(self, user_id: str) -> None:
+        self._profiles.pop(user_id, None)
+        self._updated_at.pop(user_id, None)
+
     def reset(self) -> None:
         self.__init__()

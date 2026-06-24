@@ -43,3 +43,7 @@ class NotificationRepository(ABC):
     @abstractmethod
     async def delete_by_doc_id(self, doc_id: str) -> int:
         """Delete all notifications for a document (called when doc is deleted). Returns count deleted."""
+
+    @abstractmethod
+    async def delete_by_user_id(self, user_id: str) -> int:
+        """Delete all notifications for a user (called when user is deleted). Returns count deleted."""

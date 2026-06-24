@@ -25,6 +25,20 @@ class RedisAccessCache:
         except Exception:
             pass
 
+    async def delete(self, user_id: str) -> None:
+        try:
+            await self._get_client().delete(f"acl:{user_id}")
+        except Exception:
+            pass
+
+    async def flush_all(self) -> None:
+        try:
+            client = self._get_client()
+            async for key in client.scan_iter("acl:*"):
+                await client.delete(key)
+        except Exception:
+            pass
+
     def reset(self) -> None:
         self._client = None
 
@@ -44,6 +58,12 @@ class NoOpAccessCache:
         return None
 
     async def set(self, user_id: str, doc_ids: list[str]) -> None:
+        pass
+
+    async def delete(self, user_id: str) -> None:
+        pass
+
+    async def flush_all(self) -> None:
         pass
 
     def reset(self) -> None:

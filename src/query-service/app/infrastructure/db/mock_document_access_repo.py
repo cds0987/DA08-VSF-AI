@@ -53,6 +53,15 @@ class InMemoryDocumentAccessRepository(DocumentAccessRepository):
     async def delete_access(self, document_id: str) -> None:
         self._records.pop(document_id, None)
 
+    async def rename_department(self, old_name: str, new_name: str) -> int:
+        count = 0
+        for record in self._records.values():
+            depts = record.get("allowed_departments", [])
+            if old_name in depts:
+                record["allowed_departments"] = [new_name if d == old_name else d for d in depts]
+                count += 1
+        return count
+
     def reset(self) -> None:
         self.__init__()
 
