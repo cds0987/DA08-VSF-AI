@@ -36,9 +36,11 @@ capabilities:
                                     # cho deepseek qua OpenRouter, xoay API key mỗi 150K token.
     tiers: [paid]                   # paid = OpenRouter (deepseek). KHÔNG dùng OpenAI free.
     models:
-      paid:                           # CHIA TẢI //hóa: deepseek + xiaomi RR 50/50 -> mỗi upstream
-        - deepseek/deepseek-v4-flash   # GPU nửa tải -> queue nông -> p99 ttfc thấp (gốc 12s = queue upstream)
-        - xiaomi/mimo-v2.5
+      paid: deepseek/deepseek-v4-flash   # PRIMARY (nhanh). //hóa deepseek+xiaomi ĐÃ THỬ 2026-06-24:
+                                         # deepseek p99 12.99→8.78s (split đúng cơ chế) NHƯNG xiaomi
+                                         # p99 15.21s -> kéo p99 TỔNG xấu hơn + success 125→84/150 ->
+                                         # REVERT. Cơ chế _pick_model_split GIỮ; chỉ //hóa khi có
+                                         # model thứ 2 NHANH NGANG deepseek (xiaomi giữ role save_mode).
     selector:                       # banded_rotation: dính 1 key tới khi phục vụ 150K -> xoay key kế.
       impl: adaptive_balanced       # OpenRouter(deepseek): AIMD tự dò trần qua 429 (không TPM cố định)
       params:
@@ -56,9 +58,11 @@ capabilities:
                                     # nâng chất ca khó: đổi paid = deepseek/deepseek-v4-pro.
     tiers: [paid]
     models:
-      paid:                           # CHIA TẢI //hóa: deepseek + xiaomi RR 50/50 -> mỗi upstream
-        - deepseek/deepseek-v4-flash   # GPU nửa tải -> queue nông -> p99 ttfc thấp (gốc 12s = queue upstream)
-        - xiaomi/mimo-v2.5
+      paid: deepseek/deepseek-v4-flash   # PRIMARY (nhanh). //hóa deepseek+xiaomi ĐÃ THỬ 2026-06-24:
+                                         # deepseek p99 12.99→8.78s (split đúng cơ chế) NHƯNG xiaomi
+                                         # p99 15.21s -> kéo p99 TỔNG xấu hơn + success 125→84/150 ->
+                                         # REVERT. Cơ chế _pick_model_split GIỮ; chỉ //hóa khi có
+                                         # model thứ 2 NHANH NGANG deepseek (xiaomi giữ role save_mode).
     selector:
       impl: adaptive_balanced       # OpenRouter(deepseek): AIMD tự dò trần qua 429 (không TPM cố định)
       params:
@@ -74,9 +78,11 @@ capabilities:
                                     # đổi paid = deepseek/deepseek-v4-pro (chỉ sửa dòng dưới).
     tiers: [paid]
     models:
-      paid:                           # CHIA TẢI //hóa: deepseek + xiaomi RR 50/50 -> mỗi upstream
-        - deepseek/deepseek-v4-flash   # GPU nửa tải -> queue nông -> p99 ttfc thấp (gốc 12s = queue upstream)
-        - xiaomi/mimo-v2.5
+      paid: deepseek/deepseek-v4-flash   # PRIMARY (nhanh). //hóa deepseek+xiaomi ĐÃ THỬ 2026-06-24:
+                                         # deepseek p99 12.99→8.78s (split đúng cơ chế) NHƯNG xiaomi
+                                         # p99 15.21s -> kéo p99 TỔNG xấu hơn + success 125→84/150 ->
+                                         # REVERT. Cơ chế _pick_model_split GIỮ; chỉ //hóa khi có
+                                         # model thứ 2 NHANH NGANG deepseek (xiaomi giữ role save_mode).
     selector:
       impl: adaptive_balanced       # OpenRouter(deepseek): AIMD tự dò trần qua 429 (không TPM cố định)
       params:

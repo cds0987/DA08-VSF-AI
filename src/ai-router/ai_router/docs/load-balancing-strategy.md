@@ -165,3 +165,14 @@ SỐNG. `stop → set-machine-type=e2-custom-N-MEM → start`. Disk persistent k
 Để app DÙNG core mới = thêm REPLICA (1 worker=1 core; --workers cắt SSE) → kèm fix **SSE/notification fanout
 in-memory** (ConnectionManager) kẻo notification rớt xuyên replica. Dead-air @4core CHƯA chạm trần CPU
 (load 0.92/4, query-service 3% CPU; dead-air = DB/model latency, nâng core KHÔNG giảm dead-air).
+
+### //hóa MODEL (chia tải nhiều model 1 capability) — cơ chế + thử nghiệm 2026-06-24
+**Vì sao**: p99 ttfc 12s @150 = **QUEUE inference UPSTREAM** (GPU provider), KHÔNG phải credential/key
+(ai-router 10ms, ttfc≈create_ms=provider). Chia tải 2 model = 2 upstream GPU khác nhau → mỗi cái nửa tải
+→ queue nông → p99 thấp. **Chỉ thắng nếu 2 model NHANH NGANG nhau.**
+**Cơ chế (GIỮ, dùng lại được)**: `adaptive_balanced._pick_model_split` — `models[tier]` là LIST → ROUND-ROBIN
+(`next_seq`) thay failover-first; vẫn AIMD key-balance (cùng pool OR key). Bật = routing.yaml `models.paid: [m1, m2]`.
+**Thử deepseek+xiaomi 50/50 → REVERT** (đo thật):
+- deepseek ttfc p99 **12.99→8.78s** (split ĐÚNG cơ chế, nửa tải giảm tail ✓).
+- **NHƯNG xiaomi/mimo-v2.5 ttfc p99 = 15.21s** (upstream chậm/variance hơn) → p99 TỔNG ≈15s **XẤU hơn** deepseek-only; success 125→84/150 (xiaomi sinh chậm → hold lâu → timeout).
+- → p99 = 1% chậm nhất; ≥1% đi model chậm thì p99 tổng vẫn cao. **//hóa cần model thứ 2 nhanh ngang deepseek** (vd deepseek-pro KHÔNG nhanh; cần đo 1 OR model ttfc thấp trước khi //hóa). xiaomi giữ role **save_mode** (overflow rẻ), KHÔNG làm primary.
