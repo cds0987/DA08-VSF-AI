@@ -13,6 +13,10 @@ test('buildQuotedContent: prepends multiline blockquote + question', () => {
   )
 })
 
+test('buildQuotedContent: quote nhưng không có câu hỏi -> chỉ blockquote', () => {
+  assert.equal(buildQuotedContent({ messageId: 'm', text: 'dòng 1\ndòng 2' }, '   '), '> dòng 1\n> dòng 2')
+})
+
 test('buildQuotedContent: no quote returns trimmed question', () => {
   assert.equal(buildQuotedContent(null, '  hỏi  '), 'hỏi')
   assert.equal(buildQuotedContent({ messageId: 'm', text: '   ' }, 'hỏi'), 'hỏi')

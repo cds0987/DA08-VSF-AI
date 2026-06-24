@@ -18,6 +18,8 @@ export function buildQuotedContent(quote: Quote | null, question: string): strin
   const q = question.trim()
   if (!quote || !quote.text.trim()) return q
   const blockquote = quote.text.trim().split('\n').map(line => `> ${line}`).join('\n')
+  // Chỉ có quote, không nhập câu hỏi -> gửi nguyên đoạn trích (không thêm xuống dòng thừa).
+  if (!q) return blockquote
   return `${blockquote}\n\n${q}`
 }
 

@@ -656,7 +656,8 @@ export const useChatStore = defineStore('chat', () => {
 
   async function ask(q: string, pipelineStages: PipelineStage[], docIds?: string[] | null) {
     const question = q.trim()
-    if (!question || pipeline.value >= 0) return
+    // Cho gửi khi có câu hỏi HOẶC khi đang có trích dẫn (gửi chỉ riêng đoạn quote cũng được).
+    if ((!question && !quote.value) || pipeline.value >= 0) return
     // Nếu user đã trích dẫn một đoạn bot answer, prepend thành blockquote vào nội dung gửi.
     const content = buildQuotedContent(quote.value, question)
 

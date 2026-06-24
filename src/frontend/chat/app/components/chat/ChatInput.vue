@@ -37,8 +37,11 @@ function handleInput(event: Event) {
   emit('update:input', value)
 }
 
+// Cho gửi khi có chữ HOẶC khi đang có trích dẫn (quote) — kể cả ô chat trống.
+const canSend = computed(() => !props.isProcessing && (props.input.trim().length > 0 || !!props.quote))
+
 function sendMessage() {
-  if (!props.input.trim() || props.isProcessing) return
+  if (!canSend.value) return
   emit('send', props.input)
 }
 
@@ -128,10 +131,10 @@ defineExpose({
         />
         <button
           type="submit"
-          :disabled="!input.trim() || isProcessing"
+          :disabled="!canSend"
           :class="cn(
             'inline-flex h-10 w-10 shrink-0 items-center justify-center self-end rounded-full transition-[transform,background-color] disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500',
-            input.trim() && !isProcessing
+            canSend
               ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25 hover:bg-blue-500 active:scale-[0.97]'
               : 'bg-slate-100 text-slate-400 dark:bg-white/5 dark:text-muted-foreground/40',
           )"
