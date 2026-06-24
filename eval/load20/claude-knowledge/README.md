@@ -76,6 +76,20 @@ thì 1 account KHÔNG chạy >3 concurrent → phải **N user riêng** (vì sao
 - SAU write-behind @15u: **0.65s**. SAU toàn bộ (gather+write-behind+defer+2replica) @30u: **~2.0s**
   (ctx 1s ∥ acl · mem 0.88s cache · save 0 defer · graph 0.93s).
 
+**RE-BENCHMARK @150 sau commit `af8014a` (gather get_context ∥ get_allowed_doc_ids) — 2026-06-24, server-side:**
+- Dead-air (TOTAL_first_emit) @150: **p50 5.78s · p95 7.98s · p99 10.84s** (n=150) — so CŨ ~10s → **−42%**.
+- 150/150 served · 0×429 · **9 save_mode** (cũ ~17). ai-router ttfc avg ~5.9s. CV 0.333 (đều).
+- Phân rã p50 (ms): `ctx=2520` (get_context — TO NHẤT còn lại) · `mem=2239` · `graph=2505` ·
+  `save=0` (defer) · **`acl=-2229`** (ÂM = chạy SONG SONG mem → free; đúng gather opt). → đòn kế: cache/giảm get_context.
+- ⚠️ Client 1-máy @150 báo dead-air 34s / TTFT-ans p50 88s = **thổi phồng ~6×** → BỎ, chỉ tin server-side.
+- Cách đo: IAP tunnel (`gcloud start-iap-tunnel ... :2225`; port 22 direct timeout) → `docker logs` 2 replica
+  query-service grep `orchestrator_preplan_timing TOTAL_first_emit_ms` (p-quantile) + diff `/metrics`
+  `airouter_ttfc_seconds_{count,sum}`. OS-Login user = `ttnguyen1410_gmail_com`.
+- ⚠️ KINH TẾ: `save_mode` degrade `gpt-4o-mini` mà gpt-4o-mini ĐẮT HƠN deepseek-flash → fallback NGƯỢC.
+  9 save_mode @150 là do AIMD tự-bóp chạm trần (5key×32), KHÔNG phải provider 429 (OpenRouter có credit,
+  đa-upstream hiếm hard-429). → nên: (a) nới AIMD để deepseek gánh tiếp (rẻ), hoặc (b) đổi save_mode model
+  sang rẻ hơn (key deepseek khác / model rẻ), KHÔNG dùng gpt-4o-mini. "save_mode" = tránh-503, KHÔNG phải save-cost.
+
 **Các tối ưu đã áp (tất cả live):**
 1. `AIROUTER_AIMD_INIT` 16→32 (env, counters.py) — nâng trần deepseek ~150 (provider không 429).
 2. `load_context` **write-behind** (client.py + redis_store.py get/set_summary) — summarize ra NỀN,
