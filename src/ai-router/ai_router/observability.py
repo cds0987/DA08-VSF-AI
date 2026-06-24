@@ -17,6 +17,7 @@ from threading import Lock
 
 # Bucket giây cho histogram latency/ttfc (dải LLM call 0.25-55s). Cumulative theo chuẩn Prometheus
 # -> Grafana histogram_quantile() tính p50/p95/p99; avg = rate(_sum)/rate(_count).
+# (Nuôi metric airouter_ttfc_seconds + airouter_call_latency_seconds cho bảng 'Trải nghiệm user'.)
 LAT_BUCKETS: tuple[float, ...] = (0.25, 0.5, 1, 2, 3, 5, 8, 13, 21, 34, 55)
 
 
