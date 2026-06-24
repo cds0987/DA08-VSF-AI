@@ -20,6 +20,7 @@ import type { CitationFileGroup } from '~/lib/utils'
 import type { ChatMessage, Citation } from '~/types'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
+import { createStreamingRenderer } from '~/lib/streamingMarkdown'
 import ActionableCard from './ActionableCard.vue'
 import ApprovalReviewCard from './ApprovalReviewCard.vue'
 import ProactiveSuggestionCard from './ProactiveSuggestionCard.vue'
@@ -36,6 +37,11 @@ const copied = ref(false)
 const sourcesOpen = ref(false)   // disclosure "Tài liệu liên quan" — DeepSeek-style, mặc định gọn
 
 const md = new MarkdownIt({ html: true, breaks: true, linkify: true })
+// Render tăng dần khi stream: cache prefix các block đã xong, mỗi frame chỉ render tail.
+const streamingRenderer = createStreamingRenderer({
+  render: (s: string) => md.render(s),
+  sanitize: (h: string) => DOMPurify.sanitize(h),
+})
 
 // Gom citation theo tài liệu -> số nguồn + map ref->số. Dùng cho cả pill inline lẫn list nguồn.
 const citationSources = computed(() => buildCitationSources(props.data.citations))
@@ -62,10 +68,8 @@ const renderedContent = computed(() => {
   // Đang stream: render markdown THÔ + con trỏ nhấp nháy, CHƯA inject pill (citation chưa có).
   // Cùng node với bản cuối -> khi xong chỉ patch ([N] thành pill) chứ không remount -> không flash.
   if (props.data.streaming) {
-    const html = md.render(props.data.content)
-    return DOMPurify.sanitize(
-      html.replace(/(<\/(?:p|li|h[1-6]|pre|blockquote)>)\s*$/, '<span class="streaming-cursor"></span>$1'),
-    )
+    const html = streamingRenderer.toHtml(props.data.content)
+    return html.replace(/(<\/(?:p|li|h[1-6]|pre|blockquote)>)\s*$/, '<span class="streaming-cursor"></span>$1')
   }
   const rawHtml = md.render(props.data.content)
   const { refToNumber } = citationSources.value

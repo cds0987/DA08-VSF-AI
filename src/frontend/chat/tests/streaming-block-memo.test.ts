@@ -86,3 +86,16 @@ test('reset(): xoá cache, prefix render lại lần sau', () => {
   r.toHtml('a\n\nb')
   assert.ok(d.calls.includes('a\n\n'), 'sau reset phải render lại prefix')
 })
+
+import { readFile } from 'node:fs/promises'
+const root = new URL('../', import.meta.url)
+const read = (p: string) => readFile(new URL(p, root), 'utf8')
+
+test('AnswerBlock: nhánh streaming dùng createStreamingRenderer().toHtml', async () => {
+  const src = await read('app/components/chat/AnswerBlock.vue')
+  assert.match(src, /createStreamingRenderer/, 'phải tạo streaming renderer')
+  assert.match(src, /streamingRenderer\.toHtml\(/, 'nhánh streaming phải gọi toHtml')
+  // Không còn md.render trực tiếp trên toàn bộ content ở nhánh streaming
+  assert.doesNotMatch(src, /if \(props\.data\.streaming\) \{\s*const html = md\.render\(props\.data\.content\)/,
+    'nhánh streaming không còn md.render(toàn bộ content) trực tiếp')
+})
