@@ -29,11 +29,10 @@ const ROLE_LABEL: Record<string, string> = {
 const ROLE_ICON: Record<string, any> = {
   rag_retrieve: FileSearch, hr_lookup: Database, synthesize_recommend: Sparkles, analyze: Lightbulb, critic: ShieldCheck,
 }
+// Đơn sắc kiểu DeepSeek: chỉ giữ ĐỎ cho lỗi (1 màu ngữ nghĩa); còn lại đều xám.
 function stepDotColor(s?: AgentPlanStep['status']): string {
-  return s === 'running' ? 'bg-blue-400'
-    : s === 'error' ? 'bg-red-400'
-      : s === 'ok' || s === 'no_info' ? 'bg-emerald-400'
-        : 'bg-slate-300 dark:bg-white/25'
+  return s === 'error' ? 'bg-red-400'
+    : 'bg-slate-300 dark:bg-white/25'
 }
 
 // Mỗi thought render qua <ThoughtDetail>: summary 1 dòng + disclosure "Xem chi tiết"
@@ -46,27 +45,13 @@ const TOOL_ICON: Record<string, any> = { rag_search: Search, hr_query: Database 
 
 // Style theo GROUP (tập cố định, nhỏ) — node động map vào 1 trong các group này. Thêm NODE
 // KHÔNG thêm group -> style ổn định; node mới mượn style group của nó.
-const GROUP_STYLE: Record<SseGroup, { title: string; icon: any; head: string; box: string }> = {
-  orchestrator: {
-    title: 'Orchestrator', icon: GitBranch,
-    head: 'text-blue-700 dark:text-blue-300',
-    box: 'border-blue-100 bg-blue-50/50 dark:border-blue-500/15 dark:bg-blue-500/5',
-  },
-  worker: {
-    title: 'Worker', icon: Search,
-    head: 'text-amber-700 dark:text-amber-300',
-    box: 'border-amber-100 bg-amber-50/50 dark:border-amber-500/15 dark:bg-amber-500/5',
-  },
-  verify: {
-    title: 'Verify — Kiểm tra & tổng hợp', icon: ShieldCheck,
-    head: 'text-violet-700 dark:text-violet-300',
-    box: 'border-violet-100 bg-violet-50/50 dark:border-violet-500/15 dark:bg-violet-500/5',
-  },
-  answer: {
-    title: 'Soạn câu trả lời', icon: Sparkles,
-    head: 'text-emerald-700 dark:text-emerald-300',
-    box: 'border-emerald-100 bg-emerald-50/50 dark:border-emerald-500/15 dark:bg-emerald-500/5',
-  },
+// Đơn sắc kiểu DeepSeek: chỉ KHÁC icon từng group, màu tiêu đề/marker dùng CHUNG tông xám.
+const GROUP_HEAD = 'text-slate-600 dark:text-foreground/80'
+const GROUP_STYLE: Record<SseGroup, { title: string; icon: any }> = {
+  orchestrator: { title: 'Orchestrator', icon: GitBranch },
+  worker: { title: 'Worker', icon: Search },
+  verify: { title: 'Verify — Kiểm tra & tổng hợp', icon: ShieldCheck },
+  answer: { title: 'Soạn câu trả lời', icon: Sparkles },
 }
 
 // thought gom theo group (qua nodeGroup của hợp đồng). Node lạ -> 'orchestrator'.
@@ -122,7 +107,7 @@ function resultLabel(e: TraceEntry): string {
       class="group flex items-center gap-1.5 rounded-md px-2 py-1 text-[14.5px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-muted-foreground dark:hover:bg-white/5 dark:hover:text-foreground"
       @click="open = !open"
     >
-      <Sparkles class="h-4 w-4 text-blue-500" />
+      <Sparkles class="h-4 w-4 text-slate-400 dark:text-muted-foreground" />
       <span>{{ trace.length ? `Agent đã thực hiện ${trace.length} bước` : 'Xem suy nghĩ của agent' }}</span>
       <ChevronRight class="tl-chevron h-4 w-4 transition-transform" :class="open && 'rotate-90'" />
     </button>
@@ -141,10 +126,10 @@ function resultLabel(e: TraceEntry): string {
               aria-hidden="true"
               class="absolute -left-7 top-0 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-slate-200 dark:bg-background dark:ring-white/10"
             >
-              <component :is="GROUP_STYLE[g].icon" class="h-3 w-3" :class="GROUP_STYLE[g].head" />
+              <component :is="GROUP_STYLE[g].icon" class="h-3 w-3 text-slate-400 dark:text-muted-foreground" />
             </span>
             <div class="flex items-center gap-1.5">
-              <span class="text-sm font-medium" :class="GROUP_STYLE[g].head">{{ GROUP_STYLE[g].title }}</span>
+              <span class="text-sm font-medium" :class="GROUP_HEAD">{{ GROUP_STYLE[g].title }}</span>
             </div>
             <!-- TÓM TẮT 1 dòng + chi tiết human-readable + raw lồng (do ThoughtDetail lo) -->
             <ThoughtDetail
@@ -162,7 +147,7 @@ function resultLabel(e: TraceEntry): string {
               <div class="flex items-center gap-1.5 text-sm">
                 <component :is="ROLE_ICON[s.role] ?? FileSearch" class="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-muted-foreground" />
                 <span class="flex-1 truncate font-medium text-slate-700 dark:text-foreground/80">{{ ROLE_LABEL[s.role] ?? s.role }}</span>
-                <Loader2 v-if="s.status === 'running'" class="h-3 w-3 shrink-0 animate-spin text-blue-400" />
+                <Loader2 v-if="s.status === 'running'" class="h-3 w-3 shrink-0 animate-spin text-slate-400 dark:text-muted-foreground" />
                 <XCircle v-else-if="s.status === 'error'" class="h-3 w-3 shrink-0 text-red-400" />
                 <Circle v-else-if="!s.status || s.status === 'pending'" class="h-3 w-3 shrink-0 text-slate-300 dark:text-muted-foreground/40" />
               </div>

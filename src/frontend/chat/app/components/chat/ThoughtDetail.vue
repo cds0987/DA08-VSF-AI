@@ -9,8 +9,8 @@ import type { ThoughtSummary } from '~/lib/timeline'
 const props = defineProps<{ view: ThoughtSummary }>()
 
 const open = ref(false)
-const rawOpen = ref(false)
-const hasDetail = () => props.view.detail.length > 0 || !!props.view.raw
+// Đơn sắc kiểu DeepSeek: chỉ phơi phần human-readable (detail), KHÔNG hiện JSON thô.
+const hasDetail = () => props.view.detail.length > 0
 </script>
 
 <template>
@@ -30,11 +30,12 @@ const hasDetail = () => props.view.detail.length > 0 || !!props.view.raw
         {{ open ? 'Ẩn chi tiết' : 'Xem chi tiết' }}
       </button>
 
+      <!-- Mở ra: chữ xám thụt lề dưới đường kẻ trái mảnh (DeepSeek-style) — KHÔNG box viền/nền màu -->
       <div
         v-show="open"
-        class="custom-scrollbar mt-1 max-h-[200px] overflow-auto rounded-md border border-slate-200/60 bg-slate-50/60 px-2.5 py-2 dark:border-white/10 dark:bg-white/[0.03]"
+        class="custom-scrollbar mt-1 max-h-[220px] overflow-auto border-l border-slate-200 pl-3 dark:border-white/10"
       >
-        <!-- Mức 1: section human-readable có nhãn (không ngoặc/nháy JSON) -->
+        <!-- Section human-readable có nhãn (không ngoặc/nháy JSON) -->
         <div
           v-for="(sec, si) in view.detail"
           :key="si"
@@ -49,29 +50,12 @@ const hasDetail = () => props.view.detail.length > 0 || !!props.view.raw
           <p
             v-for="(line, li) in sec.lines"
             :key="li"
-            class="whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-slate-600 dark:text-muted-foreground"
+            class="whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-slate-500 dark:text-muted-foreground"
             :class="sec.label && 'mt-0.5'"
           >
             {{ line }}
           </p>
         </div>
-
-        <!-- Mức 2: JSON thô (tuỳ chọn) — disclosure lồng, mặc định đóng -->
-        <template v-if="view.raw">
-          <button
-            type="button"
-            class="mt-2 inline-flex items-center gap-1 rounded px-1 text-[11px] font-medium text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-muted-foreground/60 dark:hover:text-foreground"
-            :aria-expanded="rawOpen"
-            @click="rawOpen = !rawOpen"
-          >
-            <ChevronRight class="td-chevron h-3 w-3 transition-transform" :class="rawOpen && 'rotate-90'" aria-hidden="true" />
-            {{ rawOpen ? 'Ẩn dữ liệu thô' : 'Xem dữ liệu thô' }}
-          </button>
-          <pre
-            v-show="rawOpen"
-            class="custom-scrollbar mt-1 max-h-[160px] overflow-auto whitespace-pre-wrap break-words rounded border border-slate-200/60 bg-white/60 px-2 py-1.5 text-[11.5px] leading-relaxed text-slate-500 dark:border-white/10 dark:bg-black/20 dark:text-muted-foreground/80"
-          >{{ view.raw }}</pre>
-        </template>
       </div>
     </template>
   </div>

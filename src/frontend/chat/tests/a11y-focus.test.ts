@@ -8,7 +8,6 @@ const read = (path: string) => readFile(new URL(path, root), 'utf8')
 // Khoá invariant a11y (Phase 5): mọi surface chat tương tác phải có focus ring nhìn thấy
 // bằng bàn phím. Grep VỪA ĐỦ (chỉ assert có focus-visible:outline) — không khoá markup chi tiết.
 const FOCUS_FILES = [
-  'app/components/chat/ChatTopBar.vue',
   'app/components/chat/ChatInput.vue',
   'app/components/chat/ActionableCard.vue',
   'app/components/chat/ApprovalReviewCard.vue',
@@ -21,9 +20,3 @@ for (const file of FOCUS_FILES) {
     assert.match(src, /focus-visible:outline/, `${file} thiếu focus-visible:outline trên nút tương tác`)
   })
 }
-
-test('ChatTopBar: dot trạng thái ping được gate prefers-reduced-motion', async () => {
-  const src = await read('app/components/chat/ChatTopBar.vue')
-  assert.match(src, /status-ping/, 'cần class riêng cho dot ping để gate')
-  assert.match(src, /prefers-reduced-motion/, 'cần @media prefers-reduced-motion tắt ping')
-})

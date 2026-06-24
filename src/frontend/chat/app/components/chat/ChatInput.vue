@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { FileText, ListChecks, Send, ShieldCheck, Sparkles, X, Zap } from '@lucide/vue'
+import { FileText, ListChecks, Send, ShieldCheck, X, Zap } from '@lucide/vue'
 import { cn } from '~/lib/utils'
 import { truncateQuote } from '~/lib/quote'
 import type { Quote } from '~/lib/quote'
@@ -114,11 +114,6 @@ defineExpose({
         </button>
       </div>
       <div class="flex items-center gap-2.5">
-        <div
-          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-50 to-indigo-50 text-blue-500 dark:from-blue-900/30 dark:to-indigo-900/30 dark:text-blue-400"
-        >
-          <Sparkles class="h-4 w-4" />
-        </div>
         <textarea
           ref="textareaRef"
           :value="input"
