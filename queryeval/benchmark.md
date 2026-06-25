@@ -109,6 +109,45 @@ heavy_fanout) — **ép planner fan-out ≥2 worker song song**. Mỗi câu nở
 
 ---
 
-## Benchmark 2 — (sau cải tiến embed/latency) · _chưa đo_
+## Benchmark 2 — (sau fix embed/rerank resilience) · 2026-06-26
 
-> Chạy lại đúng harness + dataset như Benchmark 1, ghi cùng bảng để so trước/sau.
+**Mục tiêu:** dứt `src=0` do ai-router shed embed/rerank 503 dưới tải (nút thắt #1 ở BM1).
+
+**2 fix deployed (ai-router, chi tiết: [src/mcp-service/docs/claudefix.md](../src/mcp-service/docs/claudefix.md)):**
+- **Fix#1** (`657d00f`): rate-429 bench embed 30s→3s + `embeddings()` retry-across-keys + backoff.
+- **Fix#2** (`78e3f65`): `OPENROUTER_RPM` 20→600 (embed+rerank+chat) + cooldown ngắn áp cho cả rerank.
+- Giữ nguyên model: embed PIN `qwen3-embedding-4b`, rerank PIN `cohere/rerank-v3.5`.
+
+### Kết quả — encode (embed/rerank 503) ĐÃ DỨT ✅
+
+| Chỉ số (trace VM, burst 10/s) | BM1/trước | BM2/sau |
+|---|---|---|
+| **embed 503** (ai-router shed) | 195 | **0** ✅ |
+| **rerank 503** | nhiều | **0** ✅ |
+| rag_search error · worker-retry · no_capacity | nhiều | **0** ✅ |
+| Ramp tải-thực **C=6** `src=0` (sau fix#1, đo sạch) | 44% | **0%** ✅ |
+| Ramp overall `src=0` (sau fix#1, đo sạch) | 16% | **5%** ✅ |
+
+→ **Nút thắt encode đã được giải quyết tận gốc**: dưới tải có-kiểm-soát (thực tế), retrieval không còn rỗng.
+
+### Burst CỰC HẠN (10 req/s open-loop, 142 concurrent/1 VM) — residual = capacity, KHÔNG phải encode
+
+| | BM1 | sau fix#1 | sau fix#2 |
+|---|---|---|---|
+| burst `src=0` | 81% | 80% | **68%** |
+| latency p50 | 32s | 74s | 82s |
+
+- Scrape 14 trace src=0 burst#2: **embed/rerank đều 200** (không 503), nhưng **answer rỗng**, 88/99
+  chậm ≥50s, trace treo ~60s sau `plan` = **worker_timeout (60s)**. → Dưới 142-concurrent pile-up,
+  worker/verify queue vượt timeout → bão hòa. **Đây là trần capacity 1-VM**, không phải lỗi encode.
+- Nâng retry/cooldown/RPM thêm KHÔNG cứu (latency còn tệ hơn). Cần **scale ngang / admission-control**
+  (re-enable concurrency cap → fast-fail thay vì degrade) — ngoài phạm vi fix encode.
+
+> ⚠️ Caveat đo: ramp post-fix#2 chạy ngay sau burst (prod đang hồi tải) nên `src=0` 35% bị NHIỄM,
+> không phải số sạch. Số sạch của tải-thực = ramp post-fix#1 (5%) + log VM (503=0, độc lập với tải).
+
+### Kết luận Benchmark 2
+- ✅ **"mcp rag encode đã ổn chưa": RỒI** — embed/rerank 503 = 0; tải thực-tế (ramp) sạch.
+- ⛔ Burst cực hạn 142-concurrent/1 VM vẫn ~68% src=0 do **bão hòa pipeline** (worker timeout, plan/
+  verify chậm) — trần capacity, để dành nếu cần scale.
+- Nút thắt latency thường ngày (plan 41% + verify 33%) **chưa đụng** → còn nguyên cho Benchmark 3.
