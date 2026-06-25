@@ -110,6 +110,11 @@ class McpSettings:
     # Trống = TẮT (giữ hành vi cũ). Bật khi flip embed_base_url -> ai-router để search KHÔNG sập.
     embed_fallback_base_url: str = ""
     embed_fallback_api_key: str = ""
+    # EMBED COALESCER (fix embed-storm @150: 611 embed call -> gom thành batch). Gom embed() đồng
+    # thời (cửa sổ window_ms / tới max) -> 1 call embeddings.create(input=[...]). False = per-call cũ.
+    embed_coalesce: bool = True
+    embed_coalesce_max: int = 128          # CAP batch (thực = min arrivals-trong-window, cap)
+    embed_coalesce_window_ms: int = 20     # cửa sổ gom (~0 so với embed ~1.7s)
     basic_auth: str = ""
     timeout: int | None = None
     options: Mapping[str, Any] = field(default_factory=dict)
