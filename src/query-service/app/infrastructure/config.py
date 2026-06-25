@@ -70,7 +70,8 @@ class Settings(BaseSettings):
     mcp_tool_cache_ttl_seconds: int = 300  # cache MCP tool list 5 min; 0 = off
     # PERSISTENT SESSION POOL (fix root): K session BỀN/replica (owner task) thay mở+initialize MỖI
     # call -> bỏ handshake storm -> 150 heavy trả lời thật. False = per-call cũ (rollback tức thì).
-    mcp_persistent_session: bool = True
+    mcp_persistent_session: bool = True    # fix-forward: 0/125 burst đầu = chỉ 4 preplan/125 (query KHÔNG
+                                           # tới orchestrator = connection/cold-start, KHÔNG phải pool).
     mcp_session_pool_size: int = 16        # 8 replica × 16 = 128 (đủ ~19 concurrent/replica @150);
                                            # cạn/chưa sẵn -> fallback per-call (không vỡ).
     tool_routing_mode: str = "legacy"  # "legacy" = typed methods; "native" = generic call_tool
