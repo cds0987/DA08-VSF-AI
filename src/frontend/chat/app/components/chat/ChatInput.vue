@@ -138,20 +138,21 @@ defineExpose({
           <Send class="h-4 w-4" />
         </button>
       </div>
-
-      <div v-if="showQuickActions" class="flex flex-wrap gap-2 pl-0.5">
-        <button
-          v-for="qa in quickActions"
-          :key="qa.label"
-          type="button"
-          class="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-white/10 dark:bg-white/5 dark:text-muted-foreground dark:hover:bg-white/10"
-          @click="pickQuickAction(qa.prompt)"
-        >
-          <component :is="qa.icon" class="h-3.5 w-3.5" />
-          {{ qa.label }}
-        </button>
-      </div>
     </form>
+
+    <!-- Quick-action chips: NẰM NGOÀI khung nhập, ngay dưới & canh giữa (kiểu GPT) -->
+    <div v-if="showQuickActions" class="mt-3 flex flex-wrap justify-center gap-2">
+      <button
+        v-for="qa in quickActions"
+        :key="qa.label"
+        type="button"
+        class="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-white/10 dark:bg-white/5 dark:text-muted-foreground dark:hover:bg-white/10"
+        @click="pickQuickAction(qa.prompt)"
+      >
+        <component :is="qa.icon" class="h-3.5 w-3.5" />
+        {{ qa.label }}
+      </button>
+    </div>
     <div class="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-slate-400 dark:text-muted-foreground/60">
       <ShieldCheck class="h-3 w-3" />
       Câu hỏi được giới hạn 500 ký tự. Không hỗ trợ đính kèm tệp.
