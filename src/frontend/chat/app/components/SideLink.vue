@@ -37,7 +37,7 @@ const active = computed(() => {
             :is="item.icon" 
             :class="cn(
               'h-5 w-5 shrink-0',
-              active ? 'text-slate-700 dark:text-sidebar-accent-foreground' : 'text-slate-500 dark:text-muted-foreground'
+              active ? 'text-slate-700 dark:text-sidebar-accent-foreground' : 'text-slate-900 dark:text-white'
             )" 
           />
         </div>
