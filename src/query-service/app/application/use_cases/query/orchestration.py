@@ -87,6 +87,7 @@ class QueryOrchestrationUseCase:
         user_access_profile_repo=None,
         access_cache=None,
         summarizer=None,
+        title_generator=None,
         agent_mode: str = "react",
         orchestrator_planner=None,
         make_model=None,
@@ -99,6 +100,7 @@ class QueryOrchestrationUseCase:
         self._mcp_client = mcp_client
         self._openai_client = openai_client
         self._summarizer = summarizer
+        self._title_generator = title_generator
         # Giữ ref task nền (summary update fire-and-forget) -> không bị GC giữa chừng.
         self._bg_tasks: set = set()
         # MOSA Orchestrator-Workers (mode=orchestrator_workers). Mặc định react ->
@@ -563,7 +565,7 @@ class QueryOrchestrationUseCase:
                 })
                 await asyncio.sleep(0)
 
-        message_id = await self._save_assistant(user.id, session_id, answer, sources, started)
+        message_id = await self._save_assistant(user.id, session_id, answer, sources, started, question=question)
         yield _emit_guard({
             "done": True,
             "sources": sources,
@@ -726,7 +728,7 @@ class QueryOrchestrationUseCase:
         final_sources = [] if _is_fallback_answer(answer) else sources
         if final_sources:
             await self._semantic_cache.put(cache_namespace, question, answer, final_sources)
-        message_id = await self._save_assistant(user.id, session_id, answer, final_sources, started)
+        message_id = await self._save_assistant(user.id, session_id, answer, final_sources, started, question=question)
         done_event = {
             "done": True,
             "sources": final_sources,
@@ -896,6 +898,7 @@ class QueryOrchestrationUseCase:
         answer: str,
         sources: list[dict],
         started: float,
+        question: str = "",
     ) -> str | None:
         """Trả id row message vừa lưu (nếu có) -> đưa vào done event làm message_id ổn
         định cho FE patch trạng thái action (xem docs/leave-action-state-b2.md)."""
@@ -921,6 +924,9 @@ class QueryOrchestrationUseCase:
             t = asyncio.create_task(self._maybe_update_summary(user_id))
             self._bg_tasks.add(t)
             t.add_done_callback(self._bg_tasks.discard)
+            t2 = asyncio.create_task(self._maybe_auto_title(user_id, question))
+            self._bg_tasks.add(t2)
+            t2.add_done_callback(self._bg_tasks.discard)
         else:
             await self._conversation_repo.save_message(
                 user_id,
@@ -954,6 +960,23 @@ class QueryOrchestrationUseCase:
                 )
         except Exception:
             logger.warning("summary_update_failed", exc_info=True)
+
+    async def _maybe_auto_title(self, user_id: str, question: str) -> None:
+        """Sinh title ngắn cho conversation sau turn 1. Best-effort, fire-and-forget."""
+        if not self._settings.title_enabled or self._title_generator is None:
+            return
+        try:
+            conv_id = _ACTIVE_CONVERSATION_ID.get()
+            if not conv_id or not question:
+                return
+            ctx = await self._get_context(user_id, recent_k=5)
+            if len(ctx.recent_messages) != 2:
+                return  # chỉ chạy đúng turn 1 (1 user + 1 assistant)
+            title = await self._title_generator.generate(question)
+            if title:
+                await self._conversation_repo.update_title(user_id, conv_id, title)
+        except Exception:
+            logger.warning("auto_title_failed", exc_info=True)
 
     @staticmethod
     def _source_payload(result: SearchResultLike) -> dict:

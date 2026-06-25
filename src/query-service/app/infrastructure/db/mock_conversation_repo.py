@@ -192,6 +192,9 @@ class InMemoryConversationRepository(ConversationRepository):
         if not recorded:
             raise ValueError("Session not found")
 
+    async def update_title(self, user_id: str, conversation_id: str, title: str) -> bool:
+        return await self.rename_conversation(user_id, conversation_id, title)
+
     async def list_messages(
         self,
         user_id: str,
