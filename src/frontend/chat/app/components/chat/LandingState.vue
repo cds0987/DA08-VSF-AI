@@ -43,9 +43,10 @@ const greeting = computed(() => {
 </script>
 
 <template>
-  <div class="relative flex flex-col items-center justify-center text-center pt-8">
-    <!-- Nền (aura xanh + base) do BackgroundEffects.vue ở tầng layout đảm nhiệm.
-         Landing chỉ lo nội dung -> tránh chồng layer & đường nối. -->
+  <div class="relative isolate flex flex-col items-center justify-center text-center pt-8">
+    <!-- Nền phẳng (trắng/đen) do BackgroundEffects.vue ở tầng layout đảm nhiệm.
+         Dấu ấn brand: 1 quầng đỏ mờ TĨNH sau logo+greeting (chỉ màn chào). -->
+    <div class="brand-halo pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" aria-hidden="true" />
 
     <!-- Octopus + sparkle lấp lánh (glow dịu tĩnh, không bounce/pulse ồn) -->
     <div class="mb-6 relative">
@@ -86,6 +87,29 @@ const greeting = computed(() => {
 </template>
 
 <style scoped>
+/* Quầng đỏ brand TĨNH sau logo+greeting — dấu ấn riêng, nền vẫn phẳng.
+   ~560px, mờ dần ra trong suốt; static -> 0 chi phí/frame. */
+.brand-halo {
+  width: 560px;
+  height: 560px;
+  border-radius: 9999px;
+  background: radial-gradient(
+    circle,
+    rgba(239, 68, 68, 0.12) 0%,
+    rgba(239, 68, 68, 0.05) 38%,
+    transparent 70%
+  );
+}
+:global(.dark) .brand-halo {
+  /* Trên nền đen quầng đỏ nổi hơn -> hue rose dịu, vẫn rất nhẹ */
+  background: radial-gradient(
+    circle,
+    rgba(244, 63, 94, 0.16) 0%,
+    rgba(244, 63, 94, 0.06) 40%,
+    transparent 72%
+  );
+}
+
 /* Chữ chào gradient slate */
 .landing-greeting {
   background: linear-gradient(180deg, #1e293b 0%, #334155 100%);
