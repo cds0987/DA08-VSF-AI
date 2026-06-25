@@ -1,0 +1,5112 @@
+[
+ {
+  "id": "multiturn-07",
+  "task_type": "multiturn",
+  "trace_id": "c63d573b-ddc0-41a1-96c6-78b18bf597ab",
+  "outcome": "SUCCESS",
+  "total_latency": 14.09,
+  "ttft": 10.278797000006307,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.06
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.37
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 2.07
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 7.15
+   }
+  ]
+ },
+ {
+  "id": "multiturn-04",
+  "task_type": "multiturn",
+  "trace_id": "fd9fdcc4-1c5d-4aad-9f39-d28040ebaab3",
+  "outcome": "SUCCESS",
+  "total_latency": 28.76,
+  "ttft": 28.669884299990372,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 15.74
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 12.22
+   }
+  ]
+ },
+ {
+  "id": "multiturn-01",
+  "task_type": "multiturn",
+  "trace_id": "8e628533-ef61-4b3a-a5da-1a0dfab11722",
+  "outcome": "SUCCESS",
+  "total_latency": 30.16,
+  "ttft": 20.300015700006043,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 5.98
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 1.83
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 21.13
+   }
+  ]
+ },
+ {
+  "id": "multiturn-09",
+  "task_type": "multiturn",
+  "trace_id": "f4125b53-6d82-4e54-909f-8e8be8bcf7db",
+  "outcome": "SUCCESS",
+  "total_latency": 36.39,
+  "ttft": 31.80091990000801,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.06
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.61
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 1.62
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 9.25
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 12.42
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 8.17
+   }
+  ]
+ },
+ {
+  "id": "multiturn-13",
+  "task_type": "multiturn",
+  "trace_id": "7ff24699-467b-471b-944c-e0dae83d4fe4",
+  "outcome": "SUCCESS",
+  "total_latency": 8.45,
+  "ttft": 8.356332600000314,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 2.27
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4
+   }
+  ]
+ },
+ {
+  "id": "multiturn-11",
+  "task_type": "multiturn",
+  "trace_id": "7329f3dd-ef17-48db-a107-251d7f5e27fd",
+  "outcome": "SUCCESS",
+  "total_latency": 25.22,
+  "ttft": 24.186896400002297,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.06
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 5.21
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 2.32
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 16.73
+   }
+  ]
+ },
+ {
+  "id": "multiturn-15",
+  "task_type": "multiturn",
+  "trace_id": "88d2a2e9-b227-4c9f-8b49-748f85230040",
+  "outcome": "SUCCESS",
+  "total_latency": 18.77,
+  "ttft": 15.587606999994023,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.06
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.98
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.18
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 3.15
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 2.6
+   },
+   {
+    "type": "GENERATION",
+    "name": "rag_retrieve",
+    "dur": 3.67
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 7
+   }
+  ]
+ },
+ {
+  "id": "multiturn-08",
+  "task_type": "multiturn",
+  "trace_id": "a1db7454-160f-4814-a087-c4a0b992eaa8",
+  "outcome": "SUCCESS",
+  "total_latency": 5.08,
+  "ttft": 5.022220099999686,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.35
+   }
+  ]
+ },
+ {
+  "id": "multiturn-18",
+  "task_type": "multiturn",
+  "trace_id": "3e4a4eba-8bdd-4e57-8031-cafcd8a0e3a5",
+  "outcome": "SUCCESS",
+  "total_latency": 34.1,
+  "ttft": 31.70569779998914,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.06
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 2.3
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 4.23
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 14.97
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 6.29
+   }
+  ]
+ },
+ {
+  "id": "rag_info-10",
+  "task_type": "rag_info",
+  "trace_id": "aba5e07d-57b8-4a2e-b96d-125856c56275",
+  "outcome": "SUCCESS",
+  "total_latency": 41.51,
+  "ttft": 31.688009599994984,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.06
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.51
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 4.17
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 32.43
+   }
+  ]
+ },
+ {
+  "id": "multiturn-05",
+  "task_type": "multiturn",
+  "trace_id": "f3b50a38-33e7-46ae-8bb4-7886f07bf305",
+  "outcome": "SUCCESS",
+  "total_latency": 31.53,
+  "ttft": 30.985556800005725,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 16.02
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 14.03
+   },
+   {
+    "type": "SPAN",
+    "name": "resolve_date",
+    "dur": 0.01
+   }
+  ]
+ },
+ {
+  "id": "multiturn-02",
+  "task_type": "multiturn",
+  "trace_id": "fded3d1b-849b-4deb-94e4-2b06f20fa3a2",
+  "outcome": "SUCCESS",
+  "total_latency": 29.97,
+  "ttft": 27.04504700000689,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 7.34
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 1.08
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 20.34
+   }
+  ]
+ },
+ {
+  "id": "multiturn-14",
+  "task_type": "multiturn",
+  "trace_id": "e63fbdcd-1492-4575-80fe-3babe68b8ba3",
+  "outcome": "SUCCESS",
+  "total_latency": 20.35,
+  "ttft": 19.906060799999977,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 13.91
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.16
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 1.22
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 4.15
+   }
+  ]
+ },
+ {
+  "id": "multiturn-10",
+  "task_type": "multiturn",
+  "trace_id": "627f96dd-df39-4a6e-b45b-d8c7342dcc78",
+  "outcome": "SUCCESS",
+  "total_latency": 25.44,
+  "ttft": 22.196337899993523,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 13.96
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 1.32
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 9.16
+   }
+  ]
+ },
+ {
+  "id": "rag_info-09",
+  "task_type": "rag_info",
+  "trace_id": "9cec2995-1ccb-42ef-9a8f-5c32926c8d34",
+  "outcome": "SUCCESS",
+  "total_latency": 74.3,
+  "ttft": 70.6746329000016,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 61
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 4.61
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 6.17
+   }
+  ]
+ },
+ {
+  "id": "multiturn-19",
+  "task_type": "multiturn",
+  "trace_id": "1733d146-562d-4c77-90bc-48122fa1b263",
+  "outcome": "SUCCESS",
+  "total_latency": 9.69,
+  "ttft": 9.488810900002136,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 8.69
+   }
+  ]
+ },
+ {
+  "id": "multiturn-12",
+  "task_type": "multiturn",
+  "trace_id": "6b5d78fb-6778-4cf8-9e99-919b3f2dde05",
+  "outcome": "SUCCESS",
+  "total_latency": 21.74,
+  "ttft": 17.572581100001116,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.97
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 2.44
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 13.31
+   }
+  ]
+ },
+ {
+  "id": "rag_info-20",
+  "task_type": "rag_info",
+  "trace_id": "9b2bebce-cb53-4754-903b-349592e8d040",
+  "outcome": "SUCCESS",
+  "total_latency": 9.91,
+  "ttft": 8.750031999996281,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.72
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 2.11
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 2.82
+   }
+  ]
+ },
+ {
+  "id": "multiturn-16",
+  "task_type": "multiturn",
+  "trace_id": "a63deba4-a740-4542-a5c1-11f8129f4693",
+  "outcome": "SUCCESS",
+  "total_latency": 28.87,
+  "ttft": 26.269008499992196,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 17.55
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 2.97
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 7.28
+   }
+  ]
+ },
+ {
+  "id": "multiturn-20",
+  "task_type": "multiturn",
+  "trace_id": "c3480ef6-b801-4f7a-a700-c1551c20284b",
+  "outcome": "SUCCESS",
+  "total_latency": 33.23,
+  "ttft": 29.841601400010404,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 6.21
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 2.39
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 23.58
+   }
+  ]
+ },
+ {
+  "id": "multiturn-25",
+  "task_type": "multiturn",
+  "trace_id": "70af89a5-1111-45be-b5d3-2df64be8dd3b",
+  "outcome": "SUCCESS",
+  "total_latency": 10.72,
+  "ttft": 10.204310600005556,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 9.59
+   }
+  ]
+ },
+ {
+  "id": "multiturn-03",
+  "task_type": "multiturn",
+  "trace_id": "438edaa5-bfcb-4a61-a13f-29e805ade238",
+  "outcome": "SUCCESS",
+  "total_latency": 18.87,
+  "ttft": 16.1727036999946,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 6.18
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 4.67
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 6.92
+   }
+  ]
+ },
+ {
+  "id": "multiturn-06",
+  "task_type": "multiturn",
+  "trace_id": "5f3f6c89-9a54-47bc-bdfe-37f36cb7724b",
+  "outcome": "SUCCESS",
+  "total_latency": 30.58,
+  "ttft": 30.279126599998563,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 13.89
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 15.64
+   },
+   {
+    "type": "SPAN",
+    "name": "resolve_date",
+    "dur": 0.01
+   }
+  ]
+ },
+ {
+  "id": "rag_info-08",
+  "task_type": "rag_info",
+  "trace_id": "03666ae4-9448-4b5f-a8d5-44e711e832a9",
+  "outcome": "SUCCESS",
+  "total_latency": 10.95,
+  "ttft": 9.715685899995151,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 2.22
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 4.9
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 2.83
+   }
+  ]
+ },
+ {
+  "id": "rag_info-30",
+  "task_type": "rag_info",
+  "trace_id": "d4b732ca-4613-4030-89cf-9fb81095eae6",
+  "outcome": "SUCCESS",
+  "total_latency": 5.29,
+  "ttft": 4.869392699998571,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.14
+   }
+  ]
+ },
+ {
+  "id": "multiturn-23",
+  "task_type": "multiturn",
+  "trace_id": "541e77e3-2236-4ad2-8248-f38771868683",
+  "outcome": "SUCCESS",
+  "total_latency": 29.48,
+  "ttft": 27.298388199997135,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 10.94
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 5.46
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 12.28
+   }
+  ]
+ },
+ {
+  "id": "rag_info-19",
+  "task_type": "rag_info",
+  "trace_id": "81473088-a9f1-460a-aab9-06823c3a2e74",
+  "outcome": "SUCCESS",
+  "total_latency": 39.38,
+  "ttft": 34.67628580000019,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 11.89
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 5.73
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 20.76
+   }
+  ]
+ },
+ {
+  "id": "multiturn-22",
+  "task_type": "multiturn",
+  "trace_id": "1405877c-a979-459a-992a-a9fe3f2ee95d",
+  "outcome": "SUCCESS",
+  "total_latency": 36.08,
+  "ttft": 35.85263189999387,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 35.14
+   }
+  ]
+ },
+ {
+  "id": "multiturn-17",
+  "task_type": "multiturn",
+  "trace_id": "e67fc665-8be0-4a2f-8c6a-a4881068bc0f",
+  "outcome": "SUCCESS",
+  "total_latency": 28.34,
+  "ttft": 26.559134500013897,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 15.88
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 5.5
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 5.78
+   }
+  ]
+ },
+ {
+  "id": "multiturn-21",
+  "task_type": "multiturn",
+  "trace_id": "50f1aeb8-3376-4a73-919b-0efc43e9643a",
+  "outcome": "SUCCESS",
+  "total_latency": 5.33,
+  "ttft": 4.870831000007456,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.17
+   }
+  ]
+ },
+ {
+  "id": "multiturn-24",
+  "task_type": "multiturn",
+  "trace_id": "6fe1b83a-2cd8-4b90-afe3-58fc1fdac8ff",
+  "outcome": "SUCCESS",
+  "total_latency": 7.33,
+  "ttft": 7.078445899998769,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 5.03
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 1.26
+   },
+   {
+    "type": "SPAN",
+    "name": "resolve_date",
+    "dur": 0.01
+   }
+  ]
+ },
+ {
+  "id": "rag_info-03",
+  "task_type": "rag_info",
+  "trace_id": "d22e0bdc-9d96-441a-b5f0-4fb9a52665b8",
+  "outcome": "SUCCESS",
+  "total_latency": 34.24,
+  "ttft": 32.764197899989085,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 11.56
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 4.53
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 16.72
+   }
+  ]
+ },
+ {
+  "id": "rag_info-06",
+  "task_type": "rag_info",
+  "trace_id": "bdd45855-9438-4c18-ad26-5f586f5dc481",
+  "outcome": "SUCCESS",
+  "total_latency": 27.7,
+  "ttft": 24.761739399997168,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 6.67
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 6.13
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 13.54
+   }
+  ]
+ },
+ {
+  "id": "rag_info-04",
+  "task_type": "rag_info",
+  "trace_id": "f27e7e89-a448-4408-9f7b-434306ff3129",
+  "outcome": "SUCCESS",
+  "total_latency": 15.8,
+  "ttft": 14.445028700007242,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.11
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 5.89
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 4.54
+   }
+  ]
+ },
+ {
+  "id": "rag_info-18",
+  "task_type": "rag_info",
+  "trace_id": "31fbbf60-80aa-43d9-8a12-36c6526a0951",
+  "outcome": "SUCCESS",
+  "total_latency": 34.11,
+  "ttft": 28.365677800000412,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 8.53
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 7.63
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 17
+   }
+  ]
+ },
+ {
+  "id": "rag_info-40",
+  "task_type": "rag_info",
+  "trace_id": "18f7082c-0b1a-4ce1-a9e8-032491056b66",
+  "outcome": "SUCCESS",
+  "total_latency": 33.84,
+  "ttft": 27.425267099999473,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 8.68
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 6.56
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 17.65
+   }
+  ]
+ },
+ {
+  "id": "rag_info-05",
+  "task_type": "rag_info",
+  "trace_id": "b01df2cd-4307-4fe8-b4dd-e4b988aade32",
+  "outcome": "SUCCESS",
+  "total_latency": 19,
+  "ttft": 13.642319000005955,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 5.71
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 3.87
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 8.29
+   }
+  ]
+ },
+ {
+  "id": "rag_info-29",
+  "task_type": "rag_info",
+  "trace_id": "bb622cdf-7b24-4482-bf5d-cb36e7c19e04",
+  "outcome": "SUCCESS",
+  "total_latency": 26.19,
+  "ttft": 24.767145499994513,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.29
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 5.63
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 15.26
+   }
+  ]
+ },
+ {
+  "id": "rag_info-01",
+  "task_type": "rag_info",
+  "trace_id": "36f427b3-2f32-4717-8361-2a93ce40d95e",
+  "outcome": "SUCCESS",
+  "total_latency": 15.17,
+  "ttft": 12.292882900001132,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.63
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 4.92
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 5.52
+   }
+  ]
+ },
+ {
+  "id": "rag_info-13",
+  "task_type": "rag_info",
+  "trace_id": "7c6e6007-ed4f-42e1-b20c-f98b52649dc7",
+  "outcome": "SUCCESS",
+  "total_latency": 25.72,
+  "ttft": 23.805409699998563,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 7.54
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 4.48
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 12.78
+   }
+  ]
+ },
+ {
+  "id": "rag_info-16",
+  "task_type": "rag_info",
+  "trace_id": "59b948b3-8ea5-49f0-959b-a8a238c98354",
+  "outcome": "SUCCESS",
+  "total_latency": 15.49,
+  "ttft": 11.944164200001978,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 1.83
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 6.52
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 5.95
+   }
+  ]
+ },
+ {
+  "id": "rag_info-14",
+  "task_type": "rag_info",
+  "trace_id": "bc53aeed-7cc8-4c8b-a749-83b4aa9a4d73",
+  "outcome": "SUCCESS",
+  "total_latency": 13.43,
+  "ttft": 10.846107800010941,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.09
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 6
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 3.15
+   }
+  ]
+ },
+ {
+  "id": "rag_info-02",
+  "task_type": "rag_info",
+  "trace_id": "5e12cfc6-1978-40d2-a59f-7450c8928efe",
+  "outcome": "SUCCESS",
+  "total_latency": 39.43,
+  "ttft": 36.65773859999899,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 24.87
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 5.45
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 8.17
+   }
+  ]
+ },
+ {
+  "id": "rag_info-07",
+  "task_type": "rag_info",
+  "trace_id": "967f097f-8f60-48be-96bd-17a4661610c0",
+  "outcome": "SUCCESS",
+  "total_latency": 50.24,
+  "ttft": 43.232447599992156,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 5.01
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 5.1
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 5.03
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 13.91
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 20.09
+   }
+  ]
+ },
+ {
+  "id": "rag_info-28",
+  "task_type": "rag_info",
+  "trace_id": "47dc16c0-b0d4-4928-b81d-dc67006595be",
+  "outcome": "SUCCESS",
+  "total_latency": 27.02,
+  "ttft": 21.911892500007525,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 6.58
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 6.9
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 12.52
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-05",
+  "task_type": "hr_balance",
+  "trace_id": "4e1659f2-f6d4-4731-b891-80bcf95eb2e5",
+  "outcome": "SUCCESS",
+  "total_latency": 17.76,
+  "ttft": 14.211879899987252,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 5
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.11
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 1.46
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 10.31
+   }
+  ]
+ },
+ {
+  "id": "rag_info-15",
+  "task_type": "rag_info",
+  "trace_id": "1c0b44da-b54c-4664-ad03-836f56c0d6c4",
+  "outcome": "SUCCESS",
+  "total_latency": 22.32,
+  "ttft": 18.836453199997777,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.62
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.11
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 5.08
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 1.19
+   },
+   {
+    "type": "GENERATION",
+    "name": "rag_retrieve",
+    "dur": 3.06
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 9.45
+   }
+  ]
+ },
+ {
+  "id": "rag_info-11",
+  "task_type": "rag_info",
+  "trace_id": "70f99291-4979-46f0-9c42-004b1d172c4a",
+  "outcome": "SUCCESS",
+  "total_latency": 21.92,
+  "ttft": 19.752642200008268,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 6.55
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 6.43
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 7.68
+   }
+  ]
+ },
+ {
+  "id": "rag_info-39",
+  "task_type": "rag_info",
+  "trace_id": "8594a5da-635c-4da7-80d6-1a017073a81f",
+  "outcome": "SUCCESS",
+  "total_latency": 37.01,
+  "ttft": 33.70298719999846,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 5.12
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.12
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 5
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 3.3
+   },
+   {
+    "type": "GENERATION",
+    "name": "rag_retrieve",
+    "dur": 2.42
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 22.65
+   }
+  ]
+ },
+ {
+  "id": "rag_info-23",
+  "task_type": "rag_info",
+  "trace_id": "382481c5-3f06-40e0-bac3-0ca419626261",
+  "outcome": "SUCCESS",
+  "total_latency": 22.21,
+  "ttft": 21.172603200000594,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 7.38
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 6.04
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 7.82
+   }
+  ]
+ },
+ {
+  "id": "rag_info-24",
+  "task_type": "rag_info",
+  "trace_id": "63f60281-1814-41d5-89bb-1611d7122d87",
+  "outcome": "SUCCESS",
+  "total_latency": 3.59,
+  "ttft": 3.362614700003178,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 2.67
+   }
+  ]
+ },
+ {
+  "id": "rag_info-26",
+  "task_type": "rag_info",
+  "trace_id": "8da14058-1c31-4382-a3e8-a62d75b6bd6c",
+  "outcome": "SUCCESS",
+  "total_latency": 36.87,
+  "ttft": 32.838990299991565,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.45
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 5.03
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 27.58
+   }
+  ]
+ },
+ {
+  "id": "rag_info-12",
+  "task_type": "rag_info",
+  "trace_id": "bdf10fd5-0d03-4dd4-a3c2-44b903deadfd",
+  "outcome": "SUCCESS",
+  "total_latency": 22.82,
+  "ttft": 19.841419999997015,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.95
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.12
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 5.89
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 1.5
+   },
+   {
+    "type": "GENERATION",
+    "name": "rag_retrieve",
+    "dur": 4.41
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 7.19
+   }
+  ]
+ },
+ {
+  "id": "rag_info-38",
+  "task_type": "rag_info",
+  "trace_id": "4c8ccad4-23db-4613-bc14-50946ecb262b",
+  "outcome": "SUCCESS",
+  "total_latency": 21.85,
+  "ttft": 18.00709499999357,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.56
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 7.33
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 9.99
+   }
+  ]
+ },
+ {
+  "id": "rag_info-17",
+  "task_type": "rag_info",
+  "trace_id": "480f6b09-53c6-4730-b396-a698f82ede8c",
+  "outcome": "SUCCESS",
+  "total_latency": 27.53,
+  "ttft": 23.939770899989526,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 11.29
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 7.1
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 8.33
+   }
+  ]
+ },
+ {
+  "id": "rag_info-25",
+  "task_type": "rag_info",
+  "trace_id": "92aa24d1-54cc-445c-a539-aa43aaca33c2",
+  "outcome": "SUCCESS",
+  "total_latency": 7.36,
+  "ttft": 7.2328652999858605,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.06
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 6.52
+   }
+  ]
+ },
+ {
+  "id": "rag_info-21",
+  "task_type": "rag_info",
+  "trace_id": "9e5ea2ef-ed11-430a-9410-87e72804532d",
+  "outcome": "SUCCESS",
+  "total_latency": 24.22,
+  "ttft": 20.251661200003582,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 10.63
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 6.66
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 5.69
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-04",
+  "task_type": "hr_balance",
+  "trace_id": "db754fab-159a-455f-9ef2-bf93bd5bb97e",
+  "outcome": "SUCCESS",
+  "total_latency": 27.65,
+  "ttft": 22.85887539999385,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 7.44
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.11
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 4.62
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 14.35
+   }
+  ]
+ },
+ {
+  "id": "rag_info-33",
+  "task_type": "rag_info",
+  "trace_id": "f8ec7b1e-900d-4bc2-a6aa-6f6f2370cd33",
+  "outcome": "SUCCESS",
+  "total_latency": 28.27,
+  "ttft": 20.35811100000865,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.06
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 2.21
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 8.3
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 16.82
+   }
+  ]
+ },
+ {
+  "id": "rag_info-22",
+  "task_type": "rag_info",
+  "trace_id": "e5323c3e-07cb-4322-9e27-1884c0e044a3",
+  "outcome": "SUCCESS",
+  "total_latency": 5.47,
+  "ttft": 5.3678808999975445,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.7
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-15",
+  "task_type": "hr_balance",
+  "trace_id": "d12dcb70-18fd-4a9e-b06d-dc387897f92c",
+  "outcome": "SUCCESS",
+  "total_latency": 44.28,
+  "ttft": 33.770057100002305,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 5.53
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.13
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 5.8
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 1.58
+   },
+   {
+    "type": "GENERATION",
+    "name": "rag_retrieve",
+    "dur": 2.72
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 28.97
+   }
+  ]
+ },
+ {
+  "id": "rag_info-27",
+  "task_type": "rag_info",
+  "trace_id": "aacb0012-c028-448f-bbd4-53cf33b4779b",
+  "outcome": "SUCCESS",
+  "total_latency": 7.11,
+  "ttft": 6.970924299996113,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 6.3
+   }
+  ]
+ },
+ {
+  "id": "rag_info-36",
+  "task_type": "rag_info",
+  "trace_id": "c630c613-1022-4c0d-87ce-46a38ffae5a4",
+  "outcome": "SUCCESS",
+  "total_latency": 24.03,
+  "ttft": 23.625166400001035,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.06
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 11.79
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 5.53
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 5.54
+   }
+  ]
+ },
+ {
+  "id": "rag_info-35",
+  "task_type": "rag_info",
+  "trace_id": "9c5c96c9-74fe-41bb-afc2-b9ff7aa6a6f3",
+  "outcome": "SUCCESS",
+  "total_latency": 24.18,
+  "ttft": 21.34568769999896,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 13.37
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 3.73
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 5.98
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-03",
+  "task_type": "hr_balance",
+  "trace_id": "81b55fb0-9885-490c-b921-cd354504c0ad",
+  "outcome": "SUCCESS",
+  "total_latency": 36.43,
+  "ttft": 33.37732610000239,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.06
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 5.44
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 6.14
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 11.55
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.02
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 8.76
+   }
+  ]
+ },
+ {
+  "id": "rag_info-34",
+  "task_type": "rag_info",
+  "trace_id": "bdd0f5b1-bdb6-4590-8035-ea7b1b4cb27e",
+  "outcome": "SUCCESS",
+  "total_latency": 54.87,
+  "ttft": 37.416135299994494,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 10.88
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 7.25
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 35.64
+   }
+  ]
+ },
+ {
+  "id": "rag_info-31",
+  "task_type": "rag_info",
+  "trace_id": "a6fade02-ece0-4c3e-a7fc-c08302f070bb",
+  "outcome": "SUCCESS",
+  "total_latency": 28.17,
+  "ttft": 25.615540600003442,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 7.64
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 4.46
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 15.03
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-14",
+  "task_type": "hr_balance",
+  "trace_id": "5403c04c-b9b9-4959-a802-0da0424efb9c",
+  "outcome": "SUCCESS",
+  "total_latency": 16.69,
+  "ttft": 12.570656600000802,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 5.71
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.11
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 1
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 8.95
+   }
+  ]
+ },
+ {
+  "id": "rag_info-32",
+  "task_type": "rag_info",
+  "trace_id": "2bf84370-fb90-4354-878b-c6019d841c28",
+  "outcome": "SUCCESS",
+  "total_latency": 15.88,
+  "ttft": 12.381177600007504,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.24
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 5.45
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 4.98
+   }
+  ]
+ },
+ {
+  "id": "rag_info-37",
+  "task_type": "rag_info",
+  "trace_id": "ea3f850d-3058-4b46-bd66-d134b9f8b321",
+  "outcome": "SUCCESS",
+  "total_latency": 13.86,
+  "ttft": 12.194961000001058,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.94
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 3.81
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 5.2
+   }
+  ]
+ },
+ {
+  "id": "rag_info-43",
+  "task_type": "rag_info",
+  "trace_id": "99be7005-fa18-438e-abb8-32ca255bbb15",
+  "outcome": "SUCCESS",
+  "total_latency": 28.44,
+  "ttft": 25.921887999997125,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 12.4
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 3
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 12.02
+   }
+  ]
+ },
+ {
+  "id": "leave_action-05",
+  "task_type": "leave_action",
+  "trace_id": "557f55c4-4c3d-4e66-80cd-b5b48126fdbf",
+  "outcome": "SUCCESS",
+  "total_latency": 21.76,
+  "ttft": 21.643089100005454,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 10.15
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 10.78
+   },
+   {
+    "type": "SPAN",
+    "name": "resolve_date",
+    "dur": 0.01
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-01",
+  "task_type": "hr_balance",
+  "trace_id": "cdb07433-eaf6-48a6-be79-9bbf2ad7b309",
+  "outcome": "SUCCESS",
+  "total_latency": 17.38,
+  "ttft": 14.235394599993015,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 8.54
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.12
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 1.08
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 6.53
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-13",
+  "task_type": "hr_balance",
+  "trace_id": "4c8901b7-3ca6-4c4a-accf-3c52cb079d76",
+  "outcome": "SUCCESS",
+  "total_latency": 19.74,
+  "ttft": 17.584207700012485,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 0.75
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 6.81
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 11.32
+   }
+  ]
+ },
+ {
+  "id": "rag_info-45",
+  "task_type": "rag_info",
+  "trace_id": "0f6e5e83-4f6a-48a5-933e-39bbe22fe7b7",
+  "outcome": "SUCCESS",
+  "total_latency": 23.75,
+  "ttft": 20.679631499995594,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 2.72
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 5.07
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 2.08
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 6.92
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 6.04
+   }
+  ]
+ },
+ {
+  "id": "leave_action-04",
+  "task_type": "leave_action",
+  "trace_id": "3b1bd604-4280-436a-bb0c-7a710669399f",
+  "outcome": "SUCCESS",
+  "total_latency": 15.43,
+  "ttft": 15.0941332999937,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.21
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 10
+   },
+   {
+    "type": "SPAN",
+    "name": "resolve_date",
+    "dur": 0.02
+   }
+  ]
+ },
+ {
+  "id": "rag_info-44",
+  "task_type": "rag_info",
+  "trace_id": "6442bbc7-00b7-4a76-9518-d65dc62168be",
+  "outcome": "SUCCESS",
+  "total_latency": 49.19,
+  "ttft": 27.726110600007814,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 10.5
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 4.99
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 32.62
+   }
+  ]
+ },
+ {
+  "id": "rag_info-41",
+  "task_type": "rag_info",
+  "trace_id": "1979289b-46db-4367-8d2b-b28b04480298",
+  "outcome": "SUCCESS",
+  "total_latency": 43.34,
+  "ttft": 32.3789698999899,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.57
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 4.88
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 33.72
+   }
+  ]
+ },
+ {
+  "id": "rag_info-42",
+  "task_type": "rag_info",
+  "trace_id": "a53fc4ed-0bb8-47e5-b364-d6aa2307ebce",
+  "outcome": "SUCCESS",
+  "total_latency": 34.15,
+  "ttft": 23.871797499989043,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 7.5
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 7.59
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 18.01
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-02",
+  "task_type": "hr_balance",
+  "trace_id": "4f9835fb-ae3d-4635-8fbb-93506d94e9d5",
+  "outcome": "SUCCESS",
+  "total_latency": 22.29,
+  "ttft": 21.506516399997054,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 7.25
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.11
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 1.5
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 12.29
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-11",
+  "task_type": "hr_balance",
+  "trace_id": "3d92053e-fec7-4c94-b511-1f7b47b8e68d",
+  "outcome": "SUCCESS",
+  "total_latency": 12.42,
+  "ttft": 9.852580399994622,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 5.01
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.11
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 1.28
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 4.77
+   }
+  ]
+ },
+ {
+  "id": "leave_action-03",
+  "task_type": "leave_action",
+  "trace_id": "aa2638c2-21aa-4460-a269-b6bc20a74edc",
+  "outcome": "SUCCESS",
+  "total_latency": 21.65,
+  "ttft": 21.449555500003044,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 2.87
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 9.21
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 8.69
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-08",
+  "task_type": "hr_balance",
+  "trace_id": "f9540100-6854-4002-b307-8597938f0b59",
+  "outcome": "SUCCESS",
+  "total_latency": 29.91,
+  "ttft": 27.87706440000329,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 9.21
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.12
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 8.93
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 1.23
+   },
+   {
+    "type": "GENERATION",
+    "name": "rag_retrieve",
+    "dur": 5.71
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 5.05
+   }
+  ]
+ },
+ {
+  "id": "leave_action-15",
+  "task_type": "leave_action",
+  "trace_id": "161365f8-963c-4771-8f0d-608a419b93f2",
+  "outcome": "SUCCESS",
+  "total_latency": 30.34,
+  "ttft": 29.92230199999176,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 1.42
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 27.75
+   },
+   {
+    "type": "SPAN",
+    "name": "resolve_date",
+    "dur": 0.01
+   }
+  ]
+ },
+ {
+  "id": "leave_action-14",
+  "task_type": "leave_action",
+  "trace_id": "7621bc2a-b5bf-4620-8c65-d057e2f2fab7",
+  "outcome": "SUCCESS",
+  "total_latency": 8.7,
+  "ttft": 8.18854009998904,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.32
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 3.16
+   },
+   {
+    "type": "SPAN",
+    "name": "resolve_date",
+    "dur": 0.02
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-06",
+  "task_type": "hr_balance",
+  "trace_id": "5b0b0eb3-ca9f-48b0-bbbb-ef0ffb0e13b6",
+  "outcome": "SUCCESS",
+  "total_latency": 12.28,
+  "ttft": 8.700623600001563,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.54
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.13
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 0.9
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 6.9
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-10",
+  "task_type": "hr_balance",
+  "trace_id": "d1944488-c37a-4828-aa5d-d060bb633796",
+  "outcome": "SUCCESS",
+  "total_latency": 29.2,
+  "ttft": 26.972710899994127,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 19.3
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.11
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 0.75
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 7.78
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-09",
+  "task_type": "hr_balance",
+  "trace_id": "7c11f6ad-f6a9-4575-ba8d-aba06c3f356c",
+  "outcome": "SUCCESS",
+  "total_latency": 25.33,
+  "ttft": 24.42045629999484,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 19.18
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.16
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 2.33
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 2.7
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-07",
+  "task_type": "hr_balance",
+  "trace_id": "84e6e17c-9a11-4f4f-905a-b9a3325f78dc",
+  "outcome": "SUCCESS",
+  "total_latency": 22.9,
+  "ttft": 21.321034100008546,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 5.73
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 7.88
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.12
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 3.56
+   },
+   {
+    "type": "GENERATION",
+    "name": "rag_retrieve",
+    "dur": 4.45
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 3.7
+   }
+  ]
+ },
+ {
+  "id": "leave_action-13",
+  "task_type": "leave_action",
+  "trace_id": "659d6bbd-3473-4e69-a12e-e7d1948527e6",
+  "outcome": "SUCCESS",
+  "total_latency": 6.56,
+  "ttft": 6.348421699993196,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.65
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 2
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-12",
+  "task_type": "hr_balance",
+  "trace_id": "0e3235c0-b04a-4b43-a957-05ef38318aa7",
+  "outcome": "SUCCESS",
+  "total_latency": 22.48,
+  "ttft": 21.398793600004865,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.24
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.12
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 10.61
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 1.1
+   },
+   {
+    "type": "GENERATION",
+    "name": "rag_retrieve",
+    "dur": 3.78
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 3.76
+   }
+  ]
+ },
+ {
+  "id": "ambiguous-05",
+  "task_type": "ambiguous",
+  "trace_id": "6bbde565-e157-458e-aa0e-2cccec8e84a0",
+  "outcome": "SUCCESS",
+  "total_latency": 5.61,
+  "ttft": 5.276042400000733,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.59
+   }
+  ]
+ },
+ {
+  "id": "ambiguous-04",
+  "task_type": "ambiguous",
+  "trace_id": "7a6c511b-be20-4746-8e0f-a293d4ac753e",
+  "outcome": "SUCCESS",
+  "total_latency": 7.7,
+  "ttft": 7.317754199990304,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 5.52
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-20",
+  "task_type": "hr_balance",
+  "trace_id": "b73a1f00-3080-4d22-86d2-3f7a8ff138e7",
+  "outcome": "SUCCESS",
+  "total_latency": 17.65,
+  "ttft": 16.813905799994245,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 10.55
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.11
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 0.96
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 5.09
+   }
+  ]
+ },
+ {
+  "id": "leave_action-01",
+  "task_type": "leave_action",
+  "trace_id": "5ecf831f-3479-4cd1-9e03-2b1f64d6b395",
+  "outcome": "SUCCESS",
+  "total_latency": 45.91,
+  "ttft": 45.367136600005324,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 35.8
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 8.94
+   },
+   {
+    "type": "SPAN",
+    "name": "resolve_date",
+    "dur": 0.02
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-18",
+  "task_type": "hr_balance",
+  "trace_id": "b70265f0-88fe-42e2-8de9-6c4958dde209",
+  "outcome": "SUCCESS",
+  "total_latency": 33.07,
+  "ttft": 31.447976000010385,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.87
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.11
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 1.04
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 26.95
+   }
+  ]
+ },
+ {
+  "id": "ambiguous-03",
+  "task_type": "ambiguous",
+  "trace_id": "8a8d53b1-6f80-4cdd-a998-aa4242985527",
+  "outcome": "SUCCESS",
+  "total_latency": 5.54,
+  "ttft": 5.4660241000092356,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.64
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-19",
+  "task_type": "hr_balance",
+  "trace_id": "2726aeda-5e53-4906-9778-611f87df8211",
+  "outcome": "SUCCESS",
+  "total_latency": 19.25,
+  "ttft": 17.272724099995685,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.12
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.12
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 1.37
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 12.63
+   }
+  ]
+ },
+ {
+  "id": "offtopic_adv-02",
+  "task_type": "offtopic_adv",
+  "trace_id": "ff336428-5377-4b83-8379-983df3abcf78",
+  "outcome": "SUCCESS",
+  "total_latency": 4.5,
+  "ttft": 4.114942700005486,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.38
+   }
+  ]
+ },
+ {
+  "id": "offtopic_adv-03",
+  "task_type": "offtopic_adv",
+  "trace_id": "4cf4366e-b714-4a48-87be-c7ddb0f7a344",
+  "outcome": "SUCCESS",
+  "total_latency": 15.56,
+  "ttft": 15.051171499988413,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 14.32
+   }
+  ]
+ },
+ {
+  "id": "leave_action-10",
+  "task_type": "leave_action",
+  "trace_id": "ec69e286-c32f-4316-bb24-c8c070ce2ab2",
+  "outcome": "SUCCESS",
+  "total_latency": 24.78,
+  "ttft": 24.525564200012013,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.75
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 19.52
+   },
+   {
+    "type": "SPAN",
+    "name": "resolve_date",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "resolve_date",
+    "dur": 0.01
+   }
+  ]
+ },
+ {
+  "id": "hr_balance-17",
+  "task_type": "hr_balance",
+  "trace_id": "f22804ec-fd8c-4fdf-8177-972c01cab66c",
+  "outcome": "SUCCESS",
+  "total_latency": 55.72,
+  "ttft": 53.221702599999844,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 32.16
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.14
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 9.28
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 1.23
+   },
+   {
+    "type": "GENERATION",
+    "name": "rag_retrieve",
+    "dur": 5.56
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 7.68
+   }
+  ]
+ },
+ {
+  "id": "offtopic_adv-01",
+  "task_type": "offtopic_adv",
+  "trace_id": "38417c91-d8bc-47a7-85e8-9aede66b2028",
+  "outcome": "SUCCESS",
+  "total_latency": 3.71,
+  "ttft": 3.348817699996289,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 2.71
+   }
+  ]
+ },
+ {
+  "id": "leave_action-11",
+  "task_type": "leave_action",
+  "trace_id": "23bc01ce-2e62-4a0d-b601-633b0f25d82f",
+  "outcome": "SUCCESS",
+  "total_latency": 33.41,
+  "ttft": 32.850290900008986,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 6.79
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 25.26
+   },
+   {
+    "type": "SPAN",
+    "name": "resolve_date",
+    "dur": 0.01
+   }
+  ]
+ },
+ {
+  "id": "leave_action-02",
+  "task_type": "leave_action",
+  "trace_id": "fcd0f491-de78-4807-9fb2-a04b6a21b428",
+  "outcome": "SUCCESS",
+  "total_latency": 66.1,
+  "ttft": 65.74610129999928,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.06
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 2.37
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 59.52
+   }
+  ]
+ },
+ {
+  "id": "leave_action-06",
+  "task_type": "leave_action",
+  "trace_id": "ded05581-33f2-4228-a74b-4e0788e6a63a",
+  "outcome": "SUCCESS",
+  "total_latency": 13.5,
+  "ttft": 12.945190899990848,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.36
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 7.89
+   },
+   {
+    "type": "SPAN",
+    "name": "resolve_date",
+    "dur": 0.01
+   }
+  ]
+ },
+ {
+  "id": "leave_action-09",
+  "task_type": "leave_action",
+  "trace_id": "78283305-f807-45fe-917a-00339f2c40c2",
+  "outcome": "SUCCESS",
+  "total_latency": 15.76,
+  "ttft": 15.386143299998366,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.06
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.72
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 10.89
+   },
+   {
+    "type": "SPAN",
+    "name": "resolve_date",
+    "dur": 0.02
+   }
+  ]
+ },
+ {
+  "id": "leave_action-08",
+  "task_type": "leave_action",
+  "trace_id": "4a4e9e3d-8e66-435a-8d46-230851e293cf",
+  "outcome": "SUCCESS",
+  "total_latency": 31.45,
+  "ttft": 31.00112810000428,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.38
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 25.89
+   },
+   {
+    "type": "SPAN",
+    "name": "resolve_date",
+    "dur": 0.01
+   }
+  ]
+ },
+ {
+  "id": "offtopic_adv-12",
+  "task_type": "offtopic_adv",
+  "trace_id": "b6c81f56-1c7c-4982-bf3f-37450c7e3427",
+  "outcome": "SUCCESS",
+  "total_latency": 13.63,
+  "ttft": 13.399687799988897,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 12.69
+   }
+  ]
+ },
+ {
+  "id": "offtopic_adv-13",
+  "task_type": "offtopic_adv",
+  "trace_id": "82b370ef-65a6-438e-be32-9db7819ad81f",
+  "outcome": "SUCCESS",
+  "total_latency": 12.65,
+  "ttft": 12.571600200011744,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 11.67
+   }
+  ]
+ },
+ {
+  "id": "offtopic_adv-11",
+  "task_type": "offtopic_adv",
+  "trace_id": "7ccde03d-05bb-48ef-b0bc-4a8129e29af0",
+  "outcome": "SUCCESS",
+  "total_latency": 8.29,
+  "ttft": 7.766243899997789,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 6.88
+   }
+  ]
+ },
+ {
+  "id": "leave_action-07",
+  "task_type": "leave_action",
+  "trace_id": "fcea9a4c-be0e-4131-94bd-5e56d506f62e",
+  "outcome": "SUCCESS",
+  "total_latency": 17.42,
+  "ttft": 17.32390519999899,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 5.13
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 11.46
+   },
+   {
+    "type": "SPAN",
+    "name": "resolve_date",
+    "dur": 0.01
+   }
+  ]
+ },
+ {
+  "id": "leave_action-16",
+  "task_type": "leave_action",
+  "trace_id": "4f09f0bd-bbc7-4747-9866-f3152e799885",
+  "outcome": "SUCCESS",
+  "total_latency": 19.73,
+  "ttft": 19.17272870001034,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 7.12
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 11.28
+   },
+   {
+    "type": "SPAN",
+    "name": "resolve_date",
+    "dur": 0.01
+   }
+  ]
+ },
+ {
+  "id": "leave_action-20",
+  "task_type": "leave_action",
+  "trace_id": "ef65825e-30ca-46d6-9b79-4b0449aa1a7b",
+  "outcome": "SUCCESS",
+  "total_latency": 39.49,
+  "ttft": 39.06940029999532,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 15.64
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 22.71
+   }
+  ]
+ },
+ {
+  "id": "leave_action-12",
+  "task_type": "leave_action",
+  "trace_id": "a463de38-754b-4f44-905e-55447158ef98",
+  "outcome": "SUCCESS",
+  "total_latency": 27.29,
+  "ttft": 26.925114700003178,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.06
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.39
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 22.75
+   }
+  ]
+ },
+ {
+  "id": "leave_action-19",
+  "task_type": "leave_action",
+  "trace_id": "ad82ce9e-9416-4fd7-baa6-270c7d6724f4",
+  "outcome": "SUCCESS",
+  "total_latency": 19.05,
+  "ttft": 18.980759999991278,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 9.3
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 8.96
+   },
+   {
+    "type": "SPAN",
+    "name": "resolve_date",
+    "dur": 0.01
+   }
+  ]
+ },
+ {
+  "id": "leave_action-18",
+  "task_type": "leave_action",
+  "trace_id": "8ea87f43-f09b-4ae0-ac3c-81dbb991aae2",
+  "outcome": "SUCCESS",
+  "total_latency": 27.82,
+  "ttft": 27.54303990000335,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.07
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.35
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 22.41
+   }
+  ]
+ },
+ {
+  "id": "ambiguous-01",
+  "task_type": "ambiguous",
+  "trace_id": "6e22a017-5797-494e-84ef-368b3f79fbcf",
+  "outcome": "SUCCESS",
+  "total_latency": 77.04,
+  "ttft": 73.74166900001,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 62
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 5.58
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 7.72
+   }
+  ]
+ },
+ {
+  "id": "no_doc-09",
+  "task_type": "no_doc",
+  "trace_id": "63df3ce6-8e62-49ac-9205-5e423d536f9b",
+  "outcome": "SUCCESS",
+  "total_latency": 42.18,
+  "ttft": 40.99749349999183,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 29.22
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 6.97
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 5.09
+   }
+  ]
+ },
+ {
+  "id": "ambiguous-06",
+  "task_type": "ambiguous",
+  "trace_id": "b850d2ab-c18f-47f5-beec-f22d92a4dc1d",
+  "outcome": "SUCCESS",
+  "total_latency": 4.73,
+  "ttft": 4.644564000001992,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 1.86
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 2.08
+   }
+  ]
+ },
+ {
+  "id": "no_doc-08",
+  "task_type": "no_doc",
+  "trace_id": "1c544a2a-e699-44b1-8fcb-f32f82aca78d",
+  "outcome": "SUCCESS",
+  "total_latency": 29.66,
+  "ttft": 26.773506900004577,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 11.08
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 6.31
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 11.4
+   }
+  ]
+ },
+ {
+  "id": "ambiguous-10",
+  "task_type": "ambiguous",
+  "trace_id": "48a8ad60-71af-4a98-a417-b473a8539ac5",
+  "outcome": "SUCCESS",
+  "total_latency": 7.17,
+  "ttft": 6.764531900000293,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 6.06
+   }
+  ]
+ },
+ {
+  "id": "leave_action-17",
+  "task_type": "leave_action",
+  "trace_id": "e6fd4675-9e27-4848-9c0e-afddfd9c502b",
+  "outcome": "SUCCESS",
+  "total_latency": 13.09,
+  "ttft": 12.844363299998804,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 8.34
+   },
+   {
+    "type": "GENERATION",
+    "name": "leave_action",
+    "dur": 3.7
+   }
+  ]
+ },
+ {
+  "id": "no_doc-10",
+  "task_type": "no_doc",
+  "trace_id": "09766db3-93af-45ae-9ff9-7d5b70b50f63",
+  "outcome": "SUCCESS",
+  "total_latency": 42.17,
+  "ttft": 37.05618429998867,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 12.26
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 4.88
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 23.99
+   }
+  ]
+ },
+ {
+  "id": "ambiguous-08",
+  "task_type": "ambiguous",
+  "trace_id": "7db34746-c75d-414e-88c7-78f6f3a98332",
+  "outcome": "SUCCESS",
+  "total_latency": 2.58,
+  "ttft": 2.3353883999952814,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 1.43
+   }
+  ]
+ },
+ {
+  "id": "ambiguous-09",
+  "task_type": "ambiguous",
+  "trace_id": "553e63f2-75b0-425a-be35-3f97092ccf92",
+  "outcome": "SUCCESS",
+  "total_latency": 5.74,
+  "ttft": 5.397862500001793,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.58
+   }
+  ]
+ },
+ {
+  "id": "offtopic_adv-04",
+  "task_type": "offtopic_adv",
+  "trace_id": "a21b11f8-baf5-47f2-8827-058d04ed4b7f",
+  "outcome": "SUCCESS",
+  "total_latency": 4.34,
+  "ttft": 3.9893220999947516,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3
+   }
+  ]
+ },
+ {
+  "id": "offtopic_adv-08",
+  "task_type": "offtopic_adv",
+  "trace_id": "6327aabb-b09f-4e19-a71e-55ef5ae6f9cf",
+  "outcome": "SUCCESS",
+  "total_latency": 3.65,
+  "ttft": 3.2787444999994477,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 2.53
+   }
+  ]
+ },
+ {
+  "id": "ambiguous-11",
+  "task_type": "ambiguous",
+  "trace_id": "485a5d1c-6d86-469a-a3e1-466d80842733",
+  "outcome": "SUCCESS",
+  "total_latency": 9.41,
+  "ttft": 8.862427200001548,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 7.8
+   }
+  ]
+ },
+ {
+  "id": "ambiguous-07",
+  "task_type": "ambiguous",
+  "trace_id": "61390d02-d938-4ea4-83bd-c618a699a87c",
+  "outcome": "SUCCESS",
+  "total_latency": 5.95,
+  "ttft": 5.569825299986405,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.85
+   }
+  ]
+ },
+ {
+  "id": "offtopic_adv-07",
+  "task_type": "offtopic_adv",
+  "trace_id": "75dde70e-9c5e-4a1e-966a-34aa3daa8910",
+  "outcome": "SUCCESS",
+  "total_latency": 6.5,
+  "ttft": 6.0439990000013495,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 5.28
+   }
+  ]
+ },
+ {
+  "id": "ambiguous-02",
+  "task_type": "ambiguous",
+  "trace_id": "15adbf4e-9ca2-433d-b0b9-6e0ba3b9243b",
+  "outcome": "SUCCESS",
+  "total_latency": 22.63,
+  "ttft": 22.473027300002286,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 21.15
+   }
+  ]
+ },
+ {
+  "id": "offtopic_adv-06",
+  "task_type": "offtopic_adv",
+  "trace_id": "8f54f222-05e8-43ab-b720-02637ac36e14",
+  "outcome": "SUCCESS",
+  "total_latency": 12.77,
+  "ttft": 12.387931999997818,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 11.34
+   }
+  ]
+ },
+ {
+  "id": "offtopic_adv-05",
+  "task_type": "offtopic_adv",
+  "trace_id": "c5eaba66-49ac-4ab0-94a3-bf28e11f1782",
+  "outcome": "SUCCESS",
+  "total_latency": 4.78,
+  "ttft": 4.477460299996892,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.78
+   }
+  ]
+ },
+ {
+  "id": "offtopic_adv-09",
+  "task_type": "offtopic_adv",
+  "trace_id": "8e97abba-df63-4b20-8791-0b53d1e21d9f",
+  "outcome": "SUCCESS",
+  "total_latency": 8.88,
+  "ttft": 8.82630970000173,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 8.18
+   }
+  ]
+ },
+ {
+  "id": "no_doc-04",
+  "task_type": "no_doc",
+  "trace_id": "d3b426d2-3290-4a9e-99e8-c71660d8d37f",
+  "outcome": "SUCCESS",
+  "total_latency": 4.7,
+  "ttft": 4.228860499992152,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 3.4
+   }
+  ]
+ },
+ {
+  "id": "ambiguous-12",
+  "task_type": "ambiguous",
+  "trace_id": "a2414332-599f-47c0-93cc-cc00ef0c6d17",
+  "outcome": "SUCCESS",
+  "total_latency": 7,
+  "ttft": 6.59240699998918,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 5.23
+   }
+  ]
+ },
+ {
+  "id": "no_doc-01",
+  "task_type": "no_doc",
+  "trace_id": "60938ed1-b566-4b20-ade8-2a28a0cf4f09",
+  "outcome": "SUCCESS",
+  "total_latency": 31.82,
+  "ttft": 30.64232759999868,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 22.33
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 3.94
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 4.29
+   }
+  ]
+ },
+ {
+  "id": "no_doc-05",
+  "task_type": "no_doc",
+  "trace_id": "15c9716c-f0ca-4c97-aa70-2bf1c51ba09e",
+  "outcome": "SUCCESS",
+  "total_latency": 30.85,
+  "ttft": 28.93122119999316,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.33
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 7.86
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 12.16
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 1.86
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 3.4
+   }
+  ]
+ },
+ {
+  "id": "no_doc-06",
+  "task_type": "no_doc",
+  "trace_id": "f7bfd94e-b53c-4bf9-8e10-775d32faea2a",
+  "outcome": "SUCCESS",
+  "total_latency": 5.17,
+  "ttft": 5.039568100008182,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.01
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.38
+   }
+  ]
+ },
+ {
+  "id": "no_doc-03",
+  "task_type": "no_doc",
+  "trace_id": "358f03b6-4c67-47a3-86a2-b48d5b4eb604",
+  "outcome": "SUCCESS",
+  "total_latency": 24.1,
+  "ttft": 23.99485829999321,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 8.92
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 4.77
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 7.1
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 2.23
+   }
+  ]
+ },
+ {
+  "id": "no_doc-02",
+  "task_type": "no_doc",
+  "trace_id": "db26fe23-beb2-4b8d-8cf8-b5fb3d6eac3b",
+  "outcome": "SUCCESS",
+  "total_latency": 20.41,
+  "ttft": 18.581495099992026,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 6.2
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 4.72
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 7.44
+   }
+  ]
+ },
+ {
+  "id": "offtopic_adv-10",
+  "task_type": "offtopic_adv",
+  "trace_id": "cf0d1ce9-09a6-49ba-b9fd-b4d86a06095f",
+  "outcome": "SUCCESS",
+  "total_latency": 7.81,
+  "ttft": 7.552782299986575,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 6.24
+   }
+  ]
+ },
+ {
+  "id": "no_doc-13",
+  "task_type": "no_doc",
+  "trace_id": "7b458195-d9fe-4018-af08-7a030162c7e8",
+  "outcome": "SUCCESS",
+  "total_latency": 14.12,
+  "ttft": 13.975780599997961,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 13.13
+   }
+  ]
+ },
+ {
+  "id": "no_doc-14",
+  "task_type": "no_doc",
+  "trace_id": "02242c79-e547-4be7-a192-f7e41b87ee6a",
+  "outcome": "SUCCESS",
+  "total_latency": 26.66,
+  "ttft": 18.20415399999183,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 7.9
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 5.44
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 11.05
+   }
+  ]
+ },
+ {
+  "id": "no_doc-15",
+  "task_type": "no_doc",
+  "trace_id": "dbbb9ec4-b4b6-4547-a926-5dffa5672c8b",
+  "outcome": "SUCCESS",
+  "total_latency": 23.03,
+  "ttft": 18.02248580000014,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0.19
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 6.45
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 3.61
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 11.71
+   }
+  ]
+ },
+ {
+  "id": "no_doc-11",
+  "task_type": "no_doc",
+  "trace_id": "dc26da35-1bf8-4515-9b0f-97d7d935b089",
+  "outcome": "SUCCESS",
+  "total_latency": 35.13,
+  "ttft": 30.6121553999983,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 8.49
+   },
+   {
+    "type": "SPAN",
+    "name": "hr_query",
+    "dur": 0.13
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 5.63
+   },
+   {
+    "type": "GENERATION",
+    "name": "hr_lookup",
+    "dur": 1.7
+   },
+   {
+    "type": "GENERATION",
+    "name": "rag_retrieve",
+    "dur": 5.46
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 14.13
+   }
+  ]
+ },
+ {
+  "id": "no_doc-07",
+  "task_type": "no_doc",
+  "trace_id": "bfab0d35-5f2e-4cab-8351-e42204898aee",
+  "outcome": "SUCCESS",
+  "total_latency": 33.85,
+  "ttft": 31.339441699994495,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 12.59
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 4.53
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 15.94
+   }
+  ]
+ },
+ {
+  "id": "no_doc-12",
+  "task_type": "no_doc",
+  "trace_id": "324bf265-8d03-4e43-9e64-fa54a1738701",
+  "outcome": "SUCCESS",
+  "total_latency": 50.32,
+  "ttft": 38.415931800002,
+  "nodes": [
+   {
+    "type": "SPAN",
+    "name": "preplan.fetch(context_parallel_acl)",
+    "dur": 0
+   },
+   {
+    "type": "SPAN",
+    "name": "preplan.load_context",
+    "dur": 0.01
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 4.57
+   },
+   {
+    "type": "SPAN",
+    "name": "rag_search",
+    "dur": 3.12
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 8.82
+   },
+   {
+    "type": "GENERATION",
+    "name": "plan",
+    "dur": 9.8
+   },
+   {
+    "type": "GENERATION",
+    "name": "verify",
+    "dur": 21.67
+   }
+  ]
+ }
+]
