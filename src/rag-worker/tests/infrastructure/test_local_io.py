@@ -158,6 +158,57 @@ def test_local_file_parser_reads_docx_source_under_source_root(
     asyncio.run(scenario())
 
 
+def test_local_file_parser_renders_docx_table_as_markdown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DOCX có <w:tbl> -> markdown table (| .. |) thay vì làm phẳng ô rời rạc."""
+    async def scenario() -> None:
+        source_root = tmp_path / "sources"
+        source_root.mkdir()
+        source_path = source_root / "salary.docx"
+
+        def _cell(text: str) -> str:
+            return f"<w:tc><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:tc>"
+
+        def _row(*cells: str) -> str:
+            return "<w:tr>" + "".join(_cell(c) for c in cells) + "</w:tr>"
+
+        table = "<w:tbl>" + _row("Bậc", "Lương") + _row("G3", "20tr") + _row("G4", "25tr") + "</w:tbl>"
+        with zipfile.ZipFile(source_path, "w") as archive:
+            archive.writestr(
+                "[Content_Types].xml",
+                '<?xml version="1.0" encoding="UTF-8"?><Types '
+                'xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>',
+            )
+            archive.writestr(
+                "word/document.xml",
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                "<w:body>"
+                "<w:p><w:r><w:t>Thang luong</w:t></w:r></w:p>"
+                f"{table}"
+                "</w:body>"
+                "</w:document>",
+            )
+        monkeypatch.setenv("SOURCE_ROOT", str(source_root))
+        parser = LocalFileParser(max_workers=1)
+        try:
+            parsed = await parser.parse(
+                document_id="doc-tbl", file_type="docx", source_uri="local://salary.docx",
+            )
+        finally:
+            parser.close()
+
+        md = parsed.markdown
+        assert "| Bậc | Lương |" in md          # header row giữ nguyên
+        assert "| --- | --- |" in md            # separator -> markdown table hợp lệ
+        assert "| G3 | 20tr |" in md             # data row giữ liên kết cột
+        assert "Thang luong" in md               # text thường trước bảng vẫn còn, đúng thứ tự
+
+    asyncio.run(scenario())
+
+
 def test_local_file_parser_reads_pptx_source_via_markitdown(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
