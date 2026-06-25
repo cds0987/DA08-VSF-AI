@@ -114,12 +114,12 @@ capabilities:
         - qwen/qwen3-next-80b-a3b-instruct:free
         - openai/gpt-oss-120b:free
       paid: deepseek/deepseek-v4-flash
-  think:                            # triage + planner + execute. PIN 1 MODEL = deepseek-v4-pro
-                                    # (probe: tools=OK + reasoning=CÓ) -> reasoning THẬT hiện ra
-                                    # ("Lập kế hoạch") + gọi tool được + ỔN ĐỊNH (bỏ blend gpt↔deepseek).
-    tiers: [paid]                   # paid = OpenRouter (deepseek-v4-pro). Xoay KEY, KHÔNG xoay model.
+  think:                            # role leave_action (tạo DRAFT đơn nghỉ) — flow ĐƠN GIẢN, không cần pro.
+                                    # Đổi pro->flash 2026-06-25 (probe: flash tools=OK gọi resolve_date +
+                                    # reasoning=CÓ, 8.2s vs pro 14.5s, rẻ hơn). req/s ~0 nên impact nhỏ.
+    tiers: [paid]                   # paid = OpenRouter (deepseek-v4-flash). Xoay KEY, KHÔNG xoay model.
     models:
-      paid: deepseek/deepseek-v4-pro
+      paid: deepseek/deepseek-v4-flash
     selector:
       impl: adaptive_balanced       # OpenRouter deepseek-pro: AIMD tự dò trần qua 429
       params:
