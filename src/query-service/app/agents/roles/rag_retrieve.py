@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
 
 from app.agents.base import AgentRole, WorkerInput, WorkerOutput
@@ -37,6 +38,7 @@ class RagRetrieveRole(AgentRole):
 
         # Retry 1 lần (mcp rag_search intermittent) — giống act_node hiện tại.
         _tool_start = datetime.now(timezone.utc)
+        _t0 = time.monotonic()
         try:
             results = await self._search(query)
         except Exception as exc:  # noqa: BLE001
@@ -45,6 +47,10 @@ class RagRetrieveRole(AgentRole):
                 results = await self._search(query)
             except Exception as exc2:  # noqa: BLE001
                 return WorkerOutput(task.step_id, self.name, "", status="error", error=str(exc2)[:200])
+        # ⏱️ DIAG rag latency: bóc tách starvation (rag nhanh nhưng worker timeout vì loop bận) vs
+        # MCP-overhead (rag THẬT chậm). mcp/qdrant CPU idle -> nếu ms LỚN = I/O/session, nhỏ = starve.
+        logger.info("rag_search_timing step=%s ms=%.0f n=%d", task.step_id,
+                    (time.monotonic() - _t0) * 1000, len(results))
         if ctx.tracer is not None:
             ctx.tracer.on_tool(ctx.trace, "rag_search", {"query": query},
                                f"{len(results)} chunks", _tool_start, datetime.now(timezone.utc))
