@@ -108,8 +108,18 @@ function handleSend(question: string) {
             @feedback="submitFeedback"
             @retry="messageId => chat.retryMessage(messageId, PIPELINE_STAGES)"
           />
+          <!-- Landing: tiêu đề + khung nhập canh giữa (kiểu DeepSeek) khi chưa có hội thoại -->
           <div v-else class="flex flex-1 flex-col items-center justify-center">
             <LandingState />
+            <div class="mt-8 w-full max-w-[760px] px-4">
+              <ChatInput
+                :input="chat.input"
+                :is-processing="chat.pipeline >= 0"
+                :show-quick-actions="true"
+                @update:input="chat.setInput"
+                @send="handleSend"
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -120,11 +130,12 @@ function handleSend(question: string) {
         v-if="hasConversation"
         class="pointer-events-none absolute bottom-0 left-0 right-0 z-20 h-40 bg-gradient-to-t from-background via-background/70 to-transparent"
       />
-      <div class="relative z-30 px-6 pb-6">
+      <!-- Khung nhập đáy: CHỈ khi đã có hội thoại. Lúc landing, khung nhập nằm giữa (ở trên). -->
+      <div v-if="hasConversation" class="relative z-30 px-6 pb-6">
         <ChatInput
           :input="chat.input"
           :is-processing="chat.pipeline >= 0"
-          :show-quick-actions="!hasConversation"
+          :show-quick-actions="false"
           @update:input="chat.setInput"
           @send="handleSend"
         />

@@ -24,12 +24,6 @@ import OctopusLogo from '~/components/OctopusLogo.vue'
     <h1 class="landing-title text-3xl sm:text-4xl font-semibold tracking-tight">
       VSF's Internal AI Assistant
     </h1>
-
-    <!-- Chấm accent brand (rose + blue) — dấu ấn nhỏ, tĩnh -->
-    <div class="mt-4 flex items-center justify-center gap-1.5">
-      <span class="h-1.5 w-1.5 rounded-full bg-rose-400/80" />
-      <span class="h-1.5 w-1.5 rounded-full bg-blue-400/80" />
-    </div>
   </div>
 </template>
 
