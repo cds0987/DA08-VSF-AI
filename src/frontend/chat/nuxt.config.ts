@@ -6,6 +6,15 @@ const appPath = fileURLToPath(new URL('./app', import.meta.url))
 export default defineNuxtConfig({
   compatibilityDate: '2024-11-01',
   devtools: { enabled: true },
+  app: {
+    head: {
+      title: 'vsfchat',
+      link: [
+        // Favicon = logo thương hiệu (thay favicon Vue mặc định)
+        { rel: 'icon', type: 'image/png', href: '/logo.png' },
+      ],
+    },
+  },
   modules: [
     '@pinia/nuxt',
     '@vueuse/nuxt',
