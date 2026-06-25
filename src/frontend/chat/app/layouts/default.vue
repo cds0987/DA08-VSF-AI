@@ -20,12 +20,8 @@ const isLoginPage = computed(() => route.path === '/login')
       class="flex min-w-0 flex-1 flex-col overflow-hidden relative z-10 transform-gpu"
       style="contain: content; will-change: transform"
     >
-      <!-- Chuông thông báo: góc trên-phải, luôn hiển thị mọi trang & mọi trạng thái sidebar -->
-      <div class="pointer-events-none absolute right-4 top-3 z-30">
-        <div class="pointer-events-auto">
-          <NotificationCenter />
-        </div>
-      </div>
+      <!-- Top bar mỏng: neo chuông thông báo (và action tương lai) ở góc phải, trong flow -->
+      <AppTopBar />
       <slot />
     </main>
   </div>

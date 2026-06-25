@@ -1,12 +1,25 @@
 <script setup lang="ts">
 import { useSessionStore } from './stores/session'
 import { useNotificationStore } from './stores/notifications'
+import { useChatStore } from './stores/chat'
 import { useTheme } from './composables/useTheme'
 
 const session = useSessionStore()
 const notifications = useNotificationStore()
+const chat = useChatStore()
 const route = useRoute()
 const { initTheme, applyTheme } = useTheme()
+
+// Tiêu đề tab: "vsfchat - <tên cuộc trò chuyện>"; trang khác / chat mới -> "vsfchat".
+const chatTitle = computed(() => {
+  const id = chat.currentConversationId
+  if (!id) return ''
+  return chat.conversations.find((c) => c.id === id)?.title ?? ''
+})
+useHead({
+  title: chatTitle,
+  titleTemplate: (title) => (title ? `vsfchat - ${title}` : 'vsfchat'),
+})
 let stopSessionWatch: (() => void) | null = null
 let stopRouteWatch: (() => void) | null = null
 
