@@ -28,10 +28,10 @@ roles:
 
 max_replan: 1
 max_workers_per_level: 4
-# 60->90 (2026-06-25): @150-burst 52 worker timeout >60s (mcp/qdrant CPU IDLE) = rag bị starve/chậm,
-# KHÔNG phải mcp quá tải. Nới 90s để await rag hoàn thành -> answer chạy thay vì bỏ qua (client
-# STREAM_TIMEOUT=240s dư). Diag rag_search_timing (rag_retrieve.py) sẽ chốt starvation vs MCP-overhead.
-worker_timeout_seconds: 90
+# 60 (revert từ band-aid 90): root @150 = MCP session-per-call handshake storm (fix = persistent pool
+# ở mcp_client). Nới timeout chỉ kéo dài treo (band-aid 90 -> deploy-smoke HR query treo > timeout =>
+# DEPLOY FAIL). Với persistent session call ~1.5s -> 60s thừa sức.
+worker_timeout_seconds: 60
 
 # verify_before_synthesize: chèn node verify (deepseek-pro tổng hợp lại + kiểm tra ĐỦ chưa)
 # giữa join -> synthesize. Đủ -> synthesize_recommend; thiếu -> replan (trong max_replan).

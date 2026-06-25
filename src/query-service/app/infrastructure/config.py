@@ -60,17 +60,19 @@ class Settings(BaseSettings):
 
     mcp_mode: str = "mock"
     mcp_service_url: str = "http://localhost:8003"
-    # TUNE 150-burst (2026-06-25): mcp/qdrant RỖNG lúc burst — breaker trip vì query-service CPU
-    # pegged không service kịp rag response trong 10s (KHÔNG phải mcp chậm). Nới timeout + fail_max
-    # cao + reset ngắn -> không biến "chậm thoáng qua" thành "chặn sạch 30s" (chống cascade RAG-blackout).
-    mcp_timeout_seconds: int = 60          # 20->60 BAND-AID (2026-06-25): root = session-per-call
-                                           # handshake storm @150 (mcp CPU idle, treo >20s -> cancel).
-                                           # Nới 60s xác nhận giả thuyết (nhiều rag lọt hơn?). < worker
-                                           # _timeout 90s. FIX GỐC tiếp theo = persistent/pooled session.
+    # ROOT @150 (2026-06-25): MỖI rag_search/hr_query mở transport+ClientSession+initialize() MỚI
+    # -> 150 concurrent = handshake storm vượt trần concurrency mcp -> treo -> chỉ ~2 lọt. Band-aid
+    # nới timeout KHÔNG giúp (60s -> 55/150, vẫn 2 rag) -> FIX = persistent pool (dưới).
+    mcp_timeout_seconds: int = 30          # 30s đủ (call qua session BỀN ~1.5s); nới thêm chỉ kéo dài treo.
     mcp_internal_token: str | None = None
-    mcp_circuit_fail_max: int = 20         # 5->20: KHÔNG trip vì vài timeout thoáng qua lúc burst
-    mcp_circuit_reset_timeout_seconds: int = 10   # 30->10: nếu trip thì hồi NHANH, đỡ blackout dài
+    mcp_circuit_fail_max: int = 20         # với persistent pool ít lỗi -> hiếm trip
+    mcp_circuit_reset_timeout_seconds: int = 10   # hồi nhanh nếu lỡ trip
     mcp_tool_cache_ttl_seconds: int = 300  # cache MCP tool list 5 min; 0 = off
+    # PERSISTENT SESSION POOL (fix root): K session BỀN/replica (owner task) thay mở+initialize MỖI
+    # call -> bỏ handshake storm -> 150 heavy trả lời thật. False = per-call cũ (rollback tức thì).
+    mcp_persistent_session: bool = True
+    mcp_session_pool_size: int = 16        # 8 replica × 16 = 128 (đủ ~19 concurrent/replica @150);
+                                           # cạn/chưa sẵn -> fallback per-call (không vỡ).
     tool_routing_mode: str = "legacy"  # "legacy" = typed methods; "native" = generic call_tool
 
     # hr-service (Leave WRITE REST path): query-service xác thực JWT -> inject user_id ->

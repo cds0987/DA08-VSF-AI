@@ -1,5 +1,8 @@
 from dataclasses import dataclass
+import asyncio
+import contextlib
 import json
+import logging
 import re
 import time
 from typing import Any
@@ -11,6 +14,8 @@ from app.application.ports import ToolSpec
 from app.application.hr_intents import HR_INTENTS
 from app.infrastructure.db.mock_data import MOCK_DOCUMENTS, MOCK_HR_DATA
 from app.infrastructure.config import Settings
+
+logger = logging.getLogger(__name__)
 
 streamable_http_client = None
 ClientSession = None
@@ -312,6 +317,19 @@ class MCPStreamableHttpClient:
         self._tool_specs_cache: list[ToolSpec] | None = None
         self._tool_specs_cache_at: float = 0.0
         self._tool_specs_ttl: int = settings.mcp_tool_cache_ttl_seconds
+        # ── PERSISTENT SESSION POOL (fix root: session-per-call handshake storm @150) ──
+        # MỖI _call_tool cũ mở transport+ClientSession+initialize() MỚI -> 150 concurrent =
+        # 150 handshake -> vượt trần concurrency mcp -> treo -> chỉ ~2 lọt. Pool: K session BỀN
+        # mở 1 lần trong OWNER TASK (sống ngoài request -> tránh anyio cancel-scope), acquire-
+        # exclusive/call, fallback per-call nếu pool chưa sẵn/cạn -> KHÔNG bao giờ vỡ.
+        self._persistent: bool = bool(getattr(settings, "mcp_persistent_session", True))
+        self._pool_size: int = max(1, int(getattr(settings, "mcp_session_pool_size", 16)))
+        self._pool: asyncio.Queue | None = None
+        self._owner_task: asyncio.Task | None = None
+        self._owner_lock: asyncio.Lock = asyncio.Lock()   # tạo ở __init__ (tránh race lazy 2 owner)
+        self._refill_event: asyncio.Event | None = None
+        self._stop_event: asyncio.Event | None = None
+        self._dead: set = set()
 
     @property
     def is_circuit_open(self) -> bool:
@@ -398,11 +416,103 @@ class MCPStreamableHttpClient:
         return await self._breaker.call_async(self._call_tool_inner, name, arguments)
 
     async def _call_tool_inner(self, name: str, arguments: dict[str, Any]) -> Any:
+        # PERSISTENT POOL path: mượn 1 session BỀN (đã initialize), gọi, trả lại. Pool chưa sẵn/
+        # cạn -> fallback per-call (an toàn). Session lỗi -> bỏ + refill (owner task tự mở lại).
+        if not self._persistent:
+            return await self._call_once(name, arguments)
+        await self._ensure_pool()
+        session = None
+        try:
+            session = await asyncio.wait_for(
+                self._pool.get(), timeout=min(self._timeout_seconds, 30))
+        except asyncio.TimeoutError:
+            session = None
+        if session is None:
+            return await self._call_once(name, arguments)   # pool cạn -> fallback, KHÔNG vỡ
+        try:
+            result = await session.call_tool(name, arguments=arguments)
+        except BaseException:                                # lỗi/cancel -> session có thể hỏng
+            self._dead.add(session)
+            if self._refill_event is not None:
+                self._refill_event.set()
+            raise
+        self._pool.put_nowait(session)                       # khỏe -> trả về pool tái dùng
+        if bool(getattr(result, "isError", False)):
+            raise RuntimeError(f"MCP tool {name} returned an error")
+        return _call_tool_result_payload(result)
+
+    async def _call_once(self, name: str, arguments: dict[str, Any]) -> Any:
+        """Per-call cũ (mở+đóng session 1 lần) — fallback khi pool chưa sẵn/cạn."""
         async with self._session() as session:
             result = await session.call_tool(name, arguments=arguments)
         if bool(getattr(result, "isError", False)):
             raise RuntimeError(f"MCP tool {name} returned an error")
         return _call_tool_result_payload(result)
+
+    async def _ensure_pool(self) -> None:
+        """Khởi động owner task 1 lần (idempotent). Chờ pool có ≥1 session (timeout ngắn -> fallback)."""
+        if self._owner_task is not None and not self._owner_task.done():
+            return
+        async with self._owner_lock:
+            if self._owner_task is not None and not self._owner_task.done():
+                return
+            self._pool = asyncio.Queue()
+            self._refill_event = asyncio.Event()
+            self._stop_event = asyncio.Event()
+            self._dead = set()
+            self._owner_task = asyncio.create_task(self._run_pool())
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self._wait_pool_nonempty(),
+                                       timeout=min(self._timeout_seconds, 15))
+
+    async def _wait_pool_nonempty(self) -> None:
+        while self._pool is not None and self._pool.empty():
+            await asyncio.sleep(0.1)
+
+    async def _run_pool(self) -> None:
+        """OWNER TASK (sống ngoài request -> transport anyio-task không bị cancel khi request xong).
+        Mở K session BỀN, giữ sống; session chết -> đóng + mở lại. KHÔNG bao giờ trả về sớm."""
+        live: dict = {}
+        try:
+            while not self._stop_event.is_set():
+                for s in list(self._dead):                   # dọn session chết
+                    self._dead.discard(s)
+                    st = live.pop(s, None)
+                    if st is not None:
+                        with contextlib.suppress(BaseException):
+                            await st.aclose()
+                while len(live) < self._pool_size and not self._stop_event.is_set():
+                    stack = contextlib.AsyncExitStack()
+                    try:
+                        session = await self._open_session(stack)
+                    except BaseException as exc:
+                        with contextlib.suppress(BaseException):
+                            await stack.aclose()
+                        logger.warning("mcp_pool_open_failed: %s", str(exc)[:140])
+                        break                                # nghỉ rồi thử lại vòng sau
+                    live[session] = stack
+                    self._pool.put_nowait(session)
+                self._refill_event.clear()
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(self._refill_event.wait(), timeout=15)
+        finally:
+            for st in live.values():
+                with contextlib.suppress(BaseException):
+                    await st.aclose()
+
+    async def _open_session(self, stack: "contextlib.AsyncExitStack"):
+        """Mở 1 session BỀN (transport+ClientSession+initialize) — giữ mở qua AsyncExitStack."""
+        session_cls, transport_factory = _sdk_objects()
+        headers = {}
+        if self._internal_token:
+            headers[MCP_INTERNAL_TOKEN_HEADER] = self._internal_token
+        http_client = await stack.enter_async_context(
+            httpx.AsyncClient(timeout=self._timeout_seconds, headers=headers))
+        read_stream, write_stream, _ = await stack.enter_async_context(
+            transport_factory(self._endpoint_url, http_client=http_client))
+        session = await stack.enter_async_context(session_cls(read_stream, write_stream))
+        await session.initialize()
+        return session
 
     def _session(self):
         return _McpSessionContext(self._endpoint_url, self._timeout_seconds, self._internal_token)
