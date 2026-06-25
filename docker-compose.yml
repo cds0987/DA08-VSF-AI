@@ -51,9 +51,9 @@ services:
   # ⚠ Mất VM = mất DB -> nên cron pg_dump đẩy GCS để backup.
   app-postgres:
     image: postgres:16-alpine
-    # CHUẨN BỊ MỞ RỘNG CORE: max_connections 100->200 (mặc định 100 là trần cứng cho replica×pool;
-    # 200 đủ 4 replica × 4 repo × 8 = 128). shared_buffers 128MB->512MB cho nhiều connection (VM dư RAM).
-    command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=512MB"]
+    # MỞ RỘNG CORE (e2-custom-16): max_connections 200->300 cho 6 replica × 4 repo × 8 = 192 + service
+    # khác (~30) < 300. shared_buffers 512MB->1GB (VM 32GB RAM dư thoải mái cho nhiều connection).
+    command: ["postgres", "-c", "max_connections=300", "-c", "shared_buffers=1GB"]
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -338,6 +338,132 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  # Replica 3-6: clone (e2-custom-16 -> 6 replica query-service tổng, mỗi container 1 uvicorn = SSE an
+  # toàn). nginx `upstream query_pool` round-robin cả 6 -> chia tải event-loop+DB ở 150-burst heavy.
+  query-service-3:
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/query-service:${IMAGE_TAG:-develop}
+    env_file:
+      - ./deploy/env/common.env
+      - ./deploy/env/query-service.env
+      - ./deploy/env/secret.env
+    environment:
+      <<: *newrelic
+      NEW_RELIC_APP_NAME: vsf-query-service
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/query_db
+      DB_POOL_MIN_SIZE: "2"
+      DB_POOL_MAX_SIZE: "8"
+    depends_on:
+      app-postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      redis:
+        condition: service_started
+      nats-bootstrap:
+        condition: service_completed_successfully
+      query-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  query-service-4:
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/query-service:${IMAGE_TAG:-develop}
+    env_file:
+      - ./deploy/env/common.env
+      - ./deploy/env/query-service.env
+      - ./deploy/env/secret.env
+    environment:
+      <<: *newrelic
+      NEW_RELIC_APP_NAME: vsf-query-service
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/query_db
+      DB_POOL_MIN_SIZE: "2"
+      DB_POOL_MAX_SIZE: "8"
+    depends_on:
+      app-postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      redis:
+        condition: service_started
+      nats-bootstrap:
+        condition: service_completed_successfully
+      query-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  query-service-5:
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/query-service:${IMAGE_TAG:-develop}
+    env_file:
+      - ./deploy/env/common.env
+      - ./deploy/env/query-service.env
+      - ./deploy/env/secret.env
+    environment:
+      <<: *newrelic
+      NEW_RELIC_APP_NAME: vsf-query-service
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/query_db
+      DB_POOL_MIN_SIZE: "2"
+      DB_POOL_MAX_SIZE: "8"
+    depends_on:
+      app-postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      redis:
+        condition: service_started
+      nats-bootstrap:
+        condition: service_completed_successfully
+      query-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  query-service-6:
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/query-service:${IMAGE_TAG:-develop}
+    env_file:
+      - ./deploy/env/common.env
+      - ./deploy/env/query-service.env
+      - ./deploy/env/secret.env
+    environment:
+      <<: *newrelic
+      NEW_RELIC_APP_NAME: vsf-query-service
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/query_db
+      DB_POOL_MIN_SIZE: "2"
+      DB_POOL_MAX_SIZE: "8"
+    depends_on:
+      app-postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      redis:
+        condition: service_started
+      nats-bootstrap:
+        condition: service_completed_successfully
+      query-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
   # ───────────── AI Router (gateway OpenAI-compatible, stateless) ─────────────
   # Đứng GIỮA AI-logic service và provider (OpenAI/OpenRouter). Service trỏ base_url
   # http://ai-router:8010/v1 + dùng OpenAI SDK như cũ (MOSA, zero dependency).
@@ -550,6 +676,10 @@ services:
       - document-service
       - query-service
       - query-service-2
+      - query-service-3
+      - query-service-4
+      - query-service-5
+      - query-service-6
       - mcp-service
       - hr-service
       - rag-worker
