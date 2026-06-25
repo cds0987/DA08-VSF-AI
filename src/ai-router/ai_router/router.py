@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import datetime, timedelta, timezone
@@ -27,6 +28,11 @@ logger = logging.getLogger("ai_router.router")
 
 MAX_ATTEMPTS = 4          # số lần thử resolve khác nhau khi key lỗi/429
 COOLDOWN_SECONDS = 30
+# EMBED dùng CHUNG 5 key OpenRouter với chat NHƯNG không có degrade (pinned qwen3-4b, save_mode
+# xiaomi bị feasible_model chặn theo endpoint) -> bench key 30s như chat làm CẠN pool embed dưới
+# burst -> resolve None -> 503 "no capacity for embed" -> rag rỗng (src=0). Rate-429 là nhịp-PHÚT,
+# key hồi nhanh -> bench NGẮN cho embed để pool không cạn. (Benchmark 1: burst 10/s -> 81% src=0.)
+EMBED_RATE_COOLDOWN_SECONDS = 3
 DEFAULT_OUTPUT_EST = 600  # ước lượng output mặc định (token)
 DRAIN_TTL_SECONDS = 86_400  # drain key tự hết hạn sau 24h (không state ẩn vĩnh viễn)
 
@@ -72,6 +78,12 @@ def estimate_tokens(messages: list[dict] | None, input_text: Any = None) -> int:
     if isinstance(input_text, str):
         chars += len(input_text)
     return chars // 4 + DEFAULT_OUTPUT_EST
+
+
+def _embed_backoff(attempt: int) -> float:
+    """Backoff giữa các lần retry embed: 0.5, 1, 2s (cap 2) -> tổng ~3.5s qua MAX_ATTEMPTS=4,
+    đủ vượt cooldown embed ngắn (EMBED_RATE_COOLDOWN_SECONDS=3) để key hồi rồi thử lại."""
+    return min(2.0, 0.5 * (2 ** attempt))
 
 
 class Router:
@@ -255,7 +267,9 @@ class Router:
             await self.counters.set_cooldown(dec.key_id, _seconds_to_midnight_utc())
             self.metrics.inc("airouter_key_429_total", {"key_id": dec.key_id, "kind": "quota"})
         elif kind == "rate":
-            await self.counters.set_cooldown(dec.key_id, COOLDOWN_SECONDS)
+            # embed: bench NGẮN (pool nhỏ + không degrade) — xem EMBED_RATE_COOLDOWN_SECONDS.
+            rate_cd = EMBED_RATE_COOLDOWN_SECONDS if capability == "embed" else COOLDOWN_SECONDS
+            await self.counters.set_cooldown(dec.key_id, rate_cd)
             self.metrics.inc("airouter_key_429_total", {"key_id": dec.key_id, "kind": "rate"})
             # AIMD multiplicative-decrease: 429-rate = chạm trần upstream -> co trần dò ×0.5.
             if dec.provider == Provider.OPENROUTER:
@@ -400,33 +414,46 @@ class Router:
                         status="ok", latency_ms=latency_ms, usage=usage_seen, cost=cost)
 
     async def embeddings(self, body: dict) -> dict:
+        """Embed (PIN qwen3-4b — KHÔNG degrade model, giữ đúng vector space). Retry-across-keys
+        + backoff: dưới burst, key embed bench ngắn rồi hồi -> thử lại MAX_ATTEMPTS thay vì trả
+        503 ngay (Benchmark 1: embed 503 -> 81% src=0). KHÔNG đổi model -> chỉ xoay key qwen3-4b."""
         est = estimate_tokens(None, body.get("input"))
-        dec = await self.resolve("embed", est_tokens=0, endpoint="embeddings")
-        if dec is None:
-            raise NoCapacityError("embed")
-        client = self.clients.get(dec.base_url, dec.api_key)
-        out = {k: v for k, v in body.items() if k != "model"}
-        out["model"] = dec.model_name
-        t0 = time.monotonic()
-        try:
-            resp = await client.embeddings.create(**out)
-        except Exception as exc:  # noqa: BLE001
-            await self._handle_error(dec, "embed", exc, conversation_id=None, attempt=0)
-            raise
-        finally:
-            await self.counters.release_inflight(dec.key_id, dec.inflight_token)
-        data = resp.model_dump()
-        usage = extract_usage(data)
-        cost = await self.account(dec, usage, est)
-        latency_ms = (time.monotonic() - t0) * 1000
-        self._emit_call(dec, "embed", usage, status="ok", cost=cost)
-        self._trace_log("call_ok", dec, "embed", conversation_id=None, status="ok",
-                        latency_ms=latency_ms, usage=usage, cost=cost)
-        served = data.get("model", "")
-        self._canon_model(data, dec, "embed")
-        pub = dec.public(); pub["served_model"] = served
-        data["_router"] = pub
-        return data
+        last_err: Exception | None = None
+        for attempt in range(MAX_ATTEMPTS):
+            dec = await self.resolve("embed", est_tokens=0, endpoint="embeddings")
+            if dec is None:
+                # Mọi key embed đang cooldown (ngắn) -> chờ backoff rồi resolve lại, KHÔNG 503 ngay.
+                if attempt < MAX_ATTEMPTS - 1:
+                    await asyncio.sleep(_embed_backoff(attempt))
+                continue
+            client = self.clients.get(dec.base_url, dec.api_key)
+            out = {k: v for k, v in body.items() if k != "model"}
+            out["model"] = dec.model_name
+            t0 = time.monotonic()
+            try:
+                resp = await client.embeddings.create(**out)
+                data = resp.model_dump()
+                usage = extract_usage(data)
+                cost = await self.account(dec, usage, est)
+                latency_ms = (time.monotonic() - t0) * 1000
+                self._emit_call(dec, "embed", usage, status="ok", cost=cost)
+                self._trace_log("call_ok", dec, "embed", conversation_id=None, status="ok",
+                                latency_ms=latency_ms, usage=usage, cost=cost)
+                served = data.get("model", "")
+                self._canon_model(data, dec, "embed")
+                pub = dec.public(); pub["served_model"] = served
+                data["_router"] = pub
+                return data
+            except Exception as exc:  # noqa: BLE001 — phân loại 429/5xx, cooldown đúng rồi retry
+                last_err = exc
+                await self._handle_error(dec, "embed", exc, conversation_id=None, attempt=attempt)
+                if attempt < MAX_ATTEMPTS - 1:
+                    await asyncio.sleep(_embed_backoff(attempt))
+            finally:
+                await self.counters.release_inflight(dec.key_id, dec.inflight_token)
+        if last_err is not None:
+            raise RouterCallError(str(last_err))
+        raise NoCapacityError("embed")
 
     async def rerank(self, body: dict) -> dict:
         """Cohere /rerank qua gateway — GIỮ NGUYÊN Cohere rerank-4-pro@OpenRouter, chỉ chuẩn hoá
