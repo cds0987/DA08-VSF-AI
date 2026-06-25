@@ -79,6 +79,9 @@ BƯỚC 2 — XUẤT (chọn 1):
 - CHƯA ĐỦ vì thiếu DỮ LIỆU HỆ THỐNG (tài liệu/HR) mà tra thêm SẼ lấp được -> in ĐÚNG 1 dòng bắt
   đầu "<<NEED_MORE>>" + mô tả NGẮN cần tra gì, rồi DỪNG. TUYỆT ĐỐI KHÔNG viết câu trả lời. CHỈ dùng
   khi thiếu DỮ LIỆU công cụ lấy thêm được.
+  ⚠️ KHÔNG dùng <<NEED_MORE>> khi: (1) đã có tài liệu liên quan dù chưa đủ mọi khía cạnh —
+  viết thẳng từ data hiện có; (2) câu hỏi chính sách chung (nghỉ phép, lương, quy trình) đã
+  có doc → không cần tra thêm; (3) chỉ muốn "thêm chi tiết" — replan = +20-40s user chờ thêm.
 - Câu hỏi MƠ HỒ / thiếu thông tin TỪ NGƯỜI DÙNG (vd "lên kế hoạch giúp tôi" nhưng chưa rõ kế hoạch
   GÌ; "tư vấn cho tôi" chưa rõ chủ đề) -> ĐỪNG <<NEED_MORE>> (tra thêm VÔ ÍCH, sẽ làm user CHỜ lâu).
   Trả lời NGAY: nêu phần làm được từ dữ liệu đã có + HỎI LẠI user cho rõ + gợi ý vài lựa chọn cụ thể.
