@@ -39,6 +39,30 @@ def test_local_file_parser_reads_relative_source_under_source_root(
     asyncio.run(scenario())
 
 
+def test_local_file_parser_reads_cp1252_text_without_crash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """File txt encoding cp1252 (Windows) KHÔNG còn crash — fallback giải mã."""
+    async def scenario() -> None:
+        source_root = tmp_path / "sources"
+        source_root.mkdir()
+        source_path = source_root / "note.txt"
+        # "Chi phí €50 – café" chứa ký tự cp1252 (€ 0x80, – 0x96) không hợp lệ UTF-8.
+        source_path.write_bytes("Chi phi €50 – cafe".encode("cp1252"))
+        monkeypatch.setenv("SOURCE_ROOT", str(source_root))
+        parser = LocalFileParser(max_workers=1)
+        try:
+            parsed = await parser.parse(
+                document_id="doc-cp", file_type="txt", source_uri="local://note.txt",
+            )
+        finally:
+            parser.close()
+        assert "Chi phi" in parsed.markdown  # đọc được, không raise
+
+    asyncio.run(scenario())
+
+
 def test_local_file_parser_rejects_path_traversal(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

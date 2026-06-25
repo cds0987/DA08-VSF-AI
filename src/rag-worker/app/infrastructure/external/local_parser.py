@@ -5,6 +5,7 @@ import base64
 import csv
 import logging
 import os
+import re
 import zipfile
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -152,7 +153,15 @@ def _text_step(markdown: str) -> _ParseStep:
 
 def _read_text_file(path: Path) -> _ParseStep:
     _ensure_source_file(path)
-    return _text_step(path.read_text(encoding="utf-8"))
+    data = path.read_bytes()
+    # Thử lần lượt các encoding phổ biến; latin-1 giải mã MỌI byte (không bao giờ fail)
+    # -> tránh crash file Windows-encoded (cp1252) hoặc thiếu BOM.
+    for enc in ("utf-8", "utf-8-sig", "cp1252", "latin-1"):
+        try:
+            return _text_step(data.decode(enc))
+        except UnicodeDecodeError:
+            continue
+    return _text_step(data.decode("latin-1", errors="replace"))
 
 
 def _csv_row_to_markdown_line(row: list[str], width: int) -> str:
@@ -258,8 +267,22 @@ def _read_docx_file(path: Path) -> _ParseStep:
         text = "".join(parts).strip()
         if text:
             paragraphs.append(f"{prefix} {text}" if prefix else text)
-    # Ảnh docx không có vị trí trong dòng text ⇒ gắn vào một "trang" cuối.
-    return _ParseStep(pages=[_Page(text="\n\n".join(paragraphs), images=media_images)])
+    result = _ParseStep(pages=[_Page(text="\n\n".join(paragraphs), images=media_images)])
+    # FALLBACK: nếu không tìm thấy heading nào và nội dung đủ lớn → thử MarkItDown.
+    # DOCX không có Word heading style (trang bìa, văn bản hành chính...) sẽ ra 1 block
+    # khổng lồ không có cấu trúc → chunker tạo toàn chunk trang bìa. MarkItDown nhận diện
+    # cấu trúc qua text pattern (số thứ tự, in hoa, dòng trống) thay vì XML style.
+    text = result.pages[0].text if result.pages else ""
+    has_heading = bool(re.search(r"^#{1,6}\s", text, re.MULTILINE))
+    if not has_heading and len(text.split()) > 100:
+        try:
+            md_result = _convert_with_markitdown(path)
+            md_text = md_result.pages[0].text if md_result.pages else ""
+            if bool(re.search(r"^#{1,6}\s", md_text, re.MULTILINE)):
+                return _ParseStep(pages=[_Page(text=md_text, images=media_images)])
+        except Exception:
+            pass  # fallback an toàn về kết quả docx_xml gốc
+    return result
 
 
 def _read_image_file(path: Path) -> _ParseStep:
@@ -493,8 +516,12 @@ class LocalFileParser(Parser):
                 "configured; OCR must go through the AI gateway"
             )
 
+        # PDF nhiều trang -> nhúng sentinel `<!--PG n-->` để chunker map chunk về TRANG
+        # THẬT (citation "trang N" đúng). Nguồn 1 trang (docx/csv/txt/ảnh) -> không nhúng
+        # -> chunker giữ hành vi cũ (bộ đếm section). HTML comment = vô hình khi render.
+        multi_page = len(step.pages) > 1
         parts: list[str] = []
-        for page in step.pages:
+        for page_index, page in enumerate(step.pages):
             ocr_text = ""
             if page.images:
                 ocr_text = await self._image_text_extractor.extract(page.images)
@@ -503,7 +530,7 @@ class LocalFileParser(Parser):
                 segment for segment in (page.text.strip(), ocr_text.strip()) if segment
             )
             if merged:
-                parts.append(merged)
+                parts.append(f"<!--PG {page_index + 1}-->\n{merged}" if multi_page else merged)
 
         return ParsedArtifact(
             markdown=_normalize_markdown("\n\n".join(parts)),
