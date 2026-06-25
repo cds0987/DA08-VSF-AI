@@ -24,7 +24,7 @@ os.environ.pop("AIROUTER_INTERNAL_TOKEN", None)
 from ai_router.config import get_settings  # noqa: E402
 from ai_router.router import (  # noqa: E402
     COOLDOWN_SECONDS,
-    EMBED_RATE_COOLDOWN_SECONDS,
+    RAG_RATE_COOLDOWN_SECONDS,
     RouterCallError,
     Router,
     _embed_backoff,
@@ -83,10 +83,10 @@ def test_embed_backoff_monotonic_and_capped():
     assert all(v <= 2.0 for v in vals)              # cap 2s
 
 
-def test_embed_short_cooldown_constant():
-    # embed bench NGẮN hơn nhiều so với chat (30s) -> pool embed không cạn dưới burst.
-    assert EMBED_RATE_COOLDOWN_SECONDS < COOLDOWN_SECONDS
-    assert EMBED_RATE_COOLDOWN_SECONDS <= 5
+def test_rag_short_cooldown_constant():
+    # embed + rerank bench NGẮN hơn nhiều so với chat (30s) -> pool không cạn dưới burst.
+    assert RAG_RATE_COOLDOWN_SECONDS < COOLDOWN_SECONDS
+    assert RAG_RATE_COOLDOWN_SECONDS <= 5
 
 
 def test_embeddings_retries_then_succeeds():
@@ -111,7 +111,7 @@ def test_embeddings_gives_up_after_max_attempts():
 
 if __name__ == "__main__":
     test_embed_backoff_monotonic_and_capped()
-    test_embed_short_cooldown_constant()
+    test_rag_short_cooldown_constant()
     test_embeddings_retries_then_succeeds()
     test_embeddings_gives_up_after_max_attempts()
     print("OK")

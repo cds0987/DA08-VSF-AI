@@ -28,11 +28,12 @@ logger = logging.getLogger("ai_router.router")
 
 MAX_ATTEMPTS = 4          # số lần thử resolve khác nhau khi key lỗi/429
 COOLDOWN_SECONDS = 30
-# EMBED dùng CHUNG 5 key OpenRouter với chat NHƯNG không có degrade (pinned qwen3-4b, save_mode
-# xiaomi bị feasible_model chặn theo endpoint) -> bench key 30s như chat làm CẠN pool embed dưới
-# burst -> resolve None -> 503 "no capacity for embed" -> rag rỗng (src=0). Rate-429 là nhịp-PHÚT,
-# key hồi nhanh -> bench NGẮN cho embed để pool không cạn. (Benchmark 1: burst 10/s -> 81% src=0.)
-EMBED_RATE_COOLDOWN_SECONDS = 3
+# RAG fan-out steps (embed qwen3-4b + rerank cohere) dùng CHUNG 5 key OpenRouter với chat NHƯNG
+# pool nhỏ + KHÔNG degrade model -> bench key 30s như chat làm CẠN pool dưới burst -> resolve None
+# -> 503 -> rag rỗng/giảm chất (Benchmark 1/2: burst 80%+ src=0). Rate-429 là nhịp-PHÚT, key hồi
+# nhanh -> bench NGẮN cho embed + rerank để pool không cạn (chat giữ 30s thận trọng).
+RAG_RATE_COOLDOWN_SECONDS = 3
+RAG_SHORT_COOLDOWN_CAPS = ("embed", "rerank_api")
 DEFAULT_OUTPUT_EST = 600  # ước lượng output mặc định (token)
 DRAIN_TTL_SECONDS = 86_400  # drain key tự hết hạn sau 24h (không state ẩn vĩnh viễn)
 
@@ -267,8 +268,8 @@ class Router:
             await self.counters.set_cooldown(dec.key_id, _seconds_to_midnight_utc())
             self.metrics.inc("airouter_key_429_total", {"key_id": dec.key_id, "kind": "quota"})
         elif kind == "rate":
-            # embed: bench NGẮN (pool nhỏ + không degrade) — xem EMBED_RATE_COOLDOWN_SECONDS.
-            rate_cd = EMBED_RATE_COOLDOWN_SECONDS if capability == "embed" else COOLDOWN_SECONDS
+            # embed + rerank: bench NGẮN (pool nhỏ + không degrade) — xem RAG_RATE_COOLDOWN_SECONDS.
+            rate_cd = RAG_RATE_COOLDOWN_SECONDS if capability in RAG_SHORT_COOLDOWN_CAPS else COOLDOWN_SECONDS
             await self.counters.set_cooldown(dec.key_id, rate_cd)
             self.metrics.inc("airouter_key_429_total", {"key_id": dec.key_id, "kind": "rate"})
             # AIMD multiplicative-decrease: 429-rate = chạm trần upstream -> co trần dò ×0.5.

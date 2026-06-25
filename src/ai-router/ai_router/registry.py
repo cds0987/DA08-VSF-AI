@@ -22,7 +22,12 @@ _RE_OPENROUTER = re.compile(r"^OPENROUTER_API_KEY_(\d+)$")
 # Giới hạn mặc định/account (PLAN §13.2). Có thể override qua env.
 OPENAI_TOKENS_PER_DAY = int(os.getenv("AIROUTER_OPENAI_TOKENS_PER_DAY", "2500000"))
 OPENROUTER_REQ_PER_DAY = int(os.getenv("AIROUTER_OPENROUTER_REQ_PER_DAY", "1000"))
-OPENROUTER_RPM = int(os.getenv("AIROUTER_OPENROUTER_RPM", "20"))
+# RPM/key cho OpenRouter. 20 quá thấp cho RAG fan-out dưới burst: embed (embed_or) + rerank
+# (paid) + chat dùng CHUNG 5 key -> 5×20=1.7/s, trong khi burst 10/s × fan-out cần ~40/s ->
+# reserve() fail -> 503 -> rag rỗng/giảm chất (Benchmark 2: burst 80% src=0, key_429=0 nghĩa là
+# nghẽn ở RPM router CHỨ KHÔNG phải 429 upstream). Nâng cao để OpenRouter (xoay provider, paid)
+# tự absorb; 429 THẬT của upstream đã có cooldown ngắn (RAG_RATE_COOLDOWN_SECONDS) + retry lo.
+OPENROUTER_RPM = int(os.getenv("AIROUTER_OPENROUTER_RPM", "600"))
 
 
 @dataclass(frozen=True)
