@@ -5,6 +5,7 @@ import base64
 import csv
 import logging
 import os
+import re
 import zipfile
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -258,8 +259,22 @@ def _read_docx_file(path: Path) -> _ParseStep:
         text = "".join(parts).strip()
         if text:
             paragraphs.append(f"{prefix} {text}" if prefix else text)
-    # Ảnh docx không có vị trí trong dòng text ⇒ gắn vào một "trang" cuối.
-    return _ParseStep(pages=[_Page(text="\n\n".join(paragraphs), images=media_images)])
+    result = _ParseStep(pages=[_Page(text="\n\n".join(paragraphs), images=media_images)])
+    # FALLBACK: nếu không tìm thấy heading nào và nội dung đủ lớn → thử MarkItDown.
+    # DOCX không có Word heading style (trang bìa, văn bản hành chính...) sẽ ra 1 block
+    # khổng lồ không có cấu trúc → chunker tạo toàn chunk trang bìa. MarkItDown nhận diện
+    # cấu trúc qua text pattern (số thứ tự, in hoa, dòng trống) thay vì XML style.
+    text = result.pages[0].text if result.pages else ""
+    has_heading = bool(re.search(r"^#{1,6}\s", text, re.MULTILINE))
+    if not has_heading and len(text.split()) > 100:
+        try:
+            md_result = _convert_with_markitdown(path)
+            md_text = md_result.pages[0].text if md_result.pages else ""
+            if bool(re.search(r"^#{1,6}\s", md_text, re.MULTILINE)):
+                return _ParseStep(pages=[_Page(text=md_text, images=media_images)])
+        except Exception:
+            pass  # fallback an toàn về kết quả docx_xml gốc
+    return result
 
 
 def _read_image_file(path: Path) -> _ParseStep:

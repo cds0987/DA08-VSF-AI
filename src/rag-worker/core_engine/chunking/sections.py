@@ -10,6 +10,7 @@ section) qua cùng chữ ký, KHÔNG đổi engine.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from typing import List, Tuple
@@ -47,7 +48,27 @@ def split_sections(
                 )
             )
         section_index += 1
-    return sections
+    return _dedup_children(sections)
+
+
+def _dedup_children(sections: List[Section]) -> List[Section]:
+    """Loại bỏ children trùng nội dung (hash MD5) xuyên suốt document.
+
+    Sliding window overlap + trang bìa lặp lại tạo ra nhiều chunk giống nhau
+    → dedup giữ lại chunk đầu tiên gặp, bỏ các bản sao. Section rỗng sau dedup
+    bị loại (không còn children nào mới).
+    """
+    seen: set[str] = set()
+    result: List[Section] = []
+    for s in sections:
+        unique = [
+            child for child in s.children
+            if (h := hashlib.md5(child.strip().encode()).hexdigest()) not in seen
+            and not seen.add(h)  # type: ignore[func-returns-value]
+        ]
+        if unique:
+            result.append(Section(s.section_title, s.section_index, s.parent_text, unique))
+    return result
 
 
 def _split_by_heading(markdown: str) -> List[Tuple[str, str]]:
