@@ -37,7 +37,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <TooltipProvider :delay-duration="0">
+  <!-- disable-hoverable-content: tooltip đóng NGAY khi rời trigger (không giữ mở để hover nội dung)
+       -> tránh nhiều tooltip tích tụ khi con trỏ lướt qua các icon sidebar thu gọn. -->
+  <TooltipProvider :delay-duration="0" :disable-hoverable-content="true">
     <NuxtLayout>
       <NuxtRouteAnnouncer />
       <NuxtPage />
