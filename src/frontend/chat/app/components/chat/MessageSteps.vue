@@ -158,9 +158,9 @@ function resultLabel(e: TraceEntry): string {
               <div class="flex items-center gap-1.5">
                 <component :is="TOOL_ICON[e.tool] ?? Search" class="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-muted-foreground" />
                 <span class="text-[15px] font-medium text-slate-700 dark:text-foreground/80">{{ TOOL_LABEL[e.tool] ?? e.tool }}</span>
-                <span v-if="queryLabel(e)" class="flex-1 truncate text-[13px] text-slate-500 dark:text-muted-foreground">{{ queryLabel(e) }}</span>
+                <span v-if="queryLabel(e)" class="flex-1 truncate text-[13px] font-medium text-slate-500 dark:text-muted-foreground">{{ queryLabel(e) }}</span>
               </div>
-              <div class="mt-0.5 pl-5 text-[13px] text-slate-400 dark:text-muted-foreground/70">{{ resultLabel(e) }}</div>
+              <div class="mt-0.5 pl-5 text-[13px] font-medium text-slate-400 dark:text-muted-foreground/70">{{ resultLabel(e) }}</div>
             </div>
           </template>
         </div>

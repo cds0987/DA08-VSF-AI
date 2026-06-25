@@ -15,7 +15,7 @@ const hasDetail = () => props.view.detail.length > 0
 
 <template>
   <div>
-    <p v-if="view.summary" class="text-sm leading-relaxed text-slate-600 dark:text-muted-foreground">
+    <p v-if="view.summary" class="text-sm font-medium leading-relaxed text-slate-600 dark:text-muted-foreground">
       {{ view.summary }}
     </p>
 
@@ -50,7 +50,7 @@ const hasDetail = () => props.view.detail.length > 0
           <p
             v-for="(line, li) in sec.lines"
             :key="li"
-            class="whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-500 dark:text-muted-foreground"
+            class="whitespace-pre-wrap break-words text-sm font-medium leading-relaxed text-slate-500 dark:text-muted-foreground"
             :class="sec.label && 'mt-0.5'"
           >
             {{ line }}

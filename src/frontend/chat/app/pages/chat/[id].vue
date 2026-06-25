@@ -148,7 +148,7 @@ function handleSend(question: string) {
         </div>
       </div>
 
-      <div class="pointer-events-none absolute bottom-0 left-0 right-0 z-20 h-40 bg-gradient-to-t from-background/80 to-transparent" />
+      <div class="pointer-events-none absolute bottom-0 left-0 right-0 z-20 h-40 bg-gradient-to-t from-background via-background/70 to-transparent" />
       <div class="relative z-30 px-6 pb-6">
         <ChatInput
           ref="chatInputRef"

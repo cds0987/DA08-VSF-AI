@@ -162,7 +162,7 @@ function copyToClipboard() {
         v-if="data.content"
         data-bot-answer
         :data-message-id="data.id"
-        class="ai-response-markdown prose prose-base prose-slate dark:prose-invert max-w-none text-slate-900 dark:text-foreground prose-p:leading-relaxed prose-li:leading-relaxed prose-headings:font-semibold prose-headings:tracking-tight prose-strong:font-semibold prose-pre:bg-slate-50 dark:prose-pre:bg-background/50 prose-pre:border prose-pre:border-slate-200 dark:prose-pre:border-white/5 [overflow-wrap:anywhere]"
+        class="ai-response-markdown prose prose-base prose-slate dark:prose-invert max-w-none font-medium text-slate-900 dark:text-foreground prose-p:leading-relaxed prose-li:leading-relaxed prose-headings:font-semibold prose-headings:tracking-tight prose-strong:font-semibold prose-pre:bg-slate-50 dark:prose-pre:bg-background/50 prose-pre:border prose-pre:border-slate-200 dark:prose-pre:border-white/5 [overflow-wrap:anywhere]"
         v-html="renderedContent"
         @click="handleContentClick"
         @keydown="handleContentKeydown"
@@ -305,6 +305,9 @@ function copyToClipboard() {
 }
 
 .ai-response-markdown {
+  /* Tăng độ đậm NÉT chữ (weight), KHÔNG ép màu — màu vẫn theo token theme
+     (dark = trắng-ngà --foreground, light = slate đậm). */
+  font-weight: 500;
   --tw-prose-body: var(--foreground);
   --tw-prose-headings: var(--foreground);
   --tw-prose-lead: var(--foreground);
