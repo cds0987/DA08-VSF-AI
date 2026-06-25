@@ -58,13 +58,22 @@ capabilities:
                                     # nâng chất ca khó: đổi paid = deepseek/deepseek-v4-pro.
     tiers: [paid]
     models:
-      paid: deepseek/deepseek-v4-flash   # PRIMARY (nhanh). //hóa deepseek+xiaomi ĐÃ THỬ 2026-06-24:
-                                         # deepseek p99 12.99→8.78s (split đúng cơ chế) NHƯNG xiaomi
-                                         # p99 15.21s -> kéo p99 TỔNG xấu hơn + success 125→84/150 ->
-                                         # REVERT. Cơ chế _pick_model_split GIỮ; chỉ //hóa khi có
-                                         # model thứ 2 NHANH NGANG deepseek (xiaomi giữ role save_mode).
+      paid:                              # //HÓA model (round-robin _pick_model_split) -> rải 4 UPSTREAM
+        - qwen/qwen3.5-flash-02-23        #   -> burst 150 chia ~38/pool -> queue NÔNG hơn -> p99 ttfc↓.
+        - openai/gpt-oss-120b            #   PROBE plan-format 2026-06-25 (4 câu, prose+JSON validate =
+        - qwen/qwen3-235b-a22b-2507       #   Plan schema): qwen3.5-flash 4/4 ttfc 0.69s · gpt-oss-120b
+        - deepseek/deepseek-v4-flash     #   4/4 ttfc 1.88s · qwen3-235b 4/4 ttfc 1.63s · deepseek-flash
+                                         #   3/4 ttfc ~7s (chậm nhất, giữ vì proven prod). KHÁC vụ xiaomi
+                                         #   (revert vì CHẬM): 3 model thêm NHANH HƠN deepseek -> kéo đuôi
+                                         #   XUỐNG. plan KHÔNG dùng tool + ép CoT qua prompt (prose trước
+                                         #   JSON) -> không cần native reasoning (qwen3-235b/gpt-oss không
+                                         #   có reasoning_content vẫn hiện "Lập kế hoạch" qua prose stream).
+                                         #   LOẠI: hy3-preview (format 1/4), gemma (chậm 4.1s).
+                                         #   ⚠️ qwen3-235b & qwen3.5 có thể CHUNG upstream Qwen (đa dạng GPU
+                                         #   ít hơn 4-family) + 235B to -> throughput thấp lúc tải nặng.
+                                         #   Mới đo IDLE -> PHẢI test 150-burst + sẵn REVERT (idle≠burst).
     selector:
-      impl: adaptive_balanced       # OpenRouter(deepseek): AIMD tự dò trần qua 429 (không TPM cố định)
+      impl: adaptive_balanced       # OpenRouter: AIMD tự dò trần qua 429 (không TPM cố định)
       params:
         tpm_per_key: 500000         # chỉ áp cho tier OpenAI; tier OR bỏ qua (dùng AIMD)
         save_mode:
