@@ -225,9 +225,21 @@ function stripJsonLikeBlocks(text: string): string {
   return out.replace(/\s+/g, ' ').trim()
 }
 
-// Dọn phần ngôn ngữ tự nhiên quanh khối JSON: bỏ khối JSON + nhiễu nhãn "Output JSON".
+// Cắt "recap kế hoạch" kỹ thuật ở đuôi prose orchestrator (vd "Plan: 1 step rag_retrieve
+// input=… depends_on…") — vốn TRÙNG với danh sách plan step render ngay bên dưới timeline,
+// nên thừa + lộ token kỹ thuật ra người dùng. CHỈ cắt khi có dấu hiệu kỹ thuật RÕ RÀNG; prose
+// thường (không marker) giữ NGUYÊN. Cắt làm rỗng/cụt -> giữ nguyên (không mất nội dung).
+const PLAN_RECAP_RE = /\b(?:plan|kế hoạch)\s*[:：]\s*\d|\bdepends_on\b|\bstep_id\b|\binput\s*=|\breasoning\s*=/i
+function stripPlanRecap(text: string): string {
+  const m = PLAN_RECAP_RE.exec(text)
+  if (!m) return text
+  const head = text.slice(0, m.index).replace(/[\s.;,:—–-]+$/, '').trim()
+  return head.length >= 20 ? head : text
+}
+
+// Dọn phần ngôn ngữ tự nhiên quanh khối JSON: bỏ khối JSON + nhiễu nhãn "Output JSON" + recap kỹ thuật.
 function cleanNaturalLanguage(text: string): string {
-  return stripJsonLikeBlocks(text).replace(/^output\s*json[.:]?\s*/i, '').trim()
+  return stripPlanRecap(stripJsonLikeBlocks(text).replace(/^output\s*json[.:]?\s*/i, '')).trim()
 }
 
 // Dựng kết quả từ 1 JSON đã parse (object/array) + phần NL hữu ích (nếu có).
@@ -273,16 +285,17 @@ export function summarizeThought(raw?: string | null): ThoughtSummary {
 
   // (2) Trông như JSON/debug nhưng không parse được -> KHÔNG dump; bóc/cắt, giữ NL sạch.
   if (isDebugJsonLike(text)) {
-    const cleaned = stripJsonLikeBlocks(text)
+    const cleaned = stripPlanRecap(stripJsonLikeBlocks(text))
     const summary = clampLine(cleaned) || 'Chi tiết suy luận'
     const detail = cleaned.length > SUMMARY_MAX ? [{ label: '', lines: [cleaned] }] : []
     return { summary, detail, raw: null }
   }
 
-  // (3)(4) Text thường.
-  const oneLine = text.replace(/\s+/g, ' ').trim()
+  // (3)(4) Text thường — bỏ "recap kế hoạch" kỹ thuật ở đuôi nếu có (trùng plan step bên dưới).
+  const stripped = stripPlanRecap(text)
+  const oneLine = stripped.replace(/\s+/g, ' ').trim()
   if (oneLine.length <= SUMMARY_MAX) return { summary: oneLine, detail: [], raw: null }
-  return { summary: clampLine(oneLine), detail: [{ label: '', lines: [text] }], raw: null }
+  return { summary: clampLine(oneLine), detail: [{ label: '', lines: [stripped] }], raw: null }
 }
 
 /** Cắt tên tệp dài, GIỮ đuôi (vd "CNHC_Employee_Handbook_2024.pdf" -> "CNHC_Employee…pdf"). */

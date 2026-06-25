@@ -140,6 +140,21 @@ test('plain text that merely mentions the word json -> untouched, no false strip
   assert.equal(r.raw, null)
 })
 
+test('orchestrator prose: cắt recap kỹ thuật ở đuôi (Plan:/input=/depends_on), giữ NL', () => {
+  const raw = 'Chúng ta cần xử lý câu hỏi về chính sách nghỉ phép, thuộc phạm vi hỗ trợ nội bộ. '
+    + 'Plan: 1 step rag_retrieve input=câu hỏi reasoning=tra tài liệu depends_on=[]'
+  const r = summarizeThought(raw)
+  assert.match(r.summary, /chính sách nghỉ phép/)
+  const surface = `${r.summary} ${r.detail.map(s => s.lines.join(' ')).join(' ')}`
+  assert.doesNotMatch(surface, /depends_on|input=|reasoning=|Plan:\s*\d/)
+})
+
+test('prose thường KHÔNG có marker kỹ thuật -> KHÔNG cắt nhầm', () => {
+  const raw = 'Tôi sẽ lập kế hoạch tra cứu tài liệu rồi tổng hợp lại câu trả lời cho bạn'
+  const r = summarizeThought(raw)
+  assert.equal(r.summary, raw)
+})
+
 test('truncateFilename keeps extension and adds ellipsis', () => {
   const t = truncateFilename('CNHC_Employee_Handbook_2024_final.pdf', 20)
   assert.ok(t.length <= 21)

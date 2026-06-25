@@ -79,12 +79,11 @@ function fileIconClass(doc?: string | null) { return GROUP_ICON_CLASS[citationFi
 
 const renderedContent = computed(() => {
   if (!props.data.content) return ''
-  // Đang stream: render markdown THÔ + con trỏ nhấp nháy, CHƯA inject pill (citation chưa có).
+  // Đang stream: render markdown THÔ, CHƯA inject pill (citation chưa có).
   // Cùng node với bản cuối -> khi xong chỉ patch ([N] thành pill) chứ không remount -> không flash.
   if (props.data.streaming) {
     // Strip [N] khỏi content lúc stream -> không hiện marker thô "[1][4]" (kì); pill render khi xong.
-    const html = streamingRenderer.toHtml(props.data.content.replace(/\[\d+\]/g, ''))
-    return html.replace(/(<\/(?:p|li|h[1-6]|pre|blockquote)>)\s*$/, '<span class="streaming-cursor"></span>$1')
+    return streamingRenderer.toHtml(props.data.content.replace(/\[\d+\]/g, ''))
   }
   const rawHtml = md.render(props.data.content)
   const { refToNumber } = citationSources.value
@@ -280,30 +279,6 @@ function copyToClipboard() {
 </template>
 
 <style scoped>
-/* Con trỏ stream — chèn qua v-html nên cần :deep(). Giữ y hệt StreamingBlock cũ. */
-:deep(.streaming-cursor) {
-  display: inline-block;
-  width: 2px;
-  height: 1em;
-  margin-left: 2px;
-  vertical-align: middle;
-  border-radius: 9999px;
-  background-color: rgb(59 130 246);
-  animation: streaming-blink 0.9s steps(1, end) infinite;
-  box-shadow: 0 0 0.65rem rgb(59 130 246 / 0.35);
-}
-
-@keyframes streaming-blink {
-  0%,
-  45% {
-    opacity: 1;
-  }
-  55%,
-  100% {
-    opacity: 0;
-  }
-}
-
 .ai-response-markdown {
   /* Tăng độ đậm NÉT chữ (weight), KHÔNG ép màu — màu vẫn theo token theme
      (dark = trắng-ngà --foreground, light = slate đậm). */
