@@ -71,7 +71,7 @@ function handleSend(question: string) {
       :class="cn('relative flex h-full flex-1 flex-col', chat.isPanelOpen && 'lg:pr-[min(40vw,480px)]')"
     >
       <div ref="scrollRef" class="flex-1 overflow-y-auto custom-scrollbar">
-        <div class="mx-auto flex min-h-full w-full max-w-[860px] flex-col px-4 pb-32 pt-4 sm:px-6 lg:px-8">
+        <div class="mx-auto flex min-h-full w-full max-w-[860px] flex-col px-4 pb-32 pt-16 sm:px-6 lg:px-8">
           <div
             v-if="chat.isHistoryLoading && !hasConversation"
             class="flex flex-1 flex-col items-center justify-center gap-3 text-slate-400 dark:text-muted-foreground"

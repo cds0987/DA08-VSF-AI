@@ -7,7 +7,7 @@
 
 <template>
   <header
-    class="absolute inset-x-0 top-0 z-30 flex h-[52px] items-center justify-end gap-2 border-b border-slate-200/60 bg-background/60 px-4 backdrop-blur-md dark:border-border/70"
+    class="absolute inset-x-0 top-0 z-30 flex h-[52px] items-center justify-end gap-2 bg-background/60 px-4 backdrop-blur-md"
   >
     <slot>
       <NotificationCenter />
