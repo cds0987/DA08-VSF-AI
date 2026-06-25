@@ -114,7 +114,12 @@ function handleSend(question: string) {
         </div>
       </div>
 
-      <div class="pointer-events-none absolute bottom-0 left-0 right-0 z-20 h-40 bg-gradient-to-t from-background/80 to-transparent" />
+      <!-- Scrim làm mờ tin nhắn sau ô input — CHỈ khi có hội thoại.
+           Màn landing rỗng không cần che -> tránh dải ngang cứng phủ lên nền. -->
+      <div
+        v-if="hasConversation"
+        class="pointer-events-none absolute bottom-0 left-0 right-0 z-20 h-40 bg-gradient-to-t from-background via-background/70 to-transparent"
+      />
       <div class="relative z-30 px-6 pb-6">
         <ChatInput
           :input="chat.input"

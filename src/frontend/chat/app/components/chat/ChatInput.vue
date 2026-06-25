@@ -101,7 +101,7 @@ defineExpose({
         v-if="quote"
         class="flex items-start gap-2 rounded-xl border-l-2 border-blue-400 bg-blue-50/70 px-3 py-2 dark:border-blue-500/60 dark:bg-white/5"
       >
-        <p class="line-clamp-2 flex-1 text-xs leading-relaxed text-slate-600 dark:text-muted-foreground">
+        <p class="line-clamp-2 flex-1 text-xs font-medium leading-relaxed text-slate-600 dark:text-muted-foreground">
           {{ truncateQuote(quote.text) }}
         </p>
         <button
@@ -122,7 +122,7 @@ defineExpose({
           :rows="1"
           maxlength="500"
           placeholder="Hỏi về chính sách, quy trình, kiến thức nội bộ..."
-          class="max-h-[200px] min-h-[36px] flex-1 resize-none overflow-hidden self-center bg-transparent py-2 text-[16px] text-slate-800 outline-none placeholder:text-slate-400 dark:text-foreground dark:placeholder:text-chat-placeholder"
+          class="max-h-[200px] min-h-[36px] flex-1 resize-none overflow-hidden self-center bg-transparent py-2 text-[16px] font-medium text-slate-800 outline-none placeholder:font-normal placeholder:text-slate-400 dark:text-foreground dark:placeholder:text-chat-placeholder"
         />
         <button
           type="submit"

@@ -44,19 +44,8 @@ const greeting = computed(() => {
 
 <template>
   <div class="relative flex flex-col items-center justify-center text-center pt-8">
-    <!-- Nền trắng-xanh + sóng trang trí kiểu Gemini -->
-    <div class="pointer-events-none fixed inset-0 -z-10 landing-aura" aria-hidden="true" />
-    <svg
-      class="pointer-events-none fixed inset-y-0 right-0 -z-10 h-full w-[55%] text-blue-400/20"
-      viewBox="0 0 600 800"
-      fill="none"
-      preserveAspectRatio="xMaxYMid slice"
-      aria-hidden="true"
-    >
-      <path d="M600 120 C 420 200 480 360 300 440 C 160 500 220 660 40 720" stroke="currentColor" stroke-width="1.5" />
-      <path d="M600 220 C 440 300 500 460 320 540 C 180 600 240 760 60 820" stroke="currentColor" stroke-width="1.5" opacity="0.6" />
-      <path d="M600 40 C 460 110 520 250 360 320 C 240 370 300 520 140 600" stroke="currentColor" stroke-width="1.5" opacity="0.4" />
-    </svg>
+    <!-- Nền (aura xanh + base) do BackgroundEffects.vue ở tầng layout đảm nhiệm.
+         Landing chỉ lo nội dung -> tránh chồng layer & đường nối. -->
 
     <!-- Octopus + sparkle lấp lánh (glow dịu tĩnh, không bounce/pulse ồn) -->
     <div class="mb-6 relative">
@@ -97,33 +86,6 @@ const greeting = computed(() => {
 </template>
 
 <style scoped>
-/* Nền trắng-xanh kiểu Gemini: phủ kín toàn trang, xanh đậm ở giữa loang ra mép */
-.landing-aura {
-  background:
-    radial-gradient(
-      ellipse 90% 70% at 50% 40%,
-      rgba(59, 130, 246, 0.40) 0%,
-      rgba(96, 165, 250, 0.28) 28%,
-      rgba(147, 197, 253, 0.18) 50%,
-      rgba(191, 219, 254, 0.09) 70%,
-      rgba(239, 246, 255, 0.04) 100%
-    ),
-    linear-gradient(180deg, #f0f6ff 0%, #ffffff 100%);
-  animation: aura-breathe 8s ease-in-out infinite;
-}
-
-@keyframes aura-breathe {
-  0%,
-  100% {
-    opacity: 0.85;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.04);
-  }
-}
-
 /* Chữ chào gradient slate */
 .landing-greeting {
   background: linear-gradient(180deg, #1e293b 0%, #334155 100%);
@@ -166,18 +128,7 @@ const greeting = computed(() => {
   color: transparent;
 }
 
-:global(.dark) .landing-aura {
-  background: radial-gradient(
-    ellipse 90% 70% at 50% 40%,
-    rgba(59, 130, 246, 0.22) 0%,
-    rgba(37, 99, 235, 0.12) 35%,
-    rgba(30, 58, 138, 0.05) 60%,
-    transparent 80%
-  );
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .landing-aura,
   .sparkle {
     animation: none;
   }

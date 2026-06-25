@@ -47,7 +47,7 @@ const formatSize = (bytes: number) => {
             <span class="text-[12px] font-medium text-slate-700 dark:text-foreground/90 truncate [overflow-wrap:anywhere] [word-break:break-all]">
               {{ file.name }}
             </span>
-            <span class="text-[10px] text-slate-500 dark:text-muted-foreground">{{ formatSize(file.size) }}</span>
+            <span class="text-[10px] font-medium text-slate-500 dark:text-muted-foreground">{{ formatSize(file.size) }}</span>
           </div>
         </div>
       </div>
