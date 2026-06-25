@@ -60,10 +60,13 @@ class Settings(BaseSettings):
 
     mcp_mode: str = "mock"
     mcp_service_url: str = "http://localhost:8003"
-    mcp_timeout_seconds: int = 10
+    # TUNE 150-burst (2026-06-25): mcp/qdrant RỖNG lúc burst — breaker trip vì query-service CPU
+    # pegged không service kịp rag response trong 10s (KHÔNG phải mcp chậm). Nới timeout + fail_max
+    # cao + reset ngắn -> không biến "chậm thoáng qua" thành "chặn sạch 30s" (chống cascade RAG-blackout).
+    mcp_timeout_seconds: int = 20          # 10->20: rag dưới tải cao cần >10s (event-loop bận)
     mcp_internal_token: str | None = None
-    mcp_circuit_fail_max: int = 5
-    mcp_circuit_reset_timeout_seconds: int = 30
+    mcp_circuit_fail_max: int = 20         # 5->20: KHÔNG trip vì vài timeout thoáng qua lúc burst
+    mcp_circuit_reset_timeout_seconds: int = 10   # 30->10: nếu trip thì hồi NHANH, đỡ blackout dài
     mcp_tool_cache_ttl_seconds: int = 300  # cache MCP tool list 5 min; 0 = off
     tool_routing_mode: str = "legacy"  # "legacy" = typed methods; "native" = generic call_tool
 

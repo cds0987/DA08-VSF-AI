@@ -464,6 +464,71 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  # Replica 7-8: TRACE 150-burst 2026-06-25 -> 5-6 replica VẪN pegged 100% CPU (mcp/qdrant RỖNG)
+  # -> plan-stream bị cắt (fallback 51) + rag timeout (breaker 65). 8 replica: 150/8≈19/loop < ngưỡng
+  # peg (~25-30) -> stream plan KHÔNG cắt + rag service kịp. 8×4×8=256 < PG max_connections=300.
+  query-service-7:
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/query-service:${IMAGE_TAG:-develop}
+    env_file:
+      - ./deploy/env/common.env
+      - ./deploy/env/query-service.env
+      - ./deploy/env/secret.env
+    environment:
+      <<: *newrelic
+      NEW_RELIC_APP_NAME: vsf-query-service
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/query_db
+      DB_POOL_MIN_SIZE: "2"
+      DB_POOL_MAX_SIZE: "8"
+    depends_on:
+      app-postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      redis:
+        condition: service_started
+      nats-bootstrap:
+        condition: service_completed_successfully
+      query-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  query-service-8:
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/query-service:${IMAGE_TAG:-develop}
+    env_file:
+      - ./deploy/env/common.env
+      - ./deploy/env/query-service.env
+      - ./deploy/env/secret.env
+    environment:
+      <<: *newrelic
+      NEW_RELIC_APP_NAME: vsf-query-service
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/query_db
+      DB_POOL_MIN_SIZE: "2"
+      DB_POOL_MAX_SIZE: "8"
+    depends_on:
+      app-postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      redis:
+        condition: service_started
+      nats-bootstrap:
+        condition: service_completed_successfully
+      query-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
   # ───────────── AI Router (gateway OpenAI-compatible, stateless) ─────────────
   # Đứng GIỮA AI-logic service và provider (OpenAI/OpenRouter). Service trỏ base_url
   # http://ai-router:8010/v1 + dùng OpenAI SDK như cũ (MOSA, zero dependency).
@@ -680,6 +745,8 @@ services:
       - query-service-4
       - query-service-5
       - query-service-6
+      - query-service-7
+      - query-service-8
       - mcp-service
       - hr-service
       - rag-worker
