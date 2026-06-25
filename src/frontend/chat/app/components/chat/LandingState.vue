@@ -20,8 +20,8 @@ import OctopusLogo from '~/components/OctopusLogo.vue'
       </div>
     </div>
 
-    <!-- Tiêu đề chủ đạo: tương phản mạnh, rõ ở cả light & dark -->
-    <h1 class="landing-title text-3xl sm:text-4xl font-semibold tracking-tight">
+    <!-- Tiêu đề chủ đạo: màu solid theo dark: variant (proven) — đen rõ ở light, trắng rõ ở dark -->
+    <h1 class="text-3xl sm:text-4xl font-semibold tracking-tight text-slate-900 dark:text-white">
       VSF's Internal AI Assistant
     </h1>
   </div>
@@ -48,20 +48,5 @@ import OctopusLogo from '~/components/OctopusLogo.vue'
     rgba(244, 63, 94, 0.06) 40%,
     transparent 72%
   );
-}
-
-/* Tiêu đề: gradient tương phản cao — đậm trên nền trắng */
-.landing-title {
-  background: linear-gradient(180deg, #0f172a 0%, #334155 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-/* Dark: sáng rõ trên nền đen */
-:global(.dark) .landing-title {
-  background: linear-gradient(180deg, #f8fafc 0%, #cbd5e1 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
 }
 </style>
