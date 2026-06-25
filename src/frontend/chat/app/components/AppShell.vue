@@ -142,7 +142,7 @@ const userInitials = computed(() => {
 
         <button
           @click="setSidebarCollapsed(true)"
-          class="rounded-md p-1.5 text-slate-500 dark:text-muted-foreground hover:bg-slate-100 dark:hover:bg-sidebar-accent hover:text-slate-900 dark:hover:text-sidebar-accent-foreground bg-white dark:bg-chat-input border border-slate-200/50 dark:border-sidebar-border shadow-sm cursor-pointer shrink-0 mr-4 transition-opacity duration-300"
+          class="rounded-md p-1.5 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-sidebar-accent hover:text-slate-900 dark:hover:text-sidebar-accent-foreground bg-white dark:bg-chat-input border border-slate-200/50 dark:border-sidebar-border shadow-sm cursor-pointer shrink-0 mr-4 transition-opacity duration-300"
           :class="isCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'"
         >
           <PanelLeftClose
@@ -179,7 +179,7 @@ const userInitials = computed(() => {
                     <div class="flex h-9 items-center justify-center shrink-0" :class="isCollapsed ? 'w-full' : 'w-[64px]'">
                       <SquarePlus
                         class="h-5 w-5 shrink-0"
-                        :class="!isCollapsed ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-muted-foreground'"
+                        :class="!isCollapsed ? 'text-blue-600 dark:text-blue-400' : 'text-slate-900 dark:text-white'"
                       />
                     </div>
                     <span
@@ -221,7 +221,7 @@ const userInitials = computed(() => {
                       <Search
                         class="h-5 w-5 shrink-0 z-10"
                         :class="isCollapsed
-                          ? 'text-slate-500 dark:text-muted-foreground'
+                          ? 'text-slate-900 dark:text-white'
                           : 'text-slate-400 dark:text-muted-foreground/70 group-focus-within:text-blue-600 dark:group-focus-within:text-blue-400'"
                       />
                     </div>
