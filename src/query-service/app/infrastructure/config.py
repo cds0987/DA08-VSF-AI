@@ -63,7 +63,10 @@ class Settings(BaseSettings):
     # TUNE 150-burst (2026-06-25): mcp/qdrant RỖNG lúc burst — breaker trip vì query-service CPU
     # pegged không service kịp rag response trong 10s (KHÔNG phải mcp chậm). Nới timeout + fail_max
     # cao + reset ngắn -> không biến "chậm thoáng qua" thành "chặn sạch 30s" (chống cascade RAG-blackout).
-    mcp_timeout_seconds: int = 20          # 10->20: rag dưới tải cao cần >10s (event-loop bận)
+    mcp_timeout_seconds: int = 60          # 20->60 BAND-AID (2026-06-25): root = session-per-call
+                                           # handshake storm @150 (mcp CPU idle, treo >20s -> cancel).
+                                           # Nới 60s xác nhận giả thuyết (nhiều rag lọt hơn?). < worker
+                                           # _timeout 90s. FIX GỐC tiếp theo = persistent/pooled session.
     mcp_internal_token: str | None = None
     mcp_circuit_fail_max: int = 20         # 5->20: KHÔNG trip vì vài timeout thoáng qua lúc burst
     mcp_circuit_reset_timeout_seconds: int = 10   # 30->10: nếu trip thì hồi NHANH, đỡ blackout dài
