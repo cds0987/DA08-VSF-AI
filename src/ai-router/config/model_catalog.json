@@ -1324,6 +1324,23 @@
     "endpoint": "rerank"
   },
   {
+    "id": "cohere/rerank-v3.5",
+    "provider": "cohere",
+    "name_native": "rerank-v3.5",
+    "name_or": "cohere/rerank-v3.5",
+    "context_length": 0,
+    "price_in_per_mtok": 0.0,
+    "price_out_per_mtok": 0.0,
+    "price_in_with_fee": 0.0,
+    "price_out_with_fee": 0.0,
+    "is_free": false,
+    "supports_tools": false,
+    "input_modalities": [
+      "text"
+    ],
+    "endpoint": "rerank"
+  },
+  {
     "id": "mistralai/mistral-small-2603",
     "provider": "mistralai",
     "name_native": "mistral-small-2603",

@@ -108,7 +108,7 @@ async def test_cohere_reranker_maps_index_sorts_and_filters() -> None:
         ]}
 
     reranker = CohereRerankReranker(
-        model="cohere/rerank-4-pro", api_key="k", base_url="https://x/api/v1",
+        model="cohere/rerank-v3.5", api_key="k", base_url="https://x/api/v1",
         timeout_seconds=10.0, post_fn=post_fn,
     )
     hits = [_hit("hcm"), _hit("hanoi"), _hit("danang")]
