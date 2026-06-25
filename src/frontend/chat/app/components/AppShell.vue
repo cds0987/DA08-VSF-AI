@@ -19,16 +19,44 @@ const router = useRouter()
 const route = useRoute()
 
 const isCollapsed = ref(true)
-// Prevent layout-shift pointerover from opening tooltips after sidebar width changes.
-// Only a real pointermove should re-enable tooltip hover behavior.
+// Chặn tooltip tự mở khi đổi width sidebar.
+// CƠ CHẾ THẬT (đọc từ reka-ui): tooltip mở trên `pointermove` của trigger. Khi sidebar
+// đổi width, Chrome BẮN `pointermove` GIẢ tại ĐÚNG toạ độ con trỏ đang đứng yên (layout
+// shift dưới con trỏ) -> mở tooltip dù user không di chuột. Vì vậy KHÔNG thể gỡ chặn theo
+// "pointermove bất kỳ" (chính nó là move giả). Phải phân biệt move GIẢ (cùng toạ độ) với
+// move THẬT (đổi toạ độ): chỉ gỡ chặn khi con trỏ dịch > ngưỡng.
 const suppressTooltips = ref(false)
 const isHoveringLogo = ref(false)
 // Settings giờ mở từ dropdown account (DeepSeek-style) -> dialog điều khiển bằng state.
 const settingsOpen = ref(false)
 
+let suppressBaseline: { x: number, y: number } | null = null
+let suppressMoveHandler: ((e: PointerEvent) => void) | null = null
+
+function removeSuppressListener() {
+  if (suppressMoveHandler && typeof document !== 'undefined') {
+    document.removeEventListener('pointermove', suppressMoveHandler)
+  }
+  suppressMoveHandler = null
+  suppressBaseline = null
+}
+
 function clearSuppressOnRealMove() {
-  if (typeof document === "undefined") return
-  document.addEventListener("pointermove", () => { suppressTooltips.value = false }, { once: true })
+  if (typeof document === 'undefined') return
+  removeSuppressListener() // tránh chồng listener nếu toggle liên tiếp
+  suppressMoveHandler = (e: PointerEvent) => {
+    // pointermove ĐẦU TIÊN sau collapse thường là move GIẢ (layout shift) -> làm mốc, chưa gỡ.
+    if (!suppressBaseline) {
+      suppressBaseline = { x: e.clientX, y: e.clientY }
+      return
+    }
+    // Chỉ gỡ chặn khi con trỏ THỰC SỰ dịch chuyển > 3px (move giả luôn trùng toạ độ mốc).
+    if (Math.abs(e.clientX - suppressBaseline.x) + Math.abs(e.clientY - suppressBaseline.y) > 3) {
+      suppressTooltips.value = false
+      removeSuppressListener()
+    }
+  }
+  document.addEventListener('pointermove', suppressMoveHandler)
 }
 
 function setSidebarCollapsed(value: boolean) {
@@ -36,6 +64,8 @@ function setSidebarCollapsed(value: boolean) {
   isCollapsed.value = value
   clearSuppressOnRealMove()
 }
+
+onUnmounted(removeSuppressListener)
 const searchQuery = ref('')
 const searchInputRef = ref<HTMLInputElement | null>(null)
 
