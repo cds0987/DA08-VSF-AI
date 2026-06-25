@@ -431,11 +431,15 @@ class MCPStreamableHttpClient:
             return await self._call_once(name, arguments)   # pool cạn -> fallback, KHÔNG vỡ
         try:
             result = await session.call_tool(name, arguments=arguments)
-        except BaseException:                                # lỗi/cancel -> session có thể hỏng
+        except asyncio.CancelledError:                       # request bị hủy -> bỏ session, KHÔNG fallback
             self._dead.add(session)
-            if self._refill_event is not None:
-                self._refill_event.set()
+            self._refill_event.set()
             raise
+        except Exception as exc:                             # session pool lỗi -> bỏ + FALLBACK per-call
+            self._dead.add(session)
+            self._refill_event.set()
+            logger.warning("mcp_pool_call_failed tool=%s -> fallback per-call: %s", name, str(exc)[:120])
+            return await self._call_once(name, arguments)    # robust: query VẪN chạy
         self._pool.put_nowait(session)                       # khỏe -> trả về pool tái dùng
         if bool(getattr(result, "isError", False)):
             raise RuntimeError(f"MCP tool {name} returned an error")
