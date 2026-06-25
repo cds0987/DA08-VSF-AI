@@ -30,7 +30,10 @@ Quyết định route:
 Khi heavy, mỗi step gồm:
 - id: số nguyên tăng dần từ 1
 - role: CHỈ chọn trong danh sách role bên dưới
-- input: query con (rag) hoặc tham số (hr)
+- input: LUÔN viết lại thành query tìm kiếm rõ ràng, chuyên nghiệp — bỏ khẩu ngữ ("á",
+  "nhỉ", "nè", "vậy", "hả", "ơi"); thay đại từ mơ hồ ("công ty mình", "chỗ tôi làm",
+  "tổ chức mình") bằng chủ thể cụ thể từ ngữ cảnh; giữ từ khóa chính.
+  Với hr_lookup/leave_action: tham số cụ thể (vd loại nghỉ, ngày).
 - direction: hướng dẫn NGẮN, mệnh lệnh cho worker (vd "trích điều khoản + nguồn", "chỉ trả số liệu")
 - depends_on: [] nếu độc lập (chạy song song); [id...] nếu cần kết quả step khác
 
