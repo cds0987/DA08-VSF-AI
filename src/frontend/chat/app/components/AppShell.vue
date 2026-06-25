@@ -19,18 +19,22 @@ const router = useRouter()
 const route = useRoute()
 
 const isCollapsed = ref(true)
-const isAnimatingSidebar = ref(false)
+// Prevent layout-shift pointerover from opening tooltips after sidebar width changes.
+// Only a real pointermove should re-enable tooltip hover behavior.
+const suppressTooltips = ref(false)
 const isHoveringLogo = ref(false)
 // Settings giờ mở từ dropdown account (DeepSeek-style) -> dialog điều khiển bằng state.
 const settingsOpen = ref(false)
 
+function clearSuppressOnRealMove() {
+  if (typeof document === "undefined") return
+  document.addEventListener("pointermove", () => { suppressTooltips.value = false }, { once: true })
+}
+
 function setSidebarCollapsed(value: boolean) {
-  // Trong lúc transition width (300ms), các icon trượt dưới con trỏ đứng yên
-  // -> browser bắn pointerenter giả -> tooltip mở. Set isAnimatingSidebar để
-  // truyền :disabled cho Tooltip, vô hiệu hóa hoàn toàn trong thời gian này.
-  isAnimatingSidebar.value = true
+  suppressTooltips.value = true
   isCollapsed.value = value
-  setTimeout(() => { isAnimatingSidebar.value = false }, 350)
+  clearSuppressOnRealMove()
 }
 const searchQuery = ref('')
 const searchInputRef = ref<HTMLInputElement | null>(null)
@@ -44,7 +48,7 @@ const handleNewChat = () => {
 
 const handleSearchClick = () => {
   if (isCollapsed.value) {
-    isCollapsed.value = false
+    setSidebarCollapsed(false)
     setTimeout(() => searchInputRef.value?.focus(), 200)
   } else {
     searchInputRef.value?.focus()
@@ -82,7 +86,6 @@ const userInitials = computed(() => {
       isCollapsed
         ? 'w-16 bg-transparent border-r border-transparent'
         : 'w-[268px] bg-sidebar border-r border-sidebar-border',
-      isAnimatingSidebar ? 'pointer-events-none' : '',
     ]"
     style="display: flex !important; isolation: isolate; contain: layout style paint; will-change: width, transform;"
   >
@@ -172,7 +175,7 @@ const userInitials = computed(() => {
           >
             <!-- New Chat Section -->
             <div class="w-full">
-              <Tooltip :disabled="isAnimatingSidebar" :ignore-non-keyboard-focus="true">
+              <Tooltip :disabled="suppressTooltips" :ignore-non-keyboard-focus="true">
                 <TooltipTrigger asChild>
                   <button
                     @click="handleNewChat"
@@ -206,12 +209,12 @@ const userInitials = computed(() => {
             <SideLink
               :item="{ label: 'Đơn nghỉ phép', to: '/leave-approvals', icon: CalendarCheck }"
               :is-collapsed="isCollapsed"
-              :disable-tooltip="isAnimatingSidebar"
+              :disable-tooltip="suppressTooltips"
             />
 
             <!-- Search -->
             <div class="w-full">
-              <Tooltip :disabled="isAnimatingSidebar" :ignore-non-keyboard-focus="true">
+              <Tooltip :disabled="suppressTooltips" :ignore-non-keyboard-focus="true">
                 <TooltipTrigger asChild>
                   <div
                     :role="isCollapsed ? 'button' : undefined"
