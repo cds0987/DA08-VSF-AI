@@ -64,13 +64,8 @@ const handleSignOut = () => {
 
 const sidebarWidth = computed(() => isCollapsed.value ? '64px' : '268px')
 
-const maskedEmail = computed(() => {
-  const email = session.user?.email
-  if (!email) return ''
-  const [local, domain] = email.split('@')
-  if (!domain) return email
-  return `${local.slice(0, 3)}*****@${domain}`
-})
+// Hiện full email (không che) — đây là tài khoản của chính người dùng trong app nội bộ.
+const userEmail = computed(() => session.user?.email ?? '')
 
 const userInitials = computed(() => {
   if (session.user?.initials) return session.user.initials
@@ -286,7 +281,7 @@ const userInitials = computed(() => {
               :class="isCollapsed ? 'opacity-0' : 'opacity-100'"
             >
               <div class="truncate text-sm font-semibold text-slate-900 dark:text-sidebar-foreground leading-tight">
-                {{ maskedEmail }}
+                {{ userEmail }}
               </div>
             </div>
             <ChevronsUpDown
@@ -306,7 +301,7 @@ const userInitials = computed(() => {
             <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white">
               {{ userInitials }}
             </div>
-            <span class="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-900 dark:text-sidebar-foreground">{{ maskedEmail }}</span>
+            <span class="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-900 dark:text-sidebar-foreground">{{ userEmail }}</span>
           </DropdownMenuLabel>
           <DropdownMenuSeparator class="bg-slate-100 dark:bg-sidebar-accent" />
           <DropdownMenuItem
