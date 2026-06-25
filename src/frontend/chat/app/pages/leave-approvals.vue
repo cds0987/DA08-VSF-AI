@@ -90,7 +90,7 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="flex h-full w-full flex-col overflow-y-auto p-6">
+  <div class="flex h-full w-full flex-col overflow-y-auto px-6 pb-6 pt-16">
     <div class="mx-auto w-full max-w-3xl">
       <div class="mb-6 flex items-center justify-between">
         <div>

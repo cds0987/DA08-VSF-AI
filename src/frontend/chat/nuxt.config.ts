@@ -10,8 +10,8 @@ export default defineNuxtConfig({
     head: {
       title: 'vsfchat',
       link: [
-        // Favicon = logo thương hiệu (thay favicon Vue mặc định)
-        { rel: 'icon', type: 'image/png', href: '/logo.png' },
+        // Favicon = logo octopus (mascot thương hiệu), thay favicon Vue/VSF mặc định
+        { rel: 'icon', type: 'image/svg+xml', href: '/octopus.svg' },
       ],
     },
   },

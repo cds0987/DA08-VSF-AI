@@ -10,7 +10,7 @@ const chat = useChatStore()
 const route = useRoute()
 const { initTheme, applyTheme } = useTheme()
 
-// Tiêu đề tab: "vsfchat - <tên cuộc trò chuyện>"; trang khác / chat mới -> "vsfchat".
+// Tiêu đề tab: chỉ tên cuộc trò chuyện (viết hoa chữ đầu); chat mới / trang khác -> "vsfchat".
 const chatTitle = computed(() => {
   const id = chat.currentConversationId
   if (!id) return ''
@@ -18,7 +18,7 @@ const chatTitle = computed(() => {
 })
 useHead({
   title: chatTitle,
-  titleTemplate: (title) => (title ? `vsfchat - ${title}` : 'vsfchat'),
+  titleTemplate: (title) => (title ? title.charAt(0).toUpperCase() + title.slice(1) : 'vsfchat'),
 })
 let stopSessionWatch: (() => void) | null = null
 let stopRouteWatch: (() => void) | null = null
