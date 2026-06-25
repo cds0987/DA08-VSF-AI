@@ -39,3 +39,7 @@ class ConversationRepository(ABC):
     @abstractmethod
     async def save_feedback(self, session_id: str, score: int) -> None:
         """Persist feedback for the assistant answer identified by session_id."""
+
+    @abstractmethod
+    async def update_title(self, user_id: str, conversation_id: str, title: str) -> bool:
+        """Update the conversation title (auto-generated or user-provided)."""

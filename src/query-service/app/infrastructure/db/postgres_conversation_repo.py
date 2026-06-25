@@ -271,6 +271,9 @@ class PostgresConversationRepository(ConversationRepository):
             )
         return result == "UPDATE 1"
 
+    async def update_title(self, user_id: str, conversation_id: str, title: str) -> bool:
+        return await self.rename_conversation(user_id, conversation_id, title)
+
     async def delete_conversation(self, user_id: str, conversation_id: str) -> bool:
         pool = await self._get_pool()
         async with pool.acquire() as connection:

@@ -155,6 +155,9 @@ class Settings(BaseSettings):
     summary_enabled: bool = True
     summary_capability: str = "summary"  # capability ai-router (routing.yaml) -> gpt-4o-mini
     summary_max_tokens: int = 256
+    title_enabled: bool = True
+    title_capability: str = "summary"    # route qua ai-router -> gpt-4o-mini (model rẻ đủ dùng)
+    title_max_tokens: int = 32
 
     use_langgraph: bool = True  # LangGraph is the canonical agent; set to false to use legacy orchestration
 

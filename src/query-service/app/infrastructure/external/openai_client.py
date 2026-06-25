@@ -184,3 +184,46 @@ class ConversationSummarizer:
             return out or (prev_summary or "")
         except Exception:
             return prev_summary or ""
+
+
+_TITLE_SYSTEM = (
+    "Bạn tạo tiêu đề ngắn cho hội thoại chatbot nội bộ (HR/chính sách công ty). "
+    "Tiêu đề: 3-7 từ tiếng Việt, nắm bắt ý chính câu hỏi, không dùng dấu chấm cuối. "
+    "Ví dụ: 'Chính sách nghỉ phép năm', 'Cách tính lương thưởng', 'Quy trình thử việc'. "
+    "Chỉ trả tiêu đề, không giải thích, không lời dẫn."
+)
+
+
+class ConversationTitleGenerator:
+    """Sinh tiêu đề ngắn cho conversation sau turn 1 bằng model rẻ qua ai-router.
+    Best-effort: lỗi/mock -> fallback 50 ký tự đầu câu hỏi."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._client = None
+        self._model = settings.openai_llm_model
+        if settings.llm_mode == "openai" and settings.openai_api_key:
+            from app.infrastructure.external.routed_openai import build_routed_openai, route_model
+
+            self._client, _ = build_routed_openai(settings)
+            self._model = route_model(settings, settings.title_capability, settings.openai_llm_model)
+
+    async def generate(self, question: str) -> str:
+        fallback = question.strip()[:50] or "Hội thoại mới"
+        if self._client is None:
+            return fallback
+        try:
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": _TITLE_SYSTEM},
+                    {"role": "user", "content": question},
+                ],
+                temperature=0,
+                max_completion_tokens=self._settings.title_max_tokens,
+                stream=False,
+            )
+            out = (response.choices[0].message.content or "").strip()
+            return out or fallback
+        except Exception:
+            return fallback
