@@ -13,15 +13,22 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 
 @dataclass
 class Section:
     section_title: str
-    section_index: int        # placeholder: thứ tự section, chưa phải page PDF thực
+    section_index: int        # page PDF thật (nếu có sentinel) hoặc thứ tự section
     parent_text: str          # full content -> LLM prompt
     children: List[str]       # sub-split để embed
+
+
+# Sentinel trang do parser nhúng (PDF nhiều trang): <!--PG n-->. Chunker map section
+# về trang thật rồi STRIP. Không có sentinel -> dùng bộ đếm section (hành vi cũ).
+_PAGE_SENTINEL = re.compile(r"<!--PG (\d+)-->")
+# Dòng bảng markdown: bắt đầu+kết thúc bằng `|`.
+_TABLE_LINE = re.compile(r"^\s*\|.*\|\s*$")
 
 
 def split_sections(
@@ -30,25 +37,129 @@ def split_sections(
     child_max_words: int,
     child_overlap_words: int,
 ) -> List[Section]:
-    blocks = _split_by_heading(markdown)
     sections: List[Section] = []
-    section_index = 1
-    for title, body in blocks:
-        body = body.strip()
-        if not body:
-            continue
-        for parent_text in _cap_words(body, parent_max_words):
-            children = _windows(parent_text, child_max_words, child_overlap_words)
-            sections.append(
-                Section(
-                    section_title=title or "(no heading)",
-                    section_index=section_index,
-                    parent_text=parent_text,
-                    children=children or [parent_text],
-                )
-            )
-        section_index += 1
+    counter = 1
+    for page_num, page_text in _split_by_page(markdown):
+        for title, body in _split_by_heading(page_text):
+            body = body.strip()
+            if not body:
+                continue
+            index = page_num if page_num is not None else counter
+            for kind, seg in _segment_tables(body):
+                if kind == "table":
+                    # Bảng = 1 Section: parent_text = cả bảng (cho LLM); children mang
+                    # header lặp lại để mỗi chunk tự biết tên cột.
+                    sections.append(
+                        Section(
+                            section_title=title or "(no heading)",
+                            section_index=index,
+                            parent_text=seg,
+                            children=_table_children(seg, child_max_words),
+                        )
+                    )
+                else:
+                    for parent_text in _cap_words(seg, parent_max_words):
+                        children = _windows(parent_text, child_max_words, child_overlap_words)
+                        sections.append(
+                            Section(
+                                section_title=title or "(no heading)",
+                                section_index=index,
+                                parent_text=parent_text,
+                                children=children or [parent_text],
+                            )
+                        )
+            counter += 1
     return _dedup_children(sections)
+
+
+def _split_by_page(markdown: str) -> List[Tuple[Optional[int], str]]:
+    """Tách theo sentinel trang `<!--PG n-->` (parser nhúng cho PDF nhiều trang).
+
+    Trả [(page_num, text)] với sentinel ĐÃ strip. Không có sentinel -> [(None, all)]
+    (giữ hành vi cũ: chunker dùng bộ đếm section thay số trang).
+    """
+    matches = list(_PAGE_SENTINEL.finditer(markdown))
+    if not matches:
+        return [(None, markdown)]
+    pages: List[Tuple[Optional[int], str]] = []
+    for idx, m in enumerate(matches):
+        start = m.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(markdown)
+        text = markdown[start:end].strip()
+        if text:
+            pages.append((int(m.group(1)), text))
+    return pages or [(None, markdown)]
+
+
+def _segment_tables(body: str) -> List[Tuple[str, str]]:
+    """Tách body thành đoạn xen kẽ ("prose", text) / ("table", text).
+
+    Run ≥2 dòng bảng liên tiếp = "table" (giữ nguyên để không cắt header ↔ dữ liệu).
+    Dòng bảng lẻ loi -> coi như prose.
+    """
+    lines = body.split("\n")
+    segments: List[Tuple[str, str]] = []
+    buf: List[str] = []
+    i, n = 0, len(lines)
+    while i < n:
+        if _TABLE_LINE.match(lines[i]):
+            j = i
+            while j < n and _TABLE_LINE.match(lines[j]):
+                j += 1
+            run = lines[i:j]
+            if len(run) >= 2:
+                if buf:
+                    segments.append(("prose", "\n".join(buf)))
+                    buf = []
+                segments.append(("table", "\n".join(run)))
+            else:
+                buf.extend(run)
+            i = j
+        else:
+            buf.append(lines[i])
+            i += 1
+    if buf:
+        segments.append(("prose", "\n".join(buf)))
+    return segments or [("prose", body)]
+
+
+def _is_separator_row(line: str) -> bool:
+    cells = [c.strip() for c in line.strip().strip("|").split("|")]
+    return bool(cells) and all(re.fullmatch(r":?-{1,}:?", c or "") for c in cells)
+
+
+def _table_children(table_text: str, child_max_words: int) -> List[str]:
+    """Chia bảng theo NHÓM DÒNG, lặp 2 dòng header (header + `---`) vào mỗi chunk.
+
+    Bảng nhỏ (≤ child_max_words) -> 1 chunk cả bảng. Bảng lớn -> mỗi chunk = header
+    + nhóm dòng dữ liệu sao cho ~child_max_words từ. Mỗi chunk tự mang tên cột.
+    """
+    lines = [ln for ln in table_text.split("\n") if ln.strip()]
+    if len(lines) <= 1 or len(table_text.split()) <= child_max_words:
+        return [table_text]
+    header = [lines[0]]
+    body_start = 1
+    if len(lines) >= 2 and _is_separator_row(lines[1]):
+        header.append(lines[1])
+        body_start = 2
+    data = lines[body_start:]
+    if not data:
+        return [table_text]
+    header_words = sum(len(h.split()) for h in header)
+    children: List[str] = []
+    cur: List[str] = []
+    cur_words = header_words
+    for row in data:
+        rw = len(row.split())
+        if cur and cur_words + rw > child_max_words:
+            children.append("\n".join(header + cur))
+            cur = []
+            cur_words = header_words
+        cur.append(row)
+        cur_words += rw
+    if cur:
+        children.append("\n".join(header + cur))
+    return children or [table_text]
 
 
 def _dedup_children(sections: List[Section]) -> List[Section]:
@@ -126,9 +237,45 @@ def _cap_words(text: str, max_words: int) -> List[str]:
 
 
 def _windows(text: str, size: int, overlap: int) -> List[str]:
+    """Cửa sổ trượt SENTENCE-AWARE: gom theo CÂU tới ~size từ, overlap lùi câu cuối.
+
+    Câu đơn dài hơn size -> giữ nguyên (KHÔNG cắt giữa câu). Text không có ranh giới
+    câu (vd dãy số, token rời) -> rơi về cửa sổ theo SỐ TỪ (hành vi cũ, giữ test gác).
+    """
     words = text.split()
     if len(words) <= size:
         return [text]
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
+    if len(sentences) <= 1:
+        return _word_windows(words, size, overlap)
+    sent_words = [len(s.split()) for s in sentences]
+    windows: List[str] = []
+    i, n = 0, len(sentences)
+    while i < n:
+        cur: List[str] = []
+        cur_w = 0
+        j = i
+        while j < n and (not cur or cur_w + sent_words[j] <= size):
+            cur.append(sentences[j])
+            cur_w += sent_words[j]
+            j += 1
+        windows.append(" ".join(cur))
+        if j >= n:
+            break
+        # overlap: lùi lại các câu cuối tới khi đủ ~overlap từ (đảm bảo TIẾN: next_i > i).
+        back_w = 0
+        k = j - 1
+        while k > i and back_w < overlap:
+            back_w += sent_words[k]
+            k -= 1
+        i = k + 1
+    return windows
+
+
+def _word_windows(words: List[str], size: int, overlap: int) -> List[str]:
+    """Cửa sổ theo SỐ TỪ (hành vi cũ) — dùng khi text không có ranh giới câu."""
+    if len(words) <= size:
+        return [" ".join(words)]
     step = max(1, size - overlap)
     min_tail_words = max(1, int(size * 0.3))
     windows: List[str] = []

@@ -153,7 +153,15 @@ def _text_step(markdown: str) -> _ParseStep:
 
 def _read_text_file(path: Path) -> _ParseStep:
     _ensure_source_file(path)
-    return _text_step(path.read_text(encoding="utf-8"))
+    data = path.read_bytes()
+    # Thử lần lượt các encoding phổ biến; latin-1 giải mã MỌI byte (không bao giờ fail)
+    # -> tránh crash file Windows-encoded (cp1252) hoặc thiếu BOM.
+    for enc in ("utf-8", "utf-8-sig", "cp1252", "latin-1"):
+        try:
+            return _text_step(data.decode(enc))
+        except UnicodeDecodeError:
+            continue
+    return _text_step(data.decode("latin-1", errors="replace"))
 
 
 def _csv_row_to_markdown_line(row: list[str], width: int) -> str:
@@ -508,8 +516,12 @@ class LocalFileParser(Parser):
                 "configured; OCR must go through the AI gateway"
             )
 
+        # PDF nhiều trang -> nhúng sentinel `<!--PG n-->` để chunker map chunk về TRANG
+        # THẬT (citation "trang N" đúng). Nguồn 1 trang (docx/csv/txt/ảnh) -> không nhúng
+        # -> chunker giữ hành vi cũ (bộ đếm section). HTML comment = vô hình khi render.
+        multi_page = len(step.pages) > 1
         parts: list[str] = []
-        for page in step.pages:
+        for page_index, page in enumerate(step.pages):
             ocr_text = ""
             if page.images:
                 ocr_text = await self._image_text_extractor.extract(page.images)
@@ -518,7 +530,7 @@ class LocalFileParser(Parser):
                 segment for segment in (page.text.strip(), ocr_text.strip()) if segment
             )
             if merged:
-                parts.append(merged)
+                parts.append(f"<!--PG {page_index + 1}-->\n{merged}" if multi_page else merged)
 
         return ParsedArtifact(
             markdown=_normalize_markdown("\n\n".join(parts)),
