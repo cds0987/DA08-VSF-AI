@@ -208,8 +208,10 @@ class OrchestratorWorkersPlanner(Planner):
         user = f"Câu hỏi: {ctx.question}"
         if ctx.history:  # đang trong hội thoại -> giúp model nhận follow-up (phụ thuộc ngữ cảnh) -> OTHER
             user = "(Đây là lượt tiếp theo trong một hội thoại.)\n" + user
+        # node=None: KHÔNG khai SSE node (classifier nội bộ ~1s) -> khỏi đụng NODES snapshot + FE TS.
+        # Vẫn trace Langfuse như 1 generation (đo overhead triage). FE không cần render bước này.
         text = await acomplete(model, _FAST_TRIAGE_SYS, user,
-                               tracer=ctx.tracer, trace=ctx.trace, node="triage")
+                               tracer=ctx.tracer, trace=ctx.trace, node=None)
         return "RAG" if (text and "RAG" in text.upper() and "OTHER" not in text.upper()) else "OTHER"
 
     async def plan(self, ctx: PlanContext) -> Plan:
