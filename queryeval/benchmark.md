@@ -272,18 +272,31 @@ deploy. → BM5: **filter cache-hit (latency<2s)** + **2-run** lấy variance + 
 | cache-hit | 0% | 0% | (2 run này sạch sẵn) |
 | **p50 (real-query)** | 15.4s | 15.1s | ✅ ỔN ĐỊNH |
 | p90 / p95 | 35.3 / 46.3 | 32.4 / 40.2 | ±6s |
-| correct (auto) | 75% | 76% | tight |
+| correct (heuristic) | 75% | 76% | (NHIỄU — xem LLM-judge dưới) |
 
-**Per-cat (correct% / p50):** clear-cat ỔN ĐỊNH: rag_info **91%**/16s · leave **100%**/14s · hr 85-90%/19s.
-Light-route NHIỄU (outcome-heuristic): ambiguous 33-41%/**6s** · offtopic 61-69%/**6s** · no_doc **20↔46%**/18s.
+### Correctness — LLM-judge (deepseek-chat giám khảo, 150 câu) — THAY heuristic nhiễu
+
+outcome-heuristic (cụm-từ) UNDERCOUNT nặng light-route → chấm lại bằng **LLM-judge**: fire 150 câu →
+capture answer → giám khảo so `expect` + `expect_outcome`. (Lưu `benchmark5/llm_judge.jsonl`.)
+
+| task | heuristic | **LLM-judge** | ghi chú |
+|---|---|---|---|
+| offtopic_adv | 53-69% | **100%** (13/13) | từ chối an toàn — judge xác nhận |
+| ambiguous | 33-41% | **91%** (11/12) | hỏi-lại đúng (heuristic tưởng sai) |
+| no_doc | 20↔46% | **86%** (13/15) | NO_INFO trung thực |
+| rag_info | 91% | **84%** (37/44) | tra cứu |
+| hr_balance | (37% artifact) | **75%** (15/20) | ⚠️ judge ban đầu phạt nhầm `src=0`; HR data từ **hr_query tool** (KHÔNG phải rag-source, có chống-bịa code-level `_payroll_facts`) → re-judge src-agnostic |
+| leave_action | (53% artifact) | **66%** (12/18) | tạo đơn (no-source) |
+| multiturn | 64-76% | **56%** (14/25) | thấp nhất — harness fire STANDALONE (mất ngữ cảnh) → follow-up "đó/còn..." không resolve được |
+| **TỔNG** | 75-76% | **78%** (115/147) | |
 
 ### Kết luận Benchmark 5
 - ✅ **Triage-fast: triage 4s→1s, routing accuracy 100% (full dataset), OFF OpenAI.** ambiguous/offtopic
   latency ~6s (BM4 7.5-9s) — win consistent ở câu triage-bound.
 - ✅ **Latency baseline ĐÁNG TIN** (2-run tight: p50 15.1-15.4, p95 40-46). p50 ~same BM4 (rag-retrieve
   + //hóa answer chi phối; triage chỉ 1 phần). Net trung-tính-tích cực.
-- ⚠️ **Correct auto 75-76% < BM4 86% KHÔNG phải regression** — outcome-heuristic NHIỄU ở light-route
-  (no_doc dao động 20↔46%). Clear-cat ổn định 85-100%. **Hành vi thật đúng** → cần **LLM-judge** để chấm
-  light-route chính xác (heuristic cụm-từ tới hạn).
-- 🔭 Còn lại: **migrate worker** (gpt-5.4-mini OpenAI → //hóa, phân tích KHÔNG tool-call) + LLM-judge +
-  warm-up-after-deploy (cold-start 7-model).
+- ✅ **LLM-judge: 78% (115/147)** — light-route THỰC SỰ cao (offtopic 100%, ambiguous 91%, no_doc 86%),
+  heuristic cũ undercount do bám `src`/cụm-từ. hr_balance 75% (giải oan src-artifact). multiturn 56% là
+  hạn chế HARNESS (fire standalone mất ngữ cảnh) chứ không phải hệ.
+- 🔭 Còn lại: **migrate worker** (gpt-5.4-mini OpenAI → //hóa, phân tích KHÔNG tool-call) + harness
+  multiturn giữ conversation_id + warm-up-after-deploy (cold-start 7-model).
