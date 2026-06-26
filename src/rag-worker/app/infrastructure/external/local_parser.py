@@ -224,6 +224,80 @@ def _read_html_file(path: Path) -> _ParseStep:
     return _text_step(parser.text())
 
 
+_DOCX_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_DOCX_HEADING_MAP = {
+    "heading1": "#", "heading2": "##", "heading3": "###",
+    "heading4": "####", "heading5": "#####", "heading6": "######",
+}
+
+
+def _docx_para_text(paragraph, ns: dict) -> tuple[str, str]:
+    """Trích (prefix heading, text) của 1 <w:p>: style heading + gom w:t/tab/br."""
+    style_el = paragraph.find("w:pPr/w:pStyle", ns)
+    prefix = ""
+    if style_el is not None:
+        style_val = (style_el.get(f"{{{_DOCX_NS}}}val") or "").lower().replace(" ", "")
+        prefix = _DOCX_HEADING_MAP.get(style_val, "")
+    parts: list[str] = []
+    for node in paragraph.iter():
+        tag = node.tag.rsplit("}", 1)[-1]
+        if tag == "t" and node.text:
+            parts.append(node.text)
+        elif tag == "tab":
+            parts.append("\t")
+        elif tag == "br":
+            parts.append("\n")
+    return prefix, "".join(parts).strip()
+
+
+def _docx_cell_text(tc, ns: dict) -> str:
+    """Gom mọi <w:p> trong 1 ô bảng -> 1 chuỗi (escape `|` để không vỡ markdown table)."""
+    texts = []
+    for p in tc.findall("w:p", ns):
+        _, t = _docx_para_text(p, ns)
+        if t:
+            texts.append(t)
+    return " ".join(texts).replace("|", "\\|").strip()
+
+
+def _docx_table_md(tbl, ns: dict) -> str:
+    """Render <w:tbl> thành markdown table: dòng 1 = header + dòng `---`, còn lại = data."""
+    rows: list[list[str]] = []
+    for tr in tbl.findall("w:tr", ns):
+        rows.append([_docx_cell_text(tc, ns) for tc in tr.findall("w:tc", ns)])
+    rows = [r for r in rows if any(c for c in r)]
+    if not rows:
+        return ""
+    width = max(len(r) for r in rows)
+    rows = [r + [""] * (width - len(r)) for r in rows]
+    lines = ["| " + " | ".join(rows[0]) + " |",
+             "| " + " | ".join(["---"] * width) + " |"]
+    for r in rows[1:]:
+        lines.append("| " + " | ".join(r) + " |")
+    return "\n".join(lines)
+
+
+def _docx_walk(element, ns: dict) -> list[str]:
+    """Duyệt body theo THỨ TỰ tài liệu: w:p -> đoạn văn, w:tbl -> markdown table (không
+    đệ quy vào để khỏi đếm trùng ô), sectPr -> bỏ, khác -> đệ quy (bắt paragraph lồng sdt)."""
+    blocks: list[str] = []
+    for child in element:
+        tag = child.tag.rsplit("}", 1)[-1]
+        if tag == "p":
+            prefix, text = _docx_para_text(child, ns)
+            if text:
+                blocks.append(f"{prefix} {text}" if prefix else text)
+        elif tag == "tbl":
+            md = _docx_table_md(child, ns)
+            if md:
+                blocks.append(md)
+        elif tag == "sectPr":
+            continue
+        else:
+            blocks.extend(_docx_walk(child, ns))
+    return blocks
+
+
 def _read_docx_file(path: Path) -> _ParseStep:
     _ensure_source_file(path)
     with zipfile.ZipFile(path) as archive:
@@ -243,31 +317,9 @@ def _read_docx_file(path: Path) -> _ParseStep:
             media_images.append(_vision_image(archive.read(name), mime))
     root = ElementTree.fromstring(document_xml)
     ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-    _w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-    _heading_map = {
-        "heading1": "#", "heading2": "##", "heading3": "###",
-        "heading4": "####", "heading5": "#####", "heading6": "######",
-    }
-    paragraphs: list[str] = []
-    for paragraph in root.findall(".//w:p", ns):
-        style_el = paragraph.find("w:pPr/w:pStyle", ns)
-        prefix = ""
-        if style_el is not None:
-            style_val = (style_el.get(f"{{{_w}}}val") or "").lower().replace(" ", "")
-            prefix = _heading_map.get(style_val, "")
-        parts: list[str] = []
-        for node in paragraph.iter():
-            tag = node.tag.rsplit("}", 1)[-1]
-            if tag == "t" and node.text:
-                parts.append(node.text)
-            elif tag == "tab":
-                parts.append("\t")
-            elif tag == "br":
-                parts.append("\n")
-        text = "".join(parts).strip()
-        if text:
-            paragraphs.append(f"{prefix} {text}" if prefix else text)
-    result = _ParseStep(pages=[_Page(text="\n\n".join(paragraphs), images=media_images)])
+    body = root.find("w:body", ns)
+    blocks = _docx_walk(body if body is not None else root, ns)
+    result = _ParseStep(pages=[_Page(text="\n\n".join(blocks), images=media_images)])
     # FALLBACK: nếu không tìm thấy heading nào và nội dung đủ lớn → thử MarkItDown.
     # DOCX không có Word heading style (trang bìa, văn bản hành chính...) sẽ ra 1 block
     # khổng lồ không có cấu trúc → chunker tạo toàn chunk trang bìa. MarkItDown nhận diện
