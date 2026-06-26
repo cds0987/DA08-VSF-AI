@@ -47,3 +47,7 @@ class NotificationRepository(ABC):
     @abstractmethod
     async def delete_by_user_id(self, user_id: str) -> int:
         """Delete all notifications for a user (called when user is deleted). Returns count deleted."""
+
+    @abstractmethod
+    async def delete_by_id(self, user_id: str, notification_id: str) -> bool:
+        """Delete one notification (user-scoped). Returns True if deleted, False if not found."""
