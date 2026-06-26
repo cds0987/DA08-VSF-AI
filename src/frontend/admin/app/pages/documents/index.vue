@@ -18,17 +18,33 @@ import documentService from '~/lib/api/documentService'
 import { useDocumentStore } from '~/stores/documents'
 import type { DocumentStatus } from '~/types'
 
-const q = ref('')
-const statusFilter = ref<DocumentStatus | ''>('')
-const limit = ref(10)
-const offset = ref(0)
+const route = useRoute()
+const router = useRouter()
 const store = useDocumentStore()
 
-// --- Multi-select state ---
-const selected = ref(new Set<string>())   // id chọn thủ công trên trang hiện tại
-const selectAllMatching = ref(false)       // cờ "chọn tất cả N" theo bộ lọc (qua mọi trang)
+const q = ref('')
+const limit = ref(10)
+
+// page + status là SOURCE-OF-TRUTH trên URL (?page=&status=) -> click vào tài liệu rồi
+// Back giữ NGUYÊN trang đang xem + bộ lọc (không reset về trang 1). Cũng để hiện số trang.
+const page = computed(() => Math.max(1, Number(route.query.page) || 1))
+const offset = computed(() => (page.value - 1) * limit.value)
+const statusFilter = computed<DocumentStatus | ''>({
+  get: () => (route.query.status as DocumentStatus) || '',
+  set: (val) => updateQuery({ status: val || undefined, page: undefined }),
+})
+
+// Ghi query mới (giữ các param khác); replace -> không phình history khi đổi trang.
+function updateQuery(patch: Record<string, string | undefined>) {
+  router.replace({ query: { ...route.query, ...patch } })
+}
+function goToPage(p: number) {
+  updateQuery({ page: p > 1 ? String(p) : undefined })
+}
+
+// --- Multi-select state (chỉ trong phạm vi TRANG hiện tại) ---
+const selected = ref(new Set<string>())   // id chọn trên trang hiện tại
 const confirmIds = ref<string[] | null>(null) // != null -> mở AlertDialog
-const preparing = ref(false)               // đang gom id cho "chọn tất cả N"
 const deleting = ref(false)                // đang gọi API xóa
 
 const fetchDocuments = async () => {
@@ -49,7 +65,7 @@ const filtered = computed(() => {
   return store.items.filter(document => document.name.toLowerCase().includes(query))
 })
 
-const isRowChecked = (id: string) => selectAllMatching.value || selected.value.has(id)
+const isRowChecked = (id: string) => selected.value.has(id)
 
 const allPageChecked = computed(() =>
   filtered.value.length > 0 && filtered.value.every(d => isRowChecked(d.id)),
@@ -61,20 +77,9 @@ const headerState = computed<boolean | 'indeterminate'>(() =>
   allPageChecked.value ? true : (somePageChecked.value ? 'indeterminate' : false),
 )
 
-// Còn trang khác để mời "chọn tất cả N".
-const hasMorePages = computed(() => store.total > filtered.value.length)
-const showSelectAllBanner = computed(() =>
-  allPageChecked.value && hasMorePages.value && !selectAllMatching.value,
-)
-
-const selectedCount = computed(() => (selectAllMatching.value ? store.total : selected.value.size))
+const selectedCount = computed(() => selected.value.size)
 
 function toggleRow(id: string, value: boolean | 'indeterminate') {
-  // Bỏ chọn 1 dòng khi đang "chọn tất cả N" -> thu hẹp về trang hiện tại.
-  if (selectAllMatching.value) {
-    selectAllMatching.value = false
-    selected.value = new Set(filtered.value.map(d => d.id))
-  }
   const next = new Set(selected.value)
   if (value === true) next.add(id)
   else next.delete(id)
@@ -82,14 +87,11 @@ function toggleRow(id: string, value: boolean | 'indeterminate') {
 }
 
 function togglePage(value: boolean | 'indeterminate') {
-  selectAllMatching.value = false
-  if (value === true) selected.value = new Set(filtered.value.map(d => d.id))
-  else selected.value = new Set()
+  selected.value = value === true ? new Set(filtered.value.map(d => d.id)) : new Set()
 }
 
 function clearSelection() {
   selected.value = new Set()
-  selectAllMatching.value = false
 }
 
 // Mở dialog cho 1 doc (icon thùng rác).
@@ -97,20 +99,9 @@ function askDeleteOne(id: string) {
   confirmIds.value = [id]
 }
 
-// Mở dialog cho lựa chọn hàng loạt.
-async function askDeleteSelected() {
-  if (selectAllMatching.value) {
-    preparing.value = true
-    try {
-      confirmIds.value = await documentService.fetchAllIds(statusFilter.value || undefined)
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, 'Không gom được danh sách tài liệu'))
-    } finally {
-      preparing.value = false
-    }
-  } else {
-    confirmIds.value = [...selected.value]
-  }
+// Mở dialog cho các tài liệu đã chọn trên trang.
+function askDeleteSelected() {
+  confirmIds.value = [...selected.value]
 }
 
 async function confirmDelete() {
@@ -127,9 +118,10 @@ async function confirmDelete() {
     }
     confirmIds.value = null
     clearSelection()
-    // Nếu trang hiện tại có thể rỗng sau khi xóa -> lùi 1 trang.
-    if (offset.value > 0 && result.deleted >= filtered.value.length) {
-      offset.value = Math.max(0, offset.value - limit.value)
+    // Nếu trang hiện tại có thể rỗng sau khi xóa -> lùi 1 trang (watch offset sẽ nạp lại),
+    // ngược lại nạp lại tại chỗ.
+    if (page.value > 1 && result.deleted >= filtered.value.length) {
+      goToPage(page.value - 1)
     } else {
       await fetchDocuments()
     }
@@ -148,19 +140,9 @@ const formatDate = (dateStr: string) => new Date(dateStr).toLocaleString('en-GB'
   minute: '2-digit',
 })
 
-watch(statusFilter, () => {
-  offset.value = 0
-  clearSelection()
-  void fetchDocuments()
-})
-
-watch(limit, () => {
-  offset.value = 0
-  clearSelection()
-  void fetchDocuments()
-})
-
-watch(offset, () => {
+// page + status đổi (qua URL query) hoặc limit -> nạp lại + bỏ lựa chọn. Theo dõi offset
+// (đổi khi page đổi) + statusFilter (đổi khi query.status đổi) -> gộp 1 lần/tick.
+watch([offset, statusFilter, limit], () => {
   clearSelection()
   void fetchDocuments()
 })
@@ -172,12 +154,29 @@ onMounted(async () => {
 
 onUnmounted(() => store.stopPolling())
 
+const totalPages = computed(() => Math.max(1, Math.ceil(store.total / limit.value)))
+
+// Dãy số trang có dấu "…": luôn có 1 và cuối, thêm current ±1. '…' = nhảy cách.
+const pageItems = computed<(number | '…')[]>(() => {
+  const total = totalPages.value
+  const cur = page.value
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+  const items: (number | '…')[] = [1]
+  const start = Math.max(2, cur - 1)
+  const end = Math.min(total - 1, cur + 1)
+  if (start > 2) items.push('…')
+  for (let p = start; p <= end; p++) items.push(p)
+  if (end < total - 1) items.push('…')
+  items.push(total)
+  return items
+})
+
 const nextPage = () => {
-  if (offset.value + limit.value < store.total) offset.value += limit.value
+  if (page.value < totalPages.value) goToPage(page.value + 1)
 }
 
 const prevPage = () => {
-  if (offset.value >= limit.value) offset.value -= limit.value
+  if (page.value > 1) goToPage(page.value - 1)
 }
 </script>
 
@@ -246,12 +245,10 @@ const prevPage = () => {
           </span>
           <div class="flex items-center gap-2">
             <button
-              class="inline-flex items-center gap-1.5 rounded-md bg-destructive px-3 py-1.5 text-[12.5px] font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
-              :disabled="preparing"
+              class="inline-flex items-center gap-1.5 rounded-md bg-destructive px-3 py-1.5 text-[12.5px] font-medium text-destructive-foreground hover:bg-destructive/90"
               @click="askDeleteSelected"
             >
-              <Loader2 v-if="preparing" class="h-3.5 w-3.5 animate-spin" />
-              <Trash2 v-else class="h-3.5 w-3.5" />
+              <Trash2 class="h-3.5 w-3.5" />
               Xóa
             </button>
             <button
@@ -289,18 +286,6 @@ const prevPage = () => {
             </tr>
           </thead>
           <tbody class="divide-y divide-border">
-            <!-- Banner mời chọn tất cả N qua nhiều trang -->
-            <tr v-if="showSelectAllBanner" class="bg-primary/5">
-              <td colspan="7" class="px-4 py-2 text-center text-[12px] text-muted-foreground">
-                Đã chọn {{ filtered.length }} trên trang này.
-                <button
-                  class="font-medium text-primary hover:underline"
-                  @click="selectAllMatching = true"
-                >
-                  Chọn tất cả {{ store.total }} tài liệu
-                </button>
-              </td>
-            </tr>
             <tr v-if="store.isLoading && store.items.length === 0">
               <td colspan="7" class="px-4 py-12 text-center">
                 <Loader2 class="mx-auto h-6 w-6 animate-spin text-primary" />
@@ -368,17 +353,33 @@ const prevPage = () => {
         <span class="text-[12px] text-muted-foreground">
           Showing {{ offset + 1 }} to {{ Math.min(offset + limit, store.total) }} of {{ store.total }}
         </span>
-        <div class="flex gap-2">
+        <div class="flex items-center gap-1.5">
           <button
             class="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-[12px] hover:bg-accent disabled:opacity-50"
-            :disabled="offset === 0"
+            :disabled="page === 1"
             @click="prevPage"
           >
             <ChevronLeft class="h-3.5 w-3.5" /> Prev
           </button>
+
+          <!-- Số trang (… = nhảy cách). Trang hiện tại tô đậm. -->
+          <template v-for="(it, i) in pageItems" :key="i">
+            <span v-if="it === '…'" class="px-1.5 text-[12px] text-muted-foreground">…</span>
+            <button
+              v-else
+              class="min-w-[28px] rounded-md border px-2 py-1 text-[12px] transition"
+              :class="it === page
+                ? 'border-primary bg-primary text-primary-foreground font-medium'
+                : 'border-border bg-card hover:bg-accent'"
+              @click="goToPage(Number(it))"
+            >
+              {{ it }}
+            </button>
+          </template>
+
           <button
             class="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-[12px] hover:bg-accent disabled:opacity-50"
-            :disabled="offset + limit >= store.total"
+            :disabled="page >= totalPages"
             @click="nextPage"
           >
             Next <ChevronRight class="h-3.5 w-3.5" />
