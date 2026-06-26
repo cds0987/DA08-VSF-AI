@@ -282,7 +282,7 @@ class Router:
                         status=f"error_{kind}", error=f"attempt={attempt} {exc}")
 
     # ----------------- call engine -----------------
-    def _prep_body(self, body: dict, dec: RouteDecision) -> dict:
+    def _prep_body(self, body: dict, dec: RouteDecision, capability: str | None = None) -> dict:
         """Gán model thật + chuẩn hoá param theo provider (PLAN §6)."""
         out = {k: v for k, v in body.items() if k != "model"}
         out["model"] = dec.model_name
@@ -290,6 +290,19 @@ class Router:
         # create() từ chối kwarg lạ -> phải chuyển vào extra_body. CHỈ OpenRouter hiểu 'reasoning';
         # provider OpenAI (save_mode degrade gpt-4o-mini) KHÔNG hiểu -> bỏ để tránh 400.
         _reasoning = out.pop("reasoning", None)
+        # An toàn 2 lớp: gỡ luôn nếu client lỡ nhét 'reasoning' NESTED trong extra_body (nếu không,
+        # khi provider=OpenAI nó lọt xuống create -> 400 'Unrecognized argument: reasoning').
+        _eb = out.get("extra_body")
+        if isinstance(_eb, dict) and "reasoning" in _eb:
+            _eb = dict(_eb)
+            _reasoning = _reasoning if _reasoning is not None else _eb.pop("reasoning")
+            _eb.pop("reasoning", None)
+            out["extra_body"] = _eb
+        # OCR //hóa: TỰ inject reasoning-off SERVER-SIDE cho capability 'ocr' (qwen-vl tắt nghĩ ->
+        # 9.7s + 100% acc, không truncate). Chỉ áp khi provider=OpenRouter (dưới); ocr degrade OpenAI
+        # -> bỏ -> KHÔNG 400. Provider rag-worker KHÔNG cần gửi 'reasoning'.
+        if capability == "ocr" and _reasoning is None:
+            _reasoning = {"enabled": False}
         if _reasoning is not None and dec.provider != Provider.OPENAI:
             extra = dict(out.get("extra_body") or {})
             extra.setdefault("reasoning", _reasoning)
@@ -319,7 +332,7 @@ class Router:
             client = self.clients.get(dec.base_url, dec.api_key)
             t0 = time.monotonic()
             try:
-                resp = await client.chat.completions.create(**self._prep_body(body, dec))
+                resp = await client.chat.completions.create(**self._prep_body(body, dec, capability))
                 data = resp.model_dump()
                 usage = extract_usage(data)
                 cost = await self.account(dec, usage, est)
@@ -368,7 +381,7 @@ class Router:
         sb.setdefault("stream_options", {"include_usage": True})
         t0 = time.monotonic()
         try:
-            stream = await client.chat.completions.create(stream=True, **self._prep_body(sb, dec))
+            stream = await client.chat.completions.create(stream=True, **self._prep_body(sb, dec, capability))
             _create_ms = (time.monotonic() - t0) * 1000   # thời gian await create() (mở request)
             usage_seen: Usage | None = None
             served_first = ""

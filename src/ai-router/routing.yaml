@@ -217,7 +217,8 @@ capabilities:
         - meta-llama/llama-4-scout       #   95% @8.1s — pool Meta đa dạng
     selector:                       # adaptive_balanced = _pick_model_split ROUND-ROBIN 4 model (//hóa).
                                     # banded_rotation chỉ xoay KEY 1 model -> KHÔNG rải model. ⚠️ reasoning
-                                    # -OFF cho qwen-vl do openai_provider gửi extra_body reasoning:false.
+                                    # -OFF cho qwen-vl do AI-ROUTER tự inject server-side (_prep_body:
+                                    # capability=='ocr' + provider=OpenRouter); degrade OpenAI -> bỏ -> no 400.
       impl: adaptive_balanced
       params:
         tpm_per_key: 500000
