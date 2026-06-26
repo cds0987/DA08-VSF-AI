@@ -13,6 +13,9 @@ from app.application.use_cases.documents.bulk_delete_documents_use_case import (
     BulkDeleteDocumentsUseCase,
 )
 from app.application.use_cases.documents.delete_document_use_case import DeleteDocumentUseCase
+from app.application.use_cases.documents.get_document_file_preview_use_case import (
+    GetDocumentFilePreviewUseCase,
+)
 from app.application.use_cases.documents.get_document_file_stream_use_case import (
     GetDocumentFileStreamUseCase,
 )
@@ -27,6 +30,7 @@ from app.infrastructure.db.session import get_session
 from app.infrastructure.external.hr_department_client import HrDepartmentClient
 from app.infrastructure.messaging.nats_publisher import NatsPublisher
 from app.infrastructure.storage.gcs_client import GCSClient
+from app.infrastructure.converter.gotenberg_client import GotenbergClient
 from app.infrastructure.storage.s3_client import S3StorageClient
 
 
@@ -113,6 +117,21 @@ def get_get_document_file_stream_use_case(
     hr_department_client: HrDepartmentClient = Depends(get_hr_department_client),
 ) -> GetDocumentFileStreamUseCase:
     return GetDocumentFileStreamUseCase(document_repository, storage, hr_department_client)
+
+
+def get_document_converter(settings: Settings = Depends(get_settings)) -> GotenbergClient:
+    return GotenbergClient(settings.gotenberg_url, settings.gotenberg_timeout_seconds)
+
+
+def get_get_document_file_preview_use_case(
+    document_repository: PostgresDocumentRepository = Depends(get_document_repository),
+    storage: GCSClient = Depends(get_storage),
+    converter: GotenbergClient = Depends(get_document_converter),
+    hr_department_client: HrDepartmentClient = Depends(get_hr_department_client),
+) -> GetDocumentFilePreviewUseCase:
+    return GetDocumentFilePreviewUseCase(
+        document_repository, storage, converter, hr_department_client
+    )
 
 
 def get_delete_document_use_case(
