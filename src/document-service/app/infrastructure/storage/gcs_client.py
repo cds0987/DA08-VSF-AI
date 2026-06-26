@@ -23,6 +23,10 @@ class GCSClient:
         blob = self._get_bucket().blob(key)
         return await asyncio.to_thread(blob.download_as_bytes)
 
+    async def file_exists(self, key: str) -> bool:
+        blob = self._get_bucket().blob(key)
+        return await asyncio.to_thread(blob.exists)
+
     async def generate_presigned_url(self, key: str, expires_in: int = 300) -> str:
         blob = self._get_bucket().blob(key)
         return await asyncio.to_thread(self._sign_url, blob, expires_in)
