@@ -8,11 +8,13 @@ interface Props {
   input: string
   isProcessing: boolean
   showQuickActions?: boolean
+  autofocus?: boolean
   quote?: Quote | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
   showQuickActions: false,
+  autofocus: false,
   quote: null,
 })
 const emit = defineEmits<{
@@ -43,6 +45,8 @@ const canSend = computed(() => !props.isProcessing && (props.input.trim().length
 function sendMessage() {
   if (!canSend.value) return
   emit('send', props.input)
+  // Giữ con trỏ ở ô nhập sau khi gửi (kể cả khi bấm nút Gửi) -> gõ tiếp được liền.
+  nextTick(() => textareaRef.value?.focus())
 }
 
 function handleKeyDown(event: KeyboardEvent) {
@@ -82,6 +86,12 @@ watch(() => props.input, (value) => {
     return
   }
   requestAnimationFrame(adjustHeight)
+})
+
+// Tự focus ngay khi mount (ô landing trang New Chat) -> con trỏ nhấp nháy, gõ được
+// liền không cần click.
+onMounted(() => {
+  if (props.autofocus) nextTick(() => textareaRef.value?.focus())
 })
 
 defineExpose({

@@ -116,6 +116,7 @@ function handleSend(question: string) {
                 :input="chat.input"
                 :is-processing="chat.pipeline >= 0"
                 :show-quick-actions="true"
+                :autofocus="true"
                 @update:input="chat.setInput"
                 @send="handleSend"
               />
@@ -136,6 +137,7 @@ function handleSend(question: string) {
           :input="chat.input"
           :is-processing="chat.pipeline >= 0"
           :show-quick-actions="false"
+          :autofocus="true"
           @update:input="chat.setInput"
           @send="handleSend"
         />
