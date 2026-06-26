@@ -20,6 +20,7 @@ from app.application.use_cases.ingestion import (
     StoreReconcileSettings,
     run_store_reconciler,
 )
+from app.application.use_cases.search import SearchUseCase
 from app.domain.repositories.artifact_store import ArtifactStore
 from app.domain.repositories.document_repository import DocumentRepository
 from app.domain.repositories.ingest_job_repository import IngestJobRepository
@@ -77,6 +78,7 @@ class HealthReport:
 @dataclass
 class RuntimeState:
     ingest_use_case: IngestDocumentUseCase | None
+    search_use_case: SearchUseCase | None
     document_repository: DocumentRepository
     job_repository: IngestJobRepository
     parser: Parser
@@ -714,6 +716,7 @@ def bootstrap_runtime() -> RuntimeState:
         raise RuntimeError("Production fail-closed: " + " ".join(reasons))
 
     ingest_use_case = None
+    search_use_case = None
     engine = None
     document_repository = build_document_repository()
     parser: Parser = build_parser(provider)
@@ -759,6 +762,9 @@ def bootstrap_runtime() -> RuntimeState:
             claim_heartbeat_interval_seconds=lease_settings.heartbeat_interval_seconds,
             tracer=tracer,
         )
+        # Query-side retrieval (chuyển từ mcp về rag-worker): tái dùng ĐÚNG embedder +
+        # vectorstore của engine ingest -> cùng provider/model/dim/sparse encoding.
+        search_use_case = SearchUseCase(engine.embedder, engine.vectors)
         storage_reasons, storage_warnings = parser.startup_diagnostics(
             source_bucket=source_bucket
         )
@@ -816,6 +822,7 @@ def bootstrap_runtime() -> RuntimeState:
     )
     return RuntimeState(
         ingest_use_case=ingest_use_case,
+        search_use_case=search_use_case,
         document_repository=document_repository,
         job_repository=document_repository,
         parser=parser,
@@ -1057,6 +1064,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.nats_subscription = nats_subscription
     app.state.nats_access_subscription = nats_access_subscription
     app.state.ingest_use_case = runtime.ingest_use_case
+    app.state.search_use_case = runtime.search_use_case
     app.state.runtime = runtime
     app.state.health = runtime.health
     app.state.job_log_prune_task = prune_task

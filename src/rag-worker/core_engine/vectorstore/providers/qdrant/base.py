@@ -20,7 +20,7 @@ except ModuleNotFoundError as e:
 
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.provider import VectorStoreProvider
-from core_engine.vectorstore.types import VectorRecord
+from core_engine.vectorstore.types import SearchHit, VectorRecord
 
 _QDRANT_NS = uuid.UUID("6ba7b811-9dad-11d1-80b4-00c04fd430c8")
 
@@ -123,6 +123,97 @@ class QdrantBase(VectorStoreProvider):
                     match=models.MatchValue(value=document_id),
                 )
             ]
+        )
+
+    # --- search (query-side, port từ mcp QdrantReader) -------------------- #
+    @staticmethod
+    def _access_filter(document_ids: Sequence[str] | None) -> "models.Filter":
+        """ACL filter trên document_id — ĐỐI XỨNG mcp _build_filter.
+
+        CRITICAL: document_ids None/rỗng -> match ["__no_access__"] (= KHÔNG có doc
+        nào) -> kết quả RỖNG. Caller truyền danh sách doc-id ACL cho phép; rỗng nghĩa
+        là không có quyền truy cập, KHÔNG phải "tìm tất cả". Giữ nguyên hành vi này."""
+        if not document_ids:
+            return models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="document_id",
+                        match=models.MatchAny(any=["__no_access__"]),
+                    )
+                ]
+            )
+        return models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="document_id",
+                    match=models.MatchAny(any=[str(d) for d in document_ids]),
+                )
+            ]
+        )
+
+    @staticmethod
+    def _collection_mode(info) -> str:
+        """'hybrid' nếu collection có sparse vectors config; ngược lại 'dense'.
+
+        ĐỐI XỨNG mcp QdrantReader._collection_mode: chỉ phân biệt theo SỰ TỒN TẠI của
+        sparse. Collection hybrid (mới) -> prefetch dense+sparse fusion (named vectors).
+        Collection cũ (unnamed, prod chưa migrate) -> dense KHÔNG truyền `using` (verify
+        prod: using='dense' trên unnamed -> 400 -> 0 sources)."""
+        try:
+            sparse = getattr(info.config.params, "sparse_vectors", None)
+        except Exception:  # noqa: BLE001 — info lạ -> an toàn: dense không-using
+            return "dense"
+        return "hybrid" if sparse else "dense"
+
+    def _hybrid_query_kwargs(self, vector, query_text, top_k, doc_filter) -> dict:
+        """kwargs cho query_points chế độ hybrid (dense+sparse RRF fusion)."""
+        from core_engine.vectorstore.sparse import sparse_encode_query
+
+        sparse_idx, sparse_val = sparse_encode_query(query_text)
+        return {
+            "collection_name": self._collection,
+            "prefetch": [
+                models.Prefetch(
+                    query=list(vector), using="dense", limit=top_k, filter=doc_filter
+                ),
+                models.Prefetch(
+                    query=models.SparseVector(indices=sparse_idx, values=sparse_val),
+                    using="sparse",
+                    limit=top_k,
+                    filter=doc_filter,
+                ),
+            ],
+            "query": models.FusionQuery(fusion=models.Fusion.RRF),
+            "limit": top_k,
+            "with_payload": True,
+        }
+
+    def _dense_query_kwargs(self, vector, top_k, doc_filter) -> dict:
+        """kwargs cho query_points chế độ dense trần (collection cũ unnamed)."""
+        return {
+            "collection_name": self._collection,
+            "query": list(vector),
+            "query_filter": doc_filter,
+            "limit": top_k,
+            "with_payload": True,
+        }
+
+    @staticmethod
+    def _to_search_hit(payload: dict | None, score: float | None) -> SearchHit:
+        """payload Qdrant -> SearchHit. ĐỐI XỨNG mcp _to_hit (1-nguồn-sự-thật)."""
+        m = payload or {}
+        return SearchHit(
+            chunk_id=str(m.get("chunk_id", "")),
+            document_id=str(m.get("document_id", "")),
+            document_name=str(m.get("document_name", "")),
+            caption=str(m.get("caption", m.get("child_text", ""))),
+            child_text=str(m.get("child_text", "")),
+            parent_text=str(m.get("parent_text", "")),
+            heading_path=list(m.get("heading_path", []) or []),
+            score=float(score) if score is not None else 0.0,
+            page_number=m.get("page_number"),
+            source_gcs_uri=str(m.get("source_uri", "")),
+            markdown_gcs_uri=str(m.get("artifact_uri", "")),
         )
 
     @staticmethod

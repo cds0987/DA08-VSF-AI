@@ -4,8 +4,8 @@ import logging
 
 import pytest
 
+from app.core.models import SearchHit
 from app.core.rerank import CohereRerankReranker, LlmReranker
-from app.core.vectorstore import SearchHit
 
 
 def _hit(chunk_id: str, *, score: float = 0.0, caption: str = "", parent_text: str = "") -> SearchHit:

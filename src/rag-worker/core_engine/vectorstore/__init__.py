@@ -28,12 +28,13 @@ from core_engine.vectorstore.registry import (
     register_provider,
 )
 from core_engine.vectorstore.store import VectorStore
-from core_engine.vectorstore.types import VectorRecord
+from core_engine.vectorstore.types import SearchHit, VectorRecord
 
 __all__ = [
     "VectorStore",
     "VectorStoreProvider",
     "VectorRecord",
+    "SearchHit",
     "VectorStoreConfig",
     "build_vector_store",
     "build_vector_repository",

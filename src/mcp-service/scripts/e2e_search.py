@@ -1,11 +1,13 @@
-"""E2e mcp-service: verify contract (fail-closed) + rag_search trên Qdrant THẬT.
+"""E2e mcp-service: rag_search qua rag-worker /api/search THẬT.
+
+mcp = THIN search interface: gọi rag-worker (POST /api/search) rồi rerank. Contract
+embed/collection do rag-worker sở hữu (verify ở phía rag-worker, không còn ở mcp).
 
 Exit code:
-  0 = verify OK và search ra >=1 hit (happy path)
-  1 = verify contract FAIL (dùng cho test negative/drift — mong đợi exit 1)
-  2 = verify OK nhưng search rỗng (bất thường)
+  0 = search ra >=1 hit (happy path)
+  2 = search rỗng (bất thường)
 
-Chạy: VECTOR_DB_URL=http://127.0.0.1:6333 AI_PROVIDER=offline RERANK_PROVIDER=none \
+Chạy: RAG_WORKER_URL=http://127.0.0.1:8000 RERANK_PROVIDER=none \
       python scripts/e2e_search.py
 """
 
@@ -17,7 +19,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.core.contract import VectorstoreContractError  # noqa: E402
 from app.core.search import build_search_service  # noqa: E402
 
 QUERY = "nghỉ phép thường niên"
@@ -26,13 +27,9 @@ QUERY = "nghỉ phép thường niên"
 async def _run() -> int:
     service = build_search_service()
     try:
-        contract = await service.verify_contract()
-    except VectorstoreContractError as exc:
-        print(f"VERIFY_FAILED: {exc}")
-        return 1
-    print(f"VERIFY_OK index={contract.index_id} fingerprint={contract.fingerprint}")
-
-    hits = await service.rag_search(QUERY, document_ids=["doc1"], top_k=3)
+        hits = await service.rag_search(QUERY, document_ids=["doc1"], top_k=3)
+    finally:
+        await service.aclose()
     print(f"SEARCH hits={len(hits)}")
     for hit in hits:
         print(f"  - {hit.document_id} score={hit.score:.3f} src={hit.source_gcs_uri}")

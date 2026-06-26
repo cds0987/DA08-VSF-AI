@@ -1,9 +1,9 @@
 """GATE KIẾN TRÚC LLM (mcp-service) — ép mọi call AI đi qua lớp route-aware (có base_url)
 để KHỐNG CHẾ HẾT: trỏ base_url -> ai-router là cân bằng key + cost + observability.
 
-Bối cảnh: mcp-service embed query (mỗi rag_search) + LLM rerank. Nếu dev mới tạo
-AsyncOpenAI() KHÔNG base_url -> khoá cứng OpenAI, BYPASS ai-router (xem observability-plan
-§11.1). 2 gate (mirror query-service):
+Bối cảnh: mcp-service rerank qua LLM (embed + vector search ĐÃ chuyển sang rag-worker).
+Nếu dev mới tạo AsyncOpenAI() KHÔNG base_url -> khoá cứng OpenAI, BYPASS ai-router (xem
+observability-plan §11.1). 2 gate (mirror query-service):
 
   GATE 1 : SDK call (embeddings/chat.completions/responses .create) CHỈ ở allowlist provider.
   GATE 1b: file tạo AsyncOpenAI PHẢI truyền base_url (route-aware) — không hardcode OpenAI.
@@ -18,7 +18,6 @@ _APP = Path(__file__).resolve().parents[1] / "app"
 # CHỈ các file provider tập trung được phép gọi SDK / tạo AsyncOpenAI (đều nhận base_url
 # từ config -> trỏ ai-router được). Thêm file = quyết định kiến trúc CÓ Ý THỨC.
 _SDK_ALLOWLIST = {
-    "core/embedding.py",   # OpenAIEmbedder: embeddings.create, base_url từ embed_base_url
     "core/rerank.py",      # LlmReranker: chat.completions.create, base_url từ rerank_base_url
 }
 

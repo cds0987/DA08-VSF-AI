@@ -5,15 +5,17 @@ cả corpus (qua NATS+MinIO) vào Qdrant; script này đóng vai query-service G
 tool `rag_search` cho TỪNG golden query trong manifest và assert đúng tài liệu được
 retrieve. Ranh giới duy nhất giữa 2 service là Qdrant.
 
-Offline (CI mặc định): embedding hash không ngữ nghĩa -> đặt RERANK_PROVIDER=lexical +
+mcp = THIN search interface: gọi rag-worker /api/search rồi rerank; ranh giới giữa 2
+service là HTTP endpoint đó (embed + vector search do rag-worker đảm nhiệm). Offline
+(CI mặc định): embedding hash không ngữ nghĩa -> đặt RERANK_PROVIDER=lexical +
 RERANK_THRESHOLD=0 + SEARCH_TOP_K cao để lexical rerank lái đúng doc lên (kiểm PLUMBING
 xuyên 2 service). Chất lượng ngữ nghĩa thật cần provider thật (RAG_EVAL_REAL_PROVIDER=1).
 
 Exit code:
-  0 = verify OK và mọi query retrieve đúng doc kỳ vọng
-  1 = verify contract FAIL, hoặc có query thiếu doc kỳ vọng
+  0 = mọi query retrieve đúng doc kỳ vọng
+  1 = có query thiếu doc kỳ vọng
 
-Chạy: VECTOR_DB_URL=http://127.0.0.1:6333 AI_PROVIDER=offline \
+Chạy: RAG_WORKER_URL=http://127.0.0.1:8000 \
       RERANK_PROVIDER=lexical RERANK_THRESHOLD=0 SEARCH_TOP_K=50 \
       python scripts/e2e_search_validation.py
 """
@@ -27,7 +29,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.core.contract import VectorstoreContractError  # noqa: E402
 from app.core.search import build_search_service  # noqa: E402
 
 # scripts/ -> mcp-service -> src ; manifest do rag-worker sở hữu (cùng corpus seed).
@@ -47,24 +48,20 @@ async def _run() -> int:
     manifest = _load_manifest()
     service = build_search_service()
 
-    try:
-        contract = await service.verify_contract()
-    except VectorstoreContractError as exc:
-        print(f"VERIFY_FAILED: {exc}")
-        return 1
-    print(f"VERIFY_OK index={contract.index_id} fingerprint={contract.fingerprint}")
-
     misses: list[str] = []
-    for entry in manifest:
-        query = entry["query"]
-        expected = entry["document_id"]
-        hits = await service.rag_search(query, document_ids=None, top_k=5)
-        got = [hit.document_id for hit in hits]
-        ok = expected in got
-        marker = "OK " if ok else "MISS"
-        print(f"  [{marker}] q={query!r} expect={expected} got={got}")
-        if not ok:
-            misses.append(f"{expected} <- {query!r} (got {got})")
+    try:
+        for entry in manifest:
+            query = entry["query"]
+            expected = entry["document_id"]
+            hits = await service.rag_search(query, document_ids=None, top_k=5)
+            got = [hit.document_id for hit in hits]
+            ok = expected in got
+            marker = "OK " if ok else "MISS"
+            print(f"  [{marker}] q={query!r} expect={expected} got={got}")
+            if not ok:
+                misses.append(f"{expected} <- {query!r} (got {got})")
+    finally:
+        await service.aclose()
 
     if misses:
         print(f"SEARCH_FAILED: {len(misses)}/{len(manifest)} query thiếu doc kỳ vọng:")

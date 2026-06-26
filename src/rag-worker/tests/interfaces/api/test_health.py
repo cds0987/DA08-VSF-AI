@@ -402,13 +402,20 @@ def test_health_routes_bypass_rate_limit(
     assert second.status_code == 200
 
 
-def test_search_http_route_is_removed(
+def test_search_http_route_is_served(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Query-side retrieval ĐÃ chuyển từ mcp về rag-worker: POST /api/search tồn tại.
+    # Body sai schema (thiếu "query") -> 422 (route có thật), KHÔNG còn 404 như trước.
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("AI_PROVIDER", "offline")
 
     with TestClient(create_app()) as client:
-        response = client.post("/api/search", json={"query_text": "reset password"})
+        bad_body = client.post("/api/search", json={"query_text": "reset password"})
+        served = client.post("/api/search", json={"query": "reset password"})
 
-    assert response.status_code == 404
+    assert bad_body.status_code == 422
+    # offline provider + Qdrant in-memory rỗng -> 200 với candidates rỗng (ACL None
+    # -> __no_access__ cũng rỗng). Điểm chốt: route được phục vụ, không 404.
+    assert served.status_code == 200
+    assert served.json() == {"candidates": []}

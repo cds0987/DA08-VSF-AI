@@ -24,7 +24,7 @@ from qdrant_client import AsyncQdrantClient, models
 
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.store import VectorStore
-from core_engine.vectorstore.types import VectorRecord
+from core_engine.vectorstore.types import SearchHit, VectorRecord
 
 
 class QdrantRemoteProvider(QdrantBase):
@@ -34,6 +34,8 @@ class QdrantRemoteProvider(QdrantBase):
         self._ready = False
         self._lock = asyncio.Lock()
         self._upsert_batch = max(1, int(os.getenv("UPSERT_BATCH_SIZE", "256")))
+        # Cache chế độ collection (hybrid vs dense) -> chọn query tương thích ngược.
+        self._mode: str | None = None
 
     async def _ensure(self) -> None:
         if self._ready:
@@ -183,6 +185,37 @@ class QdrantRemoteProvider(QdrantBase):
             )
 
         await self._retry_on_missing_collection(op)
+
+    async def _resolve_mode(self) -> str:
+        if self._mode is None:
+            try:
+                info = await self._client.get_collection(self._collection)
+                self._mode = self._collection_mode(info)
+            except Exception:  # noqa: BLE001 — không lấy được info -> an toàn: dense trần
+                self._mode = "dense"
+        return self._mode
+
+    async def search(
+        self,
+        *,
+        query_vector: Sequence[float],
+        query_text: str,
+        top_k: int,
+        document_ids: Sequence[str] | None,
+    ) -> list[SearchHit]:
+        doc_filter = self._access_filter(document_ids)
+
+        async def op() -> list[SearchHit]:
+            await self._ensure()
+            mode = await self._resolve_mode()
+            if mode == "hybrid":
+                kwargs = self._hybrid_query_kwargs(query_vector, query_text, top_k, doc_filter)
+            else:
+                kwargs = self._dense_query_kwargs(query_vector, top_k, doc_filter)
+            res = await self._client.query_points(**kwargs)
+            return [self._to_search_hit(p.payload, p.score) for p in res.points]
+
+        return await self._retry_on_missing_collection(op)
 
 
 class QdrantRemoteRepository(VectorStore):

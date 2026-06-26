@@ -7,7 +7,7 @@ from collections import deque
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from app.interfaces.api.routers import ingest
+from app.interfaces.api.routers import ingest, search
 from app.interfaces.api.runtime import compute_health, lifespan
 
 _HEALTH_PATHS = frozenset({"/livez", "/readyz", "/health", "/healthz", "/metrics"})
@@ -37,6 +37,7 @@ def _request_can_include_body(request: Request) -> bool:
 def create_app() -> FastAPI:
     app = FastAPI(title="RAG Service", lifespan=lifespan)
     app.include_router(ingest.router, prefix="/api", tags=["ingest"])
+    app.include_router(search.router, prefix="/api", tags=["search"])
     app.state.rate_limits = {}
 
     @app.middleware("http")

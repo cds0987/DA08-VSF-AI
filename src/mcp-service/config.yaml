@@ -19,29 +19,14 @@ profiles:
       internal_token: ${MCP_INTERNAL_TOKEN:-}
 
     # ── Cấp TOOL: mọi config thuộc tool nào thì nest hẳn vào tool đó ──────
-    # mcp-service = SEARCH-ONLY. Tool rag_search sở hữu toàn bộ config của nó:
-    # embedder (embed query) + vector_store + vectorstore_contract + reranker +
-    # retrieval. CI parity (check_vectorstore_contract) tự lift contract keys từ
-    # subtree này để so fingerprint với rag-worker.
+    # mcp-service = THIN search interface: embed + vector search là việc của
+    # rag-worker (POST /api/search, owner của embed model + collection contract).
+    # Tool rag_search chỉ giữ: search (endpoint rag-worker) + reranker + retrieval.
     rag_search:
       enabled: ${TOOL_RAG_SEARCH_ENABLED:-1}
-      embedder:
-        model: ${EMBED_MODEL:-text-embedding-3-small}
-        base_url: ${EMBED_BASE_URL:-}
-        api_key: ${OPENAI_API_KEY:-}
-        dimension: ${EMBED_DIMENSION:-}
-      vector_store:
-        impl: ${VECTOR_DB_PROVIDER:-qdrant}
-        params:
-          collection: ${VECTOR_COLLECTION:-rag_chatbot}
-          url: ${VECTOR_DB_URL:-}
-          api_key: ${VECTOR_DB_API_KEY:-}
-          basic_auth: ${VECTOR_DB_BASIC_AUTH:-}
-          timeout: ${QDRANT_TIMEOUT:-}
-      vectorstore_contract:
-        provider: ${VECTOR_DB_PROVIDER:-qdrant}
-        collection: ${VECTOR_COLLECTION:-rag_chatbot}
-        embed_model: ${EMBED_MODEL:-text-embedding-3-small}
+      search:
+        rag_worker_url: ${RAG_WORKER_URL:-http://rag-worker:8000}
+        timeout_seconds: ${RAG_SEARCH_TIMEOUT_SECONDS:-30}
       reranker:
         impl: ${RERANK_PROVIDER:-lexical}
         model: ${RERANK_MODEL:-gpt-4o-mini}

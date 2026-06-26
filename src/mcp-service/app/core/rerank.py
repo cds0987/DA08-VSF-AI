@@ -12,8 +12,8 @@ import logging
 import re
 from typing import TYPE_CHECKING, Awaitable, Callable, List, Protocol
 
+from app.core.models import SearchHit
 from app.core.text_utils import overlap_score
-from app.core.vectorstore import SearchHit
 
 if TYPE_CHECKING:
     from app.core.config import McpSettings

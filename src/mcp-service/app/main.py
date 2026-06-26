@@ -7,7 +7,6 @@ import logging
 import sys
 
 from app.core.config import load_settings
-from app.core.contract import VectorstoreContractError
 from app.interfaces.mcp_server import (
     InternalTokenAuthMiddleware,
     build_mcp,
@@ -60,11 +59,7 @@ def main() -> int:
     )
     logger.info("mcp_auth mode=%s", "internal-token" if settings.auth_enabled else "disabled")
 
-    try:
-        asyncio.run(_verify_and_reset(tools))
-    except VectorstoreContractError as exc:
-        logger.error("mcp_contract_verify_failed: %s", exc)
-        return 1
+    asyncio.run(_verify_and_reset(tools))
     logger.info(
         "mcp_startup_verified tool_count=%d tools=%s",
         len(tool_names),

@@ -5,7 +5,7 @@ from typing import Mapping, Sequence
 from core_engine.types import VectorRepository
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.provider import VectorStoreProvider
-from core_engine.vectorstore.types import VectorRecord
+from core_engine.vectorstore.types import SearchHit, VectorRecord
 
 
 class VectorStore(VectorRepository):
@@ -44,3 +44,25 @@ class VectorStore(VectorRepository):
 
     async def delete_by_document(self, document_id: str) -> None:
         await self._provider.delete_by_document(document_id)
+
+    async def search(
+        self,
+        *,
+        query_vector: Sequence[float],
+        query_text: str,
+        top_k: int,
+        document_ids: Sequence[str] | None,
+    ) -> list[SearchHit]:
+        """Query-side retrieval (port từ mcp). Provider phải implement `search`
+        (qdrant có; chromadb/milvus chưa cần -> AttributeError rõ ràng nếu gọi nhầm)."""
+        search = getattr(self._provider, "search", None)
+        if search is None:
+            raise NotImplementedError(
+                f"Provider {type(self._provider).__name__} không hỗ trợ search()"
+            )
+        return await search(
+            query_vector=query_vector,
+            query_text=query_text,
+            top_k=top_k,
+            document_ids=document_ids,
+        )

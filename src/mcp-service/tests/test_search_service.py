@@ -5,36 +5,34 @@ import dataclasses
 import pytest
 
 from app.core.config import McpSettings
+from app.core.models import SearchHit
 from app.core.search import SearchService, diversify_by_document
-from app.core.vectorstore import SearchHit
 
 
-class StubEmbedder:
-    def __init__(self) -> None:
-        self.queries: list[str] = []
+class FakeResponse:
+    def __init__(self, candidates: list[dict]) -> None:
+        self._candidates = candidates
 
-    async def embed(self, text: str) -> list[float]:
-        self.queries.append(text)
-        return [0.1, 0.2]
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return {"candidates": self._candidates}
 
 
-class StubReader:
-    def __init__(self, hits: list[SearchHit]) -> None:
-        self.hits = hits
+class FakeHttpClient:
+    """Giả httpx.AsyncClient: ghi lại POST /api/search rồi trả candidates cấu hình sẵn."""
+
+    def __init__(self, candidates: list[dict]) -> None:
+        self._candidates = candidates
         self.calls: list[dict] = []
 
-    async def search(
-        self, vector, query_text: str, top_k: int, document_ids=None
-    ) -> list[SearchHit]:
-        self.calls.append(
-            {
-                "vector": list(vector),
-                "query_text": query_text,
-                "top_k": top_k,
-                "document_ids": document_ids,
-            }
-        )
-        return list(self.hits)
+    async def post(self, url: str, json=None):
+        self.calls.append({"url": url, "json": json})
+        return FakeResponse(self._candidates)
+
+    async def aclose(self) -> None:
+        return None
 
 
 class StubReranker:
@@ -48,6 +46,22 @@ class StubReranker:
         return list(hits[:top_k])
 
 
+def _candidate(chunk_id: str, *, document_id: str = "", score: float = 0.9) -> dict:
+    return {
+        "chunk_id": chunk_id,
+        "document_id": document_id,
+        "document_name": f"{chunk_id}.pdf",
+        "caption": "cap",
+        "child_text": "child",
+        "parent_text": "parent",
+        "heading_path": ["H1"],
+        "score": score,
+        "page_number": 1,
+        "source_gcs_uri": "gs://bucket/doc.pdf",
+        "markdown_gcs_uri": "gs://bucket/doc.md",
+    }
+
+
 def _settings() -> McpSettings:
     return McpSettings(
         host="0.0.0.0",
@@ -55,14 +69,8 @@ def _settings() -> McpSettings:
         log_level="INFO",
         app_env="development",
         internal_token="",
-        provider="qdrant",
-        collection="rag_chatbot",
-        embed_model="offline",
-        dimension=256,
-        url="",
-        api_key="",
-        embed_base_url="",
-        embed_api_key="",
+        rag_worker_url="http://rag-worker:8000",
+        search_timeout_seconds=30.0,
         rerank_impl="none",
         rerank_model="gpt-4o-mini",
         rerank_base_url="",
@@ -73,40 +81,57 @@ def _settings() -> McpSettings:
         top_k_candidates=20,
         rerank_top_k=3,
         rerank_threshold=0.6,
-        options={},
     )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("document_ids", [None, [], ["doc-1"] * 1000])
-async def test_rag_search_passes_document_ids_to_reader(document_ids) -> None:
-    embedder = StubEmbedder()
-    reader = StubReader([SearchHit(chunk_id="c1", score=0.9)])
+async def test_rag_search_posts_to_rag_worker_and_returns_results(document_ids) -> None:
+    client = FakeHttpClient([_candidate("c1")])
     reranker = StubReranker()
-    service = SearchService(_settings(), embedder, reader, reranker)
+    service = SearchService(_settings(), reranker, client=client)
 
     hits = await service.rag_search("query text", document_ids=document_ids, top_k=2)
 
     assert [hit.chunk_id for hit in hits] == ["c1"]
-    assert embedder.queries == ["query text"]
-    assert reader.calls[0]["top_k"] == 20
-    assert reader.calls[0]["document_ids"] == document_ids
+    # POST tới /api/search với top_k_candidates (20), document_ids passthrough.
+    assert client.calls[0]["url"] == "/api/search"
+    assert client.calls[0]["json"] == {
+        "query": "query text",
+        "document_ids": document_ids,
+        "top_k": 20,
+    }
     assert reranker.calls[0]["top_k"] == 2
 
 
 @pytest.mark.asyncio
+async def test_candidate_fields_map_one_to_one_to_search_hit() -> None:
+    client = FakeHttpClient([_candidate("c1", document_id="doc-1", score=0.42)])
+    service = SearchService(_settings(), StubReranker(), client=client)
+
+    hits = await service.rag_search("q", document_ids=["doc-1"], top_k=1)
+
+    hit = hits[0]
+    assert hit.chunk_id == "c1"
+    assert hit.document_id == "doc-1"
+    assert hit.document_name == "c1.pdf"
+    assert hit.caption == "cap"
+    assert hit.child_text == "child"
+    assert hit.parent_text == "parent"
+    assert hit.heading_path == ["H1"]
+    assert hit.score == 0.42
+    assert hit.page_number == 1
+    assert hit.source_gcs_uri == "gs://bucket/doc.pdf"
+    assert hit.markdown_gcs_uri == "gs://bucket/doc.md"
+
+
+@pytest.mark.asyncio
 async def test_rag_search_uses_configured_rerank_top_k_when_tool_omits_top_k() -> None:
-    embedder = StubEmbedder()
-    reader = StubReader(
-        [
-            SearchHit(chunk_id="c1", score=0.9),
-            SearchHit(chunk_id="c2", score=0.8),
-            SearchHit(chunk_id="c3", score=0.7),
-            SearchHit(chunk_id="c4", score=0.6),
-        ]
+    client = FakeHttpClient(
+        [_candidate("c1"), _candidate("c2"), _candidate("c3"), _candidate("c4")]
     )
     reranker = StubReranker()
-    service = SearchService(_settings(), embedder, reader, reranker)
+    service = SearchService(_settings(), reranker, client=client)
 
     hits = await service.rag_search("query text", document_ids=["doc-1"], top_k=None)
 
@@ -141,13 +166,17 @@ def test_diversify_disabled_passthrough() -> None:
 
 @pytest.mark.asyncio
 async def test_rag_search_applies_diversity_with_wider_pool() -> None:
-    embedder = StubEmbedder()
-    reader = StubReader([_hit("A1", "A", .99), _hit("A2", "A", .98), _hit("A3", "A", .97),
-                         _hit("B1", "B", .90), _hit("C1", "C", .80)])
+    client = FakeHttpClient([
+        _candidate("A1", document_id="A", score=.99),
+        _candidate("A2", document_id="A", score=.98),
+        _candidate("A3", document_id="A", score=.97),
+        _candidate("B1", document_id="B", score=.90),
+        _candidate("C1", document_id="C", score=.80),
+    ])
     reranker = StubReranker()
     settings = dataclasses.replace(_settings(), rerank_top_k=2, rerank_max_per_doc=1,
                                    rerank_diversity_pool=3)
-    service = SearchService(settings, embedder, reader, reranker)
+    service = SearchService(settings, reranker, client=client)
     hits = await service.rag_search("q", top_k=None)
     # pool = min(#candidates=5, final_k(2)*3=6) = 5 -> rerank rộng hơn final_k(2)
     assert reranker.calls[0]["top_k"] == 5

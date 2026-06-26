@@ -8,7 +8,7 @@ import types
 import httpx
 
 from app.core.config import McpSettings
-from app.core.vectorstore import SearchHit
+from app.core.models import SearchHit
 from app.interfaces.mcp_server import (
     MCP_INTERNAL_TOKEN_HEADER,
     InternalTokenAuthMiddleware,
@@ -127,14 +127,8 @@ def _settings() -> McpSettings:
         log_level="INFO",
         app_env="development",
         internal_token="",
-        provider="qdrant",
-        collection="rag_chatbot",
-        embed_model="offline",
-        dimension=256,
-        url="",
-        api_key="",
-        embed_base_url="",
-        embed_api_key="",
+        rag_worker_url="http://rag-worker:8000",
+        search_timeout_seconds=30.0,
         rerank_impl="none",
         rerank_model="gpt-4o-mini",
         rerank_base_url="",
@@ -145,7 +139,6 @@ def _settings() -> McpSettings:
         top_k_candidates=20,
         rerank_top_k=3,
         rerank_threshold=0.6,
-        options={},
     )
 
 
@@ -194,24 +187,9 @@ def test_build_mcp_registers_rag_search_tool_and_query_service_shape(monkeypatch
             **_settings().__dict__,
             "tools_profile": {
                 "rag_search": {
-                    "embedder": {
-                        "base_url": "https://embed.example",
-                        "api_key": "embed-key",
-                        "dimension": "1024",
-                    },
-                    "vector_store": {
-                        "impl": "qdrant",
-                        "params": {
-                            "collection": "team_docs",
-                            "url": "https://qdrant.example",
-                            "api_key": "vector-key",
-                            "timeout": "15",
-                        },
-                    },
-                    "vectorstore_contract": {
-                        "provider": "qdrant",
-                        "collection": "team_docs",
-                        "embed_model": "text-embedding-3-large",
+                    "search": {
+                        "rag_worker_url": "https://rag-worker.example",
+                        "timeout_seconds": "15",
                     },
                     "reranker": {
                         "impl": "llm",
@@ -244,11 +222,8 @@ def test_build_mcp_registers_rag_search_tool_and_query_service_shape(monkeypatch
     assert mcp.stateless_http is True
     assert mcp.json_response is True
     assert "rag_search" in mcp.tools
-    assert built_with[0].collection == "team_docs"
-    assert built_with[0].embed_model == "text-embedding-3-large"
-    assert built_with[0].dimension == 1024
-    assert built_with[0].url == "https://qdrant.example"
-    assert built_with[0].embed_base_url == "https://embed.example"
+    assert built_with[0].rag_worker_url == "https://rag-worker.example"
+    assert built_with[0].search_timeout_seconds == 15.0
     assert built_with[0].rerank_impl == "llm"
     assert built_with[0].top_k_candidates == 12
     assert built_with[0].rerank_top_k == 5
@@ -357,24 +332,9 @@ def test_build_mcp_registers_both_tools_simultaneously(monkeypatch) -> None:
             **_settings().__dict__,
             "tools_profile": {
                 "rag_search": {
-                    "embedder": {
-                        "base_url": "https://embed.example",
-                        "api_key": "embed-key",
-                        "dimension": "1024",
-                    },
-                    "vector_store": {
-                        "impl": "qdrant",
-                        "params": {
-                            "collection": "team_docs",
-                            "url": "https://qdrant.example",
-                            "api_key": "vector-key",
-                            "timeout": "15",
-                        },
-                    },
-                    "vectorstore_contract": {
-                        "provider": "qdrant",
-                        "collection": "team_docs",
-                        "embed_model": "text-embedding-3-large",
+                    "search": {
+                        "rag_worker_url": "https://rag-worker.example",
+                        "timeout_seconds": "15",
                     },
                     "reranker": {"impl": "none"},
                     "retrieval": {

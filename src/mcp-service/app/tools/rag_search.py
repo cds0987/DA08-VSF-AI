@@ -6,8 +6,8 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from app.core.config import McpSettings
+from app.core.models import SearchHit
 from app.core.search import SearchService, build_search_service
-from app.core.vectorstore import SearchHit
 from app.tools.base import register_tool
 
 logger = logging.getLogger("mcp-service")
@@ -35,16 +35,8 @@ def _mapping(value: Any) -> Mapping[str, Any]:
 
 @dataclass(frozen=True)
 class RagSearchConfig:
-    provider: str
-    collection: str
-    embed_model: str
-    dimension: int
-    url: str
-    api_key: str
-    basic_auth: str
-    timeout: int | None
-    embed_base_url: str
-    embed_api_key: str
+    rag_worker_url: str
+    search_timeout_seconds: float
     rerank_impl: str
     rerank_model: str
     rerank_base_url: str
@@ -58,10 +50,7 @@ class RagSearchConfig:
 
     @classmethod
     def from_params(cls, settings: McpSettings, params: Mapping[str, Any]) -> "RagSearchConfig":
-        embedder = _mapping(params.get("embedder"))
-        vector_store = _mapping(params.get("vector_store"))
-        vector_params = _mapping(vector_store.get("params"))
-        contract = _mapping(params.get("vectorstore_contract"))
+        search = _mapping(params.get("search"))
         reranker = _mapping(params.get("reranker"))
         reranker_params = _mapping(reranker.get("params"))
         retrieval = _mapping(params.get("retrieval"))
@@ -75,20 +64,10 @@ class RagSearchConfig:
             return float(text) if text else default
 
         return cls(
-            provider=str(contract.get("provider") or vector_store.get("impl") or settings.provider).strip(),
-            collection=str(contract.get("collection") or vector_params.get("collection") or settings.collection).strip(),
-            embed_model=str(contract.get("embed_model") or settings.embed_model).strip(),
-            dimension=_int(embedder.get("dimension"), settings.dimension),
-            url=str(vector_params.get("url") or settings.url).strip(),
-            api_key=str(vector_params.get("api_key") or settings.api_key).strip(),
-            basic_auth=str(vector_params.get("basic_auth") or settings.basic_auth).strip(),
-            timeout=(
-                _int(vector_params.get("timeout"), settings.timeout)
-                if str(vector_params.get("timeout") or "").strip()
-                else settings.timeout
+            rag_worker_url=str(search.get("rag_worker_url") or settings.rag_worker_url).strip(),
+            search_timeout_seconds=_float(
+                search.get("timeout_seconds"), settings.search_timeout_seconds
             ),
-            embed_base_url=str(embedder.get("base_url") or settings.embed_base_url).strip(),
-            embed_api_key=str(embedder.get("api_key") or settings.embed_api_key).strip(),
             rerank_impl=str(reranker.get("impl") or settings.rerank_impl).strip().lower(),
             rerank_model=str(reranker.get("model") or settings.rerank_model).strip(),
             rerank_base_url=str(reranker.get("base_url") or settings.rerank_base_url).strip(),
@@ -110,16 +89,8 @@ class RagSearchConfig:
     def to_settings(self, settings: McpSettings) -> McpSettings:
         return replace(
             settings,
-            provider=self.provider,
-            collection=self.collection,
-            embed_model=self.embed_model,
-            dimension=self.dimension,
-            url=self.url,
-            api_key=self.api_key,
-            basic_auth=self.basic_auth,
-            timeout=self.timeout,
-            embed_base_url=self.embed_base_url,
-            embed_api_key=self.embed_api_key,
+            rag_worker_url=self.rag_worker_url,
+            search_timeout_seconds=self.search_timeout_seconds,
             rerank_impl=self.rerank_impl,
             rerank_model=self.rerank_model,
             rerank_base_url=self.rerank_base_url,
@@ -155,20 +126,12 @@ class RagSearchTool:
             return {"results": [_hit_to_dict(hit) for hit in hits]}
 
     async def verify(self) -> None:
-        contract = self._settings.contract()
+        # mcp KHÔNG còn sở hữu embed model/collection contract (đã chuyển sang
+        # rag-worker). Startup chỉ log — verify contract/stamp diễn ra phía rag-worker.
         logger.info(
-            "mcp_tool_verify_start tool=%s index=%s fingerprint=%s deployment=%s",
+            "mcp_tool_verify_ok tool=%s rag_worker_url=%s",
             self.name,
-            contract.index_id,
-            contract.fingerprint,
-            self._settings.deployment,
-        )
-        await self._service.verify_contract()
-        logger.info(
-            "mcp_tool_verify_ok tool=%s index=%s fingerprint=%s",
-            self.name,
-            contract.index_id,
-            contract.fingerprint,
+            self._settings.rag_worker_url,
         )
 
     async def aclose(self) -> None:

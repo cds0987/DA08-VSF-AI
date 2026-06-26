@@ -17,7 +17,7 @@ from qdrant_client import QdrantClient, models
 
 from core_engine.vectorstore.config import VectorStoreConfig
 from core_engine.vectorstore.store import VectorStore
-from core_engine.vectorstore.types import VectorRecord
+from core_engine.vectorstore.types import SearchHit, VectorRecord
 
 
 class QdrantInProcessProvider(QdrantBase):
@@ -30,6 +30,8 @@ class QdrantInProcessProvider(QdrantBase):
         self._client = QdrantClient(**options)
         self._ready = False
         self._lock = asyncio.Lock()
+        # Cache chế độ collection (hybrid vs dense) -> chọn query tương thích ngược.
+        self._mode: str | None = None
         # QdrantClient local (:memory:/path) KHÔNG thread-safe; serialize mọi op
         # (chạy qua to_thread) để concurrent ingest/search không đụng numpy index.
         self._op_lock = asyncio.Lock()
@@ -133,6 +135,36 @@ class QdrantInProcessProvider(QdrantBase):
                 collection_name=self._collection,
                 points_selector=self._delete_by_document_selector(document_id),
             )
+
+    async def _resolve_mode(self) -> str:
+        if self._mode is None:
+            try:
+                info = await asyncio.to_thread(
+                    self._client.get_collection, self._collection
+                )
+                self._mode = self._collection_mode(info)
+            except Exception:  # noqa: BLE001 — không lấy được info -> an toàn: dense trần
+                self._mode = "dense"
+        return self._mode
+
+    async def search(
+        self,
+        *,
+        query_vector: Sequence[float],
+        query_text: str,
+        top_k: int,
+        document_ids: Sequence[str] | None,
+    ) -> list[SearchHit]:
+        await self._ensure()
+        doc_filter = self._access_filter(document_ids)
+        mode = await self._resolve_mode()
+        if mode == "hybrid":
+            kwargs = self._hybrid_query_kwargs(query_vector, query_text, top_k, doc_filter)
+        else:
+            kwargs = self._dense_query_kwargs(query_vector, top_k, doc_filter)
+        async with self._op_lock:
+            res = await asyncio.to_thread(self._client.query_points, **kwargs)
+        return [self._to_search_hit(p.payload, p.score) for p in res.points]
 
 
 class QdrantInProcessRepository(VectorStore):
