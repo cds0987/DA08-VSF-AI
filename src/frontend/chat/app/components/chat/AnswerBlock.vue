@@ -70,9 +70,9 @@ const GROUP_ICON: Record<CitationFileGroup, any> = {
   sheet: FileSpreadsheet, slide: Presentation, image: FileImage, unknown: FileGeneric,
 }
 const GROUP_ICON_CLASS: Record<CitationFileGroup, string> = {
-  pdf: 'text-rose-500', doc: 'text-blue-500', text: 'text-slate-400 dark:text-muted-foreground',
+  pdf: 'text-rose-500', doc: 'text-blue-500', text: 'text-slate-500 dark:text-muted-foreground',
   web: 'text-sky-500', sheet: 'text-emerald-500', slide: 'text-amber-500',
-  image: 'text-violet-500', unknown: 'text-slate-400 dark:text-muted-foreground',
+  image: 'text-violet-500', unknown: 'text-slate-500 dark:text-muted-foreground',
 }
 function fileIcon(doc?: string | null) { return GROUP_ICON[citationFileKind(doc).group] }
 function fileIconClass(doc?: string | null) { return GROUP_ICON_CLASS[citationFileKind(doc).group] }
@@ -169,7 +169,7 @@ function copyToClipboard() {
       <!-- Network interruption — ChatGPT style: no content received, show subtle placeholder -->
       <p
         v-else-if="data.interrupted"
-        class="text-sm text-slate-400 dark:text-muted-foreground italic"
+        class="text-sm text-slate-500 dark:text-muted-foreground italic"
       >
         Kết nối bị gián đoạn.
       </p>

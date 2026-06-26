@@ -107,7 +107,7 @@ defineExpose({
         <button
           type="button"
           aria-label="Bỏ trích dẫn"
-          class="shrink-0 rounded-md p-0.5 text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:hover:text-foreground"
+          class="shrink-0 rounded-md p-0.5 text-slate-500 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-muted-foreground dark:hover:text-foreground"
           @click="emit('clear-quote')"
         >
           <X class="h-3.5 w-3.5" />
@@ -122,7 +122,7 @@ defineExpose({
           :rows="1"
           maxlength="500"
           placeholder="Hỏi về chính sách, quy trình, kiến thức nội bộ..."
-          class="max-h-[200px] min-h-[36px] flex-1 resize-none overflow-hidden self-center bg-transparent py-2 text-[16px] font-medium text-slate-800 outline-none placeholder:font-normal placeholder:text-slate-400 dark:text-foreground dark:placeholder:text-chat-placeholder"
+          class="max-h-[200px] min-h-[36px] flex-1 resize-none overflow-hidden self-center bg-transparent py-2 text-[16px] font-medium text-slate-800 outline-none placeholder:font-normal placeholder:text-slate-500 dark:text-foreground dark:placeholder:text-chat-placeholder"
         />
         <button
           type="submit"
@@ -153,7 +153,7 @@ defineExpose({
         {{ qa.label }}
       </button>
     </div>
-    <div class="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-slate-400 dark:text-muted-foreground/60">
+    <div class="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-slate-500 dark:text-muted-foreground">
       <ShieldCheck class="h-3 w-3" />
       Câu hỏi được giới hạn 500 ký tự. Không hỗ trợ đính kèm tệp.
     </div>

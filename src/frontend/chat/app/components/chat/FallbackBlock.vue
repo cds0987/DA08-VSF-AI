@@ -18,7 +18,7 @@ import { AlertTriangle, Mail } from '@lucide/vue'
         </p>
         <div class="mt-4 grid gap-3 md:grid-cols-2">
           <div class="rounded-lg border border-slate-200 dark:border-border bg-white/60 dark:bg-card p-3">
-            <div class="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-muted-foreground">
+            <div class="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground">
               Try
             </div>
             <ul class="space-y-1 text-[12.5px] text-slate-600 dark:text-foreground/80">
@@ -28,18 +28,18 @@ import { AlertTriangle, Mail } from '@lucide/vue'
             </ul>
           </div>
           <div class="rounded-lg border border-slate-200 dark:border-border bg-white/60 dark:bg-card p-3">
-            <div class="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-muted-foreground">
+            <div class="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground">
               Recommended contacts
             </div>
             <ul class="space-y-1 text-[12.5px] text-slate-600 dark:text-foreground/80">
               <li class="flex items-center gap-1.5">
-                <Mail class="h-3 w-3 text-slate-400 dark:text-muted-foreground" /> hr@featuremind.com
+                <Mail class="h-3 w-3 text-slate-500 dark:text-muted-foreground" /> hr@featuremind.com
               </li>
               <li class="flex items-center gap-1.5">
-                <Mail class="h-3 w-3 text-slate-400 dark:text-muted-foreground" /> it-support@featuremind.com
+                <Mail class="h-3 w-3 text-slate-500 dark:text-muted-foreground" /> it-support@featuremind.com
               </li>
               <li class="flex items-center gap-1.5">
-                <Mail class="h-3 w-3 text-slate-400 dark:text-muted-foreground" /> finance@featuremind.com
+                <Mail class="h-3 w-3 text-slate-500 dark:text-muted-foreground" /> finance@featuremind.com
               </li>
             </ul>
           </div>

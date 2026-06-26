@@ -255,23 +255,23 @@ const fieldClass
     >
       <div class="grid grid-cols-2 gap-4">
         <div>
-          <label class="mb-1 block text-[10px] font-bold uppercase text-slate-400 dark:text-muted-foreground">Loại nghỉ</label>
+          <label class="mb-1 block text-[10px] font-bold uppercase text-slate-500 dark:text-muted-foreground">Loại nghỉ</label>
           <select v-model="form.leave_type" :disabled="isDone" :class="fieldClass" @change="onFieldChange">
             <option v-for="t in typeOptions" :key="t.value" :value="t.value">{{ t.label }}</option>
           </select>
         </div>
         <div>
-          <label class="mb-1 block text-[10px] font-bold uppercase text-slate-400 dark:text-muted-foreground">Lý do</label>
+          <label class="mb-1 block text-[10px] font-bold uppercase text-slate-500 dark:text-muted-foreground">Lý do</label>
           <input v-model="form.reason" type="text" :disabled="isDone" :class="fieldClass" placeholder="Tùy chọn" @input="onFieldChange">
         </div>
       </div>
       <div class="grid grid-cols-2 gap-4">
         <div>
-          <label class="mb-1 block text-[10px] font-bold uppercase text-slate-400 dark:text-muted-foreground">Ngày bắt đầu</label>
+          <label class="mb-1 block text-[10px] font-bold uppercase text-slate-500 dark:text-muted-foreground">Ngày bắt đầu</label>
           <input v-model="form.start_date" type="date" :disabled="isDone" :class="fieldClass" @change="onFieldChange">
         </div>
         <div>
-          <label class="mb-1 block text-[10px] font-bold uppercase text-slate-400 dark:text-muted-foreground">Ngày kết thúc</label>
+          <label class="mb-1 block text-[10px] font-bold uppercase text-slate-500 dark:text-muted-foreground">Ngày kết thúc</label>
           <input v-model="form.end_date" type="date" :disabled="isDone" :class="fieldClass" @change="onFieldChange">
         </div>
       </div>

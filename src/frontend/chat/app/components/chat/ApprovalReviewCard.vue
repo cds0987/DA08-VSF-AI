@@ -132,7 +132,7 @@ function initials(req: LeaveApproval): string {
         </div>
         <div>
           <h4 class="text-[13.5px] font-semibold text-slate-900 dark:text-foreground">Đơn chờ bạn duyệt</h4>
-          <p class="text-[11px] text-slate-400 dark:text-muted-foreground">
+          <p class="text-[11px] text-slate-500 dark:text-muted-foreground">
             Duyệt sẽ tự trừ ngày phép của nhân viên
           </p>
         </div>
@@ -152,7 +152,7 @@ function initials(req: LeaveApproval): string {
 
     <div
       v-else-if="loaded && items.length === 0"
-      class="rounded-xl border border-dashed border-slate-200 dark:border-border py-10 text-center text-[13px] text-slate-400 dark:text-muted-foreground"
+      class="rounded-xl border border-dashed border-slate-200 dark:border-border py-10 text-center text-[13px] text-slate-500 dark:text-muted-foreground"
     >
       🎉 Hiện không có đơn nào chờ bạn duyệt.
     </div>
@@ -171,9 +171,9 @@ function initials(req: LeaveApproval): string {
             </div>
             <div class="leading-tight">
               <div class="flex items-center gap-1 text-[13px] font-semibold text-slate-800 dark:text-foreground">
-                <User class="h-3.5 w-3.5 text-slate-400" /> {{ employeeLabel(req) }}
+                <User class="h-3.5 w-3.5 text-slate-500 dark:text-muted-foreground" /> {{ employeeLabel(req) }}
               </div>
-              <div v-if="employeeSub(req)" class="text-[11px] text-slate-400 dark:text-muted-foreground">{{ employeeSub(req) }}</div>
+              <div v-if="employeeSub(req)" class="text-[11px] text-slate-500 dark:text-muted-foreground">{{ employeeSub(req) }}</div>
               <div class="text-[11.5px] font-medium text-slate-500 dark:text-foreground/70">{{ req.days_count }} ngày nghỉ</div>
             </div>
           </div>
@@ -185,13 +185,13 @@ function initials(req: LeaveApproval): string {
         <!-- Khoảng ngày -->
         <div class="mt-3 flex items-center gap-2 rounded-lg bg-slate-50 dark:bg-accent/40 px-3 py-2 text-[13px] font-medium text-slate-700 dark:text-foreground/90">
           <span>{{ req.start_date }}</span>
-          <ArrowRight class="h-3.5 w-3.5 text-slate-400" />
+          <ArrowRight class="h-3.5 w-3.5 text-slate-500 dark:text-muted-foreground" />
           <span>{{ req.end_date }}</span>
         </div>
 
         <!-- Lý do -->
         <div v-if="req.reason" class="mt-2 text-[12.5px] text-slate-500 dark:text-muted-foreground">
-          <span class="text-slate-400">Lý do:</span> {{ req.reason }}
+          <span class="text-slate-500 dark:text-muted-foreground">Lý do:</span> {{ req.reason }}
         </div>
 
         <!-- Gợi ý quyết định -->
