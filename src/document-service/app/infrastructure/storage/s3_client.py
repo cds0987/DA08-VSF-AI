@@ -53,11 +53,15 @@ class S3StorageClient:
 
     async def file_exists(self, key: str) -> bool:
         def _head() -> bool:
+            from botocore.exceptions import ClientError
+
             try:
                 self._client.head_object(Bucket=self.bucket, Key=key)
                 return True
-            except Exception:
-                return False
+            except ClientError as e:
+                if e.response["Error"]["Code"] in ("404", "NoSuchKey"):
+                    return False
+                raise
 
         return await asyncio.to_thread(_head)
 

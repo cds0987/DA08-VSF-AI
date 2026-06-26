@@ -73,7 +73,7 @@ class GetDocumentFilePreviewUseCase:
             try:
                 content = await self.storage.download_file(document.gcs_key)
             except Exception as exc:
-                raise StorageError() from exc
+                raise StorageError("Failed to fetch document for preview") from exc
             return DocumentFilePreviewResult(content, _MEDIA_TYPES[file_type], document.name)
 
         # Office: cache -> convert.
@@ -105,6 +105,13 @@ class GetDocumentFilePreviewUseCase:
         started = time.monotonic()
         try:
             original = await self.storage.download_file(document.gcs_key)
+        except Exception as exc:
+            logger.warning(
+                "preview download failed document_id=%s file_type=%s reason=%s",
+                document.id, file_type, type(exc).__name__,
+            )
+            raise StorageError("Failed to fetch document for preview") from exc
+        try:
             pdf = await self.converter.convert_to_pdf(original, document.name)
         except Exception as exc:
             logger.warning(

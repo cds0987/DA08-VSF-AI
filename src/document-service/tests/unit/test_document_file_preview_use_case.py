@@ -142,6 +142,26 @@ async def test_missing_document_raises_not_found() -> None:
 
 
 @pytest.mark.asyncio
+async def test_office_cache_write_failure_still_returns_pdf() -> None:
+    """Cache-write failure (upload_file raises) must NOT break the request."""
+
+    class FailingUploadStorage(FakePreviewStorage):
+        async def upload_file(self, key: str, content: bytes, content_type: str | None = None) -> None:
+            raise RuntimeError("storage write error")
+
+    doc = document(file_type="docx")
+    storage = FailingUploadStorage()
+    storage.seed_original(doc.gcs_key)
+    converter = CountingConverter()
+    uc = GetDocumentFilePreviewUseCase(InMemoryDocuments([doc]), storage, converter)
+
+    result = await uc.execute(viewer(), doc.id)
+
+    assert result.content == b"%PDF-1.7 converted"
+    assert result.media_type == "application/pdf"
+
+
+@pytest.mark.asyncio
 async def test_acl_denies_external_user_internal_doc() -> None:
     from app.application.auth import CurrentUser
 
