@@ -207,3 +207,20 @@
     animation-delay: calc(var(--i, 0) * 40ms);
   }
 }
+
+@keyframes tl-marker-halo {
+  0%   { transform: scale(1);   opacity: 0.5; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tl-marker-pulse { position: relative; }
+  .tl-marker-pulse::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    border: 1px solid currentColor;
+    animation: tl-marker-halo 2s ease-out infinite;
+    pointer-events: none;
+  }
+}

@@ -111,7 +111,7 @@ function getResultLabel(entry: TraceEntry): string {
             <span
               aria-hidden="true"
               class="absolute -left-7 top-0 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 dark:bg-background"
-              :class="orchActive ? PHASE_TINT.orchestrator.ring : 'ring-slate-200 dark:ring-white/10'"
+              :class="[orchActive ? PHASE_TINT.orchestrator.ring : 'ring-slate-200 dark:ring-white/10', orchActive && `tl-marker-pulse ${PHASE_TINT.orchestrator.tint}`]"
             >
               <GitBranch class="h-3 w-3" :class="PHASE_TINT.orchestrator.tint" />
             </span>
@@ -154,7 +154,7 @@ function getResultLabel(entry: TraceEntry): string {
             <span
               aria-hidden="true"
               class="absolute -left-7 top-0 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 dark:bg-background"
-              :class="verifyActive ? PHASE_TINT.verify.ring : 'ring-slate-200 dark:ring-white/10'"
+              :class="[verifyActive ? PHASE_TINT.verify.ring : 'ring-slate-200 dark:ring-white/10', verifyActive && `tl-marker-pulse ${PHASE_TINT.verify.tint}`]"
             >
               <ShieldCheck class="h-3 w-3" :class="PHASE_TINT.verify.tint" />
             </span>
