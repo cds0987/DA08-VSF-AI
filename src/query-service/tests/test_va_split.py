@@ -30,6 +30,11 @@ SPLIT_CASES = [
     ("header danh-gia",       f"**Đánh giá:** {A}", A),
     ("header nhan-dinh+verdict", f"Nhận định: Đủ thông tin. {A}", A),
     ("glyph fullwidth cite",  f"**Kiểm tra:** {A.replace('[1]', '【1】')}", A),
+    # bare-verdict KHÔNG kèm BƯỚC (leak phát hiện qua Playwright)
+    ("bare-verdict du-tra-loi", f"Dữ liệu đã đủ để trả lời phần cốt lõi của câu hỏi.\n\n{A}", A),
+    ("bare-verdict noidung",   f"Nội dung thu thập đã đủ để trả lời phần cốt lõi về chính sách nghỉ. {A}", A),
+    ("bare-verdict thongtin",  f"Thông tin đã đủ để trả lời câu hỏi. {A}", A),
+    ("bare-verdict hien-co",   f"Dữ liệu hiện có đã đủ trả lời. {A}", A),
 ]
 
 # ───── CASE GIỮ NGUYÊN (struct=False -> answer thường, KHÔNG strip) ─────
@@ -45,6 +50,10 @@ KEEP_CASES = [
     ("greeting",              "Chào bạn! Theo quy định, bạn được nghỉ 03 ngày [1]."),
     ("luu-y header (not think)", "**Lưu ý:** Bạn nên nộp đơn trước 3 ngày làm việc [1]."),
     ("fallback no-info",      "Mình chưa tìm được thông tin phù hợp. Bạn thử hỏi lại nhé."),
+    # false-positive cho bare-verdict: answer có 'Dữ liệu/Thông tin' nhưng KHÔNG phải verdict 'đã đủ trả lời'
+    ("data cho-thay",         "Dữ liệu hệ thống cho thấy bạn còn 12 ngày phép năm nay [1]."),
+    ("thongtin chi-tiet",     "Thông tin chi tiết về phụ cấp gồm: ăn trưa, đi lại [1]."),
+    ("noidung tai-lieu",      "Nội dung tài liệu nội bộ quy định nghỉ kết hôn 03 ngày [1]."),
 ]
 
 

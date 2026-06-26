@@ -265,6 +265,12 @@ _VA_NEEDMORE = re.compile(r"<<\s*NEED_MORE\s*>>\s*(.*)", re.I | re.S)
 _VA_VERDICT = re.compile(
     r"^[*_\s]*(?:Đ[Ủủ]|Đã\s*đủ|Đầy\s*đủ|Dữ\s*liệu\s*đ[ãủ]|Th[ôo]ng\s*tin\s*đ[ãủ]|Chưa\s*đủ)[^\n]{0,90}?[.:\n]\s*",
     re.I)
+# Bare-verdict KHÔNG kèm nhãn BƯỚC: model reasoning-off mở đầu bằng câu META "Dữ liệu/Thông tin/Nội
+# dung (thu thập/hiện có) đã đủ ... (để) trả lời ..." rồi mới tới answer. Distinctive ('đã đủ ... trả
+# lời') -> chống nhầm answer thường. Cắt nguyên câu verdict đầu.
+_VA_VERDICT_OPEN = re.compile(
+    r"^[*_#>\s]*(?:D[ữữ]\s*li[ệệ]u|Th[ôo]ng\s*tin|N[ộộ]i\s*dung)[^\n]{0,45}?đ[ãă]\s*đ[ủủ]"
+    r"[^\n]{0,30}?tr[ảả]\s*l[ờờ]i[^\n.]*[.\n]+\s*", re.I)
 # DETECTION: cấu trúc verify DISTINCTIVE (BƯỚC 1/2 + nhãn KIỂM TRA/TỔNG HỢP/XUẤT) -> chống false-positive
 # với answer quy-trình có 'Bước 1:' thường (chỉ split khi có nhãn verify, không chỉ chữ 'bước').
 _VA_STRUCT = re.compile(r"B[Ưư][Ớớ]C\s*[12]\b[^\n]{0,45}(KI[Ểể]M\s*TRA|T[Ổổ]NG\s*H[Ợợ]P|XU[Ấấ]T)", re.I)
@@ -287,7 +293,7 @@ def _va_is_struct(text: str) -> bool:
     """True nếu content mang cấu trúc verify (BƯỚC 1/2 + nhãn) HOẶC nhãn thinking ở đầu ('Phân tích &
     Kiểm tra:', 'Tổng hợp:') -> cần tách khỏi answer."""
     n = _va_normalize(text)
-    return bool(_VA_STRUCT.search(n) or _VA_HEADER.match(n))
+    return bool(_VA_STRUCT.search(n) or _VA_HEADER.match(n) or _VA_VERDICT_OPEN.match(n))
 
 
 def _va_need_more(full: str) -> tuple[bool, str]:
@@ -313,6 +319,10 @@ def _va_split(full: str) -> tuple[str, str]:
     if m and full[m.end():].strip():
         ans = _VA_VERDICT.sub("", full[m.end():].strip(), count=1).strip()
         return (ans or full[m.end():].strip(), "")
+    # bare-verdict mở đầu ('Dữ liệu đã đủ để trả lời...') KHÔNG kèm BƯỚC -> cắt câu verdict
+    m = _VA_VERDICT_OPEN.match(full)
+    if m and full[m.end():].strip():
+        return (full[m.end():].strip(), full[:m.end()].strip())
     return (full.strip(), "")
 
 
