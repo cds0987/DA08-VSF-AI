@@ -71,6 +71,16 @@ export function useHRService() {
     return res.items ?? []
   }
 
+  // Mọi đơn của CHÍNH người đăng nhập (trang "Đơn của tôi").
+  async function fetchMyLeaveRequests() {
+    const res = await withTokenRefresh(() =>
+      $fetch<{ items: any[]; count: number }>(`${baseUrl}/mine`, {
+        headers: getHRServiceAuthHeaders(),
+      })
+    )
+    return res.items ?? []
+  }
+
   async function approveLeaveRequest(id: string) {
     return withTokenRefresh(() =>
       $fetch<{ id: string; status: string }>(
@@ -94,6 +104,7 @@ export function useHRService() {
     getLeaveRequest,
     cancelLeaveRequest,
     fetchPendingApprovals,
+    fetchMyLeaveRequests,
     approveLeaveRequest,
     rejectLeaveRequest,
   }

@@ -21,6 +21,7 @@ class FakeHRLeaveClient:
         self.create_ret = (201, {"id": "r1", "status": "pending", "approver_user_id": "mgr"})
         self.cancel_ret = (200, {"id": "r1", "status": "cancelled"})
         self.pending_ret = (200, {"items": [], "count": 0})
+        self.mine_ret = (200, {"items": [], "count": 0})
         self.decide_ret = (200, {"id": "r1", "status": "approved"})
 
     async def create(self, **kw):
@@ -34,6 +35,10 @@ class FakeHRLeaveClient:
     async def list_pending_approval(self, **kw):
         self.calls.append(("pending", kw))
         return self.pending_ret
+
+    async def list_mine(self, **kw):
+        self.calls.append(("mine", kw))
+        return self.mine_ret
 
     async def decide(self, **kw):
         self.calls.append(("decide", kw))
@@ -106,6 +111,16 @@ async def test_pending_approval_uses_jwt_as_approver(hr_client: AsyncClient, fak
     assert r.status_code == 200
     op, kw = fake_hr.calls[0]
     assert op == "pending" and kw["approver_user_id"] == HR_USER_ID
+
+
+@pytest.mark.asyncio
+async def test_mine_uses_jwt_as_user(hr_client: AsyncClient, fake_hr):
+    fake_hr.mine_ret = (200, {"items": [{"id": "r1", "status": "approved"}], "count": 1})
+    r = await hr_client.get("/leave-requests/mine")
+    assert r.status_code == 200
+    assert r.json()["count"] == 1
+    op, kw = fake_hr.calls[0]
+    assert op == "mine" and kw["user_id"] == HR_USER_ID
 
 
 @pytest.mark.asyncio

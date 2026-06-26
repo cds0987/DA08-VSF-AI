@@ -82,6 +82,17 @@ async def pending_approval(
     return body
 
 
+@router.get("/mine")
+async def list_my_leave_requests(
+    user: AuthenticatedUser = Depends(get_current_user),
+    hr: HRLeaveClient = Depends(get_hr_leave_client),
+) -> dict:
+    """Mọi đơn của chính người đăng nhập (user_id = JWT) -> trang 'Đơn của tôi'."""
+    status_code, body = await hr.list_mine(user_id=user.id)
+    _raise_for_status(status_code, body)
+    return body
+
+
 @router.post("/{request_id}/approve")
 async def approve_leave_request(
     request_id: str,

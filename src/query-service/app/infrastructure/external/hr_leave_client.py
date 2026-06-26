@@ -85,6 +85,13 @@ class HRLeaveClient:
             params={"approver_user_id": approver_user_id},
         )
 
+    async def list_mine(self, *, user_id: str) -> tuple[int, dict]:
+        """Mọi đơn của chính chủ đơn (scope user_id) -> trang 'Đơn của tôi'."""
+        return await self._request(
+            "GET", "/hr/leave-requests/mine",
+            params={"user_id": user_id},
+        )
+
     async def decide(
         self, *, request_id: str, approver_user_id: str, action: str, reason: str = ""
     ) -> tuple[int, dict]:
