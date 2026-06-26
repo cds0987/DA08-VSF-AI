@@ -66,7 +66,6 @@ type PreviewState = 'idle' | 'loading' | 'ready' | 'error'
 const previewState = ref<PreviewState>('idle')
 const previewObjectUrl = ref<string | null>(null)
 const previewText = ref<string | null>(null)
-const previewBlob = ref<Blob | null>(null)
 const previewError = ref<string | null>(null)
 const previewKind = ref<PreviewKind>('unknown')
 
@@ -74,8 +73,8 @@ const resetPreview = () => {
   if (previewObjectUrl.value) URL.revokeObjectURL(previewObjectUrl.value)
   previewObjectUrl.value = null
   previewText.value = null
-  previewBlob.value = null
   previewError.value = null
+  previewKind.value = 'unknown'
 }
 
 const closePreview = () => {
@@ -91,7 +90,6 @@ const openPreview = async () => {
     // Fetch nội dung render-được (office đã convert -> PDF). Object-URL làm src iframe/img
     // -> top-level URL vẫn /admin/documents/{id}.
     const blob = await documentService.getPreviewBlob(id)
-    previewBlob.value = blob
     previewKind.value = previewKindFromMime(blob.type)
     if (previewKind.value === 'text') {
       previewText.value = await blob.text()
@@ -266,12 +264,14 @@ onUnmounted(() => {
                 <p class="text-[13px] font-medium text-foreground">{{ previewError || 'Không tạo được bản xem trước' }}</p>
                 <div class="flex items-center gap-2">
                   <button
+                    type="button"
                     class="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-[12.5px] hover:bg-accent"
                     @click="openPreview"
                   >
-                    <Loader2 v-if="previewState === 'loading'" class="h-3.5 w-3.5 animate-spin" /> Thử lại
+                    Thử lại
                   </button>
                   <button
+                    type="button"
                     class="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-[12.5px] hover:bg-accent"
                     @click="downloadFile"
                   >
