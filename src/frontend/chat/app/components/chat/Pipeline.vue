@@ -41,6 +41,11 @@ const ROLE_LABEL: Record<string, string> = {
 const ROLE_ICON: Record<string, any> = {
   rag_retrieve: FileSearch, hr_lookup: Database, synthesize_recommend: Sparkles, analyze: Lightbulb, critic: ShieldCheck,
 }
+const WORKER_TINT = 'text-blue-500 dark:text-blue-400'
+const PHASE_TINT = {
+  orchestrator: { tint: 'text-indigo-500 dark:text-indigo-400', ring: 'ring-indigo-200 dark:ring-indigo-500/30' },
+  verify: { tint: 'text-emerald-500 dark:text-emerald-400', ring: 'ring-emerald-200 dark:ring-emerald-500/30' },
+}
 // Dot trạng thái: bước ĐANG suy nghĩ -> XANH (đang hoạt động), xong/chờ -> XÁM, lỗi -> ĐỎ.
 function stepDotColor(s?: AgentPlanStep['status']): string {
   return s === 'error' ? 'bg-red-400'
@@ -106,9 +111,9 @@ function getResultLabel(entry: TraceEntry): string {
             <span
               aria-hidden="true"
               class="absolute -left-7 top-0 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 dark:bg-background"
-              :class="orchActive ? 'ring-slate-300 dark:ring-white/20' : 'ring-slate-200 dark:ring-white/10'"
+              :class="orchActive ? PHASE_TINT.orchestrator.ring : 'ring-slate-200 dark:ring-white/10'"
             >
-              <GitBranch class="h-3 w-3 text-slate-500 dark:text-muted-foreground" />
+              <GitBranch class="h-3 w-3" :class="PHASE_TINT.orchestrator.tint" />
             </span>
             <div class="flex items-center gap-1.5">
               <span class="text-[15px] font-medium text-slate-600 dark:text-foreground/80" :class="orchActive && 'ai-shimmer'">Orchestrator</span>
@@ -125,7 +130,7 @@ function getResultLabel(entry: TraceEntry): string {
           <div v-for="s in (plan?.steps || [])" :key="`p-${s.id}`" class="relative">
             <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full" :class="stepDotColor(s.status)" />
             <div class="flex items-center gap-1.5 text-[15px]">
-              <component :is="ROLE_ICON[s.role] ?? FileSearch" class="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-muted-foreground" />
+              <component :is="ROLE_ICON[s.role] ?? FileSearch" class="h-3.5 w-3.5 shrink-0" :class="WORKER_TINT" />
               <span class="flex-1 truncate font-medium text-slate-700 dark:text-foreground/80" :class="s.status === 'running' && 'ai-shimmer'" :title="ROLE_LABEL[s.role] ?? s.role">{{ ROLE_LABEL[s.role] ?? s.role }}</span>
               <XCircle v-if="s.status === 'error'" class="h-3 w-3 shrink-0 text-red-400" />
             </div>
@@ -135,7 +140,7 @@ function getResultLabel(entry: TraceEntry): string {
           <div v-for="(entry, i) in traceLog" :key="`t-${i}`" class="relative">
             <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full" :class="entry.pending ? 'bg-blue-500' : 'bg-slate-300 dark:bg-white/25'" />
             <div class="flex items-center gap-1.5">
-              <component :is="TOOL_ICON[entry.tool] ?? Search" class="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-muted-foreground" />
+              <component :is="TOOL_ICON[entry.tool] ?? Search" class="h-3.5 w-3.5 shrink-0" :class="WORKER_TINT" />
               <span class="text-[15px] font-medium text-slate-700 dark:text-foreground/80" :class="entry.pending && 'ai-shimmer'">{{ TOOL_LABEL[entry.tool] ?? entry.tool }}</span>
               <span v-if="getQueryLabel(entry)" class="flex-1 truncate text-[13px] font-medium text-slate-500 dark:text-muted-foreground">{{ getQueryLabel(entry) }}</span>
             </div>
@@ -149,9 +154,9 @@ function getResultLabel(entry: TraceEntry): string {
             <span
               aria-hidden="true"
               class="absolute -left-7 top-0 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 dark:bg-background"
-              :class="verifyActive ? 'ring-slate-300 dark:ring-white/20' : 'ring-slate-200 dark:ring-white/10'"
+              :class="verifyActive ? PHASE_TINT.verify.ring : 'ring-slate-200 dark:ring-white/10'"
             >
-              <ShieldCheck class="h-3 w-3 text-slate-500 dark:text-muted-foreground" />
+              <ShieldCheck class="h-3 w-3" :class="PHASE_TINT.verify.tint" />
             </span>
             <div class="flex items-center gap-1.5">
               <span class="text-[15px] font-medium text-slate-600 dark:text-foreground/80" :class="verifyActive && 'ai-shimmer'">Verify — Kiểm tra &amp; tổng hợp</span>
