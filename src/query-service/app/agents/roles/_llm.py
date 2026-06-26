@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import logging
 import re
+import unicodedata
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -254,16 +255,39 @@ def _parse_va(text: str | None) -> tuple[str | None, bool, str]:
 # reasoning_content như deepseek-reasoning-on). Soft-adapter MODEL-AGNOSTIC: glyph-normalize +
 # tách "BƯỚC 1" khỏi answer. deepseek-reasoning-off cũng ra "BƯỚC" -> cùng đường (UNIFORM).
 _VA_GLYPHS = {"【": "[", "】": "]", "〔": "[", "〕": "]", "（": "(", "）": ")", "［": "[", "］": "]"}
-_VA_BUOC2 = re.compile(r"B[Ưư][Ớớ]C\s*2[^\n:]*:?\s*", re.I)
-_VA_BUOC1 = re.compile(r"B[Ưư][Ớớ]C\s*1[^\n]*\n+", re.I)
+# Marker BƯỚC ĐẦU/DÒNG cho phép PREFIX markdown (** * # > -) + inline (kết bằng ':' HOẶC '\n') + đuôi '**'.
+# (Trước chỉ match khi BƯỚC ở ĐẦU + có '\n' -> model nào in '**BƯỚC 1 —...:** answer' 1 dòng/markdown -> RÒ.)
+_VA_BUOC2 = re.compile(r"[*_#>\-\s]*B[Ưư][Ớớ]C\s*2\b[^\n:]*[:\n]\**\s*", re.I)
+_VA_BUOC1 = re.compile(r"[*_#>\-\s]*B[Ưư][Ớớ]C\s*1\b[^\n:]*[:\n]\**\s*", re.I)
 _VA_NEEDMORE = re.compile(r"<<\s*NEED_MORE\s*>>\s*(.*)", re.I | re.S)
+# Verdict mở đầu (khi model gộp verdict + answer dưới BƯỚC 1, KHÔNG có BƯỚC 2) -> bỏ câu verdict ngắn.
+# CHỈ áp khi ĐÃ ở split-mode (cấu trúc verify) nên an toàn (không nhầm answer thường).
+_VA_VERDICT = re.compile(
+    r"^[*_\s]*(?:Đ[Ủủ]|Đã\s*đủ|Đầy\s*đủ|Dữ\s*liệu\s*đ[ãủ]|Th[ôo]ng\s*tin\s*đ[ãủ]|Chưa\s*đủ)[^\n]{0,90}?[.:\n]\s*",
+    re.I)
+# DETECTION: cấu trúc verify DISTINCTIVE (BƯỚC 1/2 + nhãn KIỂM TRA/TỔNG HỢP/XUẤT) -> chống false-positive
+# với answer quy-trình có 'Bước 1:' thường (chỉ split khi có nhãn verify, không chỉ chữ 'bước').
+_VA_STRUCT = re.compile(r"B[Ưư][Ớớ]C\s*[12]\b[^\n]{0,45}(KI[Ểể]M\s*TRA|T[Ổổ]NG\s*H[Ợợ]P|XU[Ấấ]T)", re.I)
+# Model KHÁC không in 'BƯỚC' mà in NHÃN thinking ở ĐẦU + dấu ':' (vd '**Phân tích & Kiểm tra:**',
+# '**Tổng hợp:**'). Cần ':' (header) -> answer 'Kiểm tra số phép tại...' (không ':') KHÔNG dính.
+_VA_THINK = "(?:Phân\\s*tích|T[ổổ]ng\\s*h[ợợ]p|Ki[ểể]m\\s*tra|Đánh\\s*giá|Nh[ậậ]n\\s*đ[ịị]nh|Suy\\s*ngh[ĩĩ])"
+_VA_HEADER = re.compile(
+    r"^[*_#>\-\s]*" + _VA_THINK + r"(?:\s*(?:&|và|,|/)\s*" + _VA_THINK + r")*\s*:\**\s*", re.I)
 
 
 def _va_normalize(s: str) -> str:
-    """Chuẩn hoá glyph citation lạ (【1】 〔1〕 ［1］) -> [1] ASCII (FE render thẻ nguồn từ [N])."""
+    """NFC (đồng nhất diacritic precomposed — model NFD vẫn match) + glyph citation lạ (【1】 -> [1] ASCII)."""
+    s = unicodedata.normalize("NFC", s)
     for a, b in _VA_GLYPHS.items():
         s = s.replace(a, b)
     return s
+
+
+def _va_is_struct(text: str) -> bool:
+    """True nếu content mang cấu trúc verify (BƯỚC 1/2 + nhãn) HOẶC nhãn thinking ở đầu ('Phân tích &
+    Kiểm tra:', 'Tổng hợp:') -> cần tách khỏi answer."""
+    n = _va_normalize(text)
+    return bool(_VA_STRUCT.search(n) or _VA_HEADER.match(n))
 
 
 def _va_need_more(full: str) -> tuple[bool, str]:
@@ -274,14 +298,21 @@ def _va_need_more(full: str) -> tuple[bool, str]:
 
 
 def _va_split(full: str) -> tuple[str, str]:
-    """Tách (answer, reasoning_part) khỏi 'BƯỚC 1 ... BƯỚC 2 — XUẤT: <answer>'. KHÔNG có marker
-    (deepseek-reasoning-on: content = answer thuần) -> (full, '')."""
+    """Tách (answer, reasoning_part) khỏi 'BƯỚC 1 ... BƯỚC 2 — XUẤT: <answer>'. Có 'BƯỚC 2 — XUẤT' ->
+    answer là phần SAU (an toàn cho answer quy-trình có 'bước' bên trong). Không có BƯỚC 2 -> bỏ header
+    'BƯỚC 1 ...:'. KHÔNG marker -> (full, '')."""
     parts = _VA_BUOC2.split(full, maxsplit=1)
     if len(parts) > 1 and parts[1].strip():
         return (parts[1].strip(), parts[0].strip())
     parts = _VA_BUOC1.split(full, maxsplit=1)
     if len(parts) > 1 and parts[1].strip():
-        return (parts[1].strip(), "")
+        ans = _VA_VERDICT.sub("", parts[1].strip(), count=1).strip()  # bỏ verdict 'Đủ.' nếu gộp dưới BƯỚC 1
+        return (ans or parts[1].strip(), "")
+    # nhãn thinking ở đầu ('**Phân tích & Kiểm tra:**', 'Tổng hợp:') -> bỏ header (+ verdict nếu lọt)
+    m = _VA_HEADER.match(full)
+    if m and full[m.end():].strip():
+        ans = _VA_VERDICT.sub("", full[m.end():].strip(), count=1).strip()
+        return (ans or full[m.end():].strip(), "")
     return (full.strip(), "")
 
 
@@ -338,20 +369,21 @@ async def astream_verify_answer(
                 continue
             if decided in ("need_more", "split"):
                 continue                                            # gom hết, xử lý cuối stream
-            # chưa quyết: gom buf tới khi phân biệt được sentinel / BƯỚC-structure / answer-thuần
+            # chưa quyết: gom buf tới khi phân biệt được sentinel / BƯỚC-structure / answer-thuần.
+            # _va_is_struct nhận cấu trúc verify DÙ có prefix markdown ('**BƯỚC 1 —...') hay '(Bước 1)' ->
+            # KHÔNG còn rò khi model in markdown. Chờ tới 60 ký tự để marker (có thể tới muộn) kịp xuất hiện.
             buf += tok
             stripped = buf.lstrip()
             if not stripped:
                 continue
-            low = stripped.lower()
-            if len(stripped) < 6 and (_VA_SENTINEL.startswith(stripped) or "bước".startswith(low)):
-                continue                                            # còn mơ hồ -> đợi thêm token
             if stripped.startswith(_VA_SENTINEL):
                 decided = "need_more"
-            elif low.startswith("bước"):                            # //hóa reasoning-off -> GOM + tách cuối
+            elif _va_is_struct(buf):                                # cấu trúc verify -> GOM + tách cuối
                 decided = "split"
+            elif _VA_SENTINEL.startswith(stripped) or len(stripped) < 60:
+                continue                                            # còn mơ hồ / marker chưa tới -> đợi thêm
             else:
-                decided = "answer"                                  # pure-answer -> stream live
+                decided = "answer"                                  # đủ dài, không cấu trúc -> stream live
                 await emit({"token": buf, "phase": "generating"})
         full = _va_normalize("".join(parts)).strip()
         _report_llm(tracer, trace, node, model, user, full or None, usage_meta, router, start_dt,
