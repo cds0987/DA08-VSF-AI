@@ -84,6 +84,13 @@ class OpenAIProvider(AIProvider):
             kwargs = {"model": cfg.model, "input": texts}
             if dim is not None:
                 kwargs["dimensions"] = dim   # text-embedding-3-* hỗ trợ; provider khác bỏ qua
+            # ÉP encoding_format=float (GỐC CUỐI của TypeError-NoneType giết doc dưới tải):
+            # KHÔNG set -> OpenAI SDK mặc định gửi base64 + gắn post-parser decode chạy
+            # `for embedding in obj.data`. Khi gateway shed/degraded trả data=null, vòng đó
+            # lặp `for x in None` -> TypeError NGAY TRONG create(), TRƯỚC guard dưới -> không
+            # map được transient -> permanent -> doc chết (đo: 18% fail @conc=120). Set 'float'
+            # -> SDK BỎ post-parser -> data=None xuống guard -> TransientAIError -> retry.
+            kwargs["encoding_format"] = "float"
             try:
                 res = await client.embeddings.create(**kwargs)
             except Exception as exc:  # noqa: BLE001 - SDK-specific mapping stays in adapter

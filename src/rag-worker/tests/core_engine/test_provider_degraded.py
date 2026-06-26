@@ -40,6 +40,28 @@ def _provider(client: _FakeClient) -> tuple[OpenAIProvider, CapabilityConfig]:
 
 
 @pytest.mark.asyncio
+async def test_embed_sends_encoding_format_float() -> None:
+    """GỐC CUỐI TypeError-NoneType: KHÔNG set encoding_format -> OpenAI SDK gửi base64 +
+    post-parser `for embedding in obj.data` -> data=null lúc shed -> TypeError trong create()
+    TRƯỚC guard -> permanent -> doc chết. Provider PHẢI gửi encoding_format=float -> SDK bỏ
+    post-parser -> data=None xuống guard -> transient."""
+    seen: dict = {}
+
+    async def _rec_create(**kwargs):
+        seen.update(kwargs)
+        return _Resp(data=[type("D", (), {"index": 0, "embedding": [0.1]})()])
+
+    client = _FakeClient()
+    client.embeddings = type("E", (), {"create": staticmethod(_rec_create)})()
+    provider, _ = _provider(client)
+    await provider.embed(["hello"])
+    assert seen.get("encoding_format") == "float", (
+        f"embed phải ép encoding_format=float (got {seen.get('encoding_format')!r}) — "
+        "tắt base64 post-parser dòn của SDK"
+    )
+
+
+@pytest.mark.asyncio
 async def test_embed_degraded_data_none_raises_transient_not_typeerror() -> None:
     provider, _ = _provider(_FakeClient(embed_resp=_Resp(data=None)))
     with pytest.raises(TransientAIError):
