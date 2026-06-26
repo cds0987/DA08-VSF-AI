@@ -145,7 +145,7 @@ function resultLabel(e: TraceEntry): string {
 
           <!-- SUB-STEP (orchestrator): plan step + kết quả tool — dot nhỏ canh thẳng trên CÙNG rail -->
           <template v-if="g === 'orchestrator'">
-            <div v-for="s in (plan?.steps || [])" :key="`p-${s.id}`" class="relative">
+            <div v-for="(s, i) in (plan?.steps || [])" :key="`p-${s.id}`" class="relative tl-step-enter" :style="{ '--i': i }">
               <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full" :class="stepDotColor(s.status)" />
               <div class="flex items-center gap-1.5 text-[15px]">
                 <component :is="ROLE_ICON[s.role] ?? FileSearch" class="h-3.5 w-3.5 shrink-0" :class="WORKER_TINT" />
@@ -156,7 +156,7 @@ function resultLabel(e: TraceEntry): string {
               </div>
             </div>
 
-            <div v-for="(e, i) in trace" :key="`t-${i}`" class="relative">
+            <div v-for="(e, i) in trace" :key="`t-${i}`" class="relative tl-step-enter" :style="{ '--i': i }">
               <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full bg-slate-300 dark:bg-white/25" />
               <div class="flex items-center gap-1.5">
                 <component :is="TOOL_ICON[e.tool] ?? Search" class="h-3.5 w-3.5 shrink-0" :class="WORKER_TINT" />

@@ -127,7 +127,7 @@ function getResultLabel(entry: TraceEntry): string {
           </div>
 
           <!-- plan step: dot canh trên rail, running = xanh + pulse -->
-          <div v-for="s in (plan?.steps || [])" :key="`p-${s.id}`" class="relative">
+          <div v-for="(s, i) in (plan?.steps || [])" :key="`p-${s.id}`" class="relative tl-step-enter" :style="{ '--i': i }">
             <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full" :class="stepDotColor(s.status)" />
             <div class="flex items-center gap-1.5 text-[15px]">
               <component :is="ROLE_ICON[s.role] ?? FileSearch" class="h-3.5 w-3.5 shrink-0" :class="WORKER_TINT" />
@@ -137,7 +137,7 @@ function getResultLabel(entry: TraceEntry): string {
           </div>
 
           <!-- tool: dot trên rail xanh khi đang chạy; tiêu đề shimmer thay cho spinner -->
-          <div v-for="(entry, i) in traceLog" :key="`t-${i}`" class="relative">
+          <div v-for="(entry, i) in traceLog" :key="`t-${i}`" class="relative tl-step-enter" :style="{ '--i': i }">
             <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full" :class="entry.pending ? 'bg-blue-500' : 'bg-slate-300 dark:bg-white/25'" />
             <div class="flex items-center gap-1.5">
               <component :is="TOOL_ICON[entry.tool] ?? Search" class="h-3.5 w-3.5 shrink-0" :class="WORKER_TINT" />
