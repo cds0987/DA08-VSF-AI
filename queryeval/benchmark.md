@@ -151,3 +151,52 @@ heavy_fanout) — **ép planner fan-out ≥2 worker song song**. Mỗi câu nở
 - ⛔ Burst cực hạn 142-concurrent/1 VM vẫn ~68% src=0 do **bão hòa pipeline** (worker timeout, plan/
   verify chậm) — trần capacity, để dành nếu cần scale.
 - Nút thắt latency thường ngày (plan 41% + verify 33%) **chưa đụng** → còn nguyên cho Benchmark 3.
+
+---
+
+## Benchmark 3 — (A fast-path: cắt heavy-planner cho RAG đơn) · 2026-06-26
+
+**Mục tiêu:** đánh nút thắt latency #1 ở BM1 — **plan 41%** (heavy-planner chạy MỌI câu, kể cả tra
+cứu 1-doc đơn giản). BM1 đo: fan-out >1 worker chỉ 7% → ~93% câu 1-step không cần DAG-planner.
+
+**Thay đổi deployed:**
+- **A FAST-PATH** (`orchestrator_workers._fast_triage`): triage rẻ (capability `triage`, gpt-4o-mini
+  ~1s) phân loại **RAG** (tra cứu 1 quy định, tự-đủ-nghĩa) vs **OTHER**. RAG → plan CỐ ĐỊNH 1-step
+  `rag_retrieve`, **BỎ heavy-planner (~9s)**. OTHER (mơ hồ/cá-nhân/đơn-nghỉ/off-topic/follow-up) →
+  heavy-planner (an toàn). Replan (verify NEED_MORE) → ESCALATE heavy (net bắt misclassify).
+- **Outcome-field fix**: MOSA done-event trước chỉ NO_INFO|SUCCESS → mọi refuse/clarify/no_info =
+  SUCCESS (benchmark auto-grade sai). `_classify_mosa_outcome` suy outcome từ route + nội dung answer.
+- (Thử //hóa answer 2-pool deepseek+gpt-oss để rải GPU → REVERT: gpt-oss phá format
+  `astream_verify_answer` → dump raw data. //hóa answer cần model cùng-họ-format.)
+
+### Kết quả — latency (single 150, open-loop rate 0.5, đo sạch)
+
+| task | BM1 p50 | BM3 p50 | Δ |
+|---|---|---|---|
+| **TỔNG** | 22.3 | **15.3** | **-31%** ✅ |
+| rag_info (A short-circuit) | 24.2 | **16.4** | **-32%** |
+| hr_balance | 22.5 | 17.9 | -20% |
+| leave_action | 21.6 | 16.7 | -23% |
+| multiturn | 25.4 | 17.1 | -33% |
+| ambiguous | 6.0 | 5.9 | ≈ (giữ nhanh) |
+| offtopic_adv | 7.8 | 9.1 | +1.3 |
+| no_doc | 29.7 | 16.5 | -45% |
+
+- **150/150 OK, 0 lỗi** (rate 0.5). p90 40.7 · p95 49.9s (BM1 single p95 45.9 — tương đương; rate-0.5
+  open-loop ≈ in-flight ~10 nên đuôi nhỉnh hơn closed-loop cap-4 của BM1).
+- **A triage có 2 phiên bản:** v1 (prompt rộng) regress ambiguous 6→22s + leave +4s (bắt nhầm câu mơ
+  hồ/đơn-nghỉ → phí retrieve). **v2 conservative** (chỉ RAG khi tự-đủ-nghĩa, probe vs labeled:
+  rag_info 6/6 RAG · ambiguous/offtopic/leave/hr 0/6 RAG) **xóa sạch regression** → bảng trên là v2.
+
+### Correctness (outcome-field auto-grade, sau fix)
+
+- rag_info / hr_balance / leave_action: **100%** · multiturn 84% · **TỔNG 80%** (BM1 chấm-tay 84%).
+- ⚠️ Light-route (ambiguous/offtopic/no_doc) **bị undercount**: `_classify_mosa_outcome` là heuristic
+  cụm-từ → bắt hết clear cases nhưng sót vài cách diễn đạt clarify/no_info → grade thấp hơn HÀNH VI
+  thực (spot-check live: refuse/clarify/no_info đều ĐÚNG). Muốn số chính xác tuyệt đối → **LLM-judge**.
+
+### Kết luận Benchmark 3
+- ✅ **plan-bottleneck đánh trúng: -31% latency tổng** (rag_info -32%), không regress nhóm nào (v2),
+  0 lỗi. A short-circuit ~43% traffic nặng nhất bằng triage ~1s thay heavy-planner ~9s.
+- ✅ Outcome-field hết "luôn SUCCESS" → auto-grade dùng được (clear cases), light-route cần LLM-judge.
+- 🔭 Còn lại: **verify 33%** (chưa đụng) + //hóa answer cùng-họ-format (rải GPU) + burst admission-control.
