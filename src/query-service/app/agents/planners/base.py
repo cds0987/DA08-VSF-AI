@@ -22,6 +22,7 @@ class PlanContext:
     trace: Any = None                            # trace handle của lượt query
     memory: Any = None                           # MemoryContext (dialogue+summary+task_state+working_set)
     hint_doc_ids: tuple[str, ...] = ()           # doc_ids từ proactive notification — orchestrator KHÔNG từ chối khi có
+    is_replan: bool = False                       # True khi verify NEED_MORE -> ESCALATE heavy planner (bỏ fast-path A)
 
 
 class Planner(ABC):

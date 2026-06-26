@@ -155,6 +155,7 @@ def build_orchestrator_graph(
             emit=ctx.emit,
             memory=state.get("memory_context"),  # dialogue+summary+task_state -> planner đa lượt
             hint_doc_ids=ctx.hint_doc_ids,
+            is_replan=state.get("replan_count", 0) > 0,  # A: replan -> ESCALATE heavy (bỏ fast-path)
         )
         plan = await planner.plan(pctx)
         # synthesize_recommend KHÔNG còn chạy như worker: node `synthesize` tự sinh câu trả lời +

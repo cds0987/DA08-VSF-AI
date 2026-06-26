@@ -9,12 +9,26 @@ from __future__ import annotations
 import json
 import logging
 
-from app.agents.plan_schema import Plan
+from app.agents.plan_schema import Plan, PlanStep
 from app.agents.planners.base import PlanContext, Planner
 from app.agents.registry import register_planner
-from app.agents.roles._llm import astream_plan
+from app.agents.roles._llm import acomplete, astream_plan
 
 logger = logging.getLogger(__name__)
+
+# ── A FAST-PATH: triage rẻ (//hóa qua capability 'triage', vd gpt-4o-mini ~1s) phân loại MỘT nhãn.
+# RAG (tra cứu 1 chủ đề tài liệu, ~43% traffic, NẶNG nhất p50 24s) -> plan CỐ ĐỊNH 1-step, BỎ
+# heavy-planner (~9s, 41% latency). MỌI ca khác -> heavy-planner (an toàn: đơn nghỉ/so-sánh/mơ hồ/
+# off-topic/nhạy cảm/follow-up). Misclassify -> verify NEED_MORE -> replan ESCALATE heavy (net an toàn).
+_FAST_TRIAGE_SYS = (
+    "Bạn PHÂN LOẠI câu hỏi nội bộ của nhân viên. Trả về ĐÚNG 1 TỪ, KHÔNG giải thích:\n"
+    "- RAG: tra cứu MỘT chủ đề chính sách/quy định/quy trình/chế độ trong tài liệu nội bộ "
+    "(vd: nghỉ ốm, nghỉ việc, thai sản, kết hôn, PCCC, đào tạo, đánh giá hiệu suất, công tác, tài sản).\n"
+    "- OTHER: MỌI trường hợp khác — số ngày phép/lương CÁ NHÂN, so sánh nhiều công ty/chủ đề, "
+    "câu mơ hồ cần hỏi lại, TẠO/GỬI/DUYỆT đơn nghỉ, ngoài phạm vi nhân sự, nội dung nhạy cảm/an toàn, "
+    "hoặc câu phụ thuộc ngữ cảnh hội thoại trước (follow-up).\n"
+    "PHÂN VÂN -> OTHER."
+)
 
 _SYSTEM = """\
 Bạn là ORCHESTRATOR điều phối trợ lý nội bộ VinSmartFuture. Nhận câu hỏi nhân viên và LẬP KẾ HOẠCH.
@@ -185,6 +199,19 @@ def _fallback_plan() -> Plan:
 class OrchestratorWorkersPlanner(Planner):
     name = "orchestrator_workers"
 
+    async def _fast_triage(self, ctx: PlanContext) -> str:
+        """A FAST-PATH classifier — 1 LLM call RẺ (capability 'triage'). Trả 'RAG' | 'OTHER'.
+        Lỗi/không model/phân vân -> 'OTHER' (rơi về heavy planner, KHÔNG bao giờ kém an toàn hơn)."""
+        model = ctx.make_model("triage") if ctx.make_model else None
+        if model is None:
+            return "OTHER"
+        user = f"Câu hỏi: {ctx.question}"
+        if ctx.history:  # đang trong hội thoại -> giúp model nhận follow-up (phụ thuộc ngữ cảnh) -> OTHER
+            user = "(Đây là lượt tiếp theo trong một hội thoại.)\n" + user
+        text = await acomplete(model, _FAST_TRIAGE_SYS, user,
+                               tracer=ctx.tracer, trace=ctx.trace, node="triage")
+        return "RAG" if (text and "RAG" in text.upper() and "OTHER" not in text.upper()) else "OTHER"
+
     async def plan(self, ctx: PlanContext) -> Plan:
         # EDGE: câu hỏi RỖNG/toàn khoảng-trắng -> KHÔNG gọi planner (tránh answer rỗng), hỏi lại
         # ngay (route=light, steps rỗng -> verify_answer trả answer_hint). Tiết kiệm 1 LLM call.
@@ -195,6 +222,21 @@ class OrchestratorWorkersPlanner(Planner):
                             "tài liệu và quy trình nội bộ — bạn nêu câu hỏi cụ thể giúp mình nhé.",
                 steps=[],
             )
+        # A FAST-PATH: chặn TRƯỚC heavy-planner. Chỉ khi KHÔNG phải replan (replan -> escalate heavy).
+        # RAG đơn 1-step -> plan cố định, BỎ heavy-planner (~9s). Worker rag_retrieve sẽ emit "running"
+        # -> FE vẫn thấy hoạt động; verify_answer NEED_MORE (nếu thiếu) sẽ escalate replan heavy.
+        if not ctx.is_replan and ctx.make_model is not None:
+            if await self._fast_triage(ctx) == "RAG":
+                logger.info("fast_path=RAG -> skip heavy planner (1-step rag)")
+                if ctx.emit:
+                    await ctx.emit({"phase": "plan", "route": "heavy",
+                                    "steps": [{"id": 1, "role": "rag_retrieve",
+                                               "direction": "", "depends_on": []}]})
+                return self._with_question(
+                    Plan(route="heavy", reasoning="Tra cứu tài liệu nội bộ.",
+                         steps=[PlanStep(id=1, role="rag_retrieve", input=ctx.question)]),
+                    ctx.question,
+                )
         # capability "plan" RIÊNG (không dùng chung "think") -> đổi model planner CHỈ sửa
         # routing.yaml (plan -> flash/pro), KHÔNG sửa code. Mỗi bước MOSA 1 ô model độc lập.
         model = ctx.make_model("plan") if ctx.make_model else None
