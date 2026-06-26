@@ -200,3 +200,46 @@ cứu 1-doc đơn giản). BM1 đo: fan-out >1 worker chỉ 7% → ~93% câu 1-s
   0 lỗi. A short-circuit ~43% traffic nặng nhất bằng triage ~1s thay heavy-planner ~9s.
 - ✅ Outcome-field hết "luôn SUCCESS" → auto-grade dùng được (clear cases), light-route cần LLM-judge.
 - 🔭 Còn lại: **verify 33%** (chưa đụng) + //hóa answer cùng-họ-format (rải GPU) + burst admission-control.
+
+---
+
+## Benchmark 4 — (//hóa answer 7 model đa-pool) · 2026-06-26
+
+**Mục tiêu:** đánh **variance answer-node** — deepseek-v4-flash là model CHẬM NHẤT còn lại (đo idle
+p50 6.3s, biến thiên 2-14s) và mọi answer DỒN 1 upstream → queue GPU + đuôi p95/p99 xấu.
+
+**Khảo sát (7 model × 4 scenario × 3 reps, OpenRouter):** đủ-data / đa-nguồn / thiếu→NEED_MORE /
+off-topic. Root-cause "//hóa hỏng" trước (gpt-oss dump raw) = **reasoning-model nhồi answer vào
+`reasoning_content`, `content` RỖNG** → verify đọc content rỗng → fail-safe dump raw data.
+
+**Thay đổi deployed:**
+- **reasoning-off** (profiles.yaml answer `reasoning_effort: "off"` → `reasoning:{enabled:false}`):
+  ép MỌI model nhồi answer vào `content` (kể cả deepseek — off còn NHANH hơn + cite tốt hơn).
+- **soft-adapter `_va_split`** (model-agnostic): tách "BƯỚC 1 reasoning" khỏi answer trong content
+  (model reasoning-off xuất 'BƯỚC 1..BƯỚC 2: answer') + glyph-normalize 【1】→[1]. deepseek
+  reasoning-on (pure-answer) vẫn stream live như cũ (giữ legacy path).
+- **routing.yaml answer.paid = 7 model**: deepseek-v4-flash + qwen3.5-flash + qwen3-vl-30b +
+  qwen3-235b + llama-4-scout + glm-4.7-flash + hy3-preview (DeepSeek/Qwen/Meta/Zhipu/Tencent).
+  LOẠI gpt-oss-120b (content RỖNG cả 2 chế độ — unfit thật).
+
+### Kết quả (single 150, rate 0.5, WARM — BM4 lần đầu bị cold-start ngay sau deploy, đã re-run)
+
+| | BM1 | BM3 | **BM4** | Δ vs BM3 |
+|---|---|---|---|---|
+| correct | 84% (tay) | 80% | **86%** | +6 |
+| p50 | 22.3 | 15.3 | 15.4 | ~ |
+| **p95** | — | 72.6 | **42.7** | **-41%** ✅ |
+| **max** | 152 | 139 | **71** | **-49%** ✅ |
+| lỗi · raw-dump | — | 0 | **0 · 0** | |
+
+- **Đòn //hóa = ĐUÔI**: p95 -41%, max -49% — rải answer qua 7 pool xoá outlier chậm của deepseek
+  (variance 2-14s). p50 ~same (rag-retrieve 4-10s vẫn chi phối; answer-node nhanh hơn chỉ 1 phần).
+- **Correctness 86% (cao nhất)**: answer đa-model + output sạch (cite [N] chuẩn sau glyph-normalize).
+- **0 raw-dump dưới tải**: soft-adapter `_va_split` + reasoning-off ổn định. Survey split_ok ~12/12.
+- ⚠️ **Cold-start sau deploy NẶNG hơn** (7 model cần warm connection riêng): BM4 lần đầu rag_info tụt
+  17% (fallback NO_INFO), warm lại → 100%. → cần warm-up sau mỗi deploy trước khi đo/serve.
+
+### Kết luận Benchmark 4
+- ✅ **//hóa answer đạt mục tiêu: cắt đuôi latency (p95 -41%, max -49%)** + correctness +6% + 0 raw-dump.
+- ✅ Soft-adapter model-agnostic (reasoning-off + `_va_split`) → thêm/bớt model chỉ sửa routing.yaml.
+- 🔭 Còn lại: rag-retrieve 4-10s (chi phối p50) + burst admission-control (trần 1-VM) + LLM-judge.
