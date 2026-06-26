@@ -36,14 +36,14 @@ aliases:
 capabilities:
   answer:                           # câu trả lời cuối (split answer node) -> GIAO TOÀN BỘ
                                     # cho deepseek qua OpenRouter, xoay API key mỗi 150K token.
-    tiers: [paid]                   # paid = OpenRouter. KHÔNG dùng OpenAI free.
+    tiers: [paid]                   # paid = OpenRouter (deepseek). KHÔNG dùng OpenAI free.
     models:
-      paid:                              # //HÓA answer 2026-06-26: rải 2 UPSTREAM POOL (chống queue GPU khi
-                                         # mọi answer dồn 1 pool deepseek lúc tải). Probe answer-format
-                                         # (cite [N] + tiếng Việt): deepseek 4.2s ✓ · gpt-oss-120b 5.2s ✓.
-        - deepseek/deepseek-v4-flash     #   PRIMARY proven prod (pool DeepSeek)
-        - openai/gpt-oss-120b            #   pool OpenAI (GPU khác) -> giảm concentration. KHÁC vụ xiaomi
-                                         #   (revert vì CHẬM p99): gpt-oss NHANH NGANG deepseek + format OK.
+      paid: deepseek/deepseek-v4-flash   # PRIMARY. //HÓA gpt-oss ĐÃ THỬ 2026-06-26 -> REVERT: answer node
+                                         # dùng astream_verify_answer (NEED_MORE verdict + reasoning); gpt-oss
+                                         # KHÔNG ra đúng format -> fail-safe DUMP RAW DATA (intermittent ~50%).
+                                         # //hóa answer cần model CÙNG-HỌ-format (deepseek). GPU-spread answer:
+                                         # đã có 5-key rotation + AIMD + save_mode xiaomi (degrade). Probe
+                                         # answer-format đơn (cite+VN) PASS nhưng verify_answer-format FAIL.
     selector:                       # banded_rotation: dính 1 key tới khi phục vụ 150K -> xoay key kế.
       impl: adaptive_balanced       # OpenRouter(deepseek): AIMD tự dò trần qua 429 (không TPM cố định)
       params:
@@ -89,9 +89,8 @@ capabilities:
   synth:                            # THINK 2 = tổng hợp + verify (verdict NEED_MORE). flash mặc định.
     tiers: [paid]
     models:
-      paid:                              # //HÓA synth 2026-06-26: rải 2 pool như answer (chống dồn deepseek).
-        - deepseek/deepseek-v4-flash     #   PRIMARY proven prod (pool DeepSeek)
-        - openai/gpt-oss-120b            #   pool OpenAI (GPU khác). gpt-oss reasoning OK cho verdict.
+      paid: deepseek/deepseek-v4-flash   # //HÓA gpt-oss REVERT 2026-06-26 (như answer): synth cũng dùng
+                                         # verdict-format -> gpt-oss phá. Giữ deepseek (proven).
     selector:
       impl: adaptive_balanced       # OpenRouter(deepseek): AIMD tự dò trần qua 429 (không TPM cố định)
       params:
