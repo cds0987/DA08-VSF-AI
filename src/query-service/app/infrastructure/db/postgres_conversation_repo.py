@@ -134,6 +134,7 @@ class PostgresConversationRepository(ConversationRepository):
         sources: list[dict] | None = None,
         latency_ms: int | None = None,
         create_if_missing: bool = True,
+        metadata: dict | None = None,
     ) -> StoredMessage | None:
         pool = await self._get_pool()
         async with pool.acquire() as connection:
@@ -155,9 +156,10 @@ class PostgresConversationRepository(ConversationRepository):
                     content,
                     session_id,
                     sources,
-                    latency_ms
+                    latency_ms,
+                    metadata
                 )
-                VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::jsonb, $7)
+                VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::jsonb, $7, $8::jsonb)
                 RETURNING id, session_id, user_id, role, content, created_at,
                           sources, latency_ms, feedback, metadata
                 """,
@@ -168,6 +170,7 @@ class PostgresConversationRepository(ConversationRepository):
                 session_id,
                 json.dumps(sources or []),
                 latency_ms,
+                json.dumps(metadata or {}),
             )
             await connection.execute(
                 "UPDATE query_svc.conversations SET updated_at = now() WHERE id = $1::uuid",

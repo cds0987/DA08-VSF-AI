@@ -249,8 +249,16 @@ export interface ConversationHistoryMessage {
   feedback?: 1 | -1 | null
   // metadata.actions[idempotency_key] = { status, request_id, leave_status } -> trạng thái
   // thực thi action gắn vào message (server là nguồn sự thật).
+  // metadata.agent = "suy nghĩ của agent" (thoughts/plan/trace/models) server lưu kèm ->
+  // khối Agent SỐNG qua reload/đa thiết bị (không còn phụ thuộc cache localStorage).
   metadata?: {
     actions?: Record<string, { status?: string; request_id?: string | null; leave_status?: string | null }>
+    agent?: {
+      thoughts?: Thought[]
+      plan?: AgentPlan
+      trace?: TraceEntry[]
+      models?: NodeModel[]
+    }
   } | null
 }
 
