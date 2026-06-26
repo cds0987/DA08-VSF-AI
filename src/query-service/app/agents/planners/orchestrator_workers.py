@@ -21,13 +21,16 @@ logger = logging.getLogger(__name__)
 # heavy-planner (~9s, 41% latency). MỌI ca khác -> heavy-planner (an toàn: đơn nghỉ/so-sánh/mơ hồ/
 # off-topic/nhạy cảm/follow-up). Misclassify -> verify NEED_MORE -> replan ESCALATE heavy (net an toàn).
 _FAST_TRIAGE_SYS = (
-    "Bạn PHÂN LOẠI câu hỏi nội bộ của nhân viên. Trả về ĐÚNG 1 TỪ, KHÔNG giải thích:\n"
-    "- RAG: tra cứu MỘT chủ đề chính sách/quy định/quy trình/chế độ trong tài liệu nội bộ "
-    "(vd: nghỉ ốm, nghỉ việc, thai sản, kết hôn, PCCC, đào tạo, đánh giá hiệu suất, công tác, tài sản).\n"
-    "- OTHER: MỌI trường hợp khác — số ngày phép/lương CÁ NHÂN, so sánh nhiều công ty/chủ đề, "
-    "câu mơ hồ cần hỏi lại, TẠO/GỬI/DUYỆT đơn nghỉ, ngoài phạm vi nhân sự, nội dung nhạy cảm/an toàn, "
-    "hoặc câu phụ thuộc ngữ cảnh hội thoại trước (follow-up).\n"
-    "PHÂN VÂN -> OTHER."
+    "Phân loại câu hỏi nhân viên. Trả về ĐÚNG 1 TỪ: RAG hoặc OTHER.\n"
+    "RAG = câu CỤ THỂ, TỰ ĐỦ NGHĨA, hỏi MỘT sự kiện/quy định/quy trình TRA ĐƯỢC trong tài liệu "
+    "(vd 'Nghỉ thai sản mấy tháng?', 'Quy trình nghỉ việc gồm bước nào?', 'Thời hiệu kỷ luật tối đa mấy ngày?').\n"
+    "OTHER = TẤT CẢ còn lại:\n"
+    "- Mơ hồ/thiếu thông tin/cần hỏi lại ('tư vấn cho tôi', 'chính sách thế nào', 'giúp tôi với', 'tôi nên làm gì').\n"
+    "- Số liệu CÁ NHÂN người hỏi (phép/lương/công của TÔI, 'tôi còn mấy ngày phép').\n"
+    "- Tạo/gửi/duyệt ĐƠN nghỉ ('tôi muốn xin nghỉ', 'tạo đơn').\n"
+    "- So sánh nhiều công ty/chủ đề; ngoài phạm vi nhân sự; nhạy cảm/an toàn; follow-up.\n"
+    "QUY TẮC VÀNG: PHÂN VÂN -> OTHER. Chỉ trả RAG khi CHẮC CHẮN tra 1 quy định cụ thể."
+    # Probe vs labeled 2026-06-26: rag_info 6/6 RAG · ambiguous/offtopic/leave/hr 0/6 RAG (fix regress BM3 v1).
 )
 
 _SYSTEM = """\
