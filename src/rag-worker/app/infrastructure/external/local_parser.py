@@ -572,8 +572,14 @@ class LocalFileParser(Parser):
         # THẬT (citation "trang N" đúng). Nguồn 1 trang (docx/csv/txt/ảnh) -> không nhúng
         # -> chunker giữ hành vi cũ (bộ đếm section). HTML comment = vô hình khi render.
         multi_page = len(step.pages) > 1
-        parts: list[str] = []
-        for page_index, page in enumerate(step.pages):
+
+        # Song song hoá OCR THEO TRANG (nghẽn p99 thật: scan N trang = N call vision tuần
+        # tự). CƠ CHẾ ĐÚNG-DỮ-LIỆU-ĐÚNG-DOC: mỗi coroutine xử lý đúng (page_index, page) —
+        # OCR(page.images) merge với page.text CỦA CHÍNH TRANG ĐÓ; reassemble theo
+        # page_index (KHÔNG theo thứ tự hoàn tất) -> trang sau xong trước không nhảy chỗ.
+        # Cô lập liên-doc: state cục bộ (step/parts) + extractor không giữ dữ liệu doc;
+        # trần vision toàn cục do semaphore OCR_MAX_CONCURRENCY trong extractor lo.
+        async def _page_markdown(page_index: int, page: _Page) -> tuple[int, str | None]:
             ocr_text = ""
             if page.images:
                 ocr_text = await self._image_text_extractor.extract(page.images)
@@ -581,8 +587,15 @@ class LocalFileParser(Parser):
             merged = "\n\n".join(
                 segment for segment in (page.text.strip(), ocr_text.strip()) if segment
             )
-            if merged:
-                parts.append(f"<!--PG {page_index + 1}-->\n{merged}" if multi_page else merged)
+            if not merged:
+                return page_index, None
+            return page_index, (f"<!--PG {page_index + 1}-->\n{merged}" if multi_page else merged)
+
+        rendered = await asyncio.gather(
+            *(_page_markdown(i, page) for i, page in enumerate(step.pages))
+        )
+        # Sắp lại theo page_index (bất biến thứ tự trang) rồi bỏ trang rỗng.
+        parts = [md for _, md in sorted(rendered, key=lambda r: r[0]) if md is not None]
 
         return ParsedArtifact(
             markdown=_normalize_markdown("\n\n".join(parts)),

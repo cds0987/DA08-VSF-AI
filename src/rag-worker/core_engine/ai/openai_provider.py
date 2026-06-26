@@ -85,9 +85,22 @@ class OpenAIProvider(AIProvider):
             if dim is not None:
                 kwargs["dimensions"] = dim   # text-embedding-3-* hỗ trợ; provider khác bỏ qua
             try:
-                return await client.embeddings.create(**kwargs)
+                res = await client.embeddings.create(**kwargs)
             except Exception as exc:  # noqa: BLE001 - SDK-specific mapping stays in adapter
                 raise self._map_error(exc, cfg.base_url) from exc
+            # DEGRADED guard: gateway/provider có thể trả HTTP 200 nhưng body thiếu `data`
+            # (rate-shed dưới tải / envelope lỗi upstream) -> SDK cho res.data=None. KHÔNG để
+            # rơi xuống sorted(res.data) -> TypeError 'NoneType' không iterate -> classify_ingest_error
+            # xếp PERMANENT (doc chết, KHÔNG retry). Raise TransientAIError TRONG _call -> retry_async
+            # tự thử lại (đổi key qua ai-router); cạn retry -> job-level transient retry. Thiếu/thừa
+            # vector so input -> map index sai -> cũng transient.
+            data = getattr(res, "data", None)
+            if not data or len(data) != len(texts):
+                raise TransientAIError(
+                    f"embed degraded: response thiếu/lệch 'data' "
+                    f"(got={None if data is None else len(data)}, want={len(texts)}, model={cfg.model})"
+                )
+            return res
 
         res = await retry_async(_call, max_retries=self._s.max_retries)
         # API trả theo `index` — sort lại để chắc chắn khớp thứ tự input.
@@ -112,7 +125,7 @@ class OpenAIProvider(AIProvider):
 
         async def _call():
             try:
-                return await client.chat.completions.create(
+                res = await client.chat.completions.create(
                     model=cfg.model,
                     messages=messages,
                     temperature=temperature,
@@ -120,6 +133,11 @@ class OpenAIProvider(AIProvider):
                 )
             except Exception as exc:  # noqa: BLE001 - SDK-specific mapping stays in adapter
                 raise self._map_error(exc, cfg.base_url) from exc
+            # DEGRADED guard (xem embed): 200 nhưng thiếu choices -> res.choices[0] TypeError/
+            # IndexError unmapped -> PERMANENT. Xếp transient -> retry-across-keys.
+            if not getattr(res, "choices", None):
+                raise TransientAIError(f"chat degraded: response thiếu 'choices' (model={cfg.model})")
+            return res
 
         res = await retry_async(_call, max_retries=self._s.max_retries)
         return (res.choices[0].message.content or "").strip()
@@ -156,7 +174,7 @@ class OpenAIProvider(AIProvider):
         # (xem router._prep_body). Provider KHÔNG gửi 'reasoning' -> tránh 400 khi ocr degrade OpenAI.
         async def _call():
             try:
-                return await client.chat.completions.create(
+                res = await client.chat.completions.create(
                     model=cfg.model,
                     messages=messages,
                     temperature=0.0,
@@ -164,6 +182,11 @@ class OpenAIProvider(AIProvider):
                 )
             except Exception as exc:  # noqa: BLE001 - SDK-specific mapping stays in adapter
                 raise self._map_error(exc, cfg.base_url) from exc
+            # DEGRADED guard (xem embed): vision //hoá -> tải cao -> dễ 200-thiếu-choices.
+            # Không guard -> res.choices[0] unmapped TypeError -> PERMANENT (OCR fail giết doc).
+            if not getattr(res, "choices", None):
+                raise TransientAIError(f"ocr/vision degraded: response thiếu 'choices' (model={cfg.model})")
+            return res
 
         res = await retry_async(_call, max_retries=self._s.max_retries)
         return (res.choices[0].message.content or "").strip()
