@@ -155,6 +155,7 @@ function handleSend(question: string) {
           :input="chat.input"
           :is-processing="chat.pipeline >= 0"
           :show-quick-actions="!hasConversation"
+          :autofocus="true"
           :quote="chat.quote"
           @update:input="chat.setInput"
           @clear-quote="chat.clearQuote"
