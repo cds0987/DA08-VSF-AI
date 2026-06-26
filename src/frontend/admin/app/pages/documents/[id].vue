@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { AlertCircle, ArrowLeft, CheckCircle2, ExternalLink, FileText, Loader2, RefreshCw, Trash2 } from '@lucide/vue'
+import { AlertCircle, ArrowLeft, CheckCircle2, Download, ExternalLink, FileText, Loader2, RefreshCw, Trash2, X } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import PageHeader from '~/components/admin-ui/PageHeader.vue'
 import StatCard from '~/components/admin-ui/StatCard.vue'
 import { getApiErrorMessage, getApiStatus } from '~/lib/api/apiError'
 import documentService from '~/lib/api/documentService'
+import { previewMode, type PreviewMode } from '~/lib/documentPreview'
 import type { DocumentDetail } from '~/types'
 
 const route = useRoute()
@@ -59,32 +60,69 @@ const deleteDoc = async () => {
   }
 }
 
-const isOpeningFile = ref(false)
+// Viewer nhúng in-page: render file ngay trên /admin/documents/{id} (giống Google Drive),
+// KHÔNG mở tab mới / KHÔNG điều hướng location sang blob URL.
+type PreviewState = 'idle' | 'loading' | 'ready' | 'unsupported' | 'error'
+const previewState = ref<PreviewState>('idle')
+const previewObjectUrl = ref<string | null>(null)
+const previewText = ref<string | null>(null)
+const previewBlob = ref<Blob | null>(null)
+const previewError = ref<string | null>(null)
+const previewKind = ref<PreviewMode>('download')
 
-const openFile = async () => {
-  // Mở sẵn tab trống (đồng bộ với click) để không bị popup-blocker chặn, rồi mới fetch.
-  const fileTab = window.open('', '_blank')
-  if (!fileTab) {
-    toast.error('Allow pop-ups to open the document file')
-    return
-  }
+const resetPreview = () => {
+  if (previewObjectUrl.value) URL.revokeObjectURL(previewObjectUrl.value)
+  previewObjectUrl.value = null
+  previewText.value = null
+  previewBlob.value = null
+  previewError.value = null
+}
 
-  fileTab.document.title = 'Opening document...'
-  isOpeningFile.value = true
+const closePreview = () => {
+  resetPreview()
+  previewState.value = 'idle'
+}
+
+const openPreview = async () => {
+  if (!doc.value) return
+  resetPreview()
+  previewState.value = 'loading'
+  previewKind.value = previewMode(doc.value.file_type)
   try {
-    // Fetch bytes qua axios (interceptor tự gắn auth) -> blob URL trên domain mình.
-    // PDF/ảnh render inline tại blob:https://vsfchat..., office tải về — KHÔNG bay sang
-    // storage.googleapis.com hay view.officeapps.live.com.
+    // Fetch bytes qua axios (interceptor tự gắn auth). Object-URL chỉ dùng làm src của
+    // iframe/img -> top-level URL vẫn là /admin/documents/{id}.
     const blob = await documentService.getFileBlob(id)
-    const objectUrl = URL.createObjectURL(blob)
-    fileTab.location.href = objectUrl
-    // Giải phóng blob sau khi tab đã load xong (revoke sớm sẽ chặn việc hiển thị).
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+    previewBlob.value = blob
+    if (previewKind.value === 'text') {
+      previewText.value = await blob.text()
+      previewState.value = 'ready'
+    } else if (previewKind.value === 'download') {
+      previewState.value = 'unsupported'
+    } else {
+      previewObjectUrl.value = URL.createObjectURL(blob)
+      previewState.value = 'ready'
+    }
   } catch (error) {
-    fileTab.close()
-    toast.error(getApiErrorMessage(error, 'Failed to open the document file'))
-  } finally {
-    isOpeningFile.value = false
+    previewState.value = 'error'
+    previewError.value = getApiErrorMessage(error, 'Failed to open the document file')
+  }
+}
+
+const downloadFile = async () => {
+  if (!doc.value) return
+  try {
+    // Tải về bằng <a download> + object-URL rồi revoke — trang đứng yên, không điều hướng.
+    const blob = previewBlob.value ?? (await documentService.getFileBlob(id))
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = doc.value.name
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  } catch (error) {
+    toast.error(getApiErrorMessage(error, 'Failed to download the document file'))
   }
 }
 
@@ -145,6 +183,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
+  resetPreview()
 })
 </script>
 
@@ -163,10 +202,10 @@ onUnmounted(() => {
           <div class="flex gap-2">
             <button
               class="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-[12.5px] hover:bg-accent disabled:opacity-50"
-              :disabled="isOpeningFile"
-              @click="openFile"
+              :disabled="previewState === 'loading'"
+              @click="openPreview"
             >
-              <Loader2 v-if="isOpeningFile" class="h-3.5 w-3.5 animate-spin" />
+              <Loader2 v-if="previewState === 'loading'" class="h-3.5 w-3.5 animate-spin" />
               <ExternalLink v-else class="h-3.5 w-3.5" /> Open File
             </button>
             <button
@@ -203,7 +242,64 @@ onUnmounted(() => {
         </div>
 
         <div class="grid gap-6 lg:grid-cols-3">
-          <div class="rounded-lg border border-border bg-card p-8 lg:col-span-2">
+          <!-- Viewer nhúng: render file ngay trong trang khi bấm Open File -->
+          <div
+            v-if="previewState !== 'idle'"
+            class="flex flex-col rounded-lg border border-border bg-card lg:col-span-2"
+          >
+            <div class="flex items-center justify-between border-b border-border px-4 py-2.5">
+              <span class="truncate text-[13px] font-semibold text-foreground">{{ doc.name }}</span>
+              <button
+                class="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                aria-label="Close preview"
+                @click="closePreview"
+              >
+                <X class="h-4 w-4" />
+              </button>
+            </div>
+            <div class="flex min-h-[70vh] flex-1 items-center justify-center overflow-auto bg-muted/30">
+              <Loader2 v-if="previewState === 'loading'" class="h-7 w-7 animate-spin text-primary" />
+
+              <div v-else-if="previewState === 'error'" class="px-6 text-center text-[12.5px] text-destructive">
+                {{ previewError }}
+              </div>
+
+              <iframe
+                v-else-if="previewState === 'ready' && previewKind === 'pdf'"
+                :src="previewObjectUrl!"
+                class="h-[70vh] w-full border-0"
+                title="Document preview"
+              />
+
+              <img
+                v-else-if="previewState === 'ready' && previewKind === 'image'"
+                :src="previewObjectUrl!"
+                :alt="doc.name"
+                class="max-h-[70vh] max-w-full object-contain"
+              >
+
+              <pre
+                v-else-if="previewState === 'ready' && previewKind === 'text'"
+                class="h-[70vh] w-full overflow-auto whitespace-pre-wrap break-words p-4 text-left text-[12.5px] text-foreground"
+              >{{ previewText }}</pre>
+
+              <div v-else class="flex flex-col items-center gap-3 px-6 text-center">
+                <FileText class="h-10 w-10 text-muted-foreground opacity-30" />
+                <p class="text-[13px] font-medium text-foreground">Không thể xem trước định dạng này</p>
+                <p class="text-[12px] text-muted-foreground">
+                  {{ doc.file_type.toUpperCase() }} không hiển thị trực tiếp trong trình duyệt.
+                </p>
+                <button
+                  class="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-[12.5px] hover:bg-accent"
+                  @click="downloadFile"
+                >
+                  <Download class="h-3.5 w-3.5" /> Tải về
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div v-else class="rounded-lg border border-border bg-card p-8 lg:col-span-2">
             <div class="flex flex-col items-center justify-center text-center">
               <div
                 :class="[
