@@ -354,6 +354,17 @@ async def pending_approval(
     return {"items": items, "count": len(items)}
 
 
+# Khai báo SAU /pending-approval, TRƯỚC /{request_id} (route tĩnh không bị nuốt).
+@router.get("/hr/leave-requests/mine")
+async def list_my_leave_requests(
+    user_id: str,
+    repo: LeaveWriteRepository = Depends(get_write_repo),
+) -> dict[str, Any]:
+    """Mọi đơn của chính chủ đơn (mọi trạng thái) -> nhân viên xem lại đơn mình gửi."""
+    items = await repo.list_for_user(user_id)
+    return {"items": items, "count": len(items)}
+
+
 # Khai báo SAU /pending-approval để route tĩnh đó không bị nuốt vào {request_id}.
 @router.get("/hr/leave-requests/{request_id}")
 async def get_leave_request(

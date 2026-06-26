@@ -424,6 +424,34 @@ class PostgresHrRepository(HrRepository, LeaveWriteRepository):
 
         return await asyncio.to_thread(_query)
 
+    async def list_for_user(self, user_id: str) -> list:
+        """MỌI đơn của chủ đơn (mọi trạng thái), mới nhất trước. Đính kèm tên/email người
+        duyệt (từ bảng employees) -> nhân viên thấy ai duyệt thay vì approver_user_id."""
+        def _list() -> list:
+            with self._session() as session:
+                rows = (
+                    session.query(LeaveRequestRecord)
+                    .filter(LeaveRequestRecord.user_id == user_id)
+                    .order_by(LeaveRequestRecord.created_at.desc())
+                    .all()
+                )
+                items = []
+                for row in rows:
+                    item = _req_to_dict(row)
+                    approver = (
+                        session.query(EmployeeRecord)
+                        .filter(EmployeeRecord.user_id == row.approver_user_id)
+                        .first()
+                        if row.approver_user_id
+                        else None
+                    )
+                    item["approver_name"] = approver.full_name if approver else None
+                    item["approver_email"] = approver.company_email if approver else None
+                    items.append(item)
+                return items
+
+        return await asyncio.to_thread(_list)
+
     async def get_attendance(self, user_id: str) -> Optional[AttendanceDTO]:
         def _query() -> Optional[AttendanceDTO]:
             with self._session() as session:

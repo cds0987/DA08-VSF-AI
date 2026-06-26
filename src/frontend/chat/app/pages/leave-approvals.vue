@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from 'vue'
-import { CalendarCheck, Check, Loader2, RefreshCw, X } from '@lucide/vue'
+import { Ban, CalendarCheck, Check, CheckCircle2, Clock, FileText, Loader2, RefreshCw, X, XCircle } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { useHRService } from '~/lib/api/hrService'
 
@@ -18,6 +18,21 @@ interface LeaveRequest {
   employee_email?: string | null
   employee_department?: string | null
   employee_job_title?: string | null
+}
+
+// Đơn của CHÍNH mình: thêm danh tính người duyệt + dấu thời gian quyết định.
+interface MyLeaveRequest {
+  id: string
+  leave_type: string
+  start_date: string
+  end_date: string
+  days_count: number
+  status: string
+  reason?: string | null
+  approver_user_id?: string | null
+  approver_name?: string | null
+  approver_email?: string | null
+  rejected_reason?: string | null
 }
 
 // Nhãn nhân viên: ưu tiên tên thật -> email -> user_id rút gọn (mirror ApprovalReviewCard).
@@ -41,8 +56,10 @@ function initials(req: LeaveRequest): string {
   const source = req.employee_name || req.employee_email || req.user_id
   const words = source.trim().split(/[\s@._-]+/).filter(Boolean)
   if (words.length === 0) return '?'
-  if (words.length === 1) return words[0].slice(0, 2).toUpperCase()
-  return (words[0][0] + words[words.length - 1][0]).toUpperCase()
+  const first = words[0] ?? ''
+  if (words.length === 1) return first.slice(0, 2).toUpperCase()
+  const last = words[words.length - 1] ?? ''
+  return ((first[0] ?? '') + (last[0] ?? '')).toUpperCase()
 }
 
 // ISO yyyy-mm-dd -> dd/mm/yyyy (định dạng VN), fallback giữ nguyên nếu lạ.
@@ -51,9 +68,40 @@ function fmtDate(d: string): string {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : d
 }
 
-const isSingleDay = (req: LeaveRequest) => req.start_date === req.end_date
+const isSingleDay = (req: { start_date: string; end_date: string }) => req.start_date === req.end_date
+
+// Nhãn + màu + icon theo trạng thái đơn (tab "Đơn của tôi").
+function statusMeta(status: string): { label: string; cls: string; icon: typeof Clock } {
+  switch (status) {
+    case 'pending':
+      return { label: 'Chờ duyệt', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400', icon: Clock }
+    case 'approved':
+      return { label: 'Đã duyệt', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400', icon: CheckCircle2 }
+    case 'rejected':
+      return { label: 'Từ chối', cls: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400', icon: XCircle }
+    case 'cancelled':
+      return { label: 'Đã hủy', cls: 'bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-muted-foreground', icon: Ban }
+    default:
+      return { label: status, cls: 'bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-muted-foreground', icon: Clock }
+  }
+}
+
+function approverLabel(req: MyLeaveRequest): string {
+  return req.approver_name || req.approver_email || req.approver_user_id || '—'
+}
 
 const hrService = useHRService()
+
+// --- Tab ---
+const tab = ref<'mine' | 'approvals'>('mine')
+const approvalsLoaded = ref(false)
+
+// --- Tab "Đơn của tôi" ---
+const myItems = ref<MyLeaveRequest[]>([])
+const myLoading = ref(false)
+const cancelingId = ref<string | null>(null)
+
+// --- Tab "Chờ duyệt" (người duyệt) ---
 const items = ref<LeaveRequest[]>([])
 const isLoading = ref(false)
 const actingId = ref<string | null>(null)
@@ -72,15 +120,54 @@ watch(rejectTarget, async (req) => {
   }
 })
 
+// Lazy-load tab "Chờ duyệt" lần đầu mở (mặc định mở tab "Đơn của tôi").
+watch(tab, (t) => {
+  if (t === 'approvals' && !approvalsLoaded.value) void load()
+})
+
+async function loadMine() {
+  myLoading.value = true
+  try {
+    myItems.value = (await hrService.fetchMyLeaveRequests()) as MyLeaveRequest[]
+  } catch (e) {
+    console.error(e)
+    toast.error('Không tải được danh sách đơn của bạn.')
+  } finally {
+    myLoading.value = false
+  }
+}
+
 async function load() {
   isLoading.value = true
   try {
     items.value = (await hrService.fetchPendingApprovals()) as LeaveRequest[]
+    approvalsLoaded.value = true
   } catch (e) {
     console.error(e)
     toast.error('Không tải được danh sách đơn chờ duyệt.')
   } finally {
     isLoading.value = false
+  }
+}
+
+function refresh() {
+  if (tab.value === 'mine') void loadMine()
+  else void load()
+}
+
+async function cancelMine(req: MyLeaveRequest) {
+  if (cancelingId.value) return
+  cancelingId.value = req.id
+  try {
+    await hrService.cancelLeaveRequest(req.id)
+    toast.success('Đã hủy đơn nghỉ phép.')
+    const idx = myItems.value.findIndex((r) => r.id === req.id)
+    if (idx >= 0) myItems.value[idx] = { ...req, status: 'cancelled' }
+  } catch (e: any) {
+    console.error(e)
+    toast.error(e?.data?.detail || 'Hủy đơn thất bại.')
+  } finally {
+    cancelingId.value = null
   }
 }
 
@@ -132,133 +219,248 @@ async function confirmReject() {
   }
 }
 
-onMounted(load)
+onMounted(loadMine)
 </script>
 
 <template>
   <div class="flex h-full w-full flex-col overflow-y-auto px-6 pb-6 pt-16">
     <div class="mx-auto w-full max-w-2xl">
-      <div class="mb-6 flex items-start justify-between gap-4">
+      <div class="mb-4 flex items-start justify-between gap-4">
         <div class="space-y-1">
-          <div class="flex items-center gap-2.5">
-            <h1 class="text-xl font-semibold text-slate-900 dark:text-foreground">Đơn nghỉ phép chờ duyệt</h1>
-            <span
-              v-if="items.length"
-              class="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-primary/10 px-1.5 text-xs font-semibold text-primary"
-            >
-              {{ items.length }}
-            </span>
-          </div>
+          <h1 class="text-xl font-semibold text-slate-900 dark:text-foreground">Đơn nghỉ phép</h1>
           <p class="text-sm text-slate-500 dark:text-muted-foreground">
-            Các đơn mà bạn là người duyệt. Duyệt sẽ tự trừ ngày phép của nhân viên.
+            <template v-if="tab === 'mine'">Các đơn bạn đã gửi và trạng thái duyệt.</template>
+            <template v-else>Các đơn mà bạn là người duyệt. Duyệt sẽ tự trừ ngày phép của nhân viên.</template>
           </p>
         </div>
         <button
           class="inline-flex shrink-0 items-center gap-2 rounded-lg border border-slate-200 dark:border-border px-3 py-2 text-[13px] font-medium text-slate-600 transition hover:bg-slate-100 active:scale-[0.98] dark:text-foreground/80 dark:hover:bg-accent disabled:opacity-50"
-          :disabled="isLoading"
-          @click="load"
+          :disabled="isLoading || myLoading"
+          @click="refresh"
         >
-          <RefreshCw class="h-3.5 w-3.5" :class="isLoading ? 'animate-spin' : ''" />
+          <RefreshCw class="h-3.5 w-3.5" :class="(isLoading || myLoading) ? 'animate-spin' : ''" />
           Làm mới
         </button>
       </div>
 
-      <!-- Loading: skeleton khớp dáng card thật, dễ chịu hơn spinner trống -->
-      <div v-if="isLoading && items.length === 0" class="flex flex-col gap-3">
-        <div
-          v-for="n in 3"
-          :key="n"
-          class="animate-pulse rounded-xl border border-slate-200 dark:border-border bg-white dark:bg-card p-4"
+      <!-- Tab switcher -->
+      <div class="mb-5 inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-border dark:bg-muted/40">
+        <button
+          class="rounded-md px-3.5 py-1.5 text-[13px] font-medium transition"
+          :class="tab === 'mine'
+            ? 'bg-white text-slate-900 shadow-sm dark:bg-card dark:text-foreground'
+            : 'text-slate-500 hover:text-slate-700 dark:text-muted-foreground dark:hover:text-foreground'"
+          @click="tab = 'mine'"
         >
-          <div class="flex items-center gap-3">
-            <div class="h-9 w-9 rounded-full bg-slate-200 dark:bg-muted" />
-            <div class="flex-1 space-y-2">
-              <div class="h-3.5 w-40 rounded bg-slate-200 dark:bg-muted" />
-              <div class="h-2.5 w-56 rounded bg-slate-100 dark:bg-muted/60" />
-            </div>
+          Đơn của tôi
+        </button>
+        <button
+          class="inline-flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-[13px] font-medium transition"
+          :class="tab === 'approvals'
+            ? 'bg-white text-slate-900 shadow-sm dark:bg-card dark:text-foreground'
+            : 'text-slate-500 hover:text-slate-700 dark:text-muted-foreground dark:hover:text-foreground'"
+          @click="tab = 'approvals'"
+        >
+          Chờ duyệt
+          <span
+            v-if="items.length"
+            class="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-primary/10 px-1 text-[10px] font-semibold text-primary"
+          >
+            {{ items.length }}
+          </span>
+        </button>
+      </div>
+
+      <!-- ===================== TAB: ĐƠN CỦA TÔI ===================== -->
+      <template v-if="tab === 'mine'">
+        <div v-if="myLoading && myItems.length === 0" class="flex flex-col gap-3">
+          <div
+            v-for="n in 3"
+            :key="n"
+            class="animate-pulse rounded-xl border border-slate-200 dark:border-border bg-white dark:bg-card p-4"
+          >
+            <div class="h-3.5 w-40 rounded bg-slate-200 dark:bg-muted" />
+            <div class="mt-3 h-16 rounded-lg bg-slate-100 dark:bg-muted/40" />
           </div>
-          <div class="mt-3 h-16 rounded-lg bg-slate-100 dark:bg-muted/40" />
         </div>
-      </div>
 
-      <!-- Empty: icon + tiêu đề + hướng dẫn, thay vì chỉ một dòng chữ -->
-      <div
-        v-else-if="items.length === 0"
-        class="flex flex-col items-center rounded-2xl border border-dashed border-slate-200 dark:border-border px-6 py-16 text-center"
-      >
-        <div class="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-500 dark:bg-muted dark:text-muted-foreground">
-          <CalendarCheck class="h-6 w-6" />
-        </div>
-        <h3 class="mt-4 text-sm font-semibold text-slate-900 dark:text-foreground">Không có đơn nào chờ duyệt</h3>
-        <p class="mt-1 max-w-xs text-sm text-slate-500 dark:text-muted-foreground">
-          Khi nhân viên gửi đơn nghỉ phép mà bạn là người duyệt, đơn sẽ xuất hiện ở đây.
-        </p>
-      </div>
-
-      <div v-else class="flex flex-col gap-3">
         <div
-          v-for="req in items"
-          :key="req.id"
-          class="rounded-xl border border-slate-200 bg-white p-4 transition hover:border-slate-300 dark:border-border dark:bg-card dark:hover:border-border/70"
+          v-else-if="myItems.length === 0"
+          class="flex flex-col items-center rounded-2xl border border-dashed border-slate-200 dark:border-border px-6 py-16 text-center"
         >
-          <div class="flex items-start gap-3">
-            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-              {{ initials(req) }}
-            </div>
-            <div class="min-w-0 flex-1">
-              <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <h4 class="truncate text-sm font-semibold text-slate-900 dark:text-foreground">
-                  {{ employeeLabel(req) }}
-                </h4>
-                <span class="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium capitalize text-primary">
-                  Nghỉ {{ req.leave_type }}
-                </span>
+          <div class="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-500 dark:bg-muted dark:text-muted-foreground">
+            <FileText class="h-6 w-6" />
+          </div>
+          <h3 class="mt-4 text-sm font-semibold text-slate-900 dark:text-foreground">Bạn chưa gửi đơn nghỉ phép nào</h3>
+          <p class="mt-1 max-w-xs text-sm text-slate-500 dark:text-muted-foreground">
+            Bạn có thể tạo đơn nghỉ phép bằng cách nhắn cho trợ lý AI ở khung chat.
+          </p>
+        </div>
+
+        <div v-else class="flex flex-col gap-3">
+          <div
+            v-for="req in myItems"
+            :key="req.id"
+            class="rounded-xl border border-slate-200 bg-white p-4 transition hover:border-slate-300 dark:border-border dark:bg-card dark:hover:border-border/70"
+          >
+            <div class="flex items-start gap-3">
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span class="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium capitalize text-primary">
+                    Nghỉ {{ req.leave_type }}
+                  </span>
+                  <span
+                    class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
+                    :class="statusMeta(req.status).cls"
+                  >
+                    <component :is="statusMeta(req.status).icon" class="h-3 w-3" />
+                    {{ statusMeta(req.status).label }}
+                  </span>
+                </div>
               </div>
-              <p v-if="employeeSubtitle(req)" class="truncate text-xs text-slate-500 dark:text-muted-foreground">
-                {{ employeeSubtitle(req) }}
-              </p>
+              <span class="shrink-0 text-sm font-semibold text-slate-700 dark:text-foreground/90">
+                {{ req.days_count }} ngày
+              </span>
             </div>
-            <span class="shrink-0 text-sm font-semibold text-slate-700 dark:text-foreground/90">
-              {{ req.days_count }} ngày
-            </span>
-          </div>
 
-          <dl class="mt-3 space-y-2 rounded-lg bg-slate-50 p-3 dark:bg-muted/40">
-            <div class="flex gap-3">
-              <dt class="w-16 shrink-0 text-xs font-medium text-slate-500 dark:text-muted-foreground">
-                {{ isSingleDay(req) ? 'Ngày nghỉ' : 'Thời gian' }}
-              </dt>
-              <dd class="text-sm font-medium text-slate-700 dark:text-foreground/90">
-                <template v-if="isSingleDay(req)">{{ fmtDate(req.start_date) }}</template>
-                <template v-else>{{ fmtDate(req.start_date) }} → {{ fmtDate(req.end_date) }}</template>
-              </dd>
-            </div>
-            <div v-if="req.reason" class="flex gap-3">
-              <dt class="w-16 shrink-0 text-xs font-medium text-slate-500 dark:text-muted-foreground">Lý do</dt>
-              <dd class="text-sm font-medium text-slate-700 dark:text-foreground/90">{{ req.reason }}</dd>
-            </div>
-          </dl>
+            <dl class="mt-3 space-y-2 rounded-lg bg-slate-50 p-3 dark:bg-muted/40">
+              <div class="flex gap-3">
+                <dt class="w-20 shrink-0 text-xs font-medium text-slate-500 dark:text-muted-foreground">
+                  {{ isSingleDay(req) ? 'Ngày nghỉ' : 'Thời gian' }}
+                </dt>
+                <dd class="text-sm font-medium text-slate-700 dark:text-foreground/90">
+                  <template v-if="isSingleDay(req)">{{ fmtDate(req.start_date) }}</template>
+                  <template v-else>{{ fmtDate(req.start_date) }} → {{ fmtDate(req.end_date) }}</template>
+                </dd>
+              </div>
+              <div v-if="req.reason" class="flex gap-3">
+                <dt class="w-20 shrink-0 text-xs font-medium text-slate-500 dark:text-muted-foreground">Lý do</dt>
+                <dd class="text-sm font-medium text-slate-700 dark:text-foreground/90">{{ req.reason }}</dd>
+              </div>
+              <div class="flex gap-3">
+                <dt class="w-20 shrink-0 text-xs font-medium text-slate-500 dark:text-muted-foreground">Người duyệt</dt>
+                <dd class="text-sm font-medium text-slate-700 dark:text-foreground/90">{{ approverLabel(req) }}</dd>
+              </div>
+              <div v-if="req.status === 'rejected' && req.rejected_reason" class="flex gap-3">
+                <dt class="w-20 shrink-0 text-xs font-medium text-slate-500 dark:text-muted-foreground">Lý do từ chối</dt>
+                <dd class="text-sm font-medium text-red-600 dark:text-red-400">{{ req.rejected_reason }}</dd>
+              </div>
+            </dl>
 
-          <div class="mt-4 flex justify-end gap-2">
-            <button
-              class="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-2 text-[13px] font-semibold text-red-600 transition hover:bg-red-50 active:scale-[0.98] disabled:opacity-50 dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
-              :disabled="actingId === req.id"
-              @click="openReject(req)"
-            >
-              <Loader2 v-if="actingId === req.id && actingType === 'reject'" class="h-3.5 w-3.5 animate-spin" />
-              <X v-else class="h-3.5 w-3.5" /> Từ chối
-            </button>
-            <button
-              class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-blue-700 active:scale-[0.98] disabled:opacity-50"
-              :disabled="actingId === req.id"
-              @click="approve(req)"
-            >
-              <Loader2 v-if="actingId === req.id && actingType === 'approve'" class="h-3.5 w-3.5 animate-spin" />
-              <Check v-else class="h-3.5 w-3.5" /> Duyệt
-            </button>
+            <!-- Chỉ đơn đang chờ duyệt mới hủy được. -->
+            <div v-if="req.status === 'pending'" class="mt-4 flex justify-end">
+              <button
+                class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-[13px] font-semibold text-slate-600 transition hover:bg-slate-100 active:scale-[0.98] disabled:opacity-50 dark:border-border dark:text-foreground/80 dark:hover:bg-accent"
+                :disabled="cancelingId === req.id"
+                @click="cancelMine(req)"
+              >
+                <Loader2 v-if="cancelingId === req.id" class="h-3.5 w-3.5 animate-spin" />
+                <Ban v-else class="h-3.5 w-3.5" /> Hủy đơn
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      </template>
+
+      <!-- ===================== TAB: CHỜ DUYỆT ===================== -->
+      <template v-else>
+        <!-- Loading: skeleton khớp dáng card thật, dễ chịu hơn spinner trống -->
+        <div v-if="isLoading && items.length === 0" class="flex flex-col gap-3">
+          <div
+            v-for="n in 3"
+            :key="n"
+            class="animate-pulse rounded-xl border border-slate-200 dark:border-border bg-white dark:bg-card p-4"
+          >
+            <div class="flex items-center gap-3">
+              <div class="h-9 w-9 rounded-full bg-slate-200 dark:bg-muted" />
+              <div class="flex-1 space-y-2">
+                <div class="h-3.5 w-40 rounded bg-slate-200 dark:bg-muted" />
+                <div class="h-2.5 w-56 rounded bg-slate-100 dark:bg-muted/60" />
+              </div>
+            </div>
+            <div class="mt-3 h-16 rounded-lg bg-slate-100 dark:bg-muted/40" />
+          </div>
+        </div>
+
+        <!-- Empty: icon + tiêu đề + hướng dẫn, thay vì chỉ một dòng chữ -->
+        <div
+          v-else-if="items.length === 0"
+          class="flex flex-col items-center rounded-2xl border border-dashed border-slate-200 dark:border-border px-6 py-16 text-center"
+        >
+          <div class="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-500 dark:bg-muted dark:text-muted-foreground">
+            <CalendarCheck class="h-6 w-6" />
+          </div>
+          <h3 class="mt-4 text-sm font-semibold text-slate-900 dark:text-foreground">Không có đơn nào chờ duyệt</h3>
+          <p class="mt-1 max-w-xs text-sm text-slate-500 dark:text-muted-foreground">
+            Khi nhân viên gửi đơn nghỉ phép mà bạn là người duyệt, đơn sẽ xuất hiện ở đây.
+          </p>
+        </div>
+
+        <div v-else class="flex flex-col gap-3">
+          <div
+            v-for="req in items"
+            :key="req.id"
+            class="rounded-xl border border-slate-200 bg-white p-4 transition hover:border-slate-300 dark:border-border dark:bg-card dark:hover:border-border/70"
+          >
+            <div class="flex items-start gap-3">
+              <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                {{ initials(req) }}
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <h4 class="truncate text-sm font-semibold text-slate-900 dark:text-foreground">
+                    {{ employeeLabel(req) }}
+                  </h4>
+                  <span class="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium capitalize text-primary">
+                    Nghỉ {{ req.leave_type }}
+                  </span>
+                </div>
+                <p v-if="employeeSubtitle(req)" class="truncate text-xs text-slate-500 dark:text-muted-foreground">
+                  {{ employeeSubtitle(req) }}
+                </p>
+              </div>
+              <span class="shrink-0 text-sm font-semibold text-slate-700 dark:text-foreground/90">
+                {{ req.days_count }} ngày
+              </span>
+            </div>
+
+            <dl class="mt-3 space-y-2 rounded-lg bg-slate-50 p-3 dark:bg-muted/40">
+              <div class="flex gap-3">
+                <dt class="w-16 shrink-0 text-xs font-medium text-slate-500 dark:text-muted-foreground">
+                  {{ isSingleDay(req) ? 'Ngày nghỉ' : 'Thời gian' }}
+                </dt>
+                <dd class="text-sm font-medium text-slate-700 dark:text-foreground/90">
+                  <template v-if="isSingleDay(req)">{{ fmtDate(req.start_date) }}</template>
+                  <template v-else>{{ fmtDate(req.start_date) }} → {{ fmtDate(req.end_date) }}</template>
+                </dd>
+              </div>
+              <div v-if="req.reason" class="flex gap-3">
+                <dt class="w-16 shrink-0 text-xs font-medium text-slate-500 dark:text-muted-foreground">Lý do</dt>
+                <dd class="text-sm font-medium text-slate-700 dark:text-foreground/90">{{ req.reason }}</dd>
+              </div>
+            </dl>
+
+            <div class="mt-4 flex justify-end gap-2">
+              <button
+                class="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-2 text-[13px] font-semibold text-red-600 transition hover:bg-red-50 active:scale-[0.98] disabled:opacity-50 dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
+                :disabled="actingId === req.id"
+                @click="openReject(req)"
+              >
+                <Loader2 v-if="actingId === req.id && actingType === 'reject'" class="h-3.5 w-3.5 animate-spin" />
+                <X v-else class="h-3.5 w-3.5" /> Từ chối
+              </button>
+              <button
+                class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-blue-700 active:scale-[0.98] disabled:opacity-50"
+                :disabled="actingId === req.id"
+                @click="approve(req)"
+              >
+                <Loader2 v-if="actingId === req.id && actingType === 'approve'" class="h-3.5 w-3.5 animate-spin" />
+                <Check v-else class="h-3.5 w-3.5" /> Duyệt
+              </button>
+            </div>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- Modal từ chối: thay window.prompt. Esc/click nền/Hủy để đóng, Ctrl/Cmd+Enter để xác nhận. -->

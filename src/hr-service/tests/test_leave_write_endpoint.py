@@ -173,6 +173,9 @@ class FakeLeaveWriteRepo(LeaveWriteRepository):
             if r["approver_user_id"] == approver_user_id and r["status"] == "pending"
         ]
 
+    async def list_for_user(self, user_id) -> list:
+        return [dict(r) for r in self.requests.values() if r["user_id"] == user_id]
+
     async def update_leave_status(self, *, request_id, approver_user_id, action, reason=None) -> dict:
         rec = self.requests.get(request_id)
         if rec is None:
@@ -592,3 +595,25 @@ def test_pending_approval_lists_only_relevant(ctx):
     ids = [it["id"] for it in body["items"]]
     assert ids == [a]
     assert body["count"] == 1
+
+
+def test_mine_lists_only_own_requests_all_statuses(ctx):
+    client, repo, pub, _ = ctx
+    repo.managers[EMP] = MANAGER
+    a = _create(client, repo)["id"]
+    b = _create(client, repo)["id"]
+    # b bị từ chối -> vẫn phải hiện trong "đơn của tôi" (mọi trạng thái).
+    client.post(f"/hr/leave-requests/{b}/reject", json={"approver_user_id": MANAGER})
+    # đơn của người khác -> KHÔNG được lọt vào.
+    client.post("/hr/leave-requests", json={
+        "user_id": OTHER, "leave_type": "annual",
+        "start_date": "2026-07-01", "end_date": "2026-07-02",
+    })
+
+    r = client.get("/hr/leave-requests/mine", params={"user_id": EMP})
+    assert r.status_code == 200
+    body = r.json()
+    ids = {it["id"] for it in body["items"]}
+    assert ids == {a, b}
+    assert body["count"] == 2
+    assert all(it["user_id"] == EMP for it in body["items"])

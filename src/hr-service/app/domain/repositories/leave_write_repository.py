@@ -128,6 +128,12 @@ class LeaveWriteRepository(ABC):
         user. Không abstract -> fake/test cũ không bắt buộc implement."""
         raise NotImplementedError
 
+    async def list_for_user(self, user_id: str) -> list[dict[str, Any]]:
+        """Danh sách MỌI đơn của chính chủ đơn (mọi trạng thái), mới nhất trước -> để
+        nhân viên xem lại đơn mình gửi + trạng thái duyệt. Không abstract -> fake cũ
+        không bắt buộc implement."""
+        raise NotImplementedError
+
     @abstractmethod
     async def update_leave_status(
         self,
