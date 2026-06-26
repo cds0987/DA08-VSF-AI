@@ -404,7 +404,7 @@ def test_file_raw_streams_pdf_inline() -> None:
     assert response.status_code == 200
     assert response.content == b"%PDF-1.4 stream-body"
     assert response.headers["content-type"] == "application/pdf"
-    assert "inline" in response.headers["content-disposition"]
+    assert "attachment" in response.headers["content-disposition"]
     assert "policy.pdf" in response.headers["content-disposition"]
 
 
