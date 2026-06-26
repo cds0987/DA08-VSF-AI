@@ -321,3 +321,65 @@ def test_document_file_invalid_signed_url_returns_non_200() -> None:
 
     assert response.status_code == 503
 
+
+# --- /file/raw: proxy-stream giữ file trên domain vsfchat (KHÔNG nhảy GCS/officeapps) ---
+
+from app.application.use_cases.documents.get_document_file_stream_use_case import (  # noqa: E402
+    GetDocumentFileStreamUseCase,
+)
+from tests.unit.test_document_file_stream_use_case import StreamStorage  # noqa: E402
+
+
+def test_file_raw_streams_pdf_inline() -> None:
+    doc = sample_document(document_id=str(uuid4()), file_type="pdf")
+    repo = InMemoryDocuments([doc])
+    storage = StreamStorage(b"%PDF-1.4 stream-body")
+    app.dependency_overrides[dependencies.get_current_user] = normal_user
+    app.dependency_overrides[dependencies.get_get_document_file_stream_use_case] = (
+        lambda: GetDocumentFileStreamUseCase(repo, storage)
+    )
+
+    response = TestClient(app).get(
+        f"/documents/{doc.id}/file/raw",
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"%PDF-1.4 stream-body"
+    assert response.headers["content-type"] == "application/pdf"
+    assert "inline" in response.headers["content-disposition"]
+    assert "policy.pdf" in response.headers["content-disposition"]
+
+
+def test_file_raw_office_file_is_attachment() -> None:
+    doc = sample_document(document_id=str(uuid4()), file_type="docx")
+    repo = InMemoryDocuments([doc])
+    app.dependency_overrides[dependencies.get_current_user] = normal_user
+    app.dependency_overrides[dependencies.get_get_document_file_stream_use_case] = (
+        lambda: GetDocumentFileStreamUseCase(repo, StreamStorage(b"PK docx"))
+    )
+
+    response = TestClient(app).get(
+        f"/documents/{doc.id}/file/raw",
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    assert "attachment" in response.headers["content-disposition"]
+
+
+def test_file_raw_forbidden_when_acl_does_not_match() -> None:
+    doc = sample_document(classification="secret", allowed_departments=["HR"])
+    repo = InMemoryDocuments([doc])
+    app.dependency_overrides[dependencies.get_current_user] = normal_user
+    app.dependency_overrides[dependencies.get_get_document_file_stream_use_case] = (
+        lambda: GetDocumentFileStreamUseCase(repo, StreamStorage())
+    )
+
+    response = TestClient(app).get(
+        f"/documents/{doc.id}/file/raw",
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 403
+

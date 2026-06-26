@@ -10,6 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.auth import CurrentUser
 from app.application.exceptions import PermissionDeniedError
 from app.application.use_cases.documents.delete_document_use_case import DeleteDocumentUseCase
+from app.application.use_cases.documents.get_document_file_stream_use_case import (
+    GetDocumentFileStreamUseCase,
+)
 from app.application.use_cases.documents.get_document_file_use_case import GetDocumentFileUseCase
 from app.application.use_cases.documents.get_document_use_case import GetDocumentUseCase
 from app.application.use_cases.documents.list_documents_use_case import ListDocumentsUseCase
@@ -99,6 +102,14 @@ def get_get_document_file_use_case(
     hr_department_client: HrDepartmentClient = Depends(get_hr_department_client),
 ) -> GetDocumentFileUseCase:
     return GetDocumentFileUseCase(document_repository, storage, hr_department_client)
+
+
+def get_get_document_file_stream_use_case(
+    document_repository: PostgresDocumentRepository = Depends(get_document_repository),
+    storage: GCSClient = Depends(get_storage),
+    hr_department_client: HrDepartmentClient = Depends(get_hr_department_client),
+) -> GetDocumentFileStreamUseCase:
+    return GetDocumentFileStreamUseCase(document_repository, storage, hr_department_client)
 
 
 def get_delete_document_use_case(

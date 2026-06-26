@@ -59,6 +59,17 @@ const documentService = {
     return response.data
   },
 
+  // Proxy-stream: tải bytes file qua domain mình (KHÔNG nhảy presigned-URL GCS/officeapps).
+  // Phải đi qua axios để interceptor gắn header Authorization + Authorization-Gateway —
+  // window.open thẳng sẽ rớt header và bị gateway/document-service từ chối 401.
+  async getFileBlob(documentId: string): Promise<Blob> {
+    const response = await axiosClient.get<Blob>(`/${documentId}/file/raw`, {
+      service: 'document',
+      responseType: 'blob',
+    })
+    return response.data
+  },
+
   // Loại file backend chấp nhận (manifest rag-worker ∩ allow_list) — FE dùng để
   // dựng accept filter + validation, không hardcode lệch backend.
   async getSupportedFormats(): Promise<SupportedFormatsResponse> {
