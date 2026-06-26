@@ -38,15 +38,15 @@ test('placeholder-stream mang sẵn trace/plan -> MessageSteps hiện từ đầ
   assert.match(f, /plan:\s*props\.plan \?\? undefined/)
 })
 
-test('AnswerBlock: lúc streaming render thô + cursor, KHÔNG inject chip, ẩn toolbar', async () => {
+test('AnswerBlock: lúc streaming render thô, KHÔNG inject chip, ẩn toolbar; KHÔNG còn con trỏ', async () => {
   const f = await read('app/components/chat/AnswerBlock.vue')
   // nhánh streaming trong renderedContent
   assert.match(f, /if \(props\.data\.streaming\)/)
-  assert.match(f, /streaming-cursor/)
   // toolbar feedback chỉ hiện khi KHÔNG streaming
   assert.match(f, /v-if="!data\.streaming"[^>]*>\s*<!-- Retry button|v-if="!data\.streaming"/)
-  // CSS con trỏ stream chuyển từ StreamingBlock sang
-  assert.match(f, /@keyframes streaming-blink/)
+  // Con trỏ stream đã được gỡ bỏ hoàn toàn (không inject span, không CSS blink)
+  assert.doesNotMatch(f, /streaming-cursor/)
+  assert.doesNotMatch(f, /@keyframes streaming-blink/)
 })
 
 test('store: cấp turnKey lượt ở đầu ask và gắn vào message cuối', async () => {
