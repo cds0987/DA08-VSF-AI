@@ -105,9 +105,10 @@ function resultLabel(e: TraceEntry): string {
     <button
       v-if="trace.length || thoughts?.length || plan?.steps?.length"
       class="group flex items-center gap-1.5 rounded-md px-2 py-1 text-[15px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-muted-foreground dark:hover:bg-white/5 dark:hover:text-foreground"
+      :aria-expanded="open"
       @click="open = !open"
     >
-      <Sparkles class="h-4 w-4 text-slate-400 dark:text-muted-foreground" />
+      <Sparkles class="h-4 w-4 text-slate-500 dark:text-muted-foreground" />
       <span>{{ trace.length ? `Agent đã thực hiện ${trace.length} bước` : 'Xem suy nghĩ của agent' }}</span>
       <ChevronRight class="tl-chevron h-4 w-4 transition-transform" :class="open && 'rotate-90'" />
     </button>
@@ -126,7 +127,7 @@ function resultLabel(e: TraceEntry): string {
               aria-hidden="true"
               class="absolute -left-7 top-0 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-slate-200 dark:bg-background dark:ring-white/10"
             >
-              <component :is="GROUP_STYLE[g].icon" class="h-3 w-3 text-slate-400 dark:text-muted-foreground" />
+              <component :is="GROUP_STYLE[g].icon" class="h-3 w-3 text-slate-500 dark:text-muted-foreground" />
             </span>
             <div class="flex items-center gap-1.5">
               <span class="text-[15px] font-medium" :class="GROUP_HEAD">{{ GROUP_STYLE[g].title }}</span>
@@ -145,9 +146,9 @@ function resultLabel(e: TraceEntry): string {
             <div v-for="s in (plan?.steps || [])" :key="`p-${s.id}`" class="relative">
               <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full" :class="stepDotColor(s.status)" />
               <div class="flex items-center gap-1.5 text-[15px]">
-                <component :is="ROLE_ICON[s.role] ?? FileSearch" class="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-muted-foreground" />
-                <span class="flex-1 truncate font-medium text-slate-700 dark:text-foreground/80">{{ ROLE_LABEL[s.role] ?? s.role }}</span>
-                <Loader2 v-if="s.status === 'running'" class="h-3 w-3 shrink-0 animate-spin text-slate-400 dark:text-muted-foreground" />
+                <component :is="ROLE_ICON[s.role] ?? FileSearch" class="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-muted-foreground" />
+                <span class="flex-1 truncate font-medium text-slate-700 dark:text-foreground/80" :title="ROLE_LABEL[s.role] ?? s.role">{{ ROLE_LABEL[s.role] ?? s.role }}</span>
+                <Loader2 v-if="s.status === 'running'" class="h-3 w-3 shrink-0 animate-spin text-slate-500 dark:text-muted-foreground" />
                 <XCircle v-else-if="s.status === 'error'" class="h-3 w-3 shrink-0 text-red-400" />
                 <Circle v-else-if="!s.status || s.status === 'pending'" class="h-3 w-3 shrink-0 text-slate-300 dark:text-muted-foreground/40" />
               </div>
@@ -156,11 +157,11 @@ function resultLabel(e: TraceEntry): string {
             <div v-for="(e, i) in trace" :key="`t-${i}`" class="relative">
               <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full bg-slate-300 dark:bg-white/25" />
               <div class="flex items-center gap-1.5">
-                <component :is="TOOL_ICON[e.tool] ?? Search" class="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-muted-foreground" />
+                <component :is="TOOL_ICON[e.tool] ?? Search" class="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-muted-foreground" />
                 <span class="text-[15px] font-medium text-slate-700 dark:text-foreground/80">{{ TOOL_LABEL[e.tool] ?? e.tool }}</span>
                 <span v-if="queryLabel(e)" class="flex-1 truncate text-[13px] font-medium text-slate-500 dark:text-muted-foreground">{{ queryLabel(e) }}</span>
               </div>
-              <div class="mt-0.5 pl-5 text-[13px] font-medium text-slate-400 dark:text-muted-foreground/70">{{ resultLabel(e) }}</div>
+              <div class="mt-0.5 pl-5 text-[13px] font-medium text-slate-500 dark:text-muted-foreground">{{ resultLabel(e) }}</div>
             </div>
           </template>
         </div>

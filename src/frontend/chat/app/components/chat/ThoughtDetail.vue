@@ -22,7 +22,7 @@ const hasDetail = () => props.view.detail.length > 0
     <template v-if="hasDetail()">
       <button
         type="button"
-        class="mt-1 inline-flex items-center gap-1 rounded px-1 text-[13px] font-medium text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-muted-foreground/70 dark:hover:text-foreground"
+        class="-mx-1 mt-1 inline-flex items-center gap-1 rounded px-1 py-1.5 text-[13px] font-medium text-slate-500 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-muted-foreground dark:hover:text-foreground"
         :aria-expanded="open"
         @click="open = !open"
       >
@@ -33,7 +33,7 @@ const hasDetail = () => props.view.detail.length > 0
       <!-- Mở ra: chữ xám thụt lề dưới đường kẻ trái mảnh (DeepSeek-style) — KHÔNG box viền/nền màu -->
       <div
         v-show="open"
-        class="custom-scrollbar mt-1 max-h-[220px] overflow-auto border-l border-slate-200 pl-3 dark:border-white/10"
+        class="custom-scrollbar mt-1 max-h-[220px] max-w-[68ch] overflow-auto border-l border-slate-200 pl-3 dark:border-white/10"
       >
         <!-- Section human-readable có nhãn (không ngoặc/nháy JSON) -->
         <div
@@ -43,14 +43,14 @@ const hasDetail = () => props.view.detail.length > 0
         >
           <p
             v-if="sec.label"
-            class="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-muted-foreground/70"
+            class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-muted-foreground"
           >
             {{ sec.label }}
           </p>
           <p
             v-for="(line, li) in sec.lines"
             :key="li"
-            class="whitespace-pre-wrap break-words text-sm font-medium leading-relaxed text-slate-500 dark:text-muted-foreground"
+            class="whitespace-pre-wrap break-words text-sm font-normal leading-relaxed text-slate-500 dark:text-muted-foreground"
             :class="sec.label && 'mt-0.5'"
           >
             {{ line }}
