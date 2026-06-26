@@ -68,13 +68,6 @@ const hasDetail = () => props.view.detail.length > 0
 /* Scrollbar khối "Chi tiết" / "Dữ liệu thô": dùng lại .custom-scrollbar global (light + dark)
    thay vì style td-scroll riêng (chỉ webkit + dark, không ăn -> trắng lạc lõng ở dark mode). */
 
-/* Tôn trọng prefers-reduced-motion: chevron không animate khi user yêu cầu giảm chuyển động. */
-@media (prefers-reduced-motion: reduce) {
-  .td-chevron {
-    transition: none;
-  }
-}
-
 .td-expand {
   display: grid;
   grid-template-rows: 0fr;
@@ -82,7 +75,10 @@ const hasDetail = () => props.view.detail.length > 0
 }
 .td-expand--open { grid-template-rows: 1fr; }
 .td-expand__clip { overflow: hidden; min-height: 0; }
+
+/* Tôn trọng prefers-reduced-motion: chevron + expand không animate khi user yêu cầu giảm chuyển động. */
 @media (prefers-reduced-motion: reduce) {
+  .td-chevron { transition: none; }
   .td-expand { transition: none; }
 }
 </style>
