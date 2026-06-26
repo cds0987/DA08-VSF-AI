@@ -149,6 +149,39 @@ async def test_mark_read_wrong_user_returns_404(hr_client: AsyncClient):
 
 
 # ---------------------------------------------------------------------------
+# DELETE /notifications/{id}
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_delete_notification_removes_it(hr_client: AsyncClient):
+    nid = await _seed_notification(HR_USER_ID, "doc-del")
+
+    r = await hr_client.delete(f"/notifications/{nid}")
+    assert r.status_code == 204
+
+    # Sau khi xóa, không còn trong history (không hiện lại khi fetch lại)
+    body = (await hr_client.get("/notifications/history")).json()
+    assert all(item["id"] != nid for item in body["items"])
+    assert body["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_notification_not_found_returns_404(hr_client: AsyncClient):
+    r = await hr_client.delete("/notifications/nonexistent-id")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_notification_wrong_user_returns_404(hr_client: AsyncClient):
+    """A user cannot delete another user's notification."""
+    from tests.conftest import FINANCE_USER_ID
+    nid = await _seed_notification(FINANCE_USER_ID, "fin-doc")
+
+    r = await hr_client.delete(f"/notifications/{nid}")
+    assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # POST /dev/mock-notifications/doc-new  (admin + ENABLE_DEV_ENDPOINTS)
 # ---------------------------------------------------------------------------
 
