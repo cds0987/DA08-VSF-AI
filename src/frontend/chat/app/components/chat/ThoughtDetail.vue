@@ -31,30 +31,33 @@ const hasDetail = () => props.view.detail.length > 0
       </button>
 
       <!-- Mở ra: chữ xám thụt lề dưới đường kẻ trái mảnh (DeepSeek-style) — KHÔNG box viền/nền màu -->
-      <div
-        v-show="open"
-        class="custom-scrollbar mt-1 max-h-[220px] max-w-[68ch] overflow-auto border-l border-slate-200 pl-3 dark:border-white/10"
-      >
-        <!-- Section human-readable có nhãn (không ngoặc/nháy JSON) -->
-        <div
-          v-for="(sec, si) in view.detail"
-          :key="si"
-          :class="si > 0 && 'mt-2'"
-        >
-          <p
-            v-if="sec.label"
-            class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-muted-foreground"
+      <div class="td-expand" :class="open && 'td-expand--open'" :aria-hidden="!open">
+        <div class="td-expand__clip">
+          <div
+            class="custom-scrollbar mt-1 max-h-[220px] max-w-[68ch] overflow-auto border-l border-slate-200 pl-3 dark:border-white/10"
           >
-            {{ sec.label }}
-          </p>
-          <p
-            v-for="(line, li) in sec.lines"
-            :key="li"
-            class="whitespace-pre-wrap break-words text-sm font-normal leading-relaxed text-slate-500 dark:text-muted-foreground"
-            :class="sec.label && 'mt-0.5'"
-          >
-            {{ line }}
-          </p>
+            <!-- Section human-readable có nhãn (không ngoặc/nháy JSON) -->
+            <div
+              v-for="(sec, si) in view.detail"
+              :key="si"
+              :class="si > 0 && 'mt-2'"
+            >
+              <p
+                v-if="sec.label"
+                class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-muted-foreground"
+              >
+                {{ sec.label }}
+              </p>
+              <p
+                v-for="(line, li) in sec.lines"
+                :key="li"
+                class="whitespace-pre-wrap break-words text-sm font-normal leading-relaxed text-slate-500 dark:text-muted-foreground"
+                :class="sec.label && 'mt-0.5'"
+              >
+                {{ line }}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     </template>
@@ -70,5 +73,16 @@ const hasDetail = () => props.view.detail.length > 0
   .td-chevron {
     transition: none;
   }
+}
+
+.td-expand {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 240ms ease-out;
+}
+.td-expand--open { grid-template-rows: 1fr; }
+.td-expand__clip { overflow: hidden; min-height: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .td-expand { transition: none; }
 }
 </style>
