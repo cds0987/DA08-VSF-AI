@@ -158,6 +158,10 @@ class OpenAIProvider(AIProvider):
                     messages=messages,
                     temperature=0.0,
                     max_tokens=max_tokens,
+                    # reasoning:{enabled:false} -> //hóa OCR OpenRouter (qwen-vl là reasoning-model: bật
+                    # nghĩ thì OCR CHẬM 22s + có thể ăn budget -> truncate). Tắt -> nhanh + 100% acc (đo
+                    # 15 ảnh). ai-router forward extra_body cho OpenRouter, BỎ cho OpenAI -> an toàn.
+                    extra_body={"reasoning": {"enabled": False}},
                 )
             except Exception as exc:  # noqa: BLE001 - SDK-specific mapping stays in adapter
                 raise self._map_error(exc, cfg.base_url) from exc

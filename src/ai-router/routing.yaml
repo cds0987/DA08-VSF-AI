@@ -204,14 +204,24 @@ capabilities:
       free_or: google/gemma-4-31b-it:free
     require_vision: true
   ocr:                              # ảnh/scan + chart/bảng-vector -> text (VISION)
-    tiers: [free_oai]               # CHỈ OpenAI — KHÔNG OpenRouter. gpt-5.4-mini (rẻ, vision tốt).
+    tiers: [paid]                   # //HÓA 2026-06-26: OFF OpenAI -> 4 model vision OpenRouter (rải tải,
+                                    # ổn định prod). Benchmark 15 ảnh HR thật (264 số ground-truth, reasoning
+                                    # -OFF): gpt-5.4-mini 100%@4.3s vs gemini-2.5-flash-lite 100%@5.2s ·
+                                    # qwen3.5-flash 100%@9.7s · qwen3.5-9b 100%@9.7s · llama-4-scout 95%@8.1s.
+                                    # LOẠI: deepseek-v4-flash (no-vision CRASH), gemma-4 (chậm 28s).
     models:
-      free_oai: openai/gpt-5.4-mini
-    selector:                       # xoay 5 key gpt-5.4-mini; cạn CẢ -> degrade gpt-4o-mini (vẫn OpenAI)
-      impl: banded_rotation
+      paid:                          # round-robin -> rải 4 pool (Google/Qwen×2/Meta). Bỏ trần inflight
+        - google/gemini-2.5-flash-lite   #   100% @5.2s — nhanh+chuẩn nhất (≈ gpt-5.4-mini)
+        - qwen/qwen3.5-flash-02-23        #   100% @9.7s (reasoning-OFF)
+        - qwen/qwen3.5-9b                 #   100% @9.7s (reasoning-OFF)
+        - meta-llama/llama-4-scout       #   95% @8.1s — pool Meta đa dạng
+    selector:                       # adaptive_balanced = _pick_model_split ROUND-ROBIN 4 model (//hóa).
+                                    # banded_rotation chỉ xoay KEY 1 model -> KHÔNG rải model. ⚠️ reasoning
+                                    # -OFF cho qwen-vl do openai_provider gửi extra_body reasoning:false.
+      impl: adaptive_balanced
       params:
-        band_tokens: 2500000        # quota/key/ngày -> cạn 1 key xoay key kế (cùng model)
-        save_mode:                  # cạn CẢ 5 key -> xiaomi/mimo-v2.5 (OpenRouter, omnimodal hỗ trợ vision)
+        tpm_per_key: 500000
+        save_mode:                  # cạn band -> xiaomi/mimo-v2.5 (OpenRouter omnimodal vision)
           enabled: true
           model: xiaomi/mimo-v2.5
           tier: paid
