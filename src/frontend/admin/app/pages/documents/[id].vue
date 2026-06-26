@@ -59,7 +59,10 @@ const deleteDoc = async () => {
   }
 }
 
+const isOpeningFile = ref(false)
+
 const openFile = async () => {
+  // Mở sẵn tab trống (đồng bộ với click) để không bị popup-blocker chặn, rồi mới fetch.
   const fileTab = window.open('', '_blank')
   if (!fileTab) {
     toast.error('Allow pop-ups to open the document file')
@@ -67,12 +70,21 @@ const openFile = async () => {
   }
 
   fileTab.document.title = 'Opening document...'
+  isOpeningFile.value = true
   try {
-    const { url } = await documentService.getFileUrl(id)
-    fileTab.location.href = url
+    // Fetch bytes qua axios (interceptor tự gắn auth) -> blob URL trên domain mình.
+    // PDF/ảnh render inline tại blob:https://vsfchat..., office tải về — KHÔNG bay sang
+    // storage.googleapis.com hay view.officeapps.live.com.
+    const blob = await documentService.getFileBlob(id)
+    const objectUrl = URL.createObjectURL(blob)
+    fileTab.location.href = objectUrl
+    // Giải phóng blob sau khi tab đã load xong (revoke sớm sẽ chặn việc hiển thị).
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
   } catch (error) {
     fileTab.close()
-    toast.error(getApiErrorMessage(error, 'Failed to get file access URL'))
+    toast.error(getApiErrorMessage(error, 'Failed to open the document file'))
+  } finally {
+    isOpeningFile.value = false
   }
 }
 
@@ -150,10 +162,12 @@ onUnmounted(() => {
         <template #actions>
           <div class="flex gap-2">
             <button
-              class="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-[12.5px] hover:bg-accent"
+              class="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-[12.5px] hover:bg-accent disabled:opacity-50"
+              :disabled="isOpeningFile"
               @click="openFile"
             >
-              <ExternalLink class="h-3.5 w-3.5" /> Open File
+              <Loader2 v-if="isOpeningFile" class="h-3.5 w-3.5 animate-spin" />
+              <ExternalLink v-else class="h-3.5 w-3.5" /> Open File
             </button>
             <button
               class="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-[12.5px] hover:bg-accent disabled:opacity-50"

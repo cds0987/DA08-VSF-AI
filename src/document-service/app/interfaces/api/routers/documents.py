@@ -1,4 +1,7 @@
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import Response
 
 from app.application.auth import CurrentUser
 from app.application.exceptions import (
@@ -10,6 +13,9 @@ from app.application.exceptions import (
 )
 from app.application.use_cases.documents.common import ALLOWED_EXTENSIONS, MAX_FILE_BYTES
 from app.application.use_cases.documents.delete_document_use_case import DeleteDocumentUseCase
+from app.application.use_cases.documents.get_document_file_stream_use_case import (
+    GetDocumentFileStreamUseCase,
+)
 from app.application.use_cases.documents.get_document_file_use_case import GetDocumentFileUseCase
 from app.application.use_cases.documents.get_document_use_case import GetDocumentUseCase
 from app.application.use_cases.documents.list_documents_use_case import ListDocumentsUseCase
@@ -21,6 +27,7 @@ from app.interfaces.api.dependencies import (
     get_audit_logger,
     get_current_user,
     get_delete_document_use_case,
+    get_get_document_file_stream_use_case,
     get_get_document_file_use_case,
     get_get_document_use_case,
     get_list_documents_use_case,
@@ -171,6 +178,48 @@ async def get_document_file(
         url=result.url,
         file_type=result.file_type,
         expires_in=result.expires_in,
+    )
+
+
+@router.get("/{document_id}/file/raw")
+async def get_document_file_raw(
+    document_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    use_case: GetDocumentFileStreamUseCase = Depends(get_get_document_file_stream_use_case),
+) -> Response:
+    """Proxy-stream nội dung file qua domain mình (KHÔNG trả presigned-URL GCS).
+
+    Giữ ACL per-request + không đẩy tài liệu sang officeapps/google. FE fetch endpoint này
+    dạng blob rồi mở object-URL -> tab hiển thị blob:https://vsfchat..., PDF render inline.
+    """
+    try:
+        result = await use_case.execute(user, document_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.detail) from exc
+    except PermissionDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc) or "Khong co quyen xem tai lieu nay",
+        ) from exc
+    except StorageError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=exc.detail,
+        ) from exc
+
+    # RFC 5987: filename* cho tên unicode (tiếng Việt), filename ascii làm fallback.
+    ascii_name = result.filename.encode("ascii", "ignore").decode("ascii") or "document"
+    disposition = (
+        f"{result.disposition}; filename=\"{ascii_name}\"; "
+        f"filename*=UTF-8''{quote(result.filename)}"
+    )
+    return Response(
+        content=result.content,
+        media_type=result.media_type,
+        headers={
+            "Content-Disposition": disposition,
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
