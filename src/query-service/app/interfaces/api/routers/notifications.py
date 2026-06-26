@@ -143,6 +143,20 @@ async def mark_read(
     )
 
 
+@router.delete("/notifications/{notification_id}", status_code=204)
+async def delete_notification(
+    notification_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+    repo: NotificationRepository = Depends(get_notification_repo),
+) -> None:
+    deleted = await repo.delete_by_id(user.id, notification_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notification not found",
+        )
+
+
 @router.post(
     "/dev/mock-notifications/doc-new",
     summary="DEV ONLY - simulate notify.doc_new",
