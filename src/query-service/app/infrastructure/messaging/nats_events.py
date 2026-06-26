@@ -52,6 +52,19 @@ class HrDepartmentRenamedEvent:
 
 
 @dataclass(frozen=True)
+class LeaveRequestCreatedEvent:
+    request_id: str
+    requester_user_id: str
+    approver_user_id: str
+    leave_type: str
+    start_date: str
+    end_date: str
+    days_count: int
+    event_id: str | None
+    occurred_at: datetime
+
+
+@dataclass(frozen=True)
 class NotifyDocNewEvent:
     doc_id: str
     document_name: str
@@ -115,6 +128,32 @@ class QueryNatsEventHandler:
             )
         self._doc_access_seen_at[event.doc_id] = event.occurred_at
         self._remember_event(event.event_id)
+
+    async def handle_leave_request_created(self, payload: dict[str, Any]) -> list:
+        """Thông báo cho người duyệt khi có đơn nghỉ phép mới."""
+        if self._notification_service is None:
+            return []
+        event = parse_leave_request_created_event(payload)
+        if self._is_duplicate_event(event.event_id):
+            return []
+        fallback_key = f"{event.request_id}:leave_request_new"
+        if event.event_id is None and self._is_duplicate_fallback_key(fallback_key):
+            return []
+        from app.infrastructure.messaging.notification_service import LeaveRequestNewEvent
+        delivered = await self._notification_service.publish_leave_request_new(
+            LeaveRequestNewEvent(
+                request_id=event.request_id,
+                requester_user_id=event.requester_user_id,
+                approver_user_id=event.approver_user_id,
+                leave_type=event.leave_type,
+                start_date=event.start_date,
+                end_date=event.end_date,
+                days_count=event.days_count,
+            )
+        )
+        self._remember_event(event.event_id)
+        self._remember_fallback_key(fallback_key)
+        return delivered
 
     async def handle_notify_doc_new(self, payload: dict[str, Any]):
         if self._notification_service is None:
@@ -253,6 +292,20 @@ def parse_hr_department_renamed_event(payload: dict[str, Any]) -> HrDepartmentRe
     return HrDepartmentRenamedEvent(
         old_department=_required_str(payload, "old_department"),
         new_department=_required_str(payload, "new_department"),
+        event_id=_optional_str(payload.get("event_id")),
+        occurred_at=_event_time(payload.get("occurred_at")),
+    )
+
+
+def parse_leave_request_created_event(payload: dict[str, Any]) -> LeaveRequestCreatedEvent:
+    return LeaveRequestCreatedEvent(
+        request_id=_required_str(payload, "request_id"),
+        requester_user_id=_required_str(payload, "requester_user_id"),
+        approver_user_id=_required_str(payload, "approver_user_id"),
+        leave_type=_required_str(payload, "leave_type"),
+        start_date=str(payload.get("start_date") or ""),
+        end_date=str(payload.get("end_date") or ""),
+        days_count=int(payload.get("days_count") or 0),
         event_id=_optional_str(payload.get("event_id")),
         occurred_at=_event_time(payload.get("occurred_at")),
     )

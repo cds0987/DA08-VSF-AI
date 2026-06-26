@@ -16,6 +16,17 @@ class LeaveStatusEvent:
 
 
 @dataclass(frozen=True)
+class LeaveRequestNewEvent:
+    request_id: str
+    requester_user_id: str
+    approver_user_id: str
+    leave_type: str
+    start_date: str
+    end_date: str
+    days_count: int
+
+
+@dataclass(frozen=True)
 class DocNewEvent:
     doc_id: str
     document_name: str
@@ -90,6 +101,27 @@ class NotificationService:
             doc_id=None,
         )
         await self._connection_manager.push_to_user(event.requester_user_id, payload)
+        return [notification]
+
+    async def publish_leave_request_new(self, event: LeaveRequestNewEvent) -> list[Notification]:
+        """Thông báo cho người duyệt khi có đơn nghỉ phép mới cần xử lý."""
+        message = (
+            f"Có đơn nghỉ {event.leave_type} mới cần duyệt "
+            f"({event.start_date} – {event.end_date}, {event.days_count} ngày)"
+        )
+        payload = {
+            "type": "notify",
+            "event": "leave_request_new",
+            "message": message,
+            "request_id": event.request_id,
+        }
+        notification = await self._repository.save(
+            user_id=event.approver_user_id,
+            event="leave_request_new",
+            message=message,
+            doc_id=None,
+        )
+        await self._connection_manager.push_to_user(event.approver_user_id, payload)
         return [notification]
 
     async def delete_doc_notifications(self, doc_id: str) -> int:

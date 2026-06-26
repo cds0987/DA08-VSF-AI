@@ -24,7 +24,7 @@ function isNotificationEvent(value: unknown): value is NotificationEvent {
   return typeof value === 'object'
     && value !== null
     && event.type === 'notify'
-    && ['doc_new', 'leave_approved', 'leave_rejected', 'leave_cancelled'].includes(event.event ?? '')
+    && ['doc_new', 'leave_request_new', 'leave_approved', 'leave_rejected', 'leave_cancelled'].includes(event.event ?? '')
     && typeof event.message === 'string'
 }
 
