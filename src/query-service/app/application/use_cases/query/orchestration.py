@@ -71,6 +71,28 @@ def _outcome_to_enum_value(outcome_str: str) -> int:
     return _OUTCOME_ENUM_MAP.get(outcome_str.upper(), Outcome.SUCCESS.value)
 
 
+# MOSA path TRƯỚC chỉ trả NO_INFO (rỗng) | SUCCESS (có answer) -> refuse/clarify/no_info đều =SUCCESS
+# (bug đo: benchmark auto-grade sai). Phân loại lại từ route + NỘI DUNG answer thật (phản ánh điều
+# THỰC SỰ xảy ra: từ chối/hỏi lại/không-thấy/trả lời). Heuristic benchmark-grade (cụm từ templated).
+_OFFTOPIC_CUES = ("ngoài phạm vi", "chỉ hỗ trợ", "chỉ có thể hỗ trợ", "không thể hỗ trợ", "nằm ngoài")
+_CLARIFY_CUES = ("cho biết cụ thể", "nói rõ", "cụ thể hơn", "chưa rõ", "bạn muốn", "bạn cần", "đưa thêm thông tin")
+_NOINFO_CUES = ("không tìm thấy", "chưa tìm được", "chưa lấy được", "không có thông tin", "không tìm được")
+
+
+def _classify_mosa_outcome(answer: str, route: str) -> int:
+    """Suy outcome NGỮ NGHĨA cho MOSA done-event từ answer + route. answer non-empty mặc định SUCCESS.
+    no_info cue KHÔNG gate theo sources: no_doc thường RETRIEVE được tài liệu [N] nhưng tài liệu KHÔNG
+    chứa đáp án -> vẫn 'không tìm thấy' (có source). Cụm từ templated nên phân biệt tốt cho benchmark."""
+    a = (answer or "").lower()
+    if any(k in a for k in _OFFTOPIC_CUES):
+        return Outcome.OFF_TOPIC.value
+    if route == "light" and any(k in a for k in _CLARIFY_CUES):
+        return Outcome.CLARIFY.value
+    if any(k in a for k in _NOINFO_CUES):
+        return Outcome.NO_INFO.value
+    return Outcome.SUCCESS.value
+
+
 class QueryOrchestrationUseCase:
     def __init__(
         self,
@@ -541,7 +563,6 @@ class QueryOrchestrationUseCase:
             outcome_value = Outcome.NO_INFO.value
             sources: list[dict] = []
         else:
-            outcome_value = Outcome.SUCCESS.value
             # Gắn ref [N] cho citation (FE cần), khử trùng theo chunk_id.
             sources, seen, ref = [], set(), 0
             for s in raw_sources:
@@ -551,6 +572,9 @@ class QueryOrchestrationUseCase:
                 seen.add(cid)
                 ref += 1
                 sources.append({**s, "ref": ref})
+            # outcome NGỮ NGHĨA (refuse/clarify/no_info/success) thay vì luôn SUCCESS -> benchmark grade đúng.
+            _plan_route = getattr(result.get("plan"), "route", "heavy")
+            outcome_value = _classify_mosa_outcome(answer, _plan_route)
 
         answer = await self._output_guardrail.redact(answer)
         # Synth ĐÃ stream token (qua emit) -> KHÔNG word-chunk lại. Chưa stream (light route /
