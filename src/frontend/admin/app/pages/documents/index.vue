@@ -42,11 +42,9 @@ function goToPage(p: number) {
   updateQuery({ page: p > 1 ? String(p) : undefined })
 }
 
-// --- Multi-select state ---
-const selected = ref(new Set<string>())   // id chọn thủ công trên trang hiện tại
-const selectAllMatching = ref(false)       // cờ "chọn tất cả N" theo bộ lọc (qua mọi trang)
+// --- Multi-select state (chỉ trong phạm vi TRANG hiện tại) ---
+const selected = ref(new Set<string>())   // id chọn trên trang hiện tại
 const confirmIds = ref<string[] | null>(null) // != null -> mở AlertDialog
-const preparing = ref(false)               // đang gom id cho "chọn tất cả N"
 const deleting = ref(false)                // đang gọi API xóa
 
 const fetchDocuments = async () => {
@@ -67,7 +65,7 @@ const filtered = computed(() => {
   return store.items.filter(document => document.name.toLowerCase().includes(query))
 })
 
-const isRowChecked = (id: string) => selectAllMatching.value || selected.value.has(id)
+const isRowChecked = (id: string) => selected.value.has(id)
 
 const allPageChecked = computed(() =>
   filtered.value.length > 0 && filtered.value.every(d => isRowChecked(d.id)),
@@ -79,20 +77,9 @@ const headerState = computed<boolean | 'indeterminate'>(() =>
   allPageChecked.value ? true : (somePageChecked.value ? 'indeterminate' : false),
 )
 
-// Còn trang khác để mời "chọn tất cả N".
-const hasMorePages = computed(() => store.total > filtered.value.length)
-const showSelectAllBanner = computed(() =>
-  allPageChecked.value && hasMorePages.value && !selectAllMatching.value,
-)
-
-const selectedCount = computed(() => (selectAllMatching.value ? store.total : selected.value.size))
+const selectedCount = computed(() => selected.value.size)
 
 function toggleRow(id: string, value: boolean | 'indeterminate') {
-  // Bỏ chọn 1 dòng khi đang "chọn tất cả N" -> thu hẹp về trang hiện tại.
-  if (selectAllMatching.value) {
-    selectAllMatching.value = false
-    selected.value = new Set(filtered.value.map(d => d.id))
-  }
   const next = new Set(selected.value)
   if (value === true) next.add(id)
   else next.delete(id)
@@ -100,14 +87,11 @@ function toggleRow(id: string, value: boolean | 'indeterminate') {
 }
 
 function togglePage(value: boolean | 'indeterminate') {
-  selectAllMatching.value = false
-  if (value === true) selected.value = new Set(filtered.value.map(d => d.id))
-  else selected.value = new Set()
+  selected.value = value === true ? new Set(filtered.value.map(d => d.id)) : new Set()
 }
 
 function clearSelection() {
   selected.value = new Set()
-  selectAllMatching.value = false
 }
 
 // Mở dialog cho 1 doc (icon thùng rác).
@@ -115,20 +99,9 @@ function askDeleteOne(id: string) {
   confirmIds.value = [id]
 }
 
-// Mở dialog cho lựa chọn hàng loạt.
-async function askDeleteSelected() {
-  if (selectAllMatching.value) {
-    preparing.value = true
-    try {
-      confirmIds.value = await documentService.fetchAllIds(statusFilter.value || undefined)
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, 'Không gom được danh sách tài liệu'))
-    } finally {
-      preparing.value = false
-    }
-  } else {
-    confirmIds.value = [...selected.value]
-  }
+// Mở dialog cho các tài liệu đã chọn trên trang.
+function askDeleteSelected() {
+  confirmIds.value = [...selected.value]
 }
 
 async function confirmDelete() {
@@ -272,12 +245,10 @@ const prevPage = () => {
           </span>
           <div class="flex items-center gap-2">
             <button
-              class="inline-flex items-center gap-1.5 rounded-md bg-destructive px-3 py-1.5 text-[12.5px] font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
-              :disabled="preparing"
+              class="inline-flex items-center gap-1.5 rounded-md bg-destructive px-3 py-1.5 text-[12.5px] font-medium text-destructive-foreground hover:bg-destructive/90"
               @click="askDeleteSelected"
             >
-              <Loader2 v-if="preparing" class="h-3.5 w-3.5 animate-spin" />
-              <Trash2 v-else class="h-3.5 w-3.5" />
+              <Trash2 class="h-3.5 w-3.5" />
               Xóa
             </button>
             <button
@@ -315,18 +286,6 @@ const prevPage = () => {
             </tr>
           </thead>
           <tbody class="divide-y divide-border">
-            <!-- Banner mời chọn tất cả N qua nhiều trang -->
-            <tr v-if="showSelectAllBanner" class="bg-primary/5">
-              <td colspan="7" class="px-4 py-2 text-center text-[12px] text-muted-foreground">
-                Đã chọn {{ filtered.length }} trên trang này.
-                <button
-                  class="font-medium text-primary hover:underline"
-                  @click="selectAllMatching = true"
-                >
-                  Chọn tất cả {{ store.total }} tài liệu
-                </button>
-              </td>
-            </tr>
             <tr v-if="store.isLoading && store.items.length === 0">
               <td colspan="7" class="px-4 py-12 text-center">
                 <Loader2 class="mx-auto h-6 w-6 animate-spin text-primary" />
