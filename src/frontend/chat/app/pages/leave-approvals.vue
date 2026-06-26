@@ -223,7 +223,7 @@ onMounted(loadMine)
 </script>
 
 <template>
-  <div class="flex h-full w-full flex-col overflow-y-auto px-6 pb-6 pt-16">
+  <div class="custom-scrollbar flex h-full w-full flex-col overflow-y-auto px-6 pb-6 pt-16 [scrollbar-gutter:stable]">
     <div class="mx-auto w-full max-w-2xl">
       <div class="mb-4 flex items-start justify-between gap-4">
         <div class="space-y-1">
