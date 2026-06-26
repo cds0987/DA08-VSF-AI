@@ -33,6 +33,16 @@ class OpenRouterEffortAdapter(NodeLLMAdapter):
         # OpenRouter dùng NESTED 'reasoning', KHÔNG phải top-level 'reasoning_effort' (đó là OpenAI
         # o-series). Loại reasoning_effort top-level rồi gắn vào extra_body để forward đúng.
         out.pop("reasoning_effort", None)
+        re_str = str(reasoning_effort or "").strip().lower()
+        if re_str in ("off", "none", "disabled", "false", "no"):
+            # TẮT HẲN reasoning -> model nhồi answer vào CONTENT (không vào reasoning_content).
+            # Bắt buộc cho //hóa answer: nhiều model (qwen/glm/llama/hy3) là reasoning-model -> nếu
+            # để reasoning ON thì answer rớt vào reasoning_content, content RỖNG -> verify dump raw.
+            # deepseek reasoning-off cũng ra 'BƯỚC' trong content -> đồng nhất (soft-adapter _va_split).
+            extra = dict(out.get("extra_body") or {})
+            extra["reasoning"] = {"enabled": False}
+            out["extra_body"] = extra
+            return out
         eff = self._normalise_effort(reasoning_effort)
         if eff is not None:
             extra = dict(out.get("extra_body") or {})

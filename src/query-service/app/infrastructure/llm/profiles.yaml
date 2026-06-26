@@ -65,11 +65,14 @@ nodes:
   # (suy nghĩ ẩn) vừa viết câu trả lời -> trần phải gồm CẢ token nghĩ + answer -> nâng 4000 để
   # không CỤT (trước 2500 chỉ đủ answer, nay thêm reasoning của bước gộp).
   answer:
-    adapter: openrouter_effort     # was: standard — cắt reasoning thừa khi viết câu trả lời cuối
+    adapter: openrouter_effort     # cắt reasoning -> ép answer vào CONTENT (bắt buộc cho //hóa)
     capability: answer
-    # effort=low: deepseek nghĩ GỌN khi verify+viết (chủ yếu format data đã thu thập, không cần
-    # CoT dài) -> ít token -> nhanh hơn. CoT verify VẪN stream ra panel (surfaces_reasoning_stream).
-    reasoning_effort: low
+    # reasoning_effort=off -> reasoning:{enabled:false}: TẮT HẲN nghĩ. Lý do: //hóa answer rải 7 model
+    # đa-pool (deepseek/qwen×3/llama/glm/hy3); nhiều model là reasoning-model -> nếu reasoning ON thì
+    # answer rớt vào reasoning_content, content RỖNG -> verify dump raw (sự cố gpt-oss). OFF -> mọi model
+    # nhồi 'BƯỚC 1.. BƯỚC 2: answer' vào content -> soft-adapter _va_split tách (BƯỚC1->panel). deepseek
+    # off cũng NHANH hơn (2-4s vs 4-6s) + cite [N] đúng hơn (đo 2026-06-26). Panel = verdict BƯỚC-1.
+    reasoning_effort: "off"
     max_output_tokens: 4000
 
   # Guardrail LLM-judge (input/output).

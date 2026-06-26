@@ -134,12 +134,12 @@ def test_plan_node_profile():
 
 
 def test_answer_node_profile():
-    # answer (verify_answer, sinh câu trả lời cuối) = openrouter_effort + effort=low: cắt reasoning
-    # thừa khi viết -> giảm latency cục deepseek lớn nhất còn lại. CoT verify vẫn stream ra panel.
+    # answer (verify_answer) = openrouter_effort + effort="off": TẮT reasoning -> //hóa 7 model đa-pool
+    # nhồi answer vào CONTENT (reasoning-model giữ ON sẽ rỗng content=dump raw). soft-adapter _va_split tách.
     prof = get_node_profile("answer")
     assert prof.adapter == "openrouter_effort"
     assert prof.capability == "answer"
-    assert prof.reasoning_effort == "low"
+    assert prof.reasoning_effort == "off"
     assert prof.max_output_tokens == 4000
 
 

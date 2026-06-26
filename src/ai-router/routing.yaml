@@ -36,14 +36,23 @@ aliases:
 capabilities:
   answer:                           # câu trả lời cuối (split answer node) -> GIAO TOÀN BỘ
                                     # cho deepseek qua OpenRouter, xoay API key mỗi 150K token.
-    tiers: [paid]                   # paid = OpenRouter (deepseek). KHÔNG dùng OpenAI free.
+    tiers: [paid]                   # paid = OpenRouter. KHÔNG dùng OpenAI free.
     models:
-      paid: deepseek/deepseek-v4-flash   # PRIMARY. //HÓA gpt-oss ĐÃ THỬ 2026-06-26 -> REVERT: answer node
-                                         # dùng astream_verify_answer (NEED_MORE verdict + reasoning); gpt-oss
-                                         # KHÔNG ra đúng format -> fail-safe DUMP RAW DATA (intermittent ~50%).
-                                         # //hóa answer cần model CÙNG-HỌ-format (deepseek). GPU-spread answer:
-                                         # đã có 5-key rotation + AIMD + save_mode xiaomi (degrade). Probe
-                                         # answer-format đơn (cite+VN) PASS nhưng verify_answer-format FAIL.
+      paid:                              # //HÓA answer 2026-06-26 v2: rải 7 model ĐA-POOL (DeepSeek/Qwen/
+                                         # Meta/Zhipu/Tencent) chống queue GPU + deepseek là model CHẬM NHẤT
+                                         # (p50 6.3s vs 1.7-3s) -> rải = NHANH hơn. ĐIỀU KIỆN: profiles.yaml
+                                         # answer reasoning_effort="off" (reasoning:{enabled:false}) -> mọi
+                                         # model nhồi answer vào CONTENT (không reasoning_content rỗng=dump
+                                         # raw) + soft-adapter _va_split tách 'BƯỚC 1'. Survey 7×4×3 (đủ/đa-
+                                         # nguồn/thiếu/off-topic): empty 0-1/12, split_ok ~12/12, cite 8-12/12.
+        - deepseek/deepseek-v4-flash     #   DeepSeek (proven) — off-reasoning 2-4s, cite [1][2] ✓
+        - qwen/qwen3.5-flash-02-23        #   Qwen — NHANH NHẤT 1.7s
+        - qwen/qwen3-vl-30b-a3b-instruct  #   Qwen — 2.2s, ngắn gọn
+        - qwen/qwen3-235b-a22b-2507       #   Qwen — 2.4s
+        - meta-llama/llama-4-scout       #   Meta (pool khác hẳn) — 2.6s, cite 11/12
+        - z-ai/glm-4.7-flash             #   Zhipu — 3.1s, cite 12/12 TỐT NHẤT
+        - tencent/hy3-preview            #   Tencent — 4.8s
+                                         #   LOẠI gpt-oss-120b: content RỖNG cả 2 chế độ (unfit thật).
     selector:                       # banded_rotation: dính 1 key tới khi phục vụ 150K -> xoay key kế.
       impl: adaptive_balanced       # OpenRouter(deepseek): AIMD tự dò trần qua 429 (không TPM cố định)
       params:

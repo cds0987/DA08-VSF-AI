@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -241,10 +242,47 @@ def _parse_va(text: str | None) -> tuple[str | None, bool, str]:
     """Parse output verify_answer non-stream -> (answer|None, need_more, missing)."""
     if not text:
         return (None, False, "")
-    s = text.strip()
-    if s.startswith(_VA_SENTINEL):
-        return (None, True, s[len(_VA_SENTINEL):].strip()[:200])
-    return (s, False, "")
+    s = _va_normalize(text).strip()
+    nm, missing = _va_need_more(s)
+    if nm:
+        return (None, True, missing)
+    ans, _ = _va_split(s)
+    return (ans or None, False, "")
+
+
+# ── //HÓA answer (reasoning-off): model nhồi cả "BƯỚC 1 reasoning" + answer vào content (không tách
+# reasoning_content như deepseek-reasoning-on). Soft-adapter MODEL-AGNOSTIC: glyph-normalize +
+# tách "BƯỚC 1" khỏi answer. deepseek-reasoning-off cũng ra "BƯỚC" -> cùng đường (UNIFORM).
+_VA_GLYPHS = {"【": "[", "】": "]", "〔": "[", "〕": "]", "（": "(", "）": ")", "［": "[", "］": "]"}
+_VA_BUOC2 = re.compile(r"B[Ưư][Ớớ]C\s*2[^\n:]*:?\s*", re.I)
+_VA_BUOC1 = re.compile(r"B[Ưư][Ớớ]C\s*1[^\n]*\n+", re.I)
+_VA_NEEDMORE = re.compile(r"<<\s*NEED_MORE\s*>>\s*(.*)", re.I | re.S)
+
+
+def _va_normalize(s: str) -> str:
+    """Chuẩn hoá glyph citation lạ (【1】 〔1〕 ［1］) -> [1] ASCII (FE render thẻ nguồn từ [N])."""
+    for a, b in _VA_GLYPHS.items():
+        s = s.replace(a, b)
+    return s
+
+
+def _va_need_more(full: str) -> tuple[bool, str]:
+    m = _VA_NEEDMORE.search(full)
+    if m:
+        return (True, m.group(1).strip()[:200])
+    return (False, "")
+
+
+def _va_split(full: str) -> tuple[str, str]:
+    """Tách (answer, reasoning_part) khỏi 'BƯỚC 1 ... BƯỚC 2 — XUẤT: <answer>'. KHÔNG có marker
+    (deepseek-reasoning-on: content = answer thuần) -> (full, '')."""
+    parts = _VA_BUOC2.split(full, maxsplit=1)
+    if len(parts) > 1 and parts[1].strip():
+        return (parts[1].strip(), parts[0].strip())
+    parts = _VA_BUOC1.split(full, maxsplit=1)
+    if len(parts) > 1 and parts[1].strip():
+        return (parts[1].strip(), "")
+    return (full.strip(), "")
 
 
 async def astream_verify_answer(
@@ -271,19 +309,19 @@ async def astream_verify_answer(
         router: dict | None = None
         first_tok_dt: datetime | None = None
         last_tok_dt: datetime | None = None
-        decided: str | None = None   # None (chưa rõ) | 'answer' | 'need_more'
+        # 'answer' = content pure-answer (deepseek reasoning-on) -> stream LIVE như cũ.
+        # 'split'  = //hóa model reasoning-off nhồi 'BƯỚC 1.. BƯỚC 2: answer' vào content -> GOM,
+        #            tách cuối stream (BƯỚC1->panel, answer->orchestration word-chunk). 'need_more' = sentinel.
+        decided: str | None = None
         buf = ""
         async for chunk in model.astream([SystemMessage(content=system), HumanMessage(content=user)]):
             um = getattr(chunk, "usage_metadata", None)
             if um:
                 usage_meta = um
             router = router or _router_of(chunk)
-            # PANEL: stream suy luận (tổng hợp/phân tích/quyết định) — node=verify giữ mục cũ.
+            # PANEL: deepseek reasoning-on lộ reasoning_content -> stream panel live (hết dead-air).
             rtext = (getattr(chunk, "additional_kwargs", None) or {}).get("reasoning_content")
             if rtext:
-                # TTFT = token ĐẦU TIÊN USER THẤY (reasoning stream lên panel ngay) — KHÔNG đợi
-                # token answer. Trước đây chỉ tính content -> Langfuse báo TTFT cao GIẢ (đã stream
-                # reasoning rồi). Tính reasoning -> "Time to first token" phản ánh đúng UX (thấp).
                 if first_tok_dt is None:
                     first_tok_dt = datetime.now(timezone.utc)
                 last_tok_dt = datetime.now(timezone.utc)
@@ -298,32 +336,38 @@ async def astream_verify_answer(
             if decided == "answer":
                 await emit({"token": tok, "phase": "generating"})   # ANSWER stream ở message
                 continue
-            if decided == "need_more":
-                continue                                            # nuốt phần mô tả "thiếu gì"
-            # chưa quyết: gom buf tới khi đủ để phân biệt sentinel vs answer
+            if decided in ("need_more", "split"):
+                continue                                            # gom hết, xử lý cuối stream
+            # chưa quyết: gom buf tới khi phân biệt được sentinel / BƯỚC-structure / answer-thuần
             buf += tok
             stripped = buf.lstrip()
             if not stripped:
                 continue
-            if len(stripped) < len(_VA_SENTINEL):
-                if _VA_SENTINEL.startswith(stripped):
-                    continue                                        # còn mơ hồ -> đợi thêm token
-                decided = "answer"
-                await emit({"token": buf, "phase": "generating"})   # flush phần đã gom
-            elif stripped.startswith(_VA_SENTINEL):
+            low = stripped.lower()
+            if len(stripped) < 6 and (_VA_SENTINEL.startswith(stripped) or "bước".startswith(low)):
+                continue                                            # còn mơ hồ -> đợi thêm token
+            if stripped.startswith(_VA_SENTINEL):
                 decided = "need_more"
+            elif low.startswith("bước"):                            # //hóa reasoning-off -> GOM + tách cuối
+                decided = "split"
             else:
-                decided = "answer"
+                decided = "answer"                                  # pure-answer -> stream live
                 await emit({"token": buf, "phase": "generating"})
-        full = "".join(parts).strip()
+        full = _va_normalize("".join(parts)).strip()
         _report_llm(tracer, trace, node, model, user, full or None, usage_meta, router, start_dt,
                     first_tok_dt, last_tok_dt, len(parts))
-        s = full.lstrip()
-        if s.startswith(_VA_SENTINEL):
-            if allow_replan:
-                return (None, True, s[len(_VA_SENTINEL):].strip()[:200])
-            return (s[len(_VA_SENTINEL):].strip() or None, False, "")  # hết hạn replan -> coi phần sau là trả lời
-        return (full or None, False, "")
+        nm, missing = _va_need_more(full)
+        if nm and allow_replan:
+            return (None, True, missing)
+        if nm:                                                      # hết hạn replan -> bỏ sentinel, phần còn lại là answer
+            full = _VA_NEEDMORE.sub("", full).strip()
+        if decided == "answer":
+            return (full or None, False, "")                        # đã stream live (pure-answer)
+        # split / chưa-quyết: tách BƯỚC-1 (panel) khỏi answer (orchestration word-chunk vì chưa emit token)
+        answer, reasoning_part = _va_split(full)
+        if reasoning_part and emit:
+            await emit({"phase": "thought", "node": node, "text": reasoning_part})
+        return (answer or None, False, "")
     except Exception as exc:  # noqa: BLE001 — stream lỗi -> non-stream
         logger.warning("verify_answer_stream_failed: %s -> acomplete", str(exc)[:160])
         return _parse_va(await acomplete(model, system, user, tracer=tracer, trace=trace, node=node))
