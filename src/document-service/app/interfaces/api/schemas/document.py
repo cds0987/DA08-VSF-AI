@@ -50,3 +50,15 @@ class DocumentFileResponse(BaseModel):
 class MessageResponse(BaseModel):
     message: str
 
+
+class BulkDeleteRequest(BaseModel):
+    # Chặn payload quá lớn: tối đa 200 id/lần (khớp limit list endpoint).
+    document_ids: list[str] = Field(min_length=1, max_length=200)
+
+
+class BulkDeleteResponse(BaseModel):
+    deleted: int = Field(ge=0)
+    not_found: list[str] = Field(default_factory=list)
+    failed: list[str] = Field(default_factory=list)
+    message: str
+

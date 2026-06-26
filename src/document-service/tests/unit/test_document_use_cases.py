@@ -620,6 +620,84 @@ async def test_delete_soft_deletes_before_best_effort_storage_delete() -> None:
     }
 
 
+@pytest.mark.asyncio
+async def test_bulk_delete_removes_many_and_publishes_per_doc() -> None:
+    from app.application.use_cases.documents.bulk_delete_documents_use_case import (
+        BulkDeleteDocumentsUseCase,
+    )
+
+    docs = [document(), document(), document()]
+    repo = InMemoryDocuments(docs)
+    publisher = FakePublisher()
+    delete_uc = DeleteDocumentUseCase(repo, FakeStorage(), publisher, FakeAudit())
+    bulk = BulkDeleteDocumentsUseCase(delete_uc)
+
+    result = await bulk.execute(admin(), [d.id for d in docs])
+
+    assert result.deleted == 3
+    assert result.not_found == []
+    assert result.failed == []
+    assert repo.documents == {}
+    # Mỗi doc phải có đúng 1 event doc.access {deleted:true}.
+    assert len(publisher.access_payloads) == 3
+    assert all(p["deleted"] is True for p in publisher.access_payloads)
+    assert {p["doc_id"] for p in publisher.access_payloads} == {d.id for d in docs}
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_missing_id_goes_to_not_found_without_aborting() -> None:
+    from app.application.use_cases.documents.bulk_delete_documents_use_case import (
+        BulkDeleteDocumentsUseCase,
+    )
+
+    doc = document()
+    repo = InMemoryDocuments([doc])
+    publisher = FakePublisher()
+    delete_uc = DeleteDocumentUseCase(repo, FakeStorage(), publisher, FakeAudit())
+    bulk = BulkDeleteDocumentsUseCase(delete_uc)
+
+    result = await bulk.execute(admin(), ["does-not-exist", doc.id])
+
+    assert result.deleted == 1
+    assert result.not_found == ["does-not-exist"]
+    assert repo.documents == {}
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_dedupes_repeated_ids() -> None:
+    from app.application.use_cases.documents.bulk_delete_documents_use_case import (
+        BulkDeleteDocumentsUseCase,
+    )
+
+    doc = document()
+    repo = InMemoryDocuments([doc])
+    delete_uc = DeleteDocumentUseCase(repo, FakeStorage(), FakePublisher(), FakeAudit())
+    bulk = BulkDeleteDocumentsUseCase(delete_uc)
+
+    result = await bulk.execute(admin(), [doc.id, doc.id])
+
+    assert result.deleted == 1
+    assert result.not_found == []
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_requires_admin() -> None:
+    from app.application.use_cases.documents.bulk_delete_documents_use_case import (
+        BulkDeleteDocumentsUseCase,
+    )
+
+    doc = document()
+    repo = InMemoryDocuments([doc])
+    delete_uc = DeleteDocumentUseCase(repo, FakeStorage(), FakePublisher(), FakeAudit())
+    bulk = BulkDeleteDocumentsUseCase(delete_uc)
+    non_admin = CurrentUser(id=str(uuid4()), role="employee", account_type="internal", department="HR")
+
+    with pytest.raises(PermissionDeniedError):
+        await bulk.execute(non_admin, [doc.id])
+    # Không xóa gì khi bị từ chối quyền.
+    assert repo.documents != {}
+
+
 def test_settings_rejects_weak_secret_and_non_hs256_algorithm() -> None:
     from app.core.config import Settings
 

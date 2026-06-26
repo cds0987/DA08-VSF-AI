@@ -81,6 +81,13 @@ export interface MessageResponse {
   message: string
 }
 
+export interface BulkDeleteResponse {
+  deleted: number
+  not_found: string[]
+  failed: string[]
+  message: string
+}
+
 export interface AdminMetrics {
   total_questions: number
   by_day: Array<{ date: string; count: number }>
