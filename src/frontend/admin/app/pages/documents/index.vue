@@ -198,68 +198,75 @@ const prevPage = () => {
     </PageHeader>
 
     <div class="px-8 pb-8 pt-2">
-      <div class="mb-3 flex items-center justify-between gap-3">
-        <div class="flex flex-1 items-center gap-3">
-          <div class="relative max-w-sm flex-1">
-            <Search class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <input
-              v-model="q"
-              placeholder="Filter this page by name..."
-              class="w-full rounded-md border border-input bg-card py-1.5 pl-8 pr-3 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+      <!-- Hàng filter + thanh bulk overlay trong CÙNG 1 wrapper relative -> thanh bulk
+           phủ ĐÈ lên hàng filter (cùng chiều cao) thay vì chèn thêm -> KHÔNG nhảy layout. -->
+      <div class="relative mb-3">
+        <div
+          class="flex items-center justify-between gap-3"
+          :class="selectedCount > 0 && 'invisible'"
+        >
+          <div class="flex flex-1 items-center gap-3">
+            <div class="relative max-w-sm flex-1">
+              <Search class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input
+                v-model="q"
+                placeholder="Filter this page by name..."
+                class="w-full rounded-md border border-input bg-card py-1.5 pl-8 pr-3 text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+              >
+            </div>
+            <select
+              v-model="statusFilter"
+              class="rounded-md border border-input bg-card px-3 py-1.5 text-[13px] outline-none focus:border-primary"
             >
+              <option value="">All Statuses</option>
+              <option value="queued">Queued</option>
+              <option value="processing">Processing</option>
+              <option value="indexed">Indexed</option>
+              <option value="failed">Failed</option>
+            </select>
+            <button
+              class="rounded-md p-1.5 hover:bg-accent disabled:opacity-50"
+              :disabled="store.isLoading"
+              title="Refresh"
+              @click="fetchDocuments"
+            >
+              <RefreshCw :class="['h-4 w-4 text-muted-foreground', store.isLoading && 'animate-spin']" />
+            </button>
           </div>
-          <select
-            v-model="statusFilter"
-            class="rounded-md border border-input bg-card px-3 py-1.5 text-[13px] outline-none focus:border-primary"
-          >
-            <option value="">All Statuses</option>
-            <option value="queued">Queued</option>
-            <option value="processing">Processing</option>
-            <option value="indexed">Indexed</option>
-            <option value="failed">Failed</option>
-          </select>
-          <button
-            class="rounded-md p-1.5 hover:bg-accent disabled:opacity-50"
-            :disabled="store.isLoading"
-            title="Refresh"
-            @click="fetchDocuments"
-          >
-            <RefreshCw :class="['h-4 w-4 text-muted-foreground', store.isLoading && 'animate-spin']" />
-          </button>
+          <span class="text-[12px] text-muted-foreground">{{ store.total }} total documents</span>
         </div>
-        <span class="text-[12px] text-muted-foreground">{{ store.total }} total documents</span>
+
+        <!-- Overlay bulk: phủ kín hàng filter khi có lựa chọn -->
+        <div
+          v-if="selectedCount > 0"
+          class="absolute inset-0 flex items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 px-4"
+        >
+          <span class="text-[13px] font-medium">
+            Đã chọn {{ selectedCount }} tài liệu
+          </span>
+          <div class="flex items-center gap-2">
+            <button
+              class="inline-flex items-center gap-1.5 rounded-md bg-destructive px-3 py-1.5 text-[12.5px] font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
+              :disabled="preparing"
+              @click="askDeleteSelected"
+            >
+              <Loader2 v-if="preparing" class="h-3.5 w-3.5 animate-spin" />
+              <Trash2 v-else class="h-3.5 w-3.5" />
+              Xóa
+            </button>
+            <button
+              class="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1.5 text-[12.5px] hover:bg-accent"
+              @click="clearSelection"
+            >
+              <X class="h-3.5 w-3.5" /> Bỏ chọn
+            </button>
+          </div>
+        </div>
       </div>
 
       <p v-if="q" class="mb-2 text-[11px] text-muted-foreground">
         Name filtering applies only to the {{ store.items.length }} documents on this page.
       </p>
-
-      <!-- Thanh hành động hàng loạt: hiện khi có lựa chọn -->
-      <div
-        v-if="selectedCount > 0"
-        class="mb-3 flex items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 px-4 py-2.5"
-      >
-        <span class="text-[13px] font-medium">
-          Đã chọn {{ selectedCount }} tài liệu
-        </span>
-        <div class="flex items-center gap-2">
-          <button
-            class="inline-flex items-center gap-1.5 rounded-md bg-destructive px-3 py-1.5 text-[12.5px] font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
-            :disabled="preparing"
-            @click="askDeleteSelected"
-          >
-            <Loader2 v-if="preparing" class="h-3.5 w-3.5 animate-spin" />
-            <Trash2 v-else class="h-3.5 w-3.5" />
-            Xóa
-          </button>
-          <button
-            class="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1.5 text-[12.5px] hover:bg-accent"
-            @click="clearSelection"
-          >
-            <X class="h-3.5 w-3.5" /> Bỏ chọn
-          </button>
-        </div>
-      </div>
 
       <div class="overflow-hidden rounded-lg border border-border bg-card transform-gpu">
         <table class="w-full text-[13px]">
@@ -268,6 +275,7 @@ const prevPage = () => {
               <th class="w-10 px-4 py-2.5 text-left font-medium">
                 <Checkbox
                   :model-value="headerState"
+                  class="size-4 border-2 border-slate-400 bg-card dark:border-white/40"
                   aria-label="Chọn tất cả trên trang này"
                   @update:model-value="togglePage"
                 />
@@ -313,6 +321,7 @@ const prevPage = () => {
               <td class="px-4 py-3">
                 <Checkbox
                   :model-value="isRowChecked(document.id)"
+                  class="size-4 border-2 border-slate-400 bg-card dark:border-white/40"
                   :aria-label="`Chọn ${document.name}`"
                   @update:model-value="(v) => toggleRow(document.id, v)"
                 />
