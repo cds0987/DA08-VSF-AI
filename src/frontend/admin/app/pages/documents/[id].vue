@@ -5,7 +5,7 @@ import PageHeader from '~/components/admin-ui/PageHeader.vue'
 import StatCard from '~/components/admin-ui/StatCard.vue'
 import { getApiErrorMessage, getApiStatus } from '~/lib/api/apiError'
 import documentService from '~/lib/api/documentService'
-import { previewMode, type PreviewMode } from '~/lib/documentPreview'
+import { previewKindFromMime, type PreviewKind } from '~/lib/documentPreview'
 import type { DocumentDetail } from '~/types'
 
 const route = useRoute()
@@ -62,13 +62,13 @@ const deleteDoc = async () => {
 
 // Viewer nhúng in-page: render file ngay trên /admin/documents/{id} (giống Google Drive),
 // KHÔNG mở tab mới / KHÔNG điều hướng location sang blob URL.
-type PreviewState = 'idle' | 'loading' | 'ready' | 'unsupported' | 'error'
+type PreviewState = 'idle' | 'loading' | 'ready' | 'error'
 const previewState = ref<PreviewState>('idle')
 const previewObjectUrl = ref<string | null>(null)
 const previewText = ref<string | null>(null)
 const previewBlob = ref<Blob | null>(null)
 const previewError = ref<string | null>(null)
-const previewKind = ref<PreviewMode>('download')
+const previewKind = ref<PreviewKind>('unknown')
 
 const resetPreview = () => {
   if (previewObjectUrl.value) URL.revokeObjectURL(previewObjectUrl.value)
@@ -87,32 +87,33 @@ const openPreview = async () => {
   if (!doc.value) return
   resetPreview()
   previewState.value = 'loading'
-  previewKind.value = previewMode(doc.value.file_type)
   try {
-    // Fetch bytes qua axios (interceptor tự gắn auth). Object-URL chỉ dùng làm src của
-    // iframe/img -> top-level URL vẫn là /admin/documents/{id}.
-    const blob = await documentService.getFileBlob(id)
+    // Fetch nội dung render-được (office đã convert -> PDF). Object-URL làm src iframe/img
+    // -> top-level URL vẫn /admin/documents/{id}.
+    const blob = await documentService.getPreviewBlob(id)
     previewBlob.value = blob
+    previewKind.value = previewKindFromMime(blob.type)
     if (previewKind.value === 'text') {
       previewText.value = await blob.text()
       previewState.value = 'ready'
-    } else if (previewKind.value === 'download') {
-      previewState.value = 'unsupported'
+    } else if (previewKind.value === 'unknown') {
+      previewState.value = 'error'
+      previewError.value = 'Không tạo được bản xem trước cho định dạng này.'
     } else {
       previewObjectUrl.value = URL.createObjectURL(blob)
       previewState.value = 'ready'
     }
   } catch (error) {
     previewState.value = 'error'
-    previewError.value = getApiErrorMessage(error, 'Failed to open the document file')
+    previewError.value = getApiErrorMessage(error, 'Không tạo được bản xem trước')
   }
 }
 
 const downloadFile = async () => {
   if (!doc.value) return
   try {
-    // Tải về bằng <a download> + object-URL rồi revoke — trang đứng yên, không điều hướng.
-    const blob = previewBlob.value ?? (await documentService.getFileBlob(id))
+    // Tải BẢN GỐC (không phải bản PDF preview). <a download> + revoke -> trang đứng yên.
+    const blob = await documentService.getFileBlob(id)
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -260,8 +261,23 @@ onUnmounted(() => {
             <div class="flex min-h-[70vh] flex-1 items-center justify-center overflow-auto bg-muted/30">
               <Loader2 v-if="previewState === 'loading'" class="h-7 w-7 animate-spin text-primary" />
 
-              <div v-else-if="previewState === 'error'" class="px-6 text-center text-[12.5px] text-destructive">
-                {{ previewError }}
+              <div v-else-if="previewState === 'error'" class="flex flex-col items-center gap-3 px-6 text-center">
+                <AlertCircle class="h-10 w-10 text-destructive opacity-70" />
+                <p class="text-[13px] font-medium text-foreground">{{ previewError || 'Không tạo được bản xem trước' }}</p>
+                <div class="flex items-center gap-2">
+                  <button
+                    class="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-[12.5px] hover:bg-accent"
+                    @click="openPreview"
+                  >
+                    <Loader2 v-if="previewState === 'loading'" class="h-3.5 w-3.5 animate-spin" /> Thử lại
+                  </button>
+                  <button
+                    class="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-[12.5px] hover:bg-accent"
+                    @click="downloadFile"
+                  >
+                    <Download class="h-3.5 w-3.5" /> Tải bản gốc
+                  </button>
+                </div>
               </div>
 
               <iframe
@@ -283,19 +299,6 @@ onUnmounted(() => {
                 class="h-[70vh] w-full overflow-auto whitespace-pre-wrap break-words p-4 text-left text-[12.5px] text-foreground"
               >{{ previewText }}</pre>
 
-              <div v-else class="flex flex-col items-center gap-3 px-6 text-center">
-                <FileText class="h-10 w-10 text-muted-foreground opacity-30" />
-                <p class="text-[13px] font-medium text-foreground">Không thể xem trước định dạng này</p>
-                <p class="text-[12px] text-muted-foreground">
-                  {{ doc.file_type.toUpperCase() }} không hiển thị trực tiếp trong trình duyệt.
-                </p>
-                <button
-                  class="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-[12.5px] hover:bg-accent"
-                  @click="downloadFile"
-                >
-                  <Download class="h-3.5 w-3.5" /> Tải về
-                </button>
-              </div>
             </div>
           </div>
 
