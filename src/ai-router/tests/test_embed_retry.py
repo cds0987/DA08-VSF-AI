@@ -109,9 +109,43 @@ def test_embeddings_gives_up_after_max_attempts():
     assert fake.embeddings.calls >= 2, "phải thử lại vài lần trước khi bỏ"
 
 
+class _RecordingEmbeddings:
+    """Ghi lại kwargs gửi upstream để soi encoding_format."""
+    def __init__(self):
+        self.calls = 0
+        self.last_kwargs: dict = {}
+
+    async def create(self, **kwargs):
+        self.calls += 1
+        self.last_kwargs = kwargs
+        return _Resp()
+
+
+class _RecordingClient:
+    def __init__(self):
+        self.embeddings = _RecordingEmbeddings()
+
+
+def test_embeddings_forces_float_encoding_format():
+    """REGRESSION (gốc base64-leak): client OpenAI SDK gửi NGẦM encoding_format=base64 ->
+    router là hop giữa, gọi upstream base64 TƯỜNG MINH -> SDK không auto-decode -> embedding
+    = base64 STR (vi phạm model list[float]) -> dưới tải data méo -> sorted(res.data) TypeError
+    -> doc chết. Router PHẢI ép float -> response luôn list[float], contract sạch."""
+    fake = _RecordingClient()
+    router = _router(fake)
+    asyncio.run(router.embeddings(
+        {"model": "embed", "input": ["x"], "encoding_format": "base64"}
+    ))
+    assert fake.embeddings.last_kwargs.get("encoding_format") == "float", (
+        f"router phải ÉP encoding_format=float (got "
+        f"{fake.embeddings.last_kwargs.get('encoding_format')!r}) — chống base64-leak"
+    )
+
+
 if __name__ == "__main__":
     test_embed_backoff_monotonic_and_capped()
     test_rag_short_cooldown_constant()
     test_embeddings_retries_then_succeeds()
     test_embeddings_gives_up_after_max_attempts()
+    test_embeddings_forces_float_encoding_format()
     print("OK")

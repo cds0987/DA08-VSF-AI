@@ -443,6 +443,14 @@ class Router:
             client = self.clients.get(dec.base_url, dec.api_key)
             out = {k: v for k, v in body.items() if k != "model"}
             out["model"] = dec.model_name
+            # GỐC base64-leak: OpenAI SDK client (rag-worker/query intent) gửi NGẦM
+            # encoding_format=base64 + tự decode khi parse. Nhưng router là HOP GIỮA: gọi
+            # upstream với base64 TƯỜNG MINH -> SDK router KHÔNG auto-decode -> resp.model_dump()
+            # cho embedding = base64 STR (vi phạm model list[float] -> Pydantic warning) -> dưới
+            # tải response méo -> client thấy data None/str -> sorted(res.data) TypeError ->
+            # classify PERMANENT -> doc chết. ÉP float: response LUÔN list[float], contract sạch.
+            # Client SDK gửi base64 vẫn OK (decoder chỉ chạy khi embedding là str -> list thì bỏ qua).
+            out["encoding_format"] = "float"
             t0 = time.monotonic()
             try:
                 resp = await client.embeddings.create(**out)
