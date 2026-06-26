@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -11,7 +12,24 @@ from app.application.exceptions import (
 from app.application.use_cases.documents.get_document_file_preview_use_case import (
     GetDocumentFilePreviewUseCase,
 )
+from app.domain.entities.document import Document, DocumentStatus
 from tests.unit.test_document_use_cases import InMemoryDocuments, document
+
+
+def _office_doc() -> Document:
+    """Document với tên thực tế (.docx) để kiểm tra thay thế extension."""
+    return Document(
+        id=str(uuid4()),
+        name="report.docx",
+        file_type="docx",
+        gcs_key="raw/report.docx",
+        status=DocumentStatus.INDEXED,
+        uploaded_by=str(uuid4()),
+        created_at=datetime.now(timezone.utc),
+        classification="internal",
+        allowed_departments=[],
+        allowed_user_ids=[],
+    )
 
 
 class FakePreviewStorage:
@@ -72,12 +90,13 @@ async def test_native_pdf_passthrough_inline() -> None:
 
     assert result.content == b"%PDF-1.4 native"
     assert result.media_type == "application/pdf"
+    assert result.filename == doc.name  # native: giữ nguyên tên gốc ("policy.pdf")
     assert storage.uploads == []  # native KHÔNG cache
 
 
 @pytest.mark.asyncio
 async def test_office_cache_miss_converts_and_caches() -> None:
-    doc = document(file_type="docx")
+    doc = _office_doc()  # name="report.docx"
     storage = FakePreviewStorage()
     storage.seed_original(doc.gcs_key)
     converter = CountingConverter()
@@ -87,13 +106,14 @@ async def test_office_cache_miss_converts_and_caches() -> None:
 
     assert result.media_type == "application/pdf"
     assert result.content == b"%PDF-1.7 converted"
+    assert result.filename == "report.pdf"  # extension thay thành .pdf
     assert converter.calls == 1
     assert storage.uploads == [(f"previews/{doc.id}.pdf", b"%PDF-1.7 converted")]
 
 
 @pytest.mark.asyncio
 async def test_office_cache_hit_skips_convert() -> None:
-    doc = document(file_type="docx")
+    doc = _office_doc()  # name="report.docx"
     storage = FakePreviewStorage()
     storage.seed_original(doc.gcs_key)
     storage.seed_preview(f"previews/{doc.id}.pdf", b"%PDF-1.5 cached")
@@ -103,6 +123,7 @@ async def test_office_cache_hit_skips_convert() -> None:
     result = await uc.execute(viewer(), doc.id)
 
     assert result.content == b"%PDF-1.5 cached"
+    assert result.filename == "report.pdf"  # cache-hit cũng phải trả .pdf
     assert converter.calls == 0
 
 

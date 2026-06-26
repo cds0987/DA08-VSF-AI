@@ -1,6 +1,7 @@
 import logging
 import time
 from dataclasses import dataclass
+from pathlib import PurePath
 from typing import Any, Protocol
 
 from app.application.auth import CurrentUser
@@ -21,6 +22,11 @@ from app.domain.repositories.document_repository import DocumentRepository
 logger = logging.getLogger(__name__)
 
 _PDF_MEDIA_TYPE = "application/pdf"
+
+
+def _pdf_filename(name: str) -> str:
+    """Thay extension thành .pdf — dùng cho office preview để "Save As" đúng định dạng."""
+    return f"{PurePath(name).stem}.pdf"
 
 
 class PreviewStorage(Protocol):
@@ -80,11 +86,11 @@ class GetDocumentFilePreviewUseCase:
         preview_key = f"previews/{document_id}.pdf"
         cached = await self._read_cache(preview_key, document_id, file_type)
         if cached is not None:
-            return DocumentFilePreviewResult(cached, _PDF_MEDIA_TYPE, document.name)
+            return DocumentFilePreviewResult(cached, _PDF_MEDIA_TYPE, _pdf_filename(document.name))
 
         pdf = await self._convert(document, file_type)
         await self._write_cache(preview_key, pdf, document_id)
-        return DocumentFilePreviewResult(pdf, _PDF_MEDIA_TYPE, document.name)
+        return DocumentFilePreviewResult(pdf, _PDF_MEDIA_TYPE, _pdf_filename(document.name))
 
     async def _read_cache(self, preview_key: str, document_id: str, file_type: str) -> bytes | None:
         try:
