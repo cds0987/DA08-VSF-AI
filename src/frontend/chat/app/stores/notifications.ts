@@ -295,6 +295,11 @@ export const useNotificationStore = defineStore('notifications', () => {
 
   function removeItem(id: string) {
     dismissedIds.add(id)
+    const removed = items.value.find((item) => item.id === id)
+    if (removed) {
+      total.value = Math.max(0, total.value - 1)
+      if (!removed.is_read) unreadCount.value = Math.max(0, unreadCount.value - 1)
+    }
     items.value = items.value.filter((item) => item.id !== id)
   }
 
