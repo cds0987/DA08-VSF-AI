@@ -41,7 +41,7 @@ async def test_stream_returns_pdf_bytes_inline() -> None:
 
     assert result.content == b"%PDF-1.4 hello"
     assert result.media_type == "application/pdf"
-    assert result.disposition == "inline"
+    assert result.disposition == "attachment"
     assert result.filename == "policy.pdf"
     assert storage.downloads == [doc.gcs_key]
 

@@ -59,6 +59,10 @@ class Settings(BaseModel):
     s3_secret_access_key: str | None = getenv("S3_SECRET_ACCESS_KEY")
     s3_region: str = getenv("S3_REGION", "auto")
 
+    # Gotenberg sidecar: convert office -> PDF (compose network, KHÔNG host port).
+    gotenberg_url: str = getenv("GOTENBERG_URL", "http://gotenberg:3000")
+    gotenberg_timeout_seconds: float = float(getenv("GOTENBERG_TIMEOUT_SECONDS", "30"))
+
     def __init__(self, **data: object) -> None:
         super().__init__(**data)
         _validate_jwt_secret(self.jwt_secret_key)

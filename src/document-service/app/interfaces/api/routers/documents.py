@@ -16,6 +16,9 @@ from app.application.use_cases.documents.bulk_delete_documents_use_case import (
     BulkDeleteDocumentsUseCase,
 )
 from app.application.use_cases.documents.delete_document_use_case import DeleteDocumentUseCase
+from app.application.use_cases.documents.get_document_file_preview_use_case import (
+    GetDocumentFilePreviewUseCase,
+)
 from app.application.use_cases.documents.get_document_file_stream_use_case import (
     GetDocumentFileStreamUseCase,
 )
@@ -31,6 +34,7 @@ from app.interfaces.api.dependencies import (
     get_current_user,
     get_bulk_delete_documents_use_case,
     get_delete_document_use_case,
+    get_get_document_file_preview_use_case,
     get_get_document_file_stream_use_case,
     get_get_document_file_use_case,
     get_get_document_use_case,
@@ -184,6 +188,47 @@ async def get_document_file(
         url=result.url,
         file_type=result.file_type,
         expires_in=result.expires_in,
+    )
+
+
+@router.get("/{document_id}/file/preview")
+async def get_document_file_preview(
+    document_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    use_case: GetDocumentFilePreviewUseCase = Depends(get_get_document_file_preview_use_case),
+) -> Response:
+    """Nội dung render-được inline trong viewer (giữ URL /admin/documents/{id}).
+
+    Native (pdf/ảnh/text) passthrough; office convert sang PDF qua Gotenberg (cache GCS).
+    Gotenberg lỗi/timeout -> 503 (FE hiện error card: Thử lại + Tải bản gốc).
+    """
+    try:
+        result = await use_case.execute(user, document_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.detail) from exc
+    except PermissionDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc) or "Khong co quyen xem tai lieu nay",
+        ) from exc
+    except StorageError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=exc.detail,
+        ) from exc
+
+    ascii_name = result.filename.encode("ascii", "ignore").decode("ascii") or "document"
+    disposition = (
+        f"inline; filename=\"{ascii_name}\"; "
+        f"filename*=UTF-8''{quote(result.filename)}"
+    )
+    return Response(
+        content=result.content,
+        media_type=result.media_type,
+        headers={
+            "Content-Disposition": disposition,
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

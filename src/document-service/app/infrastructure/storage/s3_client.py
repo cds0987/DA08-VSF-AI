@@ -51,6 +51,20 @@ class S3StorageClient:
 
         return await asyncio.to_thread(_download)
 
+    async def file_exists(self, key: str) -> bool:
+        def _head() -> bool:
+            from botocore.exceptions import ClientError
+
+            try:
+                self._client.head_object(Bucket=self.bucket, Key=key)
+                return True
+            except ClientError as e:
+                if e.response["Error"]["Code"] in ("404", "NoSuchKey"):
+                    return False
+                raise
+
+        return await asyncio.to_thread(_head)
+
     async def generate_presigned_url(self, key: str, expires_in: int = 300) -> str:
         return await asyncio.to_thread(
             self._client.generate_presigned_url,

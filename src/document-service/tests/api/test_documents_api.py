@@ -380,6 +380,10 @@ def test_document_file_invalid_signed_url_returns_non_200() -> None:
 from app.application.use_cases.documents.get_document_file_stream_use_case import (  # noqa: E402
     GetDocumentFileStreamUseCase,
 )
+from app.application.use_cases.documents.get_document_file_preview_use_case import (  # noqa: E402
+    GetDocumentFilePreviewUseCase,
+)
+from app.interfaces.api.dependencies import get_get_document_file_preview_use_case  # noqa: E402
 from tests.unit.test_document_file_stream_use_case import StreamStorage  # noqa: E402
 
 
@@ -400,7 +404,7 @@ def test_file_raw_streams_pdf_inline() -> None:
     assert response.status_code == 200
     assert response.content == b"%PDF-1.4 stream-body"
     assert response.headers["content-type"] == "application/pdf"
-    assert "inline" in response.headers["content-disposition"]
+    assert "attachment" in response.headers["content-disposition"]
     assert "policy.pdf" in response.headers["content-disposition"]
 
 
@@ -435,4 +439,99 @@ def test_file_raw_forbidden_when_acl_does_not_match() -> None:
     )
 
     assert response.status_code == 403
+
+
+# --- /file/preview: convert office sang PDF qua Gotenberg, cache GCS, native passthrough ---
+
+
+class _PreviewStorage:
+    def __init__(self) -> None:
+        self._files: dict[str, bytes] = {}
+        self.uploads: list[tuple[str, bytes]] = []
+
+    def seed(self, key: str, content: bytes) -> None:
+        self._files[key] = content
+
+    async def file_exists(self, key: str) -> bool:
+        return key in self._files
+
+    async def download_file(self, key: str) -> bytes:
+        if key not in self._files:
+            raise RuntimeError("not found")
+        return self._files[key]
+
+    async def upload_file(self, key: str, content: bytes, content_type: str | None = None) -> None:
+        self.uploads.append((key, content))
+        self._files[key] = content
+
+
+class _OkConverter:
+    async def convert_to_pdf(self, content: bytes, filename: str) -> bytes:
+        return b"%PDF-1.7 converted"
+
+
+class _BadConverter:
+    async def convert_to_pdf(self, content: bytes, filename: str) -> bytes:
+        from app.application.exceptions import ConversionError
+        raise ConversionError("boom")
+
+
+def test_file_preview_streams_pdf_inline() -> None:
+    doc = sample_document(document_id=str(uuid4()), file_type="pdf")
+    repo = InMemoryDocuments([doc])
+    storage = _PreviewStorage()
+    storage.seed(doc.gcs_key, b"%PDF-1.4 native")
+    app.dependency_overrides[dependencies.get_current_user] = normal_user
+    app.dependency_overrides[get_get_document_file_preview_use_case] = lambda: (
+        GetDocumentFilePreviewUseCase(repo, storage, _OkConverter())
+    )
+
+    response = TestClient(app).get(
+        f"/documents/{doc.id}/file/preview",
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert "inline" in response.headers["content-disposition"]
+    assert response.content == b"%PDF-1.4 native"
+
+
+def test_file_preview_converts_office_to_pdf() -> None:
+    doc = sample_document(document_id=str(uuid4()), file_type="docx")
+    repo = InMemoryDocuments([doc])
+    storage = _PreviewStorage()
+    storage.seed(doc.gcs_key, b"docx-bytes")
+    app.dependency_overrides[dependencies.get_current_user] = normal_user
+    app.dependency_overrides[get_get_document_file_preview_use_case] = lambda: (
+        GetDocumentFilePreviewUseCase(repo, storage, _OkConverter())
+    )
+
+    response = TestClient(app).get(
+        f"/documents/{doc.id}/file/preview",
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert response.content == b"%PDF-1.7 converted"
+    assert storage.uploads == [(f"previews/{doc.id}.pdf", b"%PDF-1.7 converted")]
+
+
+def test_file_preview_returns_503_on_convert_error() -> None:
+    doc = sample_document(document_id=str(uuid4()), file_type="docx")
+    repo = InMemoryDocuments([doc])
+    storage = _PreviewStorage()
+    storage.seed(doc.gcs_key, b"docx-bytes")
+    app.dependency_overrides[dependencies.get_current_user] = normal_user
+    app.dependency_overrides[get_get_document_file_preview_use_case] = lambda: (
+        GetDocumentFilePreviewUseCase(repo, storage, _BadConverter())
+    )
+
+    response = TestClient(app).get(
+        f"/documents/{doc.id}/file/preview",
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 503
 
