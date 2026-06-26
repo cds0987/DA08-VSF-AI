@@ -93,6 +93,66 @@ def _classify_mosa_outcome(answer: str, route: str) -> int:
     return Outcome.SUCCESS.value
 
 
+# Trần an toàn để metadata.agent KHÔNG phình DB (reasoning heavy có thể vài KB/dòng).
+_THOUGHT_TEXT_CAP = 8000
+_TRACE_CAP = 60
+
+
+def _accumulate_agent_meta(
+    ev: dict,
+    thoughts: list[dict],
+    models: list[dict],
+    trace: list[dict],
+) -> None:
+    """Gom event SSE -> thoughts/models/trace (cùng shape FE dựng từ stream). Gộp token
+    'thought' liên tiếp cùng node vào 1 dòng; ghép acting->observing thành 1 bước trace."""
+    phase = ev.get("phase")
+    if phase == "thought" and ev.get("node") and ev.get("text"):
+        if thoughts and thoughts[-1]["node"] == ev["node"]:
+            thoughts[-1]["text"] = (thoughts[-1]["text"] + ev["text"])[:_THOUGHT_TEXT_CAP]
+        else:
+            thoughts.append({"node": ev["node"], "text": ev["text"][:_THOUGHT_TEXT_CAP]})
+    elif phase == "model_used" and ev.get("node") and ev.get("model"):
+        m = {"node": ev["node"], "model": ev["model"]}
+        if m not in models:
+            models.append(m)
+    elif phase == "acting" and ev.get("tool") and len(trace) < _TRACE_CAP:
+        trace.append({
+            "tool": ev["tool"],
+            "args": ev.get("tool_args") or {},
+            "iteration": ev.get("iterations") or len(trace) + 1,
+            "pending": True,
+        })
+    elif phase == "observing" and ev.get("tool"):
+        summ = ev.get("tool_result_summary") or {}
+        for e in reversed(trace):
+            if e["tool"] == ev["tool"] and e.get("pending"):
+                e["resultCount"] = summ.get("count")
+                e["resultDocs"] = summ.get("docs")  # bỏ raw (lớn) -> giữ DB gọn
+                e["pending"] = False
+                break
+
+
+def _build_agent_meta(
+    thoughts: list[dict],
+    plan: dict | None,
+    trace: list[dict],
+    models: list[dict],
+) -> dict:
+    """Đóng gói metadata.agent; chỉ thêm field có dữ liệu -> message thường không phình."""
+    meta: dict = {}
+    if thoughts:
+        meta["thoughts"] = thoughts
+    if plan and plan.get("steps"):
+        meta["plan"] = plan
+    if trace:
+        # Bỏ cờ pending còn sót (tool chưa kịp observing) -> FE render gọn.
+        meta["trace"] = [{k: v for k, v in e.items() if k != "pending"} for e in trace]
+    if models:
+        meta["models"] = models
+    return meta
+
+
 class QueryOrchestrationUseCase:
     def __init__(
         self,
@@ -516,6 +576,12 @@ class QueryOrchestrationUseCase:
 
         task = asyncio.create_task(_run_graph())
         _first_logged = False
+        # Tích lũy "suy nghĩ của agent" để LƯU kèm message (sống qua reload/đa thiết bị) —
+        # cùng shape FE dựng từ SSE (xem stores/chat.ts) để rehydrate thẳng, không map lại.
+        agent_thoughts: list[dict] = []
+        agent_models: list[dict] = []
+        agent_trace: list[dict] = []
+        agent_plan: dict | None = None
         while True:
             ev = await progress_q.get()
             if ev is _SENTINEL:
@@ -536,6 +602,16 @@ class QueryOrchestrationUseCase:
                 )
             if ev.get("token"):
                 streamed_tokens = True
+            _accumulate_agent_meta(ev, agent_thoughts, agent_models, agent_trace)
+            if ev.get("phase") == "plan" and isinstance(ev.get("steps"), list):
+                agent_plan = {
+                    "route": ev.get("route") or "heavy",
+                    "steps": [{**s, "status": "pending"} for s in ev["steps"]],
+                }
+            elif ev.get("phase") == "step" and ev.get("step_id") is not None and agent_plan:
+                for st in agent_plan["steps"]:
+                    if st.get("id") == ev["step_id"] and ev.get("status"):
+                        st["status"] = ev["status"]
             ev.setdefault("agent_mode", "orchestrator_workers")
             ev.setdefault("session_id", session_id)
             yield _emit_guard(ev)
@@ -589,7 +665,11 @@ class QueryOrchestrationUseCase:
                 })
                 await asyncio.sleep(0)
 
-        message_id = await self._save_assistant(user.id, session_id, answer, sources, started, question=question)
+        agent_meta = _build_agent_meta(agent_thoughts, agent_plan, agent_trace, agent_models)
+        message_id = await self._save_assistant(
+            user.id, session_id, answer, sources, started, question=question,
+            metadata={"agent": agent_meta} if agent_meta else None,
+        )
         yield _emit_guard({
             "done": True,
             "sources": sources,
@@ -923,9 +1003,13 @@ class QueryOrchestrationUseCase:
         sources: list[dict],
         started: float,
         question: str = "",
+        metadata: dict | None = None,
     ) -> str | None:
         """Trả id row message vừa lưu (nếu có) -> đưa vào done event làm message_id ổn
-        định cho FE patch trạng thái action (xem docs/leave-action-state-b2.md)."""
+        định cho FE patch trạng thái action (xem docs/leave-action-state-b2.md).
+
+        metadata.agent (thoughts/plan/models/trace) -> lưu kèm message để khối "suy nghĩ
+        của agent" SỐNG qua reload/đa thiết bị (trước đây chỉ cache localStorage client)."""
         latency_ms = int((perf_counter() - started) * 1000)
         message_id: str | None = None
         save_message_detail = getattr(self._conversation_repo, "save_message_detail", None)
@@ -940,6 +1024,7 @@ class QueryOrchestrationUseCase:
                 sources=sources,
                 latency_ms=latency_ms,
                 create_if_missing=False,
+                metadata=metadata or None,
             )
             message_id = str(stored.id) if stored is not None else None
             # FIRE-AND-FORGET: gộp summary là memory phụ cho lượt SAU, KHÔNG liên quan câu trả lời

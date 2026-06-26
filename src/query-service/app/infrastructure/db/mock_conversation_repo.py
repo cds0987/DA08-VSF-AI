@@ -84,6 +84,7 @@ class InMemoryConversationRepository(ConversationRepository):
         sources: list[dict] | None = None,
         latency_ms: int | None = None,
         create_if_missing: bool = True,
+        metadata: dict | None = None,
     ) -> StoredMessage | None:
         conversation = self._ensure_conversation(
             user_id,
@@ -102,6 +103,7 @@ class InMemoryConversationRepository(ConversationRepository):
             created_at=datetime.now(timezone.utc),
             sources=sources or [],
             latency_ms=latency_ms,
+            metadata=metadata or {},
         )
         conversation.messages.append(message)
         conversation.updated_at = datetime.now(timezone.utc)

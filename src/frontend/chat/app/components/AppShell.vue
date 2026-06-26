@@ -321,10 +321,10 @@ const userInitials = computed(() => {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
-          side="right"
-          align="end"
-          :side-offset="12"
-          class="w-[220px] bg-white dark:bg-chat-input shadow-lg border-slate-100 dark:border-sidebar-border text-slate-900 dark:text-sidebar-foreground p-1.5"
+          side="top"
+          align="start"
+          :side-offset="8"
+          class="w-[240px] bg-white dark:bg-chat-input shadow-lg border-slate-100 dark:border-sidebar-border text-slate-900 dark:text-sidebar-foreground p-1.5"
         >
           <!-- Header: avatar + email (hữu ích khi sidebar thu gọn) -->
           <DropdownMenuLabel class="flex items-center gap-2.5 px-2 py-1.5">

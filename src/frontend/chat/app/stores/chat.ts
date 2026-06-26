@@ -253,6 +253,9 @@ function toChatMessage(message: ConversationHistoryMessage, userId?: string): Ch
     const st = a.idempotency_key ? actionStates?.[a.idempotency_key] : undefined
     return st ? { ...a, status: st.status, request_id: st.request_id, leave_status: st.leave_status } : a
   })
+  // Khối "suy nghĩ của agent" server lưu kèm (metadata.agent) -> hiện lại sau reload/đa
+  // thiết bị, không phụ thuộc cache localStorage. Chỉ gắn field có dữ liệu.
+  const agent = message.metadata?.agent
   return {
     id: message.id,
     role: message.role,
@@ -267,6 +270,10 @@ function toChatMessage(message: ConversationHistoryMessage, userId?: string): Ch
     timestamp: Number.isNaN(createdAt.getTime())
       ? message.created_at
       : createdAt.toLocaleString(),
+    thoughts: agent?.thoughts?.length ? agent.thoughts : undefined,
+    plan: agent?.plan?.steps?.length ? agent.plan : undefined,
+    trace: agent?.trace?.length ? agent.trace : undefined,
+    models: agent?.models?.length ? agent.models : undefined,
   }
 }
 
