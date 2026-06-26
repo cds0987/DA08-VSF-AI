@@ -47,11 +47,12 @@ const TOOL_ICON: Record<string, any> = { rag_search: Search, hr_query: Database 
 // KHÔNG thêm group -> style ổn định; node mới mượn style group của nó.
 // Đơn sắc kiểu DeepSeek: chỉ KHÁC icon từng group, màu tiêu đề/marker dùng CHUNG tông xám.
 const GROUP_HEAD = 'text-slate-600 dark:text-foreground/80'
-const GROUP_STYLE: Record<SseGroup, { title: string; icon: any }> = {
-  orchestrator: { title: 'Orchestrator', icon: GitBranch },
-  worker: { title: 'Worker', icon: Search },
-  verify: { title: 'Verify — Kiểm tra & tổng hợp', icon: ShieldCheck },
-  answer: { title: 'Soạn câu trả lời', icon: Sparkles },
+const WORKER_TINT = 'text-blue-500 dark:text-blue-400'
+const GROUP_STYLE: Record<SseGroup, { title: string; icon: any; tint: string; ring: string }> = {
+  orchestrator: { title: 'Orchestrator', icon: GitBranch, tint: 'text-indigo-500 dark:text-indigo-400', ring: 'ring-indigo-200 dark:ring-indigo-500/30' },
+  worker: { title: 'Worker', icon: Search, tint: WORKER_TINT, ring: 'ring-blue-200 dark:ring-blue-500/30' },
+  verify: { title: 'Verify — Kiểm tra & tổng hợp', icon: ShieldCheck, tint: 'text-emerald-500 dark:text-emerald-400', ring: 'ring-emerald-200 dark:ring-emerald-500/30' },
+  answer: { title: 'Soạn câu trả lời', icon: Sparkles, tint: 'text-amber-500 dark:text-amber-400', ring: 'ring-amber-200 dark:ring-amber-500/30' },
 }
 
 // thought gom theo group (qua nodeGroup của hợp đồng). Node lạ -> 'orchestrator'.
@@ -125,9 +126,10 @@ function resultLabel(e: TraceEntry): string {
           <div class="relative">
             <span
               aria-hidden="true"
-              class="absolute -left-7 top-0 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-slate-200 dark:bg-background dark:ring-white/10"
+              class="absolute -left-7 top-0 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 dark:bg-background"
+              :class="GROUP_STYLE[g].ring"
             >
-              <component :is="GROUP_STYLE[g].icon" class="h-3 w-3 text-slate-500 dark:text-muted-foreground" />
+              <component :is="GROUP_STYLE[g].icon" class="h-3 w-3" :class="GROUP_STYLE[g].tint" />
             </span>
             <div class="flex items-center gap-1.5">
               <span class="text-[15px] font-medium" :class="GROUP_HEAD">{{ GROUP_STYLE[g].title }}</span>
@@ -143,10 +145,10 @@ function resultLabel(e: TraceEntry): string {
 
           <!-- SUB-STEP (orchestrator): plan step + kết quả tool — dot nhỏ canh thẳng trên CÙNG rail -->
           <template v-if="g === 'orchestrator'">
-            <div v-for="s in (plan?.steps || [])" :key="`p-${s.id}`" class="relative">
+            <div v-for="(s, i) in (plan?.steps || [])" :key="`p-${s.id}`" class="relative tl-step-enter" :style="{ '--i': i }">
               <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full" :class="stepDotColor(s.status)" />
               <div class="flex items-center gap-1.5 text-[15px]">
-                <component :is="ROLE_ICON[s.role] ?? FileSearch" class="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-muted-foreground" />
+                <component :is="ROLE_ICON[s.role] ?? FileSearch" class="h-3.5 w-3.5 shrink-0" :class="WORKER_TINT" />
                 <span class="flex-1 truncate font-medium text-slate-700 dark:text-foreground/80" :title="ROLE_LABEL[s.role] ?? s.role">{{ ROLE_LABEL[s.role] ?? s.role }}</span>
                 <Loader2 v-if="s.status === 'running'" class="h-3 w-3 shrink-0 animate-spin text-slate-500 dark:text-muted-foreground" />
                 <XCircle v-else-if="s.status === 'error'" class="h-3 w-3 shrink-0 text-red-400" />
@@ -154,10 +156,10 @@ function resultLabel(e: TraceEntry): string {
               </div>
             </div>
 
-            <div v-for="(e, i) in trace" :key="`t-${i}`" class="relative">
+            <div v-for="(e, i) in trace" :key="`t-${i}`" class="relative tl-step-enter" :style="{ '--i': i }">
               <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full bg-slate-300 dark:bg-white/25" />
               <div class="flex items-center gap-1.5">
-                <component :is="TOOL_ICON[e.tool] ?? Search" class="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-muted-foreground" />
+                <component :is="TOOL_ICON[e.tool] ?? Search" class="h-3.5 w-3.5 shrink-0" :class="WORKER_TINT" />
                 <span class="text-[15px] font-medium text-slate-700 dark:text-foreground/80">{{ TOOL_LABEL[e.tool] ?? e.tool }}</span>
                 <span v-if="queryLabel(e)" class="flex-1 truncate text-[13px] font-medium text-slate-500 dark:text-muted-foreground">{{ queryLabel(e) }}</span>
               </div>
