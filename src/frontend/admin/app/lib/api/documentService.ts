@@ -1,5 +1,6 @@
 import axiosClient from './axiosClient'
 import type {
+  BulkDeleteResponse,
   Classification,
   DocumentDetail,
   DocumentFileResponse,
@@ -80,6 +81,33 @@ const documentService = {
   async deleteDocument(documentId: string): Promise<MessageResponse> {
     const response = await axiosClient.delete<MessageResponse>(`/${documentId}`, { service: 'document' })
     return response.data
+  },
+
+  // Xóa nhiều doc trong 1 request. Backend xử lý best-effort: trả về số đã xóa +
+  // danh sách not_found/failed để FE báo tóm tắt.
+  async deleteDocuments(documentIds: string[]): Promise<BulkDeleteResponse> {
+    const response = await axiosClient.post<BulkDeleteResponse>(
+      '/bulk-delete',
+      { document_ids: documentIds },
+      { service: 'document' },
+    )
+    return response.data
+  },
+
+  // Gom TẤT CẢ id khớp bộ lọc qua nhiều trang (phục vụ "chọn tất cả N"). Lặp theo
+  // limit=200 (max backend) cho tới khi đủ total.
+  async fetchAllIds(status?: DocumentStatus): Promise<string[]> {
+    const ids: string[] = []
+    const pageSize = 200
+    let offset = 0
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const page = await this.listDocuments({ status, limit: pageSize, offset })
+      ids.push(...page.items.map(item => item.id))
+      offset += pageSize
+      if (offset >= page.total || page.items.length === 0) break
+    }
+    return ids
   },
 }
 

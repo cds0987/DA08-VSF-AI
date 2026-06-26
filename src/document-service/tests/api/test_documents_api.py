@@ -139,6 +139,59 @@ def test_admin_can_list_get_and_delete_documents() -> None:
     assert publisher.access_payloads[0]["deleted"] is True
 
 
+def test_admin_bulk_delete_removes_many() -> None:
+    from app.application.use_cases.documents.bulk_delete_documents_use_case import (
+        BulkDeleteDocumentsUseCase,
+    )
+
+    docs = [sample_document(document_id=str(uuid4())) for _ in range(3)]
+    repo = InMemoryDocuments(docs)
+    publisher = FakePublisher()
+    delete_uc = DeleteDocumentUseCase(repo, FakeStorage(), publisher, FakeAudit())
+    app.dependency_overrides[dependencies.get_current_user] = admin_user
+    app.dependency_overrides[dependencies.get_bulk_delete_documents_use_case] = (
+        lambda: BulkDeleteDocumentsUseCase(delete_uc)
+    )
+
+    response = TestClient(app).post(
+        "/documents/bulk-delete",
+        json={"document_ids": [d.id for d in docs] + ["missing-id"]},
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["deleted"] == 3
+    assert body["not_found"] == ["missing-id"]
+    assert body["failed"] == []
+    assert len(publisher.access_payloads) == 3
+    assert all(p["deleted"] is True for p in publisher.access_payloads)
+
+
+def test_bulk_delete_requires_admin() -> None:
+    app.dependency_overrides[dependencies.get_current_user] = normal_user
+
+    response = TestClient(app).post(
+        "/documents/bulk-delete",
+        json={"document_ids": [DOC_ID]},
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_bulk_delete_rejects_empty_list() -> None:
+    app.dependency_overrides[dependencies.get_current_user] = admin_user
+
+    response = TestClient(app).post(
+        "/documents/bulk-delete",
+        json={"document_ids": []},
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 422
+
+
 def test_authorized_user_can_get_document_detail() -> None:
     doc = sample_document(classification="secret", allowed_departments=["Finance"])
     repo = InMemoryDocuments([doc])

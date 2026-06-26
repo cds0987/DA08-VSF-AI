@@ -12,6 +12,9 @@ from app.application.exceptions import (
     ValidationError,
 )
 from app.application.use_cases.documents.common import ALLOWED_EXTENSIONS, MAX_FILE_BYTES
+from app.application.use_cases.documents.bulk_delete_documents_use_case import (
+    BulkDeleteDocumentsUseCase,
+)
 from app.application.use_cases.documents.delete_document_use_case import DeleteDocumentUseCase
 from app.application.use_cases.documents.get_document_file_stream_use_case import (
     GetDocumentFileStreamUseCase,
@@ -26,6 +29,7 @@ from app.infrastructure.db.postgres_audit_log_repository import PostgresAuditLog
 from app.interfaces.api.dependencies import (
     get_audit_logger,
     get_current_user,
+    get_bulk_delete_documents_use_case,
     get_delete_document_use_case,
     get_get_document_file_stream_use_case,
     get_get_document_file_use_case,
@@ -36,6 +40,8 @@ from app.interfaces.api.dependencies import (
 )
 from app.interfaces.api.schemas.audit import AuditLogItem, AuditLogList
 from app.interfaces.api.schemas.document import (
+    BulkDeleteRequest,
+    BulkDeleteResponse,
     DocumentDetail,
     DocumentFileResponse,
     DocumentItem,
@@ -220,6 +226,26 @@ async def get_document_file_raw(
             "Content-Disposition": disposition,
             "X-Content-Type-Options": "nosniff",
         },
+    )
+
+
+@router.post("/bulk-delete", response_model=BulkDeleteResponse)
+async def bulk_delete_documents(
+    payload: BulkDeleteRequest,
+    request: Request,
+    actor: CurrentUser = Depends(require_admin),
+    use_case: BulkDeleteDocumentsUseCase = Depends(get_bulk_delete_documents_use_case),
+) -> BulkDeleteResponse:
+    result = await use_case.execute(
+        actor=actor,
+        document_ids=payload.document_ids,
+        ip_address=request.client.host if request.client else None,
+    )
+    return BulkDeleteResponse(
+        deleted=result.deleted,
+        not_found=result.not_found,
+        failed=result.failed,
+        message=result.message,
     )
 
 

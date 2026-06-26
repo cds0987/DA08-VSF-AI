@@ -9,6 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.auth import CurrentUser
 from app.application.exceptions import PermissionDeniedError
+from app.application.use_cases.documents.bulk_delete_documents_use_case import (
+    BulkDeleteDocumentsUseCase,
+)
 from app.application.use_cases.documents.delete_document_use_case import DeleteDocumentUseCase
 from app.application.use_cases.documents.get_document_file_stream_use_case import (
     GetDocumentFileStreamUseCase,
@@ -119,6 +122,12 @@ def get_delete_document_use_case(
     audit_logger: PostgresAuditLogRepository = Depends(get_audit_logger),
 ) -> DeleteDocumentUseCase:
     return DeleteDocumentUseCase(document_repository, storage, publisher, audit_logger)
+
+
+def get_bulk_delete_documents_use_case(
+    delete_use_case: DeleteDocumentUseCase = Depends(get_delete_document_use_case),
+) -> BulkDeleteDocumentsUseCase:
+    return BulkDeleteDocumentsUseCase(delete_use_case)
 
 
 async def get_current_user(
