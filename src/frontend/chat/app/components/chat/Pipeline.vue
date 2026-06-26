@@ -91,7 +91,7 @@ function getResultLabel(entry: TraceEntry): string {
   <div class="px-4 py-3">
     <!-- header luồng suy nghĩ -->
     <div class="mb-2.5 flex items-center gap-2 text-[15px] font-medium text-slate-700 dark:text-foreground/80">
-      <Sparkles class="h-4 w-4 text-slate-400 dark:text-muted-foreground" /> Agent đang xử lý
+      <Sparkles class="h-4 w-4 text-slate-500 dark:text-muted-foreground" /> Agent đang xử lý
     </div>
 
     <div class="relative pl-7">
@@ -108,7 +108,7 @@ function getResultLabel(entry: TraceEntry): string {
               class="absolute -left-7 top-0 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 dark:bg-background"
               :class="orchActive ? 'ring-slate-300 dark:ring-white/20' : 'ring-slate-200 dark:ring-white/10'"
             >
-              <GitBranch class="h-3 w-3 text-slate-400 dark:text-muted-foreground" />
+              <GitBranch class="h-3 w-3 text-slate-500 dark:text-muted-foreground" />
             </span>
             <div class="flex items-center gap-1.5">
               <span class="text-[15px] font-medium text-slate-600 dark:text-foreground/80" :class="orchActive && 'ai-shimmer'">Orchestrator</span>
@@ -125,8 +125,8 @@ function getResultLabel(entry: TraceEntry): string {
           <div v-for="s in (plan?.steps || [])" :key="`p-${s.id}`" class="relative">
             <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full" :class="stepDotColor(s.status)" />
             <div class="flex items-center gap-1.5 text-[15px]">
-              <component :is="ROLE_ICON[s.role] ?? FileSearch" class="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-muted-foreground" />
-              <span class="flex-1 truncate font-medium text-slate-700 dark:text-foreground/80" :class="s.status === 'running' && 'ai-shimmer'">{{ ROLE_LABEL[s.role] ?? s.role }}</span>
+              <component :is="ROLE_ICON[s.role] ?? FileSearch" class="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-muted-foreground" />
+              <span class="flex-1 truncate font-medium text-slate-700 dark:text-foreground/80" :class="s.status === 'running' && 'ai-shimmer'" :title="ROLE_LABEL[s.role] ?? s.role">{{ ROLE_LABEL[s.role] ?? s.role }}</span>
               <XCircle v-if="s.status === 'error'" class="h-3 w-3 shrink-0 text-red-400" />
             </div>
           </div>
@@ -135,11 +135,11 @@ function getResultLabel(entry: TraceEntry): string {
           <div v-for="(entry, i) in traceLog" :key="`t-${i}`" class="relative">
             <span aria-hidden="true" class="absolute -left-[22px] top-[7px] h-1.5 w-1.5 rounded-full" :class="entry.pending ? 'bg-blue-500' : 'bg-slate-300 dark:bg-white/25'" />
             <div class="flex items-center gap-1.5">
-              <component :is="TOOL_ICON[entry.tool] ?? Search" class="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-muted-foreground" />
+              <component :is="TOOL_ICON[entry.tool] ?? Search" class="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-muted-foreground" />
               <span class="text-[15px] font-medium text-slate-700 dark:text-foreground/80" :class="entry.pending && 'ai-shimmer'">{{ TOOL_LABEL[entry.tool] ?? entry.tool }}</span>
               <span v-if="getQueryLabel(entry)" class="flex-1 truncate text-[13px] font-medium text-slate-500 dark:text-muted-foreground">{{ getQueryLabel(entry) }}</span>
             </div>
-            <div v-if="!entry.pending && getResultLabel(entry)" class="mt-0.5 pl-5 text-[13px] font-medium text-slate-400 dark:text-muted-foreground/70">{{ getResultLabel(entry) }}</div>
+            <div v-if="!entry.pending && getResultLabel(entry)" class="mt-0.5 pl-5 text-[13px] font-medium text-slate-500 dark:text-muted-foreground">{{ getResultLabel(entry) }}</div>
           </div>
         </div>
 
@@ -151,7 +151,7 @@ function getResultLabel(entry: TraceEntry): string {
               class="absolute -left-7 top-0 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 dark:bg-background"
               :class="verifyActive ? 'ring-slate-300 dark:ring-white/20' : 'ring-slate-200 dark:ring-white/10'"
             >
-              <ShieldCheck class="h-3 w-3 text-slate-400 dark:text-muted-foreground" />
+              <ShieldCheck class="h-3 w-3 text-slate-500 dark:text-muted-foreground" />
             </span>
             <div class="flex items-center gap-1.5">
               <span class="text-[15px] font-medium text-slate-600 dark:text-foreground/80" :class="verifyActive && 'ai-shimmer'">Verify — Kiểm tra &amp; tổng hợp</span>
