@@ -86,7 +86,7 @@ class GetDocumentFileStreamUseCase:
             content=content,
             media_type=_MEDIA_TYPES[file_type],
             filename=document.name,
-            disposition="inline" if file_type in _INLINE_TYPES else "attachment",
+            disposition="attachment",  # /file/raw = TẢI BẢN GỐC; xem inline đã chuyển sang /file/preview
         )
 
 
