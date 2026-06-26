@@ -120,6 +120,19 @@ capabilities:
         - qwen/qwen3-next-80b-a3b-instruct:free
         - openai/gpt-oss-120b:free
       paid: deepseek/deepseek-v4-flash
+  triage_fast:                      # A FAST-PATH classifier (RAG/OTHER) — //hóa Qwen NHANH, reasoning-OFF.
+                                    # Đo router-accuracy 2026-06-26 (49 câu labeled): deepseek-reason-ON
+                                    # 93% @3.0s vs qwen3.5-flash-reason-OFF 93% @1.2s -> reasoning VÔ DỤNG
+                                    # cho classify (accuracy GIỐNG HỆT) nhưng tốn ~2s. Tắt nghĩ + Qwen nhanh
+                                    # = cắt ~1.8s/MỌI query, giữ accuracy. OFF OpenAI (qwen=OpenRouter, ổn
+                                    # định prod). profiles.yaml triage node: adapter openrouter_effort +
+                                    # reasoning_effort="off" (dynamic-reasoning). Spread 2 Qwen (resilience).
+    tiers: [paid]
+    models:
+      paid:
+        - qwen/qwen3.5-flash-02-23        # 1.2s — nhanh nhất
+        - qwen/qwen3-vl-30b-a3b-instruct  # 1.5s — dự phòng
+    require_tools: false
   think:                            # role leave_action (tạo DRAFT đơn nghỉ) — flow ĐƠN GIẢN, không cần pro.
                                     # Đổi pro->flash 2026-06-25 (probe: flash tools=OK gọi resolve_date +
                                     # reasoning=CÓ, 8.2s vs pro 14.5s, rẻ hơn). req/s ~0 nên impact nhỏ.

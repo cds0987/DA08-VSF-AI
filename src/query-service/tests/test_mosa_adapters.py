@@ -128,7 +128,7 @@ def test_build_node_model_direct_uses_real_model():
     assert m.model == "gpt-4o-mini"       # direct -> direct_model khi profiles.models rỗng
 
 
-def test_build_node_model_triage_is_standard():
+def test_build_node_model_triage_is_fast_no_reasoning():
     m = build_node_chat_model("triage", api_key="x", base_url="http://ai-router:8010/v1")
-    assert m.adapter_name == "standard"
-    assert m.model == "think"   # triage capability = think (tránh regression model rẻ)
+    assert m.adapter_name == "openrouter_effort"   # tắt reasoning (off) -> classify nhanh
+    assert m.model == "triage_fast"                # capability triage_fast = Qwen nhanh (OFF OpenAI)

@@ -24,8 +24,12 @@ nodes:
   # trên cùng model như think để KHÔNG đổi hành vi prod. Muốn hạ model triage: phải eval
   # chất lượng phân loại trước rồi đổi capability ở đây.
   triage:
-    adapter: standard
-    capability: think
+    # A FAST-PATH classifier (RAG/OTHER). reasoning_effort="off" -> tắt suy luận dài dòng (đo: reasoning
+    # KHÔNG cải thiện accuracy classify, chỉ tốn ~2s). capability triage_fast = Qwen nhanh (1.2s), OFF
+    # OpenAI (OpenRouter ổn định prod). Trước: capability think (deepseek reason-ON ~3-4s) -> cắt ~1.8s.
+    adapter: openrouter_effort
+    capability: triage_fast
+    reasoning_effort: "off"
 
   # Node CHÍNH (planner): chọn tool + tổng hợp.
   # MẶC ĐỊNH 'standard' = hành vi cũ (gửi temperature, KHÔNG reasoning_effort).

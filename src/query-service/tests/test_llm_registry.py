@@ -111,10 +111,11 @@ def test_think_node_profile_default_standard():
 
 def test_triage_node_profile():
     prof = get_node_profile("triage")
-    assert prof.adapter == "standard"
-    # capability = think (gpt-5.4-mini) để tránh regression phân loại của model rẻ.
-    assert prof.capability == "think"
-    assert prof.make_adapter().name == "standard"
+    # A FAST-PATH classifier: openrouter_effort + reasoning_effort="off" (đo: reasoning vô dụng cho
+    # classify, accuracy giống hệt nhưng tốn ~2s). capability triage_fast = Qwen nhanh, OFF OpenAI.
+    assert prof.adapter == "openrouter_effort"
+    assert prof.capability == "triage_fast"
+    assert prof.reasoning_effort == "off"
 
 
 def test_unknown_node_falls_back_to_standard():
