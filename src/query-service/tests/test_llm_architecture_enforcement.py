@@ -35,8 +35,8 @@ _SDK_CALL_RE = re.compile(r"\.(responses|chat\.completions|embeddings)\.create\s
 # được cả khi build query-service biệt lập); nếu thấy routing.yaml thì cross-check chống drift.
 # plan + synth = capability RIÊNG per-step MOSA (orchestrate=plan, think2=synth) -> đổi model
 # chỉ sửa routing.yaml, không sửa code.
-_EXPECTED_CAPABILITIES = {"answer", "triage", "think", "worker", "rerank", "guardrail", "summary",
-                          "caption", "ocr", "embed", "plan", "synth", "rerank_api"}
+_EXPECTED_CAPABILITIES = {"answer", "triage", "triage_fast", "think", "worker", "rerank", "guardrail",
+                          "summary", "caption", "ocr", "embed", "plan", "synth", "rerank_api"}
 
 
 def _py_files():
