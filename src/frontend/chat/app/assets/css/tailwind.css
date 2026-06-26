@@ -224,3 +224,11 @@
     pointer-events: none;
   }
 }
+
+@keyframes tl-check-pop {
+  from { transform: scale(0.6); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tl-check-pop { animation: tl-check-pop 220ms ease-out both; }
+}
