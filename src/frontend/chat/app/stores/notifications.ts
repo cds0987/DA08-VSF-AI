@@ -46,7 +46,7 @@ export const useNotificationStore = defineStore('notifications', () => {
     isLoading.value = true
     try {
       const data = await queryService.fetchHistory(limit, offset, unreadOnly)
-      items.value = data.items
+      items.value = data.items.filter(item => !dismissedIds.has(item.id))
       total.value = data.total
     } finally {
       isLoading.value = false
@@ -131,7 +131,7 @@ export const useNotificationStore = defineStore('notifications', () => {
       if (data.items.length > 0) {
         // Filter out any items we might already have (safety check)
         const existingIds = new Set(items.value.map(i => i.id))
-        const newItems = data.items.filter(item => !existingIds.has(item.id))
+        const newItems = data.items.filter(item => !existingIds.has(item.id) && !dismissedIds.has(item.id))
         
         if (newItems.length > 0) {
           // Add new items to the beginning and sort by date descending
@@ -224,6 +224,7 @@ export const useNotificationStore = defineStore('notifications', () => {
     }
   }
 
+  const dismissedIds = new Set<string>()
   let initRetryCount = 0
   let initRetryTimer: ReturnType<typeof setTimeout> | null = null
   let isFetchingMissing = false
@@ -284,6 +285,7 @@ export const useNotificationStore = defineStore('notifications', () => {
     isConnected.value = false
     items.value = []
     unreadCount.value = 0
+    dismissedIds.clear()
 
     if (import.meta.client) {
       window.removeEventListener('online', handleOnline)
@@ -292,6 +294,7 @@ export const useNotificationStore = defineStore('notifications', () => {
   }
 
   function removeItem(id: string) {
+    dismissedIds.add(id)
     items.value = items.value.filter((item) => item.id !== id)
   }
 
