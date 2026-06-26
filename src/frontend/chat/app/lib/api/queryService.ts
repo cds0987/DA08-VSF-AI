@@ -76,6 +76,18 @@ export function useQueryService() {
     )
   }
 
+  async function deleteNotification(id: string) {
+    return withTokenRefresh(() =>
+      $fetch<void>(
+        `${baseUrl}/notifications/${encodeURIComponent(id)}`,
+        {
+          method: 'DELETE',
+          headers: getQueryServiceAuthHeaders(),
+        },
+      )
+    )
+  }
+
   async function submitFeedback(sessionId: string, score: 1 | -1, traceId?: string) {
     return withTokenRefresh(() =>
       $fetch<{ message: string }>(`${baseUrl}/feedback`, {
@@ -162,6 +174,7 @@ export function useQueryService() {
     fetchHistory,
     fetchUnreadCount,
     markNotificationRead,
+    deleteNotification,
     submitFeedback,
     fetchConversations,
     fetchConversation,

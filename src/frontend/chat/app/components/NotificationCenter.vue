@@ -15,6 +15,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useNotificationStore } from '~/stores/notifications'
 import { useChatStore } from '~/stores/chat'
+import { useQueryService } from '~/lib/api/queryService'
 import {
   formatAbsolute,
   formatRelativeTime,
@@ -27,6 +28,7 @@ import type { NotificationItem } from '~/types'
 // Chuông sống trong AppTopBar (góc trên-phải khu main) -> badge luôn thấy dù sidebar đóng/mở.
 const notifications = useNotificationStore()
 const chat = useChatStore()
+const queryService = useQueryService()
 const router = useRouter()
 const route = useRoute()
 const isOpen = ref(false)
@@ -112,15 +114,13 @@ async function handleAskAI(event: MouseEvent, item: NotificationItem) {
   }
 }
 
-// Click X → mark read + xóa khỏi list
+// Click X → xóa hẳn khỏi DB + list (không refresh lại nữa)
 async function handleDismiss(event: MouseEvent, item: NotificationItem) {
   event.stopPropagation()
-  if (!item.is_read) {
-    await notifications.markAsRead(item.id).catch(() => {
-      toast.error('Không thể đánh dấu thông báo đã đọc.')
-    })
-  }
-  notifications.removeItem(item.id)
+  notifications.removeItem(item.id)   // optimistic: ẩn ngay
+  await queryService.deleteNotification(item.id).catch(() => {
+    // best-effort: nếu lỗi thì để lại (sẽ thấy lại khi refresh)
+  })
 }
 </script>
 
