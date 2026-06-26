@@ -62,7 +62,6 @@ jobs:
       run_langsmith: ${{ steps.matrix.outputs.run_langsmith }}
       run_rag_langfuse: ${{ steps.matrix.outputs.run_rag_langfuse }}
       run_deploy: ${{ steps.matrix.outputs.run_deploy }}
-      embed_migration: ${{ steps.matrix.outputs.embed_migration }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -99,10 +98,6 @@ jobs:
               - 'infra/e2e/**'
             wf: '.github/workflows/deploy-develop.yml'
       - id: matrix
-        env:
-          # SOFT-DETECT migration embedding: marker [embed-migration] trong commit message.
-          MIG_MARKER: ${{ contains(github.event.head_commit.message, '[embed-migration]') }}
-          EV_BEFORE: ${{ github.event.before }}
         run: |
           EV='${{ github.event_name }}'
           CH='${{ steps.f.outputs.changes }}'
@@ -135,16 +130,6 @@ jobs:
             rrag=false; rhr=false; rec=false; rlf=false; rls=false; rrwlf=false
             echo "::notice::skip-tests bật -> BỎ QUA Phase 1 validate, chỉ build + deploy"
           fi
-          # SOFT-DETECT migration embedding: marker [embed-migration] HOẶC EMBED_MODEL đổi trong
-          # common.env -> collection MỚI rỗng -> e2e content (search ra 0) đỏ KHÔNG do regression
-          # -> gate bỏ qua e2e đúng 1 lần migration (re-ingest xong, deploy sau lại chặt như cũ).
-          emig=false
-          [ "$MIG_MARKER" = "true" ] && emig=true
-          if [ -n "${EV_BEFORE:-}" ] && ! echo "$EV_BEFORE" | grep -qE '^0+$'; then
-            if git diff --unified=0 "$EV_BEFORE" "${{ github.sha }}" -- deploy/env/common.env 2>/dev/null | grep -qiE '^[+-]EMBED_MODEL='; then
-              emig=true
-            fi
-          fi
           {
             echo "services=$SVC"
             echo "run_rag=$rrag"
@@ -155,9 +140,8 @@ jobs:
             echo "run_langsmith=$rls"
             echo "run_rag_langfuse=$rrwlf"
             echo "run_deploy=$rd"
-            echo "embed_migration=$emig"
           } >> "$GITHUB_OUTPUT"
-          echo "→ services=$SVC run_e2e_cloud=$rec run_deploy=$rd embed_migration=$emig"
+          echo "→ services=$SVC run_rag=$rrag run_hr=$rhr run_e2e_cloud=$rec run_frontend=$rfe run_langfuse=$rlf run_langsmith=$rls run_rag_langfuse=$rrwlf run_deploy=$rd"
 
   # ═══════════════════ Phase 1: PER-SERVICE (cục bộ) ═══════════════════
   # Test BEHAVIOR + CONTRACT của TỪNG service, infra off, nhanh. Matrix chỉ
@@ -396,16 +380,11 @@ jobs:
   # ───────────────────────── Phase GATE ─────────────────────────
   # Fail nếu BẤT KỲ test nào failure/cancelled. Job skipped (path không khớp) = pass.
   gate:
-    needs: [detect, unit, frontend-test, contract, e2e, migration-lint, manifest-lint, nats-contract-lint]
+    needs: [unit, frontend-test, contract, e2e, migration-lint, manifest-lint, nats-contract-lint]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Assert no test failed
-        env:
-          # SOFT-DETECT: migration embedding -> collection MỚI rỗng -> e2e content có thể đỏ
-          # KHÔNG do regression -> bỏ qua e2e ở gate đúng 1 lần migration (re-ingest xong, deploy
-          # sau lại chặt). KHÔNG nới các test khác (unit/contract/lint vẫn fatal).
-          EMBED_MIGRATION: ${{ needs.detect.outputs.embed_migration }}
         run: |
           for nr in \
             "unit=${{ needs.unit.result }}" \
@@ -417,17 +396,13 @@ jobs:
             "e2e=${{ needs.e2e.result }}"; do
             name="${nr%%=*}"; res="${nr#*=}"
             echo "  $name = $res"
-            if [ "$name" = "e2e" ] && [ "$EMBED_MIGRATION" = "true" ]; then
-              echo "::warning::embed_migration=true -> e2e content non-fatal (collection mới rỗng, re-ingest sau). res=$res"
-              continue
-            fi
             if [ "$res" = "failure" ] || [ "$res" = "cancelled" ]; then
               echo "::error::test '$name' = $res -> chặn build + deploy"
               FAILED=1
             fi
           done
           [ -z "${FAILED:-}" ] || exit 1
-          echo "GATE OK: không test nào fail (e2e nới nếu embed_migration)."
+          echo "GATE OK: không test nào fail."
 
   # ──────────────────── Phase 3: BUILD + PUSH ──────────────────────
   # Matrix = CHỈ service thay đổi (detect.services). Mỗi image 2 tag: :develop + :<git-sha>.

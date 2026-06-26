@@ -25,10 +25,6 @@ EMBED_MODELS: dict[str, dict[str, object]] = {
     "bge-m3": {"native": 1024, "allowed": {1024}},
     # qwen3-embedding-4b qua OpenRouter (DeepInfra): native 2560, MRL 32..2560.
     "qwen/qwen3-embedding-4b": {"native": 2560, "allowed": "32..2560"},
-    # qwen3-embedding-8b qua OpenRouter: native 4096, MRL 32..4096. 3 provider
-    # (Nebius/DeepInfra/SiliconFlow) -> OpenRouter load-balance, hết engine_overloaded
-    # mà 4b (1 provider) dính dưới burst. Giữ dim=2560 (MRL) -> KHÔNG đổi vector size hạ tầng.
-    "qwen/qwen3-embedding-8b": {"native": 4096, "allowed": "32..4096"},
     "offline": {"native": 256, "allowed": {256}},
 }
 
@@ -37,7 +33,6 @@ MODEL_TAGS = {
     "text-embedding-3-large": "te3l",
     "bge-m3": "bgem3",
     "qwen/qwen3-embedding-4b": "qwen3emb4b",   # collection: {base}__qwen3emb4b__d2560
-    "qwen/qwen3-embedding-8b": "qwen3emb8b",   # collection MỚI: {base}__qwen3emb8b__d2560__s2
     "offline": "offline",
 }
 
