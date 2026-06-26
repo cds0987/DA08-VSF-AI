@@ -266,10 +266,10 @@ const prevPage = () => {
       </p>
 
       <div class="overflow-hidden rounded-lg border border-border bg-card transform-gpu">
-        <table class="w-full text-[13px]">
+        <table class="w-full table-fixed text-[13px]">
           <thead class="bg-background/60 text-[11px] uppercase tracking-wider text-muted-foreground">
             <tr>
-              <th class="w-10 px-4 py-2.5 text-left font-medium">
+              <th class="w-12 px-4 py-2.5 text-left font-medium">
                 <Checkbox
                   :model-value="headerState"
                   class="size-4 border-2 border-slate-400 bg-card dark:border-white/40"
@@ -278,11 +278,11 @@ const prevPage = () => {
                 />
               </th>
               <th class="px-4 py-2.5 text-left font-medium">Document</th>
-              <th class="px-4 py-2.5 text-left font-medium">Status</th>
-              <th class="px-4 py-2.5 text-left font-medium">Classification</th>
-              <th class="px-4 py-2.5 text-left font-medium">Uploaded At</th>
-              <th class="px-4 py-2.5 text-right font-medium">Chunks</th>
-              <th class="px-4 py-2.5 text-right font-medium">Actions</th>
+              <th class="w-28 px-4 py-2.5 text-left font-medium">Status</th>
+              <th class="w-36 px-4 py-2.5 text-left font-medium">Classification</th>
+              <th class="w-44 px-4 py-2.5 text-left font-medium">Uploaded At</th>
+              <th class="w-24 px-4 py-2.5 text-right font-medium">Chunks</th>
+              <th class="w-24 px-4 py-2.5 text-right font-medium">Actions</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-border">
@@ -314,10 +314,11 @@ const prevPage = () => {
               <td class="px-4 py-3">
                 <NuxtLink
                   :to="`/documents/${document.id}`"
-                  class="flex items-center gap-2 font-medium text-foreground hover:text-primary"
+                  :title="document.name"
+                  class="flex min-w-0 items-center gap-2 font-medium text-foreground hover:text-primary"
                 >
-                  <FileText class="h-4 w-4 text-muted-foreground" />
-                  {{ document.name }}
+                  <FileText class="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span class="truncate">{{ document.name }}</span>
                 </NuxtLink>
               </td>
               <td class="px-4 py-3"><StatusBadge :status="document.status" /></td>

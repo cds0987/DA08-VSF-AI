@@ -44,3 +44,17 @@ test('User input + bubble: tăng weight, màu giữ token', async () => {
   assert.doesNotMatch(input, /\bdark:text-white\b/)
   assert.doesNotMatch(userBubble, /\bdark:text-white\b/)
 })
+
+test('SettingsDialog: màu theo token theme, không hardcode trắng/đen cực đại', async () => {
+  const src = await read('app/components/SettingsDialog.vue')
+
+  // Dùng token dark mode thay vì ép màu cứng
+  assert.match(src, /\bdark:text-foreground\b/)
+  assert.match(src, /\bdark:text-muted-foreground\b/)
+  // Không ép màu cực đại / nền hex cứng
+  assert.doesNotMatch(src, /\btext-slate-950\b/)
+  assert.doesNotMatch(src, /\bdark:text-white\b/)
+  assert.doesNotMatch(src, /\bdark:text-white\/\d/)
+  assert.doesNotMatch(src, /\bdark:bg-\[#/)
+  assert.doesNotMatch(src, /\bdark:border-white\//)
+})
