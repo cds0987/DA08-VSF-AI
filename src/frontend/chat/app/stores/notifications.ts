@@ -94,7 +94,7 @@ export const useNotificationStore = defineStore('notifications', () => {
     if (items.value.some((item) => item.id === event.id)) return
 
     toast.info(event.message, {
-      description: 'The knowledge base has been updated.',
+      description: 'Tài liệu đã được cập nhật vào hệ thống.',
       duration: 5000,
     })
 

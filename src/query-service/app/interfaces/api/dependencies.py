@@ -276,6 +276,7 @@ def get_notification_service() -> NotificationService:
     return NotificationService(
         repository=get_notification_repo(),
         connection_manager=get_connection_manager(),
+        user_access_profile_repo=get_user_access_profile_repo(),
     )
 
 

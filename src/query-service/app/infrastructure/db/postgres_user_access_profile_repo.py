@@ -78,6 +78,33 @@ class PostgresUserAccessProfileRepository(UserAccessProfileRepository):
                 user_id,
             )
 
+    async def list_eligible_user_ids(
+        self,
+        classification: str,
+        allowed_departments: list[str],
+        allowed_user_ids: list[str],
+    ) -> list[str]:
+        if classification == "top_secret":
+            return list(allowed_user_ids)
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            if classification == "secret":
+                rows = await conn.fetch(
+                    "SELECT user_id::text FROM query_svc.user_access_profile"
+                    " WHERE department = ANY($1::text[])",
+                    allowed_departments,
+                )
+            elif classification == "internal":
+                rows = await conn.fetch(
+                    "SELECT user_id::text FROM query_svc.user_access_profile"
+                    " WHERE account_type = 'internal'"
+                )
+            else:  # public
+                rows = await conn.fetch(
+                    "SELECT user_id::text FROM query_svc.user_access_profile"
+                )
+        return [str(r["user_id"]) for r in rows]
+
     async def close(self) -> None:
         if self._pool is not None:
             await self._pool.close()

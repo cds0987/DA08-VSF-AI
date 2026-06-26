@@ -29,9 +29,11 @@ class NotificationService:
         self,
         repository: NotificationRepository,
         connection_manager: ConnectionManager,
+        user_access_profile_repo=None,
     ) -> None:
         self._repository = repository
         self._connection_manager = connection_manager
+        self._user_access_profile_repo = user_access_profile_repo
 
     async def publish_doc_new(self, event: DocNewEvent) -> list[Notification]:
         payload = {
@@ -40,16 +42,26 @@ class NotificationService:
             "message": f"Có tài liệu mới: {event.document_name}",
             "doc_id": event.doc_id,
         }
+        # Lấy TẤT CẢ user có quyền (kể cả đang offline) để lưu vào DB.
+        # Chỉ push SSE cho user đang online. Tránh user offline mất notification khi fetchHistory.
+        if self._user_access_profile_repo is not None:
+            all_eligible_ids = set(await self._user_access_profile_repo.list_eligible_user_ids(
+                event.classification, event.allowed_departments, event.allowed_user_ids,
+            ))
+        else:
+            all_eligible_ids = {u.id for u in self._eligible_online_users(event)}
+        online_ids = {u.id for u in self._connection_manager.online_users()}
         delivered: list[Notification] = []
-        for user in self._eligible_online_users(event):
+        for user_id in all_eligible_ids:
             notification = await self._repository.save(
-                user_id=user.id,
+                user_id=user_id,
                 event="doc_new",
                 message=payload["message"],
                 doc_id=event.doc_id,
             )
             delivered.append(notification)
-            await self._connection_manager.push_to_user(user.id, payload)
+            if user_id in online_ids:
+                await self._connection_manager.push_to_user(user_id, payload)
         return delivered
 
     async def publish_leave_status(self, event: LeaveStatusEvent) -> list[Notification]:

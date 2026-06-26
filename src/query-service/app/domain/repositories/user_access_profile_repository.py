@@ -30,3 +30,16 @@ class UserAccessProfileRepository(ABC):
     @abstractmethod
     async def delete_profile(self, user_id: str) -> None:
         """Delete user access profile (called when user is deleted)."""
+
+    @abstractmethod
+    async def list_eligible_user_ids(
+        self,
+        classification: str,
+        allowed_departments: list[str],
+        allowed_user_ids: list[str],
+    ) -> list[str]:
+        """Trả list user_id của TẤT CẢ user có quyền truy cập tài liệu theo classification.
+
+        Dùng để lưu notification cho user offline (không chỉ user đang online).
+        top_secret -> allowed_user_ids; secret -> theo department; internal/public -> tất cả.
+        """

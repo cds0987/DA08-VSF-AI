@@ -49,5 +49,25 @@ class InMemoryUserAccessProfileRepository(UserAccessProfileRepository):
         self._profiles.pop(user_id, None)
         self._updated_at.pop(user_id, None)
 
+    async def list_eligible_user_ids(
+        self,
+        classification: str,
+        allowed_departments: list[str],
+        allowed_user_ids: list[str],
+    ) -> list[str]:
+        from app.infrastructure.db.mock_document_access_repo import can_access_document
+        return [
+            uid for uid, p in self._profiles.items()
+            if can_access_document(
+                user_id=uid,
+                role="user",
+                department=str(p.get("department", "")),
+                classification=classification,
+                account_type=str(p.get("account_type", "internal")),
+                allowed_departments=allowed_departments,
+                allowed_user_ids=allowed_user_ids,
+            )
+        ]
+
     def reset(self) -> None:
         self.__init__()
