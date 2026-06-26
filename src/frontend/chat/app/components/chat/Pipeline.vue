@@ -4,7 +4,7 @@
 // MessageSteps ở chỗ có chỉ báo LIVE: dot/marker của bước ĐANG chạy được tô màu + pulse,
 // spinner + thinkingStatus. SSE KHÔNG đổi: chỉ sắp xếp lại cách hiển thị.
 import { computed, ref, watch, onUnmounted } from 'vue'
-import { Search, Database, Sparkles, GitBranch, ShieldCheck, FileSearch, Lightbulb, XCircle } from '@lucide/vue'
+import { Search, Database, Sparkles, GitBranch, ShieldCheck, FileSearch, Lightbulb, XCircle, Check } from '@lucide/vue'
 import type { TraceEntry, NodeModel, AgentPlan, AgentPlanStep } from '~/types'
 import { nodeGroup } from '~/types/sse-contract.gen'
 import { summarizeThought, truncateFilename } from '~/lib/timeline'
@@ -133,6 +133,7 @@ function getResultLabel(entry: TraceEntry): string {
               <component :is="ROLE_ICON[s.role] ?? FileSearch" class="h-3.5 w-3.5 shrink-0" :class="WORKER_TINT" />
               <span class="flex-1 truncate font-medium text-slate-700 dark:text-foreground/80" :class="s.status === 'running' && 'ai-shimmer'" :title="ROLE_LABEL[s.role] ?? s.role">{{ ROLE_LABEL[s.role] ?? s.role }}</span>
               <XCircle v-if="s.status === 'error'" class="h-3 w-3 shrink-0 text-red-400" />
+              <Check v-else-if="s.status === 'done'" class="tl-check-pop h-3 w-3 shrink-0 text-emerald-500 dark:text-emerald-400" />
             </div>
           </div>
 
