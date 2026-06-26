@@ -35,3 +35,8 @@ local-stack/
 # .pw-test/: harness test cục bộ (Playwright) — chứa creds Langfuse/login plaintext + ảnh/log
 # dung lượng lớn. KHÔNG commit (tránh lộ mật khẩu admin + Basic Auth).
 .pw-test/
+# Artifact dev cục bộ (superpowers specs/plans, lockfile plugin, guide tự sinh) — giữ local,
+# KHÔNG push. Khớp ở mọi thư mục (root lẫn src/frontend).
+**/docs/superpowers/
+skills-lock.json
+full-end-to-end-frontend-guide.md
