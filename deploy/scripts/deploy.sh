@@ -96,9 +96,9 @@ if [ -f "$WIPE_TOKEN_FILE" ]; then
 fi
 
 echo "==> 4) Up image đã pull (query/rag/hr migrations chạy one-shot và fail-fast)"
-# rag-ingest-worker: ingest-only, scale N=8 (CPU/replica mới ~67% ở N=4 -> còn dư). `docker compose
-# up` BỎ QUA deploy.replicas (chỉ honor khi có --compatibility) -> PHẢI dùng --scale để lên đúng N.
-docker compose up -d --no-build --scale rag-ingest-worker=8 qdrant langfuse-db langfuse nats-bootstrap query-migrate rag-worker rag-ingest-worker mcp-service hr-service user-service gotenberg document-service query-service ai-router frontend-chat frontend-admin \
+# rag-ingest-worker: ingest-only, scale N=4 (rebalance: N=8 thừa, chỉ queue tại ai-router MAXED
+# 401% -> dồn core sang ai-router UVICORN_WORKERS 6). compose up BỎ QUA deploy.replicas -> --scale.
+docker compose up -d --no-build --scale rag-ingest-worker=4 qdrant langfuse-db langfuse nats-bootstrap query-migrate rag-worker rag-ingest-worker mcp-service hr-service user-service gotenberg document-service query-service ai-router frontend-chat frontend-admin \
   || { echo "::error::compose up FAILED — dump migration + nats-bootstrap logs:"; \
        docker logs da08-vsf-hr-migrate-1 2>&1 | tail -80 || true; \
        docker logs da08-vsf-user-migrate-1 2>&1 | tail -40 || true; \
