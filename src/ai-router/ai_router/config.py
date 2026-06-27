@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     # đọc usage thật từ provider lúc boot (OpenRouter /key) -> hết "mù 0". Off mặc định
     # (tránh chậm boot / lỗi mạng ở test); bật ở prod qua AIROUTER_RECONCILE_ON_BOOT=1.
     reconcile_on_boot: bool = False
+    # chu kỳ flush metrics delta sang Redis (shared, nhiều worker). AIROUTER_METRICS_FLUSH_INTERVAL_SECONDS.
+    metrics_flush_interval_seconds: float = 3.0
 
 
 class TierConfig(BaseModel):

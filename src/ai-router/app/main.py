@@ -11,6 +11,7 @@ Endpoint:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -18,7 +19,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from ai_router.config import get_settings
-from ai_router.observability import render_prometheus
+from ai_router.observability import render_prometheus, render_prometheus_shared
 from ai_router.router import NoCapacityError, Router, RouterCallError, estimate_tokens
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -34,6 +35,25 @@ async def _reconcile_on_boot() -> None:
     """Đọc usage thật provider lúc boot (opt-in) -> thuật toán không 'mù 0'."""
     if settings.reconcile_on_boot:
         await router.reconcile_usage()
+
+
+async def _metrics_flush_loop() -> None:
+    """Background: định kỳ flush DELTA metrics in-process -> Redis (shared) để /metrics nhất quán
+    khi chạy nhiều worker/replica. Lỗi/transient -> log + tiếp tục (không sập app)."""
+    interval = settings.metrics_flush_interval_seconds
+    while True:
+        try:
+            await router.metrics_sink.flush(router.metrics)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("metrics_flush_failed err=%s", str(exc)[:160])
+        await asyncio.sleep(interval)
+
+
+@app.on_event("startup")
+async def _start_metrics_flush() -> None:
+    """Bật loop flush metrics nếu có Redis sink. Không Redis (dev) -> bỏ qua (render in-process)."""
+    if router.metrics_sink is not None:
+        asyncio.create_task(_metrics_flush_loop())
 
 
 def _auth(authorization: str | None, x_internal_token: str | None) -> None:
@@ -75,8 +95,12 @@ async def metrics() -> PlainTextResponse:
     """Prometheus scrape. Per-key gauge (Redis) + leading-indicator counter (fallback/resolve-fail).
     KHÔNG lộ secret (chỉ key_id/secret_env định danh). Bind 127.0.0.1 + mạng compose nội bộ."""
     snap = await router.snapshot()
-    return PlainTextResponse(render_prometheus(snap, router.metrics),
-                             media_type="text/plain; version=0.0.4; charset=utf-8")
+    if router.metrics_sink is not None:
+        # Shared: counter/hist đọc từ Redis -> tổng across mọi worker (không phân mảnh).
+        text = render_prometheus_shared(snap, await router.metrics_sink.read())
+    else:
+        text = render_prometheus(snap, router.metrics)   # dev/single: in-process
+    return PlainTextResponse(text, media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
 @app.post("/admin/reload", dependencies=[Depends(require_auth)])
