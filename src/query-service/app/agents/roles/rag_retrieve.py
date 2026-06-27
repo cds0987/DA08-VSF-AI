@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from datetime import datetime, timezone
 
@@ -15,6 +16,17 @@ from app.agents.registry import register_agent
 from app.agents.roles._llm import acomplete
 
 logger = logging.getLogger(__name__)
+
+
+def _env_bool(name: str, default: str = "0") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+# WORKER_DISTILL_MULTISTEP: bật bước distill LLM per-worker cho plan đa-step.
+# default OFF (="0") = HÀNH VI MỚI: multi-step trả RAW chunks (như solo), việc trích/tổng hợp
+# dồn về node cuối verify_answer (per-direction). ON (="1"/"true") = ROLLBACK distill cũ.
+def _distill_multistep_enabled() -> bool:
+    return _env_bool("WORKER_DISTILL_MULTISTEP", "0")
 
 
 @register_agent("rag_retrieve")
@@ -99,10 +111,12 @@ class RagRetrieveRole(AgentRole):
 
         raw_text = json.dumps({"results": chunks}, ensure_ascii=False)
 
-        # SOLO (plan chỉ 1 step dữ liệu): BỎ distill — verify_answer sẽ synth thẳng trên chunks
-        # thô (citation lấy từ `sources`, không phụ thuộc distill). Tiết kiệm 1 LLM call nối tiếp
-        # (~3-5s). Plan đa-step vẫn distill bên dưới (gộp đa nguồn cho verify_answer đỡ tải).
-        if task.solo:
+        # BỎ distill -> verify_answer synth thẳng trên chunks thô (citation lấy từ `sources`,
+        # không phụ thuộc distill). Tiết kiệm các LLM call nối tiếp (~3-5s/worker).
+        #  - task.solo: plan chỉ 1 step dữ liệu -> luôn bỏ distill (như trước).
+        #  - multi-step: bỏ distill TRỪ KHI WORKER_DISTILL_MULTISTEP bật (rollback). Khi bỏ,
+        #    verify_answer trích per-direction trên raw chunks (direction-label do graph_builder gắn).
+        if task.solo or not _distill_multistep_enabled():
             return WorkerOutput(task.step_id, self.name, raw_text, sources=sources,
                                 status="ok", retrieved=len(used))
 

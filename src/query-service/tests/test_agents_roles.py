@@ -58,7 +58,9 @@ async def test_rag_retrieve_without_model_returns_raw_chunks():
     assert "results" in out.output
 
 
-async def test_rag_retrieve_with_model_analyzes():
+async def test_rag_retrieve_with_model_analyzes(monkeypatch):
+    # distill multi-step CHỈ chạy khi flag ON (mặc định OFF -> trả raw chunks).
+    monkeypatch.setenv("WORKER_DISTILL_MULTISTEP", "1")
     role = AGENT_REGISTRY.get("rag_retrieve")(_ctx(_FakeModel("PHAN TICH ok")))
     out = await role.run(WorkerInput(1, "rag_retrieve", "q", "trich"))
     assert out.output.startswith("PHAN TICH")
@@ -88,8 +90,21 @@ async def test_rag_retrieve_solo_skips_distill():
     assert out.retrieved == 1
 
 
-async def test_rag_retrieve_non_solo_still_distills():
-    # solo=False (mặc định) -> giữ hành vi cũ: vẫn distill qua model.
+async def test_rag_retrieve_multistep_default_skips_distill(monkeypatch):
+    # MỚI: multi-step (solo=False) + flag OFF (mặc định) -> KHÔNG gọi distill, trả raw chunks.
+    monkeypatch.delenv("WORKER_DISTILL_MULTISTEP", raising=False)
+    spy = _SpyModel()
+    role = AGENT_REGISTRY.get("rag_retrieve")(_ctx(spy))
+    out = await role.run(WorkerInput(1, "rag_retrieve", "q", "trich"))
+    assert spy.called is False            # KHÔNG gọi LLM distill
+    assert "results" in out.output        # raw chunks
+    assert len(out.sources) == 1
+    assert out.retrieved == 1
+
+
+async def test_rag_retrieve_multistep_flag_on_still_distills(monkeypatch):
+    # ROLLBACK: flag ON -> multi-step vẫn distill qua model (hành vi cũ).
+    monkeypatch.setenv("WORKER_DISTILL_MULTISTEP", "1")
     spy = _SpyModel()
     role = AGENT_REGISTRY.get("rag_retrieve")(_ctx(spy))
     out = await role.run(WorkerInput(1, "rag_retrieve", "q", "trich"))
@@ -292,7 +307,9 @@ def _ctx_traced(model, tracer, mcp=None):
     )
 
 
-async def test_rag_retrieve_emits_generation_and_tool_span():
+async def test_rag_retrieve_emits_generation_and_tool_span(monkeypatch):
+    # generation per-step rag_retrieve = distill LLM -> chỉ có khi flag ON.
+    monkeypatch.setenv("WORKER_DISTILL_MULTISTEP", "1")
     tr = _RecTracer()
     role = AGENT_REGISTRY.get("rag_retrieve")(_ctx_traced(_FakeModel("phan tich"), tr))
     out = await role.run(WorkerInput(1, "rag_retrieve", "nghi phep", "trich"))
@@ -361,6 +378,30 @@ async def test_astream_plan_streams_all_content_incl_json():
     assert "{" in prose, "JSON GIỜ được stream ra thought (không nuốt -> hết đơ pha sinh JSON)"
     assert not [e for e in events if e.get("token")], "KHÔNG emit token (chỉ thought)"
     assert '{"route":"light"}' in (text or ""), "full text vẫn có JSON để parse"
+
+
+def test_build_data_text_prefixes_role_and_direction():
+    """verify_answer: data_text prefix mỗi block bằng [role · direction] -> node cuối trích
+    PER-DIRECTION trên raw chunks (thiết yếu khi worker bỏ distill). direction rỗng -> chỉ [role]."""
+    from app.agents.base import WorkerOutput
+    from app.agents.graph_builder import _build_data_text
+
+    class _Step:
+        def __init__(self, sid, direction):
+            self.id = sid
+            self.direction = direction
+
+    results = {
+        1: WorkerOutput(1, "rag_retrieve", "chunk A"),
+        2: WorkerOutput(2, "rag_retrieve", "chunk B"),
+        3: WorkerOutput(3, "hr_lookup", "  "),  # rỗng -> bỏ
+    }
+    steps = [_Step(1, "chính sách nghỉ phép"), _Step(2, ""), _Step(3, "x")]
+    text = _build_data_text(results, steps)
+    assert "[rag_retrieve · chính sách nghỉ phép] chunk A" in text
+    assert "[rag_retrieve] chunk B" in text     # direction rỗng -> không có " · "
+    assert "chunk B" in text and "·" not in text.split("chunk B")[0].splitlines()[-1]
+    assert "hr_lookup" not in text              # output rỗng bị loại
 
 
 async def test_role_never_raises_on_mcp_error():

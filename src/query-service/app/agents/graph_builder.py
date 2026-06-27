@@ -27,6 +27,25 @@ logger = logging.getLogger(__name__)
 _SYNTH_ROLE = "synthesize_recommend"
 _ACTION_ROLE = "leave_action"
 
+
+def _build_data_text(data_results: dict, steps: list) -> str:
+    """Gom output các worker thành THÔNG TIN ĐÃ THU THẬP cho verify_answer.
+
+    Prefix mỗi block bằng role + direction của step tương ứng -> node cuối trích PER-DIRECTION
+    trên chunks thô (thiết yếu khi worker BỎ distill: LLM cần biết aspect/khía cạnh mỗi nguồn).
+    direction rỗng -> chỉ `[role]` (không thừa " · "). Vô hại cả khi distill bật.
+    """
+    dir_by_id = {getattr(s, "id", None): (getattr(s, "direction", "") or "") for s in (steps or [])}
+    blocks = []
+    for k in sorted(data_results):
+        r = data_results[k]
+        if not str(r.output or "").strip():
+            continue
+        direction = dir_by_id.get(k, "")
+        label = f"{r.role} · {direction}" if direction else r.role
+        blocks.append(f"[{label}] {r.output}")
+    return "\n\n".join(blocks)
+
 _SYNTH_CITE_SYSTEM = """\
 Bạn là trợ lý nội bộ VinSmartFuture. Dựa CHỈ trên THÔNG TIN ĐÃ THU THẬP, trả lời đúng trọng tâm
 câu hỏi + khuyến nghị hành động cụ thể nếu phù hợp. Nếu dữ liệu không đủ, nói rõ phần còn thiếu +
@@ -97,6 +116,8 @@ XUẤT (chọn 1):
 
 == KHI VIẾT CÂU TRẢ LỜI ==
 Đúng trọng tâm + khuyến nghị hành động cụ thể.
+Mỗi block THÔNG TIN gắn nhãn [role · định hướng] = một KHÍA CẠNH của câu hỏi. Hãy trích & tổng hợp
+ĐỦ MỌI khía cạnh/định hướng đó (đừng bỏ sót aspect nào), vẫn giữ cite [N] cho từng ý.
 NGUỒN TRẢ LỜI — theo thứ tự ưu tiên:
 1. Tài liệu nội bộ / HR data → cite [N], đây là nguồn ưu tiên cao nhất.
 2. Nếu tài liệu không đủ → dùng kiến thức chung để giải thích khái niệm/thuật ngữ kỹ thuật
@@ -266,11 +287,7 @@ def build_orchestrator_graph(
                 seen.add(cid)
                 agg.append(s)
         sources_ref = [{**s, "ref": i + 1} for i, s in enumerate(agg)]
-        data_text = "\n\n".join(
-            f"[{data_results[k].role}] {data_results[k].output}"
-            for k in sorted(data_results)
-            if str(data_results[k].output or "").strip()
-        )
+        data_text = _build_data_text(data_results, plan.steps)
         if sources_ref:
             refs_block = "\n".join(
                 f"[{s['ref']}] {s.get('document_name', '')}"
