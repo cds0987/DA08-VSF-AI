@@ -254,6 +254,14 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  # Convert office (doc/docx/xls/xlsx/ppt/pptx) -> PDF cho viewer inline. CHỈ trong compose
+  # network (KHÔNG expose host port -> tài liệu mật không ra Internet). document-service
+  # POST bytes -> nhận PDF. KHÔNG service nào depends_on cứng -> gotenberg chết chỉ làm
+  # preview office lỗi 503, app KHÔNG sập (FE hiện error card: Thử lại + Tải bản gốc).
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    restart: unless-stopped
+
   query-migrate:
     image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/query-service:${IMAGE_TAG:-develop}
     command: ["python", "-m", "app.infrastructure.db.migrate"]

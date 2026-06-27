@@ -71,6 +71,16 @@ const documentService = {
     return response.data
   },
 
+  // Viewer inline: server trả nội dung render-được (office đã convert -> application/pdf).
+  // KHÁC getFileBlob (raw = bản gốc để tải về). Cùng đi qua axios để gắn header auth.
+  async getPreviewBlob(documentId: string): Promise<Blob> {
+    const response = await axiosClient.get<Blob>(`/${documentId}/file/preview`, {
+      service: 'document',
+      responseType: 'blob',
+    })
+    return response.data
+  },
+
   // Loại file backend chấp nhận (manifest rag-worker ∩ allow_list) — FE dùng để
   // dựng accept filter + validation, không hardcode lệch backend.
   async getSupportedFormats(): Promise<SupportedFormatsResponse> {
