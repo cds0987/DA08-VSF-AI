@@ -274,16 +274,19 @@ Services sau khi `docker compose up`:
 | nuxt-admin | 3001 | Admin console — Admin (production build, extends frontend/base) |
 | user-service | 8000 | Auth / User management |
 | document-service | 8002 | Document management (Admin only) |
-| query-service | 8001 | User chat / LLM Orchestration (MCP client) — SSE `/query` + `/notifications` |
-| rag-worker | — | NATS Worker — ingestion pipeline (no HTTP port) |
-| mcp-service | 8003 | MCP server — tool `rag_search`, `hr_query` (tool gateway, không sở hữu HR data) |
-| hr-service | 8004 | Employee profile + HR data API (internal only) |
+| query-service (+ query-service-2..8) | 8001 | User chat / LLM Orchestration (MCP client + MOSA agent) — SSE `/query` + `/notifications`. **8 replica** sau nginx `query_pool` (SSE-safe). |
+| rag-worker | — | NATS Worker — ingestion pipeline (no HTTP port cho client; có health/status nội bộ) |
+| mcp-service | 8003 | MCP server — 6 tool: `rag_search`, `hr_query`, `leave_write`, `leave_approvals`, `leave_types`, `resolve_date` |
+| hr-service | 8004 | Employee profile + HR data + leave write/approve API (internal only) |
+| ai-router | 127.0.0.1:8010 | Gateway LLM tương thích OpenAI (multi-pool key, cost/load routing). KHÔNG ra Internet — chỉ service nội bộ + SSH tunnel. |
 | nats | 4222 / 8222 | Message broker — JetStream enabled (4222: client, 8222: monitoring UI) |
 | qdrant | 6333 | Vector database |
-| redis | 6379 | JWT blacklist + rate limiting + semantic cache |
-| langfuse | 3100 | LLM observability dashboard (IT/DevOps only) |
+| redis | 6379 | JWT blacklist + rate limiting + semantic cache + ai-router state |
+| langfuse | 127.0.0.1:3100 | LLM observability dashboard (qua SSH tunnel) |
 
-> **PostgreSQL:** Không có container — dùng **GCP Cloud SQL db-g1-small** với 6 databases riêng: `user_db`, `doc_db`, `query_db`, `mcp_db`, `hr_db`, `langfuse_db`. Mỗi service kết nối đến database của mình qua cùng 1 Cloud SQL IP.
+> **Observability (overlay `docker-compose.observability.yml`, dùng chung network):** Prometheus + Grafana + Alertmanager (Slack) + node-exporter + otel-collector (OTLP) + Tempo (trace) + Loki (log). Truy cập qua subdomain Basic-Auth (`grafana|langfuse|qdrant.vsfchat.cloud`).
+>
+> **PostgreSQL:** Local dev & demo VM dùng container `app-postgres:16` (shared) với các database `user_db`, `doc_db`, `query_db`, `rag_db`, `hr_db` (+ `langfuse_db` ở container riêng). Mỗi service kết nối database của mình qua cùng 1 host.
 
 ---
 

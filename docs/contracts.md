@@ -83,6 +83,7 @@ class Message:
     content: str
     created_at: datetime
     sources: Optional[List[Source]] = None  # chỉ có ở assistant message có citation
+    metadata: Optional[dict] = None         # {agent:{thoughts,plan,trace,models}} + {actions:{...}} — persist để xem lại sau reload
 
 @dataclass
 class ConversationContext:
@@ -217,8 +218,8 @@ class NotificationRepository(ABC):
 ## mcp-service — Domain
 
 MCP Tool Service expose tool qua giao thức MCP Streamable HTTP (`:8003`, path `/mcp`). **Search-only routing layer** —
-KHÔNG sở hữu dữ liệu HR. Tool đăng ký qua registry (`app/tools/`); hiện có 2 tool built-in: `rag_search` (đọc Qdrant)
-và `hr_query` (HTTP proxy sang **hr-service**).
+KHÔNG sở hữu dữ liệu HR. Tool đăng ký qua registry (`app/tools/`); hiện có 6 tool: `rag_search` (đọc Qdrant),
+`hr_query` (HTTP proxy sang **hr-service**), `leave_write`, `leave_approvals`, `leave_types`, `resolve_date` (đều proxy hr-service).
 
 > ⚠️ **Lưu ý đối chiếu code**: mcp-service KHÔNG có `domain/repositories/*.py` (không `RerankService`/`HrClient` ABC),
 > KHÔNG có `domain/entities/search_result.py`. Shape kết quả search là `SearchHit` ở `app/core/vectorstore.py`;
@@ -269,10 +270,10 @@ class RagSearchInput:
 >   `HrIntent = Literal["leave_balance","leave_requests","attendance","onboarding","payroll","benefits","performance"]`
 >   (PHẢI khớp `Literal` ở hr-service `routes.py`). mcp-service KHÔNG typed output này; envelope do hr-service quyết.
 > - Tham số nhạy cảm (`document_ids`, `user_id`) do MCP client inject từ ACL/JWT, **không tin LLM**.
-> - `hr_query` mặc định **TẮT** (`TOOL_HR_QUERY_ENABLED=0`); bật khi hr-service sẵn sàng.
-> - Tool tạo đơn nghỉ phép (`create_leave_request`) **chưa đăng ký là MCP tool** trong mcp-service, và
->   hr-service **cũng chưa có endpoint** leave-request (chỉ `POST /hr/query` + `GET /health`). **Thiết kế WRITE flow đã chốt**
->   (endpoint + NATS event) — xem section hr-service bên dưới + [`docs/api-spec.md`](api-spec.md).
+> - `hr_query` đã bật trong prod (`TOOL_HR_QUERY_ENABLED=1`).
+> - **Leave tools (ĐÃ đăng ký):** `leave_write` (tạo/sửa/hủy đơn), `leave_approvals` (pending-approval + approve/reject),
+>   `leave_types` (taxonomy 4 rổ), `resolve_date` (ngày tương đối → ISO) — tất cả proxy hr-service (`X-Internal-Token`),
+>   `user_id`/`approver_user_id` từ JWT. Xem section hr-service bên dưới + [`docs/api-spec.md`](api-spec.md).
 
 ---
 
@@ -369,12 +370,19 @@ class HrRepository(ABC):
     async def get_performance(self, user_id: str) -> Optional[PerformanceReviewDTO]: ...
     async def aclose(self) -> None: ...
 
-    # ── WRITE (leave request) — 🟡 THIẾT KẾ ĐÃ CHỐT, chưa implement ──────────────
-    # create: resolve approver = manager_user_id OR HR_DEFAULT_APPROVER; days_count server tính (ngày lịch);
-    #         INSERT status='pending'. approve: TRANSACTION update + trừ leave_balance (annual/sick).
-    # async def create_leave_request(self, user_id, leave_type, start_date, end_date, reason) -> LeaveRequestRecord: ...
-    # async def list_pending_approval(self, approver_user_id) -> List[...]: ...
-    # async def update_leave_status(self, request_id, approver_user_id, action: "approve"|"reject", reason=None) -> ...: ...
+
+# src/hr-service/app/domain/repositories/leave_write_repository.py — ✅ ĐÃ implement (PostgresHrRepository).
+# create: approver = manager_user_id OR HR_DEFAULT_APPROVER; days_count server tính; INSERT status='pending';
+#         idempotency_key chống tạo trùng; overlap/duplicate → 409 trừ khi confirm_overlap.
+# approve: TRANSACTION update + trừ leave_balance (annual/sick); thiếu phép → 409 (giữ pending).
+class LeaveWriteRepository(ABC):
+    async def create_leave_request(self, *, user_id, leave_type, start_date, end_date, reason, idempotency_key, confirm_overlap=False) -> dict: ...
+    async def update_leave_request(self, *, request_id, user_id, ...) -> dict: ...
+    async def cancel(self, *, request_id, user_id) -> dict: ...
+    async def decide(self, *, request_id, approver_user_id, action: "approve"|"reject", reason=None) -> dict: ...
+    async def list_pending_approval(self, approver_user_id: str) -> list[dict]: ...
+    async def list_for_user(self, user_id: str) -> list[dict]: ...   # "Đơn của tôi" — mọi trạng thái
+    async def get_profile(self, user_id: str) -> dict: ...           # gộp 7 mục + thông tin nhân viên
 ```
 
 > **HTTP contract (hr-service, theo `app/api/routes.py`):**
@@ -383,17 +391,16 @@ class HrRepository(ABC):
 > - `GET /health` → `{"status": "ok"}` (dùng bởi `HrQueryTool.verify()` lúc startup, best-effort — hr-service down KHÔNG sập mcp-service).
 > - **Intent nhạy cảm** (`payroll`/`benefits`/`performance`) = self-access (chỉ data của chính user, lọc cứng `WHERE user_id`),
 >   **không cần role-gate**; hr-service ghi **audit log** mỗi lần truy cập (mask user_id, KHÔNG log số liệu) — `SENSITIVE_INTENTS` ở `routes.py`.
-> - **Leave request WRITE (🟡 thiết kế đã chốt, chưa implement)** — endpoint + flow đầy đủ ở [`docs/api-spec.md`](api-spec.md) (section "Leave request WRITE flow") + [`src/hr-service/docs/intent.md`](../src/hr-service/docs/intent.md):
->   - `POST /hr/leave-requests` (mcp gọi qua tool `create_leave_request`) → ghi `pending`, approver = `manager_user_id` OR `HR_DEFAULT_APPROVER` → publish `hr.leave_request.created`.
->   - `GET /hr/leave-requests/pending-approval` + `POST /hr/leave-requests/{id}/approve|reject` (HTTP `X-Internal-Token`, **không** phải MCP tool). approve trừ `leave_balance` trong transaction → publish `hr.leave_request.approved|rejected`.
+> - **Leave request WRITE (✅ đã implement)** — endpoint + flow đầy đủ ở [`docs/api-spec.md`](api-spec.md) (section "Leave request WRITE flow"):
+>   - `POST /hr/leave-requests` → ghi `pending`, approver = `manager_user_id` OR `HR_DEFAULT_APPROVER` → publish `hr.leave_request.created`. Thêm `PATCH /{id}`, `/{id}/cancel`.
+>   - `GET /hr/leave-requests/pending-approval`, `GET /mine`, `GET /{id}` + `POST /{id}/approve|reject` (HTTP `X-Internal-Token`). approve trừ `leave_balance` trong transaction → publish `hr.leave_request.approved|rejected`.
 >   - Quyền duyệt = `đơn.approver_user_id == current AND status='pending'` (KHÔNG dùng app-role).
+>   - Thêm `POST /hr/profile`, `GET /hr/leave-types`, `GET /hr/departments`, `/hr/admin/*` (JWT admin).
 
-> **NATS event contract (hr-service publish → query-service subscribe)** — bàn giao cho query-service tự consume:
-> - `hr.leave_request.created` → `{event_id, occurred_at, request_id, requester_user_id, approver_user_id, leave_type, start_date, end_date, days_count, status}` → báo **sếp** (`approver_user_id`).
-> - `hr.leave_request.approved` → `{event_id, occurred_at, request_id, requester_user_id, approver_user_id, status}` → báo **nhân viên** (`requester_user_id`).
-> - `hr.leave_request.rejected` → thêm `rejected_reason` → báo **nhân viên**.
-> - hr-service publish **sau commit**, `event_id` idempotent. hr-service KHÔNG đẩy thẳng tới user; SSE do query-service Notification Center lo. ⏳ Cả 2 phía chưa implement.
-> - **Tool MCP duy nhất cho write**: `create_leave_request(user_id, leave_type, start_date, end_date, reason)` (mcp-service proxy, `user_id` từ JWT). approve/reject KHÔNG là tool.
+> **NATS event contract (hr-service publish → query-service subscribe)** — ✅ cả 2 phía đã implement, `event_id` idempotent, publish sau commit:
+> - `hr.leave_request.created|updated|cancelled|approved|rejected` → route SSE theo `approver_user_id`/`requester_user_id`.
+> - `hr.employee_profile.updated`, `hr.department.renamed` → query-service cập nhật projection `user_access_profile`/`document_access`.
+> - **Tool MCP cho write**: `leave_write` (tạo/sửa/hủy), `leave_approvals` (pending + approve/reject) — proxy hr-service, định danh từ JWT.
 
 ---
 

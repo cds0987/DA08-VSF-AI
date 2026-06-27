@@ -91,16 +91,25 @@ JWT_ALGORITHM=HS256
 # Redis — JWT blacklist + rate limiting + semantic cache
 REDIS_URL=redis://redis:6379/0
 
-# OpenAI — LLM (streaming + tool_call) + Embedding
+# LLM/Embedding — đi qua ai-router (gateway tương thích OpenAI). OPENAI_BASE_URL rỗng = gọi THẲNG OpenAI (kill-switch).
 OPENAI_API_KEY=...
-OPENAI_LLM_MODEL=gpt-4o-mini
+OPENAI_BASE_URL=http://ai-router:8010/v1     # set = mọi LLM/embedding qua router; rỗng = thẳng OpenAI
+AIROUTER_INTERNAL_TOKEN=                       # Bearer gửi cho ai-router (tách khỏi OPENAI_API_KEY)
+OPENAI_LLM_MODEL=gpt-4o-mini                   # khi base_url=ai-router, 'model' dùng ALIAS capability (answer/worker/think/plan)
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 
-# MCP Tool Service (gọi tool rag_search, hr_query qua MCP)
+# Agent (MOSA Orchestrator-Workers). OVERRIDE agents.yaml; rỗng = theo manifest (commit là 'react').
+AGENT_MODE=orchestrator_workers                # prod & e2e PHẢI khớp (test_e2e_and_prod_agent_mode_consistent)
+
+# MCP Tool Service (rag_search, hr_query, leave_write, leave_approvals, leave_types, resolve_date)
 MCP_SERVICE_URL=http://mcp-service:8003
 MCP_TIMEOUT_SECONDS=10
 
-# NATS (subscribe doc.access + notify.doc_new + hr.employee_profile.updated)
+# HR Service (proxy đơn nghỉ phép — leave-requests)
+HR_SERVICE_URL=http://hr-service:8004
+HR_SERVICE_INTERNAL_TOKEN=
+
+# NATS (subscribe doc.access, notify.doc_new, hr.* leave/profile, hr.department.renamed, user.deleted)
 NATS_URL=nats://nats:4222
 NATS_JETSTREAM_ENABLED=true
 
@@ -119,9 +128,11 @@ LANGFUSE_HOST=http://langfuse:3100
 | `DATABASE_URL` | Connection string PostgreSQL | Cloud SQL IP — database `query_db` |
 | `JWT_SECRET_KEY` | Phải khớp với User Service | Dùng cùng key đã generate |
 | `OPENAI_API_KEY` | Key gọi OpenAI API (LLM + Embedding semantic cache) | platform.openai.com → API keys |
-| `OPENAI_LLM_MODEL` | Model LLM — streaming + Function Calling | `gpt-4o-mini` |
+| `OPENAI_BASE_URL` | Gateway LLM (ai-router); rỗng = thẳng OpenAI | `http://ai-router:8010/v1` |
+| `AGENT_MODE` | Override agent mode (MOSA) | `orchestrator_workers` |
+| `OPENAI_LLM_MODEL` | Model/alias LLM (alias capability khi qua ai-router) | `gpt-4o-mini` |
 | `OPENAI_EMBEDDING_MODEL` | Model embedding — 1536 dims | `text-embedding-3-small` |
-| `MCP_SERVICE_URL` | Endpoint MCP server (rag_search, hr_query) | `http://mcp-service:8003` |
+| `MCP_SERVICE_URL` | Endpoint MCP server (6 tool) | `http://mcp-service:8003` |
 | `NATS_URL` | URL kết nối NATS (doc.access, notify.doc_new, hr.employee_profile.updated) | `nats://nats:4222` |
 | `LANGFUSE_*` | LLM observability (traces, token cost, latency) | Self-hosted tại `:3100` |
 
@@ -258,9 +269,12 @@ DATABASE_URL=postgresql+asyncpg://user:password@<cloud-sql-ip>:5432/hr_db
 JWT_SECRET_KEY=your-secret-key-change-in-production
 JWT_ALGORITHM=HS256
 
-# NATS (publish hr.employee_profile.updated cho Query Service projection)
+# NATS (publish hr.leave_request.* + hr.employee_profile.updated + hr.department.renamed) — ĐÃ wire
 NATS_URL=nats://nats:4222
 NATS_JETSTREAM_ENABLED=true
+
+# Approver mặc định khi nhân viên không có manager
+HR_DEFAULT_APPROVER=
 
 # HR server
 HR_SERVICE_PORT=8004
@@ -269,9 +283,33 @@ HR_SERVICE_PORT=8004
 | Biến | Mô tả | Lấy ở đâu |
 |------|-------|-----------|
 | `DATABASE_URL` | Connection string PostgreSQL | Cloud SQL IP — database `hr_db` |
-| `JWT_SECRET_KEY` | Dùng cùng key nếu endpoint internal verify JWT/service token | Dùng cùng key đã generate |
-| `NATS_URL` | URL kết nối NATS để publish `hr.employee_profile.updated` | `nats://nats:4222` |
+| `JWT_SECRET_KEY` | Verify JWT cho nhóm `/hr/admin/*` | Dùng cùng key đã generate |
+| `NATS_URL` | Publish `hr.leave_request.*`, `hr.employee_profile.updated`, `hr.department.renamed` | `nats://nats:4222` |
+| `HR_DEFAULT_APPROVER` | Approver fallback khi nhân viên thiếu `manager_user_id` | user_id 1 quản lý |
 | `HR_SERVICE_PORT` | Port internal của HR Service | `8004` |
+
+---
+
+## AI Router — `src/ai-router/` (gateway LLM, :8010 internal)
+
+```env
+# Multi-pool key — auto-discover theo pattern (loại key đơn cũ)
+OPENAI_API_KEY_1=sk-...
+OPENROUTER_API_KEY_1=sk-or-...
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+
+# State/quota: Redis (None = in-memory, chỉ dev)
+AIROUTER_REDIS_URL=redis://redis:6379/3
+AIROUTER_INTERNAL_TOKEN=                 # Bearer các service gửi khi route (có thể rỗng vì bind 127.0.0.1)
+
+# Trần quota mỗi nhà cung cấp (spill khi chạm)
+AIROUTER_OPENAI_TOKENS_PER_DAY=...
+AIROUTER_OPENROUTER_REQ_PER_DAY=...
+AIROUTER_OPENROUTER_RPM=...
+AIROUTER_RECONCILE_ON_BOOT=0             # opt-in reconcile lúc khởi động
+```
+
+> Cấu hình thuật toán/model: `src/ai-router/routing.yaml` (selector `sticky_rotation_soft`, capability→tier→model, hot-reload qua `POST /admin/reload`) + `config/model_catalog.json` (build từ OpenRouter `/models` mỗi deploy). Bind `127.0.0.1:8010` — `/admin/*` truy cập qua SSH tunnel.
 
 ---
 
@@ -305,7 +343,7 @@ NUXT_PUBLIC_QUERY_SERVICE_URL=http://localhost:8001     # /admin/metrics
 | `NUXT_PUBLIC_DOCUMENT_SERVICE_URL` | Upload / quản lý tài liệu (Admin only) | Admin |
 | `NUXT_PUBLIC_QUERY_SERVICE_URL` | Query / conversations / feedback (Chat); `/admin/metrics` (Admin) | Chat + Admin |
 
-> **Production note:** Frontend deploy cùng GCE với backend. Nginx route `/api/user/*` → `user-service:8000`, `/api/documents/*` → `document-service:8002`, `/api/query/*` → `query-service:8001`, `/api/mcp/*` → `mcp-service:8003` nếu cần debug/tool gateway. Không cần CORS config vì cùng domain. `hr-service:8004` deploy cùng Docker Compose nhưng **internal only**, không route public qua Nginx; MCP Service gọi nội bộ bằng `HR_SERVICE_URL`.
+> **Production note:** Frontend deploy cùng GCE với backend. Nginx route `/api/user/*` → `user-service:8000`, `/api/documents/*` → `document-service:8002`, `/api/query/*` → `query_pool` (8 replica query-service:8001), `/api/hr/*` → `hr-service:8004`, `/api/mcp/*` → `mcp-service:8003`. Không cần CORS vì cùng domain. `ai-router:8010` **không** route public (bind 127.0.0.1, chỉ service nội bộ + SSH tunnel). Frontend đơn nghỉ phép đi qua `/api/query/leave-requests` (query-service inject `user_id` từ JWT) — KHÔNG gọi thẳng hr-service.
 
 ---
 

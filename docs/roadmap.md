@@ -34,6 +34,15 @@ Không chỉ là một chatbot — mà là **hệ thống quản lý tri thức 
 - Semantic Cache: cache câu hỏi tương tự (Redis TTL 1h), tiết kiệm ~60% OpenAI API cost
 - Deploy lên GCP: GCE + Docker Compose, Cloud SQL, Cloud Storage, HTTPS qua Nginx
 
+> **✅ Đã triển khai thêm (so với plan gốc — cập nhật theo runtime hiện tại):**
+> - **MOSA — Agent Orchestrator-Workers** chạy mặc định trong prod (`AGENT_MODE=orchestrator_workers`), không còn là "phương án Phase 4". Lưu "suy nghĩ của agent" (thoughts/plan/trace) vào `messages.metadata.agent` → xem lại được sau reload.
+> - **ai-router** — gateway LLM tương thích OpenAI (multi-pool key OpenAI + OpenRouter, routing theo cost/tải, hot-reload).
+> - **Leave WRITE đầy đủ**: tạo/sửa/hủy/duyệt/từ chối + **"Đơn của tôi"** (nhân viên tự xem đơn & trạng thái); event `hr.leave_request.*` đẩy SSE cho sếp/nhân viên.
+> - **Notification Center**: thêm **xóa** thông báo (badge unread giảm real-time).
+> - **Documents**: **bulk-delete** (chọn nhiều, xóa 1 lần) + phân trang số.
+> - **Observability stack**: Prometheus/Grafana/Loki/Tempo/Alertmanager/otel-collector.
+> - **Scale**: 8 replica query-service sau nginx `query_pool` (SSE-safe).
+
 **Definition of Done:**
 
 _Auth_
@@ -70,7 +79,7 @@ _HR Personal Q&A_
 - [ ] Không tạo Word/PDF; DB record trong `hr_svc.leave_requests` là đơn chính thức
 
 _MCP Tool Service_
-- [ ] mcp-service chạy như MCP server riêng (port 8003), expose 3 tool: `rag_search`, `hr_query`, `create_leave_request`
+- [ ] mcp-service chạy như MCP server riêng (port 8003), expose 6 tool: `rag_search`, `hr_query`, `leave_write`, `leave_approvals`, `leave_types`, `resolve_date`
 - [ ] Query Service agent là MCP client — liệt kê + gọi tool qua MCP; inject `document_ids`/`user_id` (không để LLM tự điền)
 - [ ] `rag_search` self-contained: embed query → đọc Qdrant trực tiếp → rerank (`none`/`lexical`/`llm`, fallback an toàn) → Top-3; `hr_query` HTTP proxy gọi HR Service nội bộ và không sở hữu HR data
 - [ ] `create_leave_request` chỉ chạy sau user confirmation; Query Service lưu draft tạm bằng Redis `pending_action:{user_id}` TTL ~10 phút
@@ -221,7 +230,7 @@ Các phase này không nằm trong scope hiện tại nhưng cho thấy sản ph
 |-------|-----------|---------|
 | **Phase 3** | Onboarding flow tự động | Nhân viên mới được bot dẫn qua checklist thay vì hỏi từng người |
 | **Phase 3** | REST API public | Hệ thống khác của công ty tích hợp vào chatbot |
-| **Phase 4** | GraphRAG / Multi-agent routing | Nếu standard RAG không đủ tốt cho câu hỏi phức tạp → nâng lên knowledge graph hoặc agent chuyên biệt (HR / IT / Finance) |
+| **Phase 4** | GraphRAG | Nâng lên knowledge graph cho câu hỏi phức tạp đa bước (Multi-agent routing kiểu MOSA đã triển khai sớm ở Phase 1) |
 | **Phase 4** | Vietnamese embedding optimization | Cải thiện độ chính xác với tài liệu tiếng Việt |
 | **Phase 4** | Auto re-index khi tài liệu cập nhật | Knowledge base luôn up-to-date |
 

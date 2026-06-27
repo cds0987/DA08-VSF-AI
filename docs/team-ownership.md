@@ -8,7 +8,7 @@
 | **Frontend Dev** | Đặng Hồ Hải | 2 micro-frontend: Chat (End User) + Admin console, dùng chung base layer (auth, design system) | `src/frontend/chat/`, `src/frontend/admin/`, `src/frontend/base/` (Nuxt 4) | Sau khi SA freeze schemas |
 | **Backend Dev** | Vũ Quang Dũng | User Service + Document Service: auth, JWT, document management + **chủ NATS subject contract & JetStream config** | `src/user-service/`, `src/document-service/`, `infra/nats/` | Sau khi SA freeze domain |
 | **RAG Engineer** | Trần Thanh Nguyên | RAG Worker + MCP Tool Service + HR Service: ingestion/retrieval, MCP tools, HR personal data + leave request MVP | `src/rag-worker/app/`, `src/mcp-service/app/`, `src/hr-service/app/` | Sau khi SA freeze domain |
-| **AI/Agent Engineer** | Phạm Quốc Dũng | Query Service: LLM orchestration, SSE streaming, notify, memory, MCP client | `src/query-service/app/` | Sau khi SA freeze domain |
+| **AI/Agent Engineer** | Phạm Quốc Dũng | Query Service: MOSA agent (Orchestrator-Workers) + MCP client, SSE streaming, notify, memory, leave proxy; **+ ai-router** (gateway LLM) | `src/query-service/app/`, `src/ai-router/` | Sau khi SA freeze domain |
 | **DevOps** | Trần Hữu Gia Huy | Docker, GCP, CI/CD, Nginx, **deploy/vận hành NATS container**, monitoring | `infra/`, `docker-compose.yml` | Ngay — song song với SA |
 
 ---
@@ -426,7 +426,9 @@ src/mcp-service/app/
 
 ### AI/Agent Engineer — Phạm Quốc Dũng
 
-**Phụ trách query-service. Bắt đầu Ngày 3. Phase 1 nặng (FunctionCallingAgent + MCP client + SSE + notify).**
+**Phụ trách query-service + ai-router. Bắt đầu Ngày 3. Phase 1 nặng (agent + MCP client + SSE + notify).**
+
+> **Cập nhật runtime:** orchestration đã nâng từ `FunctionCallingAgent` (ReAct) lên **MOSA Orchestrator-Workers** (`app/agents/`, planner `orchestrator_workers.py`), bật bằng `AGENT_MODE=orchestrator_workers` (prod). LLM/embedding đi qua **ai-router** (`src/ai-router/`, `OPENAI_BASE_URL=http://ai-router:8010/v1`; rỗng = fallback thẳng OpenAI). query-service cũng proxy đơn nghỉ phép sang hr-service (`hr_leave_client.py`) và lưu agent thoughts/trace + leave action state vào `messages.metadata`.
 
 **Files AI/Agent Engineer tạo:**
 ```

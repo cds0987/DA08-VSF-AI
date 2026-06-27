@@ -94,6 +94,7 @@ CREATE TABLE query_svc.messages (
     sources         JSONB,                       -- assistant only: [{document_id, document_name, caption, heading_path, score, source_gcs_uri}]
     latency_ms      INTEGER,
     feedback        SMALLINT,                    -- 1 | -1 | NULL
+    metadata        JSONB,                       -- {agent:{thoughts,plan,trace,models}} (xem lại "suy nghĩ agent" sau reload) + {actions:{<idempotency_key>:{status,request_id,leave_status,submitted_at}}}
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
@@ -273,6 +274,8 @@ CREATE TABLE hr_svc.leave_requests (
     approved_at          TIMESTAMP WITH TIME ZONE,
     rejected_at          TIMESTAMP WITH TIME ZONE,
     rejected_reason      TEXT,
+    cancelled_at         TIMESTAMP WITH TIME ZONE,  -- 0003: chủ đơn hủy đơn pending
+    idempotency_key      TEXT UNIQUE,               -- 0003: chống tạo trùng khi retry
     created_at           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     updated_at           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
