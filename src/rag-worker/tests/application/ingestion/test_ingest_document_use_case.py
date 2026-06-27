@@ -900,3 +900,24 @@ def test_classify_ingest_error_distinguishes_transient_and_permanent() -> None:
     # 0-chunk (OCR/scanned flake) -> transient: store_reconciler retry (cap 3) thay vì giết doc.
     from app.application.use_cases.ingestion.ingest_document_use_case import EmptyIngestResultError
     assert classify_ingest_error(EmptyIngestResultError("0 chunks")) == "transient"
+
+
+def test_classify_ingest_error_infra_transient_not_lost() -> None:
+    """Lỗi HẠ TẦNG transient (httpx mạng + qdrant ResponseHandlingException) PHẢI là transient
+    để store_reconciler retry — KHÔNG giết doc (trước default 'permanent' -> mất ~7% doc burst)."""
+    import httpx
+    from qdrant_client.http.exceptions import ResponseHandlingException
+
+    assert classify_ingest_error(httpx.ConnectError("conn refused")) == "transient"
+    assert classify_ingest_error(httpx.ReadTimeout("read timeout")) == "transient"
+    assert classify_ingest_error(httpx.RemoteProtocolError("peer closed")) == "transient"
+    assert classify_ingest_error(ConnectionError("network")) == "transient"
+    assert (
+        classify_ingest_error(ResponseHandlingException(RuntimeError("qdrant net")))
+        == "transient"
+    )
+    # PermanentAIError vẫn permanent (không nuốt nhầm).
+    from core_engine.ai import PermanentAIError
+    assert classify_ingest_error(PermanentAIError("bad input")) == "permanent"
+    # Lỗi LẠ thật (không phải infra/AI) vẫn permanent (fail-fast, không retry vô ích).
+    assert classify_ingest_error(ValueError("weird")) == "permanent"
