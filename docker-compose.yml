@@ -617,6 +617,10 @@ services:
       <<: *newrelic
       NEW_RELIC_APP_NAME: vsf-rag-worker
       DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/rag_db
+      # SEARCH-ONLY: KHÔNG spawn ingest-worker -> chat-search-latency KHÔNG bị ingest
+      # bóp. Ingest do service rag-ingest-worker (INGEST_ENABLED=true) đảm nhận riêng.
+      # mcp-service vẫn route /api/search vào ĐÂY (rag-worker:8000).
+      INGEST_ENABLED: "false"
       # MỌI AI qua ai-router: 1 TOKEN -> gateway (ai-router giữ 2 key thật OpenRouter+OpenAI, tự
       # route). caption/ocr kế thừa key này. ${} substitute từ deploy env; env_file không substitute.
       EMBED_API_KEY: ${AIROUTER_INTERNAL_TOKEN:-}
@@ -630,6 +634,39 @@ services:
       rag-migrate:
         condition: service_completed_successfully
     restart: unless-stopped
+
+  # INGEST-ONLY worker (scale ngang dùng core rảnh, CÔ LẬP khỏi /api/search).
+  # Cùng image rag-worker, KHÔNG host ports, KHÔNG nằm trong mcp depends_on /
+  # search routing. claim-lease DB-safe (claim_next_pending + _maintain_claim_lease)
+  # cho phép nhiều replica claim job an toàn không trùng.
+  # SCALE: deploy.replicas KHÔNG được `docker compose up` tôn trọng nếu thiếu
+  # --compatibility; deploy.sh dùng `--scale rag-ingest-worker=4` để lên đúng N.
+  rag-ingest-worker:
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/rag-worker:${IMAGE_TAG:-develop}
+    env_file:
+      - ./deploy/env/common.env
+      - ./deploy/env/rag-worker.env
+      - ./deploy/env/secret.env
+    environment:
+      <<: *newrelic
+      NEW_RELIC_APP_NAME: vsf-rag-ingest-worker
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/rag_db
+      INGEST_ENABLED: "true"
+      INGEST_WORKER_COUNT: "2"
+      EMBED_BATCH_MAX_CONCURRENCY: "16"
+      EMBED_API_KEY: ${AIROUTER_INTERNAL_TOKEN:-}
+    depends_on:
+      nats:
+        condition: service_started
+      nats-bootstrap:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_started
+      rag-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    deploy:
+      replicas: 4
 
   mcp-service:
     image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/mcp-service:${IMAGE_TAG:-develop}
