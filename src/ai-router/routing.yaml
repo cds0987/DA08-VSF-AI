@@ -211,12 +211,12 @@ capabilities:
                                     # qwen3.5-flash 100%@9.7s · qwen3.5-9b 100%@9.7s · llama-4-scout 95%@8.1s.
                                     # LOẠI: deepseek-v4-flash (no-vision CRASH), gemma-4 (chậm 28s).
     models:
-      paid:                          # round-robin -> rải 4 pool (Google/Qwen×2/Meta). Bỏ trần inflight
-        - google/gemini-2.5-flash-lite   #   100% @5.2s — nhanh+chuẩn nhất (≈ gpt-5.4-mini)
+      paid:                          # round-robin -> rải 3 pool (Qwen×2/Meta). Bỏ trần inflight.
+                                     # google/gemini-2.5-flash-lite ĐÃ BỎ (yêu cầu 2026-06-27).
         - qwen/qwen3.5-flash-02-23        #   100% @9.7s (reasoning-OFF)
         - qwen/qwen3.5-9b                 #   100% @9.7s (reasoning-OFF)
         - meta-llama/llama-4-scout       #   95% @8.1s — pool Meta đa dạng
-    selector:                       # adaptive_balanced = _pick_model_split ROUND-ROBIN 4 model (//hóa).
+    selector:                       # adaptive_balanced = _pick_model_split ROUND-ROBIN 3 model (//hóa).
                                     # banded_rotation chỉ xoay KEY 1 model -> KHÔNG rải model. ⚠️ reasoning
                                     # -OFF cho qwen-vl do AI-ROUTER tự inject server-side (_prep_body:
                                     # capability=='ocr' + provider=OpenRouter); degrade OpenAI -> bỏ -> no 400.
