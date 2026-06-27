@@ -223,6 +223,10 @@ capabilities:
       impl: adaptive_balanced
       params:
         tpm_per_key: 500000
+        weights:                    # WEIGHTED round-robin (giữ 3 model anti-queue, chỉ đổi TỈ LỆ)
+          meta-llama/llama-4-scout: 5      # 50% — chủ lực, OCR ~1.8s (10x nhanh hơn qwen)
+          qwen/qwen3.5-9b: 3               # 30%
+          qwen/qwen3.5-flash-02-23: 2      # 20%
         save_mode:                  # cạn band -> xiaomi/mimo-v2.5 (OpenRouter omnimodal vision)
           enabled: true
           model: xiaomi/mimo-v2.5
