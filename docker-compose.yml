@@ -666,7 +666,7 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
     deploy:
-      replicas: 4
+      replicas: 8
 
   mcp-service:
     image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/mcp-service:${IMAGE_TAG:-develop}
