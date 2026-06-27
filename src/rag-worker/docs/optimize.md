@@ -97,12 +97,29 @@ song song, tự co khi 429. Kỳ vọng 92s→~20s (~5× cho doc nhiều-chunk).
 Clean-architecture: tái dùng `AdaptiveConcurrencyLimiter` + giữ interface `EmbeddingService`
 (không bypass); env-config (no hardcode); test giữ-thứ-tự chứng minh KHÔNG xáo trộn embedding.
 
-**Result (bm2 vs bm1)**: _(điền sau CI/CD + đo 96-doc)_
+**Result (bm2 vs bm1)** — commit 9f6975a:
 | | bm0 | bm1 | bm2 |
 |---|---|---|---|
-| Drain 96 doc | ~37′ | ~25.5′ | _?_ |
-| embed_ms / doc 450-chunk | 92s | 92s | _?_ |
-| embed_concurrency grow/shrink | — | — | _?_ |
-| **Recall @1 / @3 / MRR** | 0.944/1.0/0.972 | (bất biến) | _? (PHẢI đo lại)_ |
+| Drain 96 doc (throughput) | ~37′ | ~25.5′ | **~24.5′** |
+| Tăng so bm1 | — | — | **~1.04× (≈ bằng)** |
+| **embed_ms / doc 450-575chunk** | 92s | 92s | **15-48s (~2-3×)** |
+| embed_concurrency grow/shrink | — | — | grow→24, **0 shrink** |
+| ai-router engine_overloaded | — | 0 | **0** |
+| indexed / fail | 84/12 | 84/12 | **80/16** (12 oversized + **4 ResponseHandlingException MỚI**) |
+| **Recall @1 / @3 / MRR** (quality) | 0.944/1.0/0.972 | (bất biến) | **0.957/1.0/0.978 ✓ GIỮ** |
 
-**Conclusion**: _(điền — phải nêu recall giữ ≥0.944@1, nếu tụt → revert)_
+**Conclusion**:
+- ✅ **Per-doc embed ~2-3×** (92s→15-48s) — A1 hoạt động đúng; gather sub-batch + limiter nở→24, 0 shrink/0 shed = router thừa trần.
+- ✅ **Recall GIỮ** (0.957@1 ≥ 0.944, @3=1.0) — order-preserve đúng, KHÔNG xáo trộn embedding.
+- ❌ **System throughput KHÔNG tăng** (~24.5′ ≈ bm1): nghẽn đã dời sang **CPU 1-core 100%** (rag-worker
+  single event-loop: decode base64 embedding + rasterize serial trên 1 core). Embed nhanh hơn nhưng
+  CPU không kịp xử lý kết quả → throughput trần ~4 doc/phút.
+- ⚠️ **+4 fail transient** (ResponseHandlingException): embed conc=24 stress thêm response-handling
+  (httpx/qdrant). Cân nhắc hạ EMBED_BATCH_MAX_CONCURRENCY 24→16 hoặc điều tra; recall không ảnh hưởng
+  (fail transient, re-ingest phục hồi).
+
+**Giá trị A1**: thắng per-doc (1 doc upload index nhanh ~2-3×, giảm tail-latency) + recall-safe → GIỮ.
+Nhưng **muốn vượt ~4 doc/phút phải A2 (scale rag-worker ngang nhiều process/replica)** — CPU 1-core
+là trần thật, không phải embed/OCR concurrency.
+
+→ **bm3 (đề xuất tiếp)**: A2 scale rag-worker 1→N replica (claim-lease DB-safe) — dùng 15 core rảnh.
