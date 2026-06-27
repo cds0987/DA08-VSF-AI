@@ -138,8 +138,17 @@ def load_settings(path: str | os.PathLike[str] | None = None) -> McpSettings:
         search_timeout_seconds=_float(search.get("timeout_seconds"), 30.0),
         rerank_impl=str(reranker.get("impl") or "none").strip().lower(),
         rerank_model=str(reranker.get("model") or "").strip(),
-        rerank_base_url=str(reranker.get("base_url") or "").strip(),
-        rerank_api_key=str(reranker.get("api_key") or "").strip(),
+        # rerank đi qua CÙNG gateway ai-router như embed cũ -> fallback base_url/api_key sang
+        # env gateway (EMBED_BASE_URL/EMBED_API_KEY) khi config.yaml/RERANK_* không khai. Trước
+        # refactor mcp-thin rerank fallback settings.embed_* (field đã xoá) -> AttributeError khi
+        # rerank_api_key rỗng (e2e RERANK_PROVIDER=llm không set key) -> mcp KHÔNG đăng ký tool.
+        rerank_base_url=str(
+            reranker.get("base_url") or os.getenv("RERANK_BASE_URL") or os.getenv("EMBED_BASE_URL") or ""
+        ).strip(),
+        rerank_api_key=str(
+            reranker.get("api_key") or os.getenv("RERANK_API_KEY")
+            or os.getenv("EMBED_API_KEY") or os.getenv("OPENAI_API_KEY") or ""
+        ).strip(),
         rerank_timeout_seconds=_float(reranker.get("timeout_seconds"), 30.0),
         rerank_batch_size=_int((reranker.get("params") or {}).get("batch_size"), 8),
         rerank_passage_chars=_int((reranker.get("params") or {}).get("passage_chars"), 800),
