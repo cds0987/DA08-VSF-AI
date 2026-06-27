@@ -30,6 +30,18 @@ def _should_bypass_edge_guards(path: str) -> bool:
     return path in _HEALTH_PATHS
 
 
+# rag-worker phục vụ INTERNAL RPC: mcp -> POST /api/search, document-service/NATS -> /api/ingest,
+# qua mạng compose. MỌI call đến từ ÍT IP nội bộ (vd mcp 1 IP) -> rate-limit PER-IP (edge-guard
+# chống abuse EXTERNAL) bóp NHẦM toàn bộ search còn RATE_LIMIT_REQUESTS/WINDOW (~1/giây) -> 429 ->
+# retrieval fail -> chat trả rỗng. rag-worker KHÔNG expose ra ngoài nên KHÔNG có edge để bảo vệ
+# -> miễn rate-limit per-IP cho path RPC nội bộ. VẪN giữ body-size guard (413) cho mọi path.
+_INTERNAL_RPC_PREFIXES = ("/api/search", "/api/ingest")
+
+
+def _is_internal_rpc_path(path: str) -> bool:
+    return path.startswith(_INTERNAL_RPC_PREFIXES)
+
+
 def _request_can_include_body(request: Request) -> bool:
     return request.method.upper() not in _BODYLESS_METHODS
 
@@ -45,25 +57,28 @@ def create_app() -> FastAPI:
         if _should_bypass_edge_guards(request.url.path):
             return await call_next(request)
 
-        limit = _rate_limit_requests()
-        window_seconds = _rate_limit_window_seconds()
-        client_ip = request.client.host if request.client else "unknown"
-        now = time.monotonic()
-        bucket = app.state.rate_limits.get(client_ip)
-        if bucket is None:
-            bucket = deque()
+        # Rate-limit per-IP CHỈ cho path EXTERNAL-facing; bỏ qua RPC nội bộ (search/ingest)
+        # vì mọi call từ ít IP nội bộ sẽ bị bóp nhầm -> 429 chat (xem _is_internal_rpc_path).
+        if not _is_internal_rpc_path(request.url.path):
+            limit = _rate_limit_requests()
+            window_seconds = _rate_limit_window_seconds()
+            client_ip = request.client.host if request.client else "unknown"
+            now = time.monotonic()
+            bucket = app.state.rate_limits.get(client_ip)
+            if bucket is None:
+                bucket = deque()
+                app.state.rate_limits[client_ip] = bucket
+            while bucket and now - bucket[0] > window_seconds:
+                bucket.popleft()
+            if not bucket:
+                app.state.rate_limits.pop(client_ip, None)
+            if len(bucket) >= limit:
+                return JSONResponse(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    content={"detail": "rate limit exceeded"},
+                )
+            bucket.append(now)
             app.state.rate_limits[client_ip] = bucket
-        while bucket and now - bucket[0] > window_seconds:
-            bucket.popleft()
-        if not bucket:
-            app.state.rate_limits.pop(client_ip, None)
-        if len(bucket) >= limit:
-            return JSONResponse(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                content={"detail": "rate limit exceeded"},
-            )
-        bucket.append(now)
-        app.state.rate_limits[client_ip] = bucket
 
         max_body = _max_request_body_bytes()
         content_length = request.headers.get("content-length")

@@ -419,3 +419,39 @@ def test_search_http_route_is_served(
     # -> __no_access__ cũng rỗng). Điểm chốt: route được phục vụ, không 404.
     assert served.status_code == 200
     assert served.json() == {"candidates": []}
+
+
+def test_internal_rpc_search_bypasses_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # REGRESSION: /api/search là RPC NỘI BỘ (mcp -> rag-worker, mọi call từ 1 IP mcp).
+    # Trước fix: rate-limit per-IP (default 60/60s) bóp search còn ~1/giây -> 429 dưới tải
+    # chat -> retrieval fail -> chat trả rỗng. Sau fix: search MIỄN rate-limit per-IP.
+    # RATE_LIMIT_REQUESTS=1 nhưng nhiều search liên tiếp PHẢI vẫn 200 (không 429).
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AI_PROVIDER", "offline")
+    monkeypatch.setenv("RATE_LIMIT_REQUESTS", "1")
+    monkeypatch.setenv("RATE_LIMIT_WINDOW_SECONDS", "60")
+
+    with TestClient(create_app()) as client:
+        responses = [client.post("/api/search", json={"query": "x"}) for _ in range(5)]
+
+    codes = [r.status_code for r in responses]
+    assert codes == [200] * 5, codes  # KHÔNG có 429
+
+
+def test_external_path_still_rate_limited_after_fix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Fix CHỈ miễn path internal RPC; path khác (vd /api/does-not-exist) VẪN bị rate-limit.
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AI_PROVIDER", "offline")
+    monkeypatch.setenv("RATE_LIMIT_REQUESTS", "1")
+    monkeypatch.setenv("RATE_LIMIT_WINDOW_SECONDS", "60")
+
+    with TestClient(create_app()) as client:
+        first = client.get("/api/other")
+        second = client.get("/api/other")
+
+    assert first.status_code in (404, 405)
+    assert second.status_code == 429
