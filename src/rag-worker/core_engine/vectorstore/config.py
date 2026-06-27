@@ -136,6 +136,14 @@ class VectorStoreConfig:
             if provider_mode == "offline" or (provider_mode == "auto" and not has_real_provider)
             else os.getenv("EMBED_MODEL", DEFAULT_EMBED_MODEL)
         )
+        # GỐC BẨN/auto-migrate sai (2026-06-27): tham số dimension=None mà KHÔNG đọc
+        # EMBED_DIMENSION -> resolve_dimension(model, None) trả NATIVE (8b=4096) thay vì
+        # override (2560) -> index_id lệch runtime (bootstrap_runtime đọc EMBED_DIMENSION
+        # qua mapping) -> auto_migrate tính target collection SAI -> tạo collection lạc +
+        # reingest nhầm chỗ. Đọc EMBED_DIMENSION ở đây để from_env == runtime.
+        if dimension is None:
+            _env_dim = os.getenv("EMBED_DIMENSION", "").strip()
+            dimension = int(_env_dim) if _env_dim else None
         contract = resolve_vectorstore_contract(
             provider=os.getenv(
                 "VECTOR_DB_PROVIDER",

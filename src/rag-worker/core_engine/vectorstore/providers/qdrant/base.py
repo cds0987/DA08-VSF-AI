@@ -30,20 +30,15 @@ def point_id(chunk_id: str) -> str:
 
 
 def is_qdrant_collection_missing_error(exc: BaseException) -> bool:
-    if not isinstance(exc, UnexpectedResponse):
-        return False
-    if getattr(exc, "status_code", None) != 404:
-        return False
-    text = " ".join(
-        str(part)
-        for part in (
-            getattr(exc, "reason_phrase", ""),
-            getattr(exc, "content", ""),
-            exc,
-        )
-        if part
-    ).lower()
-    return "collection" in text and ("doesn't exist" in text or "does not exist" in text)
+    """404 từ op collection-scoped (upsert/insert/search/delete/list) = collection THIẾU ->
+    caller recreate + retry (idempotent).
+
+    KHÔNG match phrasing cụ thể: Qdrant đổi message giữa version ("Collection ... doesn't
+    exist!" vs "Not found: Collection ... not found") -> match từng chữ là GIÒN. Gốc 2026-06-27:
+    reingest sau khi xoá collection -> 404 "Not Found" KHÔNG khớp "doesn't exist" -> không
+    recover -> 105 doc permanent-fail. Dựa STATUS 404 (tín hiệu semantic, không hardcode chữ):
+    recreate idempotent + retry BOUNDED 1 lần -> an toàn cả khi 404 vì lý do khác (404 lại -> raise)."""
+    return isinstance(exc, UnexpectedResponse) and getattr(exc, "status_code", None) == 404
 
 
 class QdrantBase(VectorStoreProvider):
