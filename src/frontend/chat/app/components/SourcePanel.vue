@@ -163,6 +163,52 @@ async function renderSheetFile(data: ArrayBuffer): Promise<string> {
   return sanitizeHtml(parts.join('\n'))
 }
 
+// TIFF: trình duyệt KHÔNG render natively -> decode bằng UTIF, vẽ mọi page lên canvas
+// rồi xuất PNG blob URL để hiển thị như ảnh thường (path 'image' sẵn có).
+async function renderTiffToPngUrl(data: ArrayBuffer): Promise<string> {
+  const UTIF = (await import('utif')).default
+  const ifds = UTIF.decode(data)
+  if (!ifds.length) throw new Error('TIFF has no pages')
+
+  const pages: HTMLCanvasElement[] = []
+  for (const ifd of ifds) {
+    UTIF.decodeImage(data, ifd)
+    const rgba = UTIF.toRGBA8(ifd)
+    const needed = ifd.width * ifd.height * 4
+    if (!ifd.width || !ifd.height || rgba.length < needed) continue
+    const canvas = document.createElement('canvas')
+    canvas.width = ifd.width
+    canvas.height = ifd.height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) continue
+    const pixels = new Uint8ClampedArray(needed)
+    pixels.set(rgba.subarray(0, needed))
+    ctx.putImageData(new ImageData(pixels, ifd.width, ifd.height), 0, 0)
+    pages.push(canvas)
+  }
+  if (!pages.length) throw new Error('TIFF decode produced no image')
+
+  const gap = 8
+  const width = Math.max(...pages.map(c => c.width))
+  const height = pages.reduce((sum, c) => sum + c.height, 0) + gap * (pages.length - 1)
+  const out = document.createElement('canvas')
+  out.width = width
+  out.height = height
+  const octx = out.getContext('2d')
+  if (!octx) throw new Error('Canvas 2D context unavailable')
+  octx.fillStyle = '#ffffff'
+  octx.fillRect(0, 0, width, height)
+  let y = 0
+  for (const canvas of pages) {
+    octx.drawImage(canvas, 0, y)
+    y += canvas.height + gap
+  }
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    out.toBlob(result => (result ? resolve(result) : reject(new Error('Canvas toBlob failed'))), 'image/png')
+  })
+  return URL.createObjectURL(blob)
+}
+
 function createHtmlDocument(content: string, highlight: string): string {
   const parser = new DOMParser()
   const document = parser.parseFromString(sanitizeHtml(content), "text/html")
@@ -302,6 +348,15 @@ watch(
         // xlsx/xls/csv -> SheetJS -> HTML table (officeparser render bảng tính bị hỏng).
         viewerMode.value = 'html'
         htmlContent.value = createHtmlDocument(await renderSheetFile(data), highlight)
+        return
+      }
+
+      if (mode === 'tiff') {
+        // TIFF -> UTIF decode -> PNG blob URL -> hiển thị như ảnh (browser không render TIFF).
+        revokeObjectUrl()
+        objectUrl = await renderTiffToPngUrl(data)
+        viewerMode.value = 'image'
+        fileUrl.value = objectUrl
         return
       }
 

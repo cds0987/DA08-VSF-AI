@@ -8,9 +8,10 @@
 //   html      -> HTML gốc (đã DOMPurify) trong iframe sandbox sẵn có
 //   text      -> hiển thị thô (txt)
 //   image     -> <img> (ảnh trình duyệt render được)
-//   fallback  -> thẻ đẹp "Mở/Tải tài liệu gốc" (tif/tiff + type lạ; KHÔNG render được tại đây)
+//   tiff      -> UTIF decode -> canvas -> PNG (trình duyệt KHÔNG render TIFF natively)
+//   fallback  -> thẻ đẹp "Mở/Tải tài liệu gốc" (type lạ; KHÔNG render được tại đây)
 
-export type ViewerMode = 'pdf' | 'office' | 'sheet' | 'html' | 'text' | 'markdown' | 'image' | 'fallback'
+export type ViewerMode = 'pdf' | 'office' | 'sheet' | 'html' | 'text' | 'markdown' | 'image' | 'tiff' | 'fallback'
 
 const MODE_BY_EXT: Record<string, ViewerMode> = {
   pdf: 'pdf',
@@ -21,7 +22,8 @@ const MODE_BY_EXT: Record<string, ViewerMode> = {
   md: 'markdown',
   htm: 'html', html: 'html',
   png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', bmp: 'image', webp: 'image',
-  // tif, tiff: trình duyệt KHÔNG render -> fallback có chủ đích.
+  // TIFF: browser không render -> decode bằng UTIF sang PNG.
+  tif: 'tiff', tiff: 'tiff',
 }
 
 /** Đuôi tệp -> chế độ xem. Chuẩn hoá hoa/thường + dấu '.' đầu. Lạ/rỗng -> 'fallback' (không câm). */
