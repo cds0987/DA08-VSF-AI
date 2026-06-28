@@ -141,6 +141,28 @@ async function renderOfficeFile(
   return sanitizeHtml(value)
 }
 
+function escapeHtml(value: string): string {
+  const map: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
+  return value.replace(/[&<>"']/g, ch => map[ch] ?? ch)
+}
+
+// Bảng tính (xlsx/xls/csv): officeparser render hỏng (chỉ trả tên sheet.xml) -> dùng SheetJS
+// dựng HTML table cho từng sheet, rồi sanitize như mọi path office/html khác.
+async function renderSheetFile(data: ArrayBuffer): Promise<string> {
+  const XLSX = await import('xlsx')
+  const workbook = XLSX.read(new Uint8Array(data), { type: 'array' })
+  const parts = workbook.SheetNames.map((name) => {
+    const sheet = workbook.Sheets[name]
+    if (!sheet) return ''
+    const table = XLSX.utils.sheet_to_html(sheet, { editable: false })
+    return `<h3 class="sheet-title">${escapeHtml(name)}</h3>${table}`
+  }).filter(Boolean)
+  if (!parts.length) {
+    throw new Error('Workbook has no readable sheets')
+  }
+  return sanitizeHtml(parts.join('\n'))
+}
+
 function createHtmlDocument(content: string, highlight: string): string {
   const parser = new DOMParser()
   const document = parser.parseFromString(sanitizeHtml(content), "text/html")
@@ -276,7 +298,14 @@ watch(
         return
       }
 
-      // mode === 'office' (docx/xlsx/csv/pptx) qua officeparser.
+      if (mode === 'sheet') {
+        // xlsx/xls/csv -> SheetJS -> HTML table (officeparser render bảng tính bị hỏng).
+        viewerMode.value = 'html'
+        htmlContent.value = createHtmlDocument(await renderSheetFile(data), highlight)
+        return
+      }
+
+      // mode === 'office' (docx/pptx) qua officeparser.
       viewerMode.value = 'html'
       htmlContent.value = createHtmlDocument(
         await renderOfficeFile(data, normalizedType as OfficeFileType),
