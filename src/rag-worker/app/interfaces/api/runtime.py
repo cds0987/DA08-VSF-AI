@@ -52,7 +52,6 @@ from core_engine.mapping import (
 )
 from core_engine.ocr import ProviderImageTextExtractor
 from core_engine.vectorstore import VectorStoreConfig, available_providers
-from core_engine.vectorstore.qdrant_contract import write_contract_stamp
 
 
 def _is_production(app_env: str) -> bool:
@@ -1035,15 +1034,9 @@ async def start_nats_ingest(
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     runtime = bootstrap_runtime()
     logger = logging.getLogger(__name__)
-    await write_contract_stamp(runtime.vector_config, written_by="rag-worker")
-    log_event(
-        logger,
-        logging.INFO,
-        "vectorstore_contract_stamp_written",
-        stage="startup",
-        vector_index=runtime.vector_config.index_id(),
-        vector_fingerprint=runtime.vector_config.contract().fingerprint,
-    )
+    # VESTIGIAL contract stamp ĐÃ GỠ: mcp-thin KHÔNG còn verify contract (RagSearchTool.verify chỉ
+    # log — embed+search dồn về rag-worker), 0 caller check_stamp -> stamp write-only vô dụng. Bỏ
+    # write startup + collection rag_chatbot__meta. (write_contract_stamp giữ cho seed-e2e scripts.)
     retention_settings = load_job_log_retention_settings()
     lease_settings = load_ingest_lease_settings()
     status_sweep_settings = load_doc_status_sweep_settings()
