@@ -169,13 +169,20 @@ if ME_OUT=$(docker compose run --rm --no-deps \
 echo "$ME_OUT"
 if [ "$ME_OK" = 1 ]; then
   echo "  multi-embed collections OK (NO-OP nếu không có model mới trong embeddings.yaml)."
-  # LAUNCH backfill-new DETACHED (-d): re-embed CHỈ collection vừa created, chạy NỀN.
-  # KHÔNG chờ (corpus chậm). Lỗi launch -> chỉ cảnh báo. rag-ingest-worker đã có MULTI_EMBED_ENABLED.
-  if docker compose run -d --rm -e MULTI_EMBED_ENABLED=1 rag-ingest-worker \
-       python scripts/multi_embed_migrate.py --backfill-new --yes >/dev/null 2>&1; then
-    echo "  backfill-new launched in background (re-embed collection mới từ MD; KHÔNG block deploy)."
+  # BIẾN CONTROL: RUN_MULTI_EMBED_BACKFILL (default 0 = TẮT). Backfill re-embed corpus CŨ từ MD
+  # = ĐẮT + KHÔNG phải lúc nào cũng muốn (vd sắp thay data mới, hoặc shard-write forward tự lo doc
+  # mới). Deploy thường: collection tạo xong, KHÔNG backfill. Bật RUN_MULTI_EMBED_BACKFILL=1 khi
+  # THẬT SỰ cần re-embed lịch sử. Ingest forward-write vẫn ghi doc mới dù backfill tắt.
+  if [ "${RUN_MULTI_EMBED_BACKFILL:-0}" = "1" ]; then
+    # LAUNCH backfill-new DETACHED (-d): re-embed CHỈ collection RỖNG từ MD, chạy NỀN, KHÔNG chờ.
+    if docker compose run -d --rm -e MULTI_EMBED_ENABLED=1 rag-ingest-worker \
+         python scripts/multi_embed_migrate.py --backfill-new --yes >/dev/null 2>&1; then
+      echo "  backfill-new launched in background (RUN_MULTI_EMBED_BACKFILL=1; re-embed từ MD; KHÔNG block deploy)."
+    else
+      echo "::warning::multi-embed backfill-new launch FAIL — collection đã tạo, forward-write vẫn ghi dần."
+    fi
   else
-    echo "::warning::multi-embed backfill-new launch FAIL — collection đã tạo, ingest forward-write vẫn ghi dần; chạy tay nếu cần backfill lịch sử."
+    echo "  backfill SKIP (RUN_MULTI_EMBED_BACKFILL!=1) — collection tạo xong, chỉ forward-write doc mới. Bật =1 khi cần re-embed lịch sử."
   fi
 else
   echo "::warning::multi-embed collections-create FAIL (Qdrant chưa sẵn / embeddings.yaml lỗi?) — NON-FATAL, embed chính qwen8b vẫn chạy; xem log trên."
