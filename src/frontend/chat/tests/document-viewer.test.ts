@@ -7,8 +7,14 @@ test('PDF -> pdf', () => {
 })
 
 test('office docs (officeparser) -> office', () => {
-  for (const t of ['docx', 'pptx', 'xlsx', 'csv']) {
+  for (const t of ['docx', 'pptx']) {
     assert.equal(resolveViewerMode(t), 'office', `${t} phải là office`)
+  }
+})
+
+test('bảng tính (SheetJS) -> sheet', () => {
+  for (const t of ['xlsx', 'xls', 'csv']) {
+    assert.equal(resolveViewerMode(t), 'sheet', `${t} phải là sheet`)
   }
 })
 
@@ -28,9 +34,9 @@ test('ảnh trình duyệt render được -> image', () => {
   }
 })
 
-test('xls/tif/tiff (không render được) -> fallback', () => {
-  for (const t of ['xls', 'tif', 'tiff']) {
-    assert.equal(resolveViewerMode(t), 'fallback', `${t} phải là fallback`)
+test('tif/tiff (UTIF decode) -> tiff', () => {
+  for (const t of ['tif', 'tiff']) {
+    assert.equal(resolveViewerMode(t), 'tiff', `${t} phải là tiff`)
   }
 })
 
@@ -50,7 +56,7 @@ test('chuẩn hoá: hoa/thường + dấu chấm đầu', () => {
 test('phủ ĐỦ bộ định dạng yêu cầu, không cái nào trả về undefined', () => {
   const required = ['bmp', 'csv', 'docx', 'gif', 'htm', 'html', 'jpeg', 'jpg', 'md', 'pdf',
     'png', 'pptx', 'tif', 'tiff', 'txt', 'webp', 'xls', 'xlsx']
-  const valid = new Set(['pdf', 'office', 'html', 'text', 'markdown', 'image', 'fallback'])
+  const valid = new Set(['pdf', 'office', 'sheet', 'html', 'text', 'markdown', 'image', 'tiff', 'fallback'])
   for (const t of required) {
     const mode = resolveViewerMode(t)
     assert.ok(valid.has(mode), `${t} -> ${mode} phải là 1 mode hợp lệ`)
