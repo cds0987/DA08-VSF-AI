@@ -42,3 +42,8 @@ Kiến trúc hiện tại = **shard N model**: mỗi tài liệu chỉ embed và
 
 ## results/
 - `load_openragbench.md`, `recall_multicollection.md` — kết quả từng lần đo (ghi rõ ngày + config).
+
+## Eval-data dùng chung qua HuggingFace
+Gold labels + harness + results đồng bộ lên **HF dataset private `gunnybd01/vsf-systemeval`**
+(nhiều máy/Claude cùng làm). **Corpus 121 doc HR MẬT KHÔNG upload** (gitignore + chỉ local).
+Pull: `huggingface_hub.snapshot_download("gunnybd01/vsf-systemeval", repo_type="dataset", token=...)`.
