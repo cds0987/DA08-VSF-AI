@@ -655,10 +655,9 @@ services:
       DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/rag_db
       INGEST_ENABLED: "true"
       INGEST_WORKER_COUNT: "2"
-      # TEST embed pressure (Part A): batch 100->50 (372 chunk -> ~8 sub-batch thay vì 4) +
-      # concurrency 16->24 -> nhiều embed call song song hơn. Đo embed_ms ↓ (headroom) hay
-      # shrink/429 (provider choke). classify-retry cover transient nên an toàn.
-      EMBED_BATCH_SIZE: "50"
+      # TEST embed batch inference (Part A): batch 50 KHÔNG lợi (20.5s ≈ 20.6s, 0 shrink) -> thử
+      # batch TO 256 để tận dụng batch-inference (GPU xử nhiều text/forward-pass). Đo chunks/sec ↑?
+      EMBED_BATCH_SIZE: "256"
       EMBED_BATCH_MAX_CONCURRENCY: "24"
       EMBED_API_KEY: ${AIROUTER_INTERNAL_TOKEN:-}
     depends_on:
