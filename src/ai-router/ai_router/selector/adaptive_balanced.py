@@ -58,6 +58,16 @@ class AdaptiveBalanced(Selector):
         if model is None:
             return None
         is_oai = tdef.provider == Provider.OPENAI
+        # no_inflight_cap (embed): KHÔNG cap inflight client-side -> ĐẨY THOẢI MÁI, round-robin key,
+        # chỉ dựa cooldown-on-429 (live đã loại key cooldown) + retry-failover (router retry-across-keys).
+        # Cơ chế LLM-router chuẩn (LiteLLM/OpenRouter): bão hòa = provider tự 429 -> cooldown -> key kế;
+        # chỉ fail khi MỌI key cooldown/cạn-quota. AIMD inflight = throttle cho chat, PHẢN tác dụng embed
+        # (throughput-bound, từng tự-bóp 503 "no capacity" dù key còn tiền). Chỉ áp tier OpenRouter.
+        no_cap = bool(self.params.get("no_inflight_cap")) and not is_oai
+        if no_cap and len(live) > 1:                    # round-robin điểm bắt đầu -> rải đều key
+            seq = await self.counters.next_seq(f"{req.capability}:{tier_name}:keyrr")
+            i = seq % len(live)
+            live = live[i:] + live[:i]
 
         # ── XẾP HẠNG theo headroom (least-loaded) — tín hiệu khác nhau theo provider ──
         ranked: list = []
@@ -67,13 +77,16 @@ class AdaptiveBalanced(Selector):
                 if t + req.est_tokens > tpm:
                     continue                      # key này hết TPM phút -> bỏ
                 ranked.append((t, k))             # ít token/phút nhất lên đầu
+            elif no_cap:
+                ranked.append((0, k))             # KHÔNG gate inflight -> giữ thứ tự round-robin
             else:
                 lim = await self.counters.get_aimd_limit(k.id)
                 inf = await self.counters.get_inflight(k.id)
                 if inf >= lim:
                     continue                      # đầy theo limit AIMD -> bỏ
                 ranked.append((inf - lim, k))     # nhiều headroom nhất (âm nhất) lên đầu
-        ranked.sort(key=lambda x: x[0])
+        if not no_cap:
+            ranked.sort(key=lambda x: x[0])       # no_cap: GIỮ thứ tự round-robin (không sort)
 
         for _, k in ranked:
             # GATE theo trần thật + chiếm chỗ
@@ -81,11 +94,12 @@ class AdaptiveBalanced(Selector):
             if is_oai:
                 if not await self.counters.tpm_reserve(k.id, amount=req.est_tokens, tpm_limit=tpm):
                     continue
-            else:
+            elif not no_cap:
                 lim = int(await self.counters.get_aimd_limit(k.id))
                 token = await self.counters.acquire_inflight(k.id, max_inflight=lim)
                 if token is None:
                     continue
+            # no_cap: bỏ acquire_inflight (token=None) — đẩy thẳng, không cap đồng thời.
             # backstop: RPM + trần ngày (quota cứng) vẫn áp
             daily_limit = k.limit.value if tdef.limit_kind != "none" else 0.0
             ok = await self.counters.reserve(

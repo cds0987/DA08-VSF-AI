@@ -249,22 +249,22 @@ capabilities:
     tiers: [embed_or]              # qwen3-embedding-8b qua OpenRouter (rag-worker + query intent)
     pinned_model: qwen/qwen3-embedding-8b   # 2026-06-27: 4b->8b (3 provider, hết engine_overloaded;
                                             # MRL dim=2560 giữ nguyên vector size; collection mới tự tạo)
-    selector: { impl: adaptive_balanced, params: { tpm_per_key: 500000 } }
+    selector: { impl: adaptive_balanced, params: { tpm_per_key: 500000, no_inflight_cap: true } }
   # ── MULTI-COLLECTION secondary embed (mỗi model PIN riêng -> đúng provider/endpoint). rag-worker
   #    ingest GHI + shard-read SEARCH (router.embeddings route theo body['model'] -> capability này). ──
   embed_e5large:
     tiers: [embed_or]
     pinned_model: intfloat/multilingual-e5-large
-    selector: { impl: adaptive_balanced, params: { tpm_per_key: 500000 } }
+    selector: { impl: adaptive_balanced, params: { tpm_per_key: 500000, no_inflight_cap: true } }
   embed_bgem3:
     tiers: [embed_or]
     pinned_model: baai/bge-m3
-    selector: { impl: adaptive_balanced, params: { tpm_per_key: 500000 } }
+    selector: { impl: adaptive_balanced, params: { tpm_per_key: 500000, no_inflight_cap: true } }
   embed_pplx:
     tiers: [embed_or]
     pinned_model: perplexity/pplx-embed-v1-0.6b
-    selector: { impl: adaptive_balanced, params: { tpm_per_key: 500000 } }
+    selector: { impl: adaptive_balanced, params: { tpm_per_key: 500000, no_inflight_cap: true } }
   embed_te3s:                       # OpenAI embeddings (embed_oai tier) -> rải 5 key OpenAI theo TPM
     tiers: [embed_oai]
     pinned_model: openai/text-embedding-3-small
-    selector: { impl: adaptive_balanced, params: { tpm_per_key: 500000 } }
+    selector: { impl: adaptive_balanced, params: { tpm_per_key: 500000, no_inflight_cap: true } }
