@@ -9,6 +9,9 @@ export const useSessionStore = defineStore('session', () => {
     watch: true,
     sameSite: 'lax',
     path: '/',
+    // Persistent (không phải session-cookie) -> còn đăng nhập sau khi đóng browser.
+    // Khớp TTL refresh token (REFRESH_TOKEN_TTL_DAYS=30); watch:true gia hạn sliding mỗi fetchMe.
+    maxAge: 60 * 60 * 24 * 30,
   })
   const isLoading = ref(false)
   const isInitialized = ref(false)
