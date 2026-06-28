@@ -439,11 +439,13 @@ class Router:
         (rải key). GỐC BUG cũ: hardcode resolve('embed') -> ÉP MỌI model về qwen8b -> multi-collection
         GIẢ (mọi collection lưu qwen8b cắt chiều). Retry-across-keys + backoff: key embed bench ngắn
         rồi hồi -> thử lại MAX_ATTEMPTS thay vì 503 (Benchmark 1: 503 -> 81% src=0)."""
-        # embeddings KHÔNG sinh output -> est = INPUT tokens THẬT (KHÔNG dùng estimate_tokens vì nó
-        # +DEFAULT_OUTPUT_EST=600 output-pad của chat -> est luôn ≥600 > ctx model nhỏ (e5large=512)
-        # -> feasible_model loại OAN + sai TPM-reserve. Input-only: ~4 ký tự/token.
+        # embeddings: est = MAX tokens của 1 text trong batch (KHÔNG phải estimate_tokens +600
+        # output-pad của chat, cũng KHÔNG phải SUM batch). LÝ DO: feasible_model gate context_length
+        # là PER-TEXT (mỗi text embed độc lập, mỗi cái phải ≤ ctx model). SUM cả batch 100 chunk
+        # (~8300 tok) > ctx bge-m3 8192 -> loại OAN -> no_capacity 503 (gốc bug 7/14 doc mất). MAX
+        # per-text (~200 tok) < mọi ctx -> feasible đúng. ~4 ký tự/token.
         _inp = body.get("input")
-        est = (sum(len(x) for x in _inp if isinstance(x, str)) if isinstance(_inp, list)
+        est = (max((len(x) for x in _inp if isinstance(x, str)), default=0) if isinstance(_inp, list)
                else len(_inp or "")) // 4
         # capability = alias của model THẬT client gửi (qwen8b/e5large/te3s/...). KHÔNG hardcode
         # 'embed' -> router tôn trọng model -> giữ đúng vector space mỗi collection.
