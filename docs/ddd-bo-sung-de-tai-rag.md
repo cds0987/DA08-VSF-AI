@@ -43,7 +43,7 @@ DDD yêu cầu team phải có ngôn ngữ chung, nhất quán từ code đến 
 |-----------|-------------------------------|
 | **Document** | Tài liệu nội bộ Admin đã upload và được index vào hệ thống (status `indexed`). Admin upload → `queued` → ingest → `indexed` (không có bước approve/reject). Chưa index xong thì chưa truy vấn được. |
 | **Chunk** | Đơn vị văn bản được cắt từ Document theo chiến lược Parent-Child (LlamaIndex HierarchicalNodeParser). Child node dùng để search; Parent node đưa vào LLM context. Config sizes TBD. |
-| **Embedding** | Vector số 1536 chiều đại diện cho nghĩa của một Chunk, được sinh bởi model `text-embedding-3-small`. |
+| **Embedding** | Vector số 4096 chiều (native) đại diện cho nghĩa của một Chunk, được sinh bởi model `qwen/qwen3-embedding-8b` (qua ai-router). |
 | **Query** | Câu hỏi của người dùng sau khi đã được normalize (lowercase, unicode NFC). |
 | **Retrieved Context** | Tập hợp top-K Chunk có similarity score cao nhất với Query, dùng làm context cho LLM. |
 | **Citation** | Thông tin trích dẫn nguồn gồm: tên file, số trang (nếu có), chunk_id. Bắt buộc đi kèm mọi câu trả lời. |
@@ -198,7 +198,7 @@ DDD nói: model ban đầu luôn nông cạn, phải refactor liên tục sau kh
 | Top-K retrieval | 5 chunks | Câu trả lời thiếu thông tin hoặc nhiễu |
 | Score threshold | 0.7 | Fallback rate > 30% hoặc hallucination xuất hiện |
 | Re-ranker | BGE-Reranker-v2-m3 (Top-5 → Top-3) | Nếu context quality vẫn thấp sau Top-5 |
-| Embedding model | text-embedding-3-small (1536 dims) | Khi tiếng Việt accuracy kém |
+| Embedding model | qwen/qwen3-embedding-8b (4096 dims native) | Khi tiếng Việt accuracy kém |
 
 **Quy trình tune:**
 1. Chạy bộ 40 câu Ground Truth sau mỗi thay đổi

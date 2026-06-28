@@ -1,6 +1,6 @@
 # Data Schema — RAG Chatbot
 
-Mỗi service kết nối đến **database riêng** trên cùng 1 GCP Cloud SQL db-g1-small: `user_db`, `doc_db`, `query_db`, `mcp_db`, `hr_db`, `langfuse_db`.
+Mỗi service kết nối đến **database riêng** trên container `app-postgres:16` (chạy trên VM): `user_db`, `doc_db`, `query_db`, `hr_db`, `rag_db`; `langfuse_db` ở container postgres riêng. (mcp-service KHÔNG có DB. Cloud SQL managed là kế hoạch Phase sau.)
 
 > **Convention chung:**
 > - `id`: `UUID PRIMARY KEY DEFAULT gen_random_uuid()`
@@ -118,8 +118,8 @@ CREATE INDEX idx_doc_access_classification ON query_svc.document_access(classifi
 -- `hr.employee_profile.updated` (WRITE/propagation path — KHÔNG phải read hr_query).
 -- Query Service dùng bảng này để lọc tài liệu theo account_type/department/
 -- employment_status mà không gọi trực tiếp HR Service trên hot path chat.
--- ⏳ Nguồn publish hiện là scaffold (NatsPublisher stub ở hr-service, chưa wire) —
---    bảng tồn tại nhưng chưa nhận event thật cho tới khi nhánh NATS được implement.
+-- ✅ Nguồn publish đã wire: hr-service NatsPublisher connect NATS JetStream và publish thật
+--    (hr.employee_profile.updated, hr.leave_request.*, hr.department.renamed) → query-service consume.
 CREATE TABLE query_svc.user_access_profile (
     user_id           UUID PRIMARY KEY,
     account_type      VARCHAR(20) NOT NULL,       -- internal | external
@@ -348,7 +348,7 @@ CREATE INDEX idx_performance_user ON hr_svc.performance_reviews(user_id, period 
 
 ## Qdrant Collection — Vector Payload
 
-Collection name: `rag_chatbot`
+Base collection name: `rag_chatbot` (env `VECTOR_COLLECTION`). Tên collection THỰC là động theo từng embed model: `rag_chatbot__{model_tag}__d{native_dim}[__s{sparse_version}]` (vd `rag_chatbot__qwen3emb8b__d4096__s2`). Multi-collection forward-write (`embeddings.yaml`): ingest ghi đồng thời qwen3-8b (4096, PRIMARY) + e5-large (1024) + bge-m3 (1024) + text-embedding-3-small (1536) + pplx (1024). PRIMARY (phục vụ `/api/search`) do `EMBED_MODEL` quyết định. Hybrid BM25 (sparse) bật cả khi ghi (rag-worker) lẫn đọc (rag-worker `/api/search`).
 
 ```json
 {
@@ -373,7 +373,7 @@ Collection name: `rag_chatbot`
 }
 ```
 
-> Vector dimension: 1536 (text-embedding-3-small). Chỉ embed `child_text`. `parent_text` lưu trong payload để đưa vào LLM context. `source_uri` trỏ tới file gốc; `artifact_uri` trỏ tới canonical Markdown artifact do rag-worker ghi sau parse/OCR. Production path của artifact là `gs://<bucket>/artifacts/{document_id}/markdown.md`; không dùng `/tmp/artifacts` làm storage bền. mcp-service đọc payload trực tiếp từ Qdrant để dựng `SearchHit` (KHÔNG qua NATS, KHÔNG cần tra DB) và map `source_uri` → `source_gcs_uri`, `artifact_uri` → `markdown_gcs_uri` ở response tool. `section_title` → map sang `caption`, `heading_path` (breadcrumb) → map thẳng sang SearchResult. `ocr_confidence` chỉ có với PDF scan, dùng để flag low-quality chunks. Chunk size: Parent-Child (LlamaIndex HierarchicalNodeParser) — config TBD sau khi implement.
+> Vector dimension PRIMARY: 4096 (qwen/qwen3-embedding-8b, native — không MRL-truncate). Mỗi collection multi-embed có dim riêng (e5/bge/pplx 1024, te3s 1536) — dim resolve qua `core_engine.contract.resolve_dimension`. Chỉ embed `child_text`. `parent_text` lưu trong payload để đưa vào LLM context. `source_uri` trỏ tới file gốc; `artifact_uri` trỏ tới canonical Markdown artifact do rag-worker ghi sau parse/OCR. Production path của artifact là `gs://<bucket>/artifacts/{document_id}/markdown.md`; không dùng `/tmp/artifacts` làm storage bền. **Retrieval:** rag-worker (`POST /api/search`) embed query + đọc Qdrant trực tiếp → trả candidates; mcp-service nhận candidates rồi rerank, map `source_uri` → `source_gcs_uri`, `artifact_uri` → `markdown_gcs_uri`. `section_title` → `caption`, `heading_path` (breadcrumb) → map thẳng sang SearchResult. `ocr_confidence` chỉ có với PDF scan, dùng để flag low-quality chunks. Chunk: Parent-Child (LlamaIndex HierarchicalNodeParser).
 
 ---
 

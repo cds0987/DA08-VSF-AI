@@ -68,6 +68,14 @@ Response 401:  { "detail": "Invalid or expired refresh token" }
 
 > Refresh Token TTL 7 ngày, rotate-on-use — mỗi lần gọi endpoint này trả về refresh token mới, invalidate cái cũ. Lưu refresh token hash trong `user_svc.refresh_tokens` (không lưu raw token).
 
+### `POST /auth/logout` · `POST /auth/admin/logout` · `POST /auth/admin/refresh`
+
+```
+POST /auth/logout          → thu hồi refresh token (chat app). 200 { "message": "Logged out" }
+POST /auth/admin/logout    → logout admin app (cookie refresh riêng eka.admin.refresh_token)
+POST /auth/admin/refresh   → refresh access token cho admin app
+```
+
 ### `GET /health`
 
 ```
@@ -113,6 +121,29 @@ Response 404:  { "detail": "User not found" }
 Response 200:  { "id": "uuid", "is_active": true }
 Response 403:  { "detail": "Admin only" }
 Response 404:  { "detail": "User not found" }
+```
+
+### `POST /users`  (Admin only — tạo tài khoản)
+
+```
+Request Body: { "email", "password", "role", "account_type"?, "department"? }
+Response 201:  { "id", "email", "role", "account_type", "department", "is_active": true }
+Response 409:  { "detail": "Email already exists" }
+```
+
+> Tạo user → publish `user.created` → HR Service subscriber tự sync employee record.
+
+### `DELETE /users/{user_id}`  (Admin only)
+
+```
+Response 200:  { "message": "User deleted" }   # publish user.deleted → query-service dọn hội thoại/notifications
+```
+
+### `GET /audit-logs`  (Admin only)
+
+```
+Query params: ?limit=50&offset=0
+Response 200:  { "items": [ { "id", "actor_id", "actor_role", "action", "resource_type", "resource_id", "detail", "ip_address", "created_at" } ], "total": 0 }
 ```
 
 ---
@@ -188,9 +219,18 @@ Response 403:  { "detail": "Không có quyền xem tài liệu này" }
 Response 404:  { "detail": "Document not found" }
 ```
 
+### `GET /documents/{document_id}/file/preview`
+
+> Stream nội dung **render inline** trong viewer (Content-Disposition: inline). Kiểm tra ACL mỗi request.
+
+```
+Response 200:  <binary stream inline>
+Response 403/404
+```
+
 ### `GET /documents/{document_id}/file/raw`
 
-> Proxy-stream nội dung file (không trả presigned URL) — kiểm tra ACL mỗi request. Dùng khi cần che URL GCS khỏi client.
+> Proxy-stream nội dung file để **tải bản gốc** (Content-Disposition: attachment) — kiểm tra ACL mỗi request. Dùng khi cần che URL GCS khỏi client.
 
 ```
 Response 200:  <binary stream> (Content-Type theo file_type)
@@ -293,6 +333,8 @@ Response 200:  { "id": "uuid", "is_read": true }
 Response 200:  { "message": "Notification deleted" }
 Response 404:  { "detail": "Notification not found" }
 ```
+
+> **Dev-only:** `POST /dev/mock-notifications/doc-new` — giả lập event `notify.doc_new` để test SSE (không bật ở prod).
 
 ### `GET /conversations`
 
@@ -420,12 +462,21 @@ Response 503:  { "status": "degraded", "degraded_reasons": ["rag_worker unreacha
 
 ---
 
-## RAG Worker — NATS Internal Only
+## RAG Worker — NATS ingest + HTTP search (nội bộ)
 
-> Không expose HTTP. Chỉ giao tiếp qua NATS :4222.
+> **NATS** (:4222) cho ingest; **HTTP `:8000` nội bộ** (`POST /api/search` cho mcp-service) — KHÔNG expose host.
 > **Subject contract do Backend Dev làm chủ** (đăng ký ở `infra/nats/subjects.md`).
 >
-> ⚠️ **Theo code:** RAG Worker là **ingest-only** — chỉ subscribe `doc.ingest` và publish `doc.status`. KHÔNG có subject `rag.search`/request-reply retrieval. Retrieval do mcp-service đọc Qdrant trực tiếp (ghép với RAG Worker chỉ qua Qdrant).
+> ⚠️ **Theo code:** RAG Worker phục vụ CẢ ingest (subscribe `doc.ingest`, publish `doc.status`) LẪN query-search. KHÔNG có subject `rag.search`/request-reply — retrieval đi HTTP đồng bộ: mcp-service gọi rag-worker `POST /api/search` (rag-worker embed query + vector search Qdrant → candidates), mcp **rerank** rồi trả tool. Prod tách scale phần ingest thành `rag-ingest-worker` ×8 (cùng image).
+>
+> **`POST /api/search`** (internal RPC, mcp-service gọi) — body `{ query, document_ids, top_k }` → `{ candidates: [...] }` (CHƯA rerank). ACL nằm ở `document_ids` (rỗng/None → kết quả rỗng).
+>
+> **Ingest status/management** (internal-only `:8000`, không expose host — dùng cho document-service/ops):
+> - `GET /api/ingest/{document_id}` → `DocumentResponse` (trạng thái 1 document)
+> - `GET /api/ingest/jobs/{job_id}` → `IngestJobResponse` (trạng thái 1 ingest job)
+> - `GET /api/ingest` → `list[DocumentResponse]` (liệt kê document state)
+> - `DELETE /api/ingest/{document_id}` → 204 (xóa document khỏi index)
+> - Health/metrics: `GET /livez`, `/readyz`, `/health`, `/healthz`, `/metrics`
 
 | Subject | Type | Payload | Mô tả |
 |---------|------|---------|-------|
@@ -525,13 +576,15 @@ GET    /hr/leave-requests/{request_id}?user_id=X → đơn theo id
 POST   /hr/profile            Body { user_id } → gộp 7 mục HR + thông tin nhân viên cơ bản trong 1 call
 GET    /hr/leave-types        taxonomy loại nghỉ (4 rổ theo luật LĐ VN) — public
 GET    /hr/departments        danh sách phòng ban — public
+GET    /hr/employees/departments           danh sách phòng ban từ bảng employees (internal)
 POST   /hr/departments/{old_name}/rename   (X-Internal-Token) đổi tên + cascade employees → publish hr.department.renamed
 GET    /hr/admin/employees                 (JWT admin) list nhân viên (paginated)
-GET    /hr/admin/employees/{employee_id}   (JWT admin) chi tiết + HR data liên quan
+GET    /hr/admin/employees/{employee_id}           (JWT admin) hồ sơ cơ bản (EmployeeItem)
+GET    /hr/admin/employees/{employee_id}/details   (JWT admin) chi tiết + HR data liên quan
 PATCH  /hr/admin/employees/{employee_id}   (JWT admin) cập nhật hồ sơ
-GET    /hr/admin/leave-requests            (JWT admin) mọi đơn (filter + paginated)
-GET    /hr/admin/departments               (JWT admin) phòng ban distinct
+DELETE /hr/admin/employees/{employee_id}   (JWT admin) xóa hồ sơ nhân viên (204)
 ```
+> hr-service KHÔNG có `/hr/admin/leave-requests` hay `/hr/admin/departments` riêng — đơn nghỉ admin xem qua các route leave-requests ở trên; phòng ban dùng `/hr/departments` hoặc `/hr/employees/departments`.
 
 > **Tool MCP leave:** `leave_write` (tạo/sửa/hủy), `leave_approvals` (pending + approve/reject), `leave_types`, `resolve_date` — đều proxy hr-service qua `X-Internal-Token`.
 
@@ -554,7 +607,7 @@ POST /admin/key/{key_id}/drain    rút 1 key khỏi vòng xoay (HITL)
 POST /admin/key/{key_id}/resume   đưa key trở lại
 ```
 
-> Cấu hình: `routing.yaml` (selector `sticky_rotation_soft`, capability→tier→model, quality floor — hot-reload) + `config/model_catalog.json` (build từ OpenRouter `/models` mỗi deploy). An toàn: không service nào `depends_on` ai-router → router chết không kéo sập app (query-service set `OPENAI_BASE_URL` rỗng = fallback gọi thẳng OpenAI).
+> Cấu hình: `routing.yaml` (selector default `banded_rotation` — xoay key theo ngưỡng token; nhiều capability override `adaptive_balanced` — AIMD cho OpenRouter / TPM-headroom cho OpenAI; capability→tier→model, quality floor — hot-reload) + `config/model_catalog.json` (build từ OpenRouter `/models` mỗi deploy). An toàn: không service nào `depends_on` ai-router → router chết không kéo sập app (query-service set `OPENAI_BASE_URL` rỗng = fallback gọi thẳng OpenAI).
 
 ---
 

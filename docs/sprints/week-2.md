@@ -12,7 +12,7 @@ Nối **luồng chính chạy thông** (local): Admin upload tài liệu → ing
 | Role | Người | Task tuần này | Phụ thuộc |
 |------|-------|---------------|-----------|
 | **Backend Dev** | Vũ Quang Dũng | document-service: `upload_document_use_case` (validate → GCS → record `queued` → publish `doc.ingest` + `doc.access`); `nats_subscriber` (sub `doc.status` → update status + chunk_count); user CRUD admin (`list`, deactivate/reactivate). | NATS contract (T1) |
-| **RAG Engineer** | Trần Thanh Nguyên | rag-worker: ingestion đầy đủ (Gemini OCR → Parent-Child chunking → embed 1536d → upsert Qdrant) + `retrieval.py` Top-5; mcp-service: tool `rag_search` (NATS rag.search → rerank BGE Top-3) + `hr_query`. | `doc.ingest` từ Backend Dev |
+| **RAG Engineer** | Trần Thanh Nguyên | rag-worker: ingestion đầy đủ (OCR → Parent-Child chunking → embed 4096d (qwen3-8b) → upsert Qdrant) + query-search `/api/search` Top-K; mcp-service: tool `rag_search` (gọi rag-worker → rerank Top-K) + `hr_query`. | `doc.ingest` từ Backend Dev |
 | **AI/Agent Engineer** | Phạm Quốc Dũng | query-service: `orchestration.py` (FunctionCallingAgent = MCP client → gọi `rag_search`/`hr_query`); SSE streaming token/done; `doc_access_subscriber` (sub `doc.access` → projection `document_access`); semantic cache Redis. | mcp-service tools (RAG Eng) |
 | **Frontend Dev** | Đặng Hồ Hải | **frontend/chat**: chat SSE chạy thật (`StreamingText.vue` đọc token từ `POST /query`) + `useChat`. **frontend/admin**: `documents.vue` (`FileUpload` + bảng status). `useApi`/`useAuth` ở base layer. | SSE `/query` (AI Eng) |
 | **DevOps** | Trần Hữu Gia Huy | `docker-compose up` full **13 containers** chạy local; dựng **Langfuse server** (:3100) + cấp API key qua Secret Manager. | Dockerfile các service (T1) |

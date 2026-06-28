@@ -218,17 +218,18 @@ class NotificationRepository(ABC):
 ## mcp-service — Domain
 
 MCP Tool Service expose tool qua giao thức MCP Streamable HTTP (`:8003`, path `/mcp`). **Search-only routing layer** —
-KHÔNG sở hữu dữ liệu HR. Tool đăng ký qua registry (`app/tools/`); hiện có 6 tool: `rag_search` (đọc Qdrant),
+KHÔNG sở hữu dữ liệu HR. Tool đăng ký qua registry (`app/tools/`); hiện có 6 tool: `rag_search` (gọi rag-worker `/api/search` rồi rerank),
 `hr_query` (HTTP proxy sang **hr-service**), `leave_write`, `leave_approvals`, `leave_types`, `resolve_date` (đều proxy hr-service).
 
-> ⚠️ **Lưu ý đối chiếu code**: mcp-service KHÔNG có `domain/repositories/*.py` (không `RerankService`/`HrClient` ABC),
-> KHÔNG có `domain/entities/search_result.py`. Shape kết quả search là `SearchHit` ở `app/core/vectorstore.py`;
+> ⚠️ **Lưu ý đối chiếu code**: mcp-service là **THIN search interface** — embed + vector search ĐÃ chuyển sang rag-worker
+> (`POST /api/search`, owner của embed model + collection contract). mcp KHÔNG còn `vectorstore.py`/Qdrant/embed; chỉ giữ
+> `search.py` (gọi rag-worker rồi rerank). Shape kết quả search là `SearchHit` ở `app/core/models.py`;
 > reranker là `Reranker` Protocol ở `app/core/rerank.py`. `app/domain/entities/tool_io.py` chỉ còn `RagSearchInput`.
 > Toàn bộ DTO HR + `HrRepository` đã chuyển sang **hr-service** (xem section hr-service bên dưới).
 
 ```python
-# src/mcp-service/app/core/vectorstore.py — shape 1 hit trả về cho client (KHÔNG phải domain entity).
-# CÙNG field với SearchResult của rag-worker (ghép qua Qdrant: point_id uuid5 + payload keys phải khớp).
+# src/mcp-service/app/core/models.py — shape 1 hit trả về cho client (KHÔNG phải domain entity).
+# CÙNG field với candidates rag-worker trả ở POST /api/search (map 1:1).
 @dataclass
 class SearchHit:
     chunk_id: str = ""
@@ -461,11 +462,11 @@ class EmbeddingService(ABC):
 
     @abstractmethod
     async def embed(self, text: str) -> List[float]:
-        """Embed 1 đoạn text → vector 1536 dims (text-embedding-3-small)."""
+        """Embed 1 đoạn text → vector dim native theo EMBED_MODEL (resolve_dimension; qwen3-8b = 4096)."""
 
     @abstractmethod
     async def embed_batch(self, texts: List[str]) -> List[List[float]]:
-        """Embed nhiều text cùng lúc — dùng khi ingestion chunking."""
+        """Embed nhiều text — sub-batch song song qua AdaptiveConcurrencyLimiter (AIMD)."""
 ```
 
 ```python
@@ -475,7 +476,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 @dataclass
-class SearchResult:           # shape chunk trả về (CÙNG field với SearchHit của mcp-service; mcp đọc từ Qdrant payload, KHÔNG qua NATS)
+class SearchResult:           # shape chunk rag-worker /api/search trả (CÙNG field với SearchHit của mcp-service; mcp gọi rag-worker rồi rerank)
     chunk_id: str
     document_id: str
     document_name: str
@@ -498,7 +499,7 @@ class VectorRepository(ABC):
         """Xóa toàn bộ vectors của một document."""
 ```
 
-> ⚠️ **Theo code**: rag-worker là **ingest-only** — `VectorRepository` chỉ có `upsert`/`delete_by_document`, **KHÔNG có `hybrid_search`/search**. Retrieval (vector search + rerank) do **mcp-service** đọc Qdrant trực tiếp (`app/core/vectorstore.py` + `search.py`). `SearchResult` ở đây chỉ là shape tham chiếu (cùng field với `SearchHit` của mcp-service).
+> ⚠️ **Theo code**: rag-worker phục vụ CẢ ingest LẪN query-search. Ingest qua `VectorRepository.upsert`/`delete_by_document`; query-search qua `SearchUseCase` (`app/application/use_cases/search/`) → embed query + `VectorStore.search` (vector + BM25 hybrid trên Qdrant) → trả candidates (CHƯA rerank) ở `POST /api/search`. **mcp-service** gọi endpoint này rồi rerank. `SearchResult` ở đây là shape candidate (cùng field với `SearchHit` mcp).
 
 ---
 

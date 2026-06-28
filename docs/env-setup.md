@@ -18,7 +18,7 @@ cp src/hr-service/.env.example        src/hr-service/.env
 ## User Service — `src/user-service/.env.example`
 
 ```env
-# Database (Cloud SQL — user_db)
+# Database (Postgres — app-postgres container; user_db)
 DATABASE_URL=postgresql+asyncpg://user:password@<cloud-sql-ip>:5432/user_db
 
 # JWT (phải khớp với tất cả services)
@@ -37,7 +37,7 @@ MICROSOFT_TENANT_ID=common    # "common" = chấp nhận mọi Microsoft account
 
 | Biến | Mô tả | Lấy ở đâu |
 |------|-------|-----------|
-| `DATABASE_URL` | Connection string PostgreSQL | Cloud SQL IP — database `user_db` |
+| `DATABASE_URL` | Connection string PostgreSQL | Host `app-postgres:5432` — database `user_db` (Cloud SQL = Phase sau) |
 | `JWT_SECRET_KEY` | Secret ký JWT — phải khớp các services verify token | Tự generate: `openssl rand -hex 32` |
 | `JWT_EXPIRE_MINUTES` | Thời gian hết hạn token (phút) | Mặc định 480 = 8 giờ |
 | `MICROSOFT_CLIENT_ID` | App ID đăng ký trên Azure | Azure Portal → App registrations → Application (client) ID |
@@ -49,7 +49,7 @@ MICROSOFT_TENANT_ID=common    # "common" = chấp nhận mọi Microsoft account
 ## Document Service — `src/document-service/.env.example`
 
 ```env
-# Database (Cloud SQL — doc_db)
+# Database (Postgres — app-postgres container; doc_db)
 DATABASE_URL=postgresql+asyncpg://user:password@<cloud-sql-ip>:5432/doc_db
 
 # JWT (shared secret — verify locally, không gọi User Service)
@@ -68,7 +68,7 @@ GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json  # local dev only; 
 
 | Biến | Mô tả | Lấy ở đâu |
 |------|-------|-----------|
-| `DATABASE_URL` | Connection string PostgreSQL | Cloud SQL IP — database `doc_db` |
+| `DATABASE_URL` | Connection string PostgreSQL | Host `app-postgres:5432` — database `doc_db` |
 | `JWT_SECRET_KEY` | Phải khớp với User Service | Dùng cùng key đã generate |
 | `NATS_URL` | URL kết nối NATS broker | `nats://nats:4222` (Docker) hoặc `nats://localhost:4222` (local dev) |
 | `NATS_JETSTREAM_ENABLED` | Bật JetStream để persist message — RAG Worker restart không mất job | `true` |
@@ -81,7 +81,7 @@ GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json  # local dev only; 
 ## Query Service — `src/query-service/.env.example`
 
 ```env
-# Database (Cloud SQL — query_db)
+# Database (Postgres — app-postgres container; query_db)
 DATABASE_URL=postgresql+asyncpg://user:password@<cloud-sql-ip>:5432/query_db
 
 # JWT (shared secret — verify locally)
@@ -96,9 +96,11 @@ OPENAI_API_KEY=...
 OPENAI_BASE_URL=http://ai-router:8010/v1     # set = mọi LLM/embedding qua router; rỗng = thẳng OpenAI
 AIROUTER_INTERNAL_TOKEN=                       # Bearer gửi cho ai-router (tách khỏi OPENAI_API_KEY)
 OPENAI_LLM_MODEL=gpt-4o-mini                   # khi base_url=ai-router, 'model' dùng ALIAS capability (answer/worker/think/plan)
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+# Embedding CONTRACT-CRITICAL: EMBED_MODEL + EMBED_DIMENSION đặt ở deploy/env/common.env (nguồn DUY NHẤT),
+# rag-worker == mcp == query PHẢI khớp hệt nếu không sẽ split-brain collection.
+EMBED_MODEL=qwen/qwen3-embedding-8b            # PRIMARY hiện tại — 4096 dims native (KHÔNG còn 1536/te3s)
 
-# Agent (MOSA Orchestrator-Workers). OVERRIDE agents.yaml; rỗng = theo manifest (commit là 'react').
+# Agent Multi-Agent (Orchestrator-Workers). OVERRIDE agents.yaml; rỗng = theo manifest (commit là 'react').
 AGENT_MODE=orchestrator_workers                # prod & e2e PHẢI khớp (test_e2e_and_prod_agent_mode_consistent)
 
 # MCP Tool Service (rag_search, hr_query, leave_write, leave_approvals, leave_types, resolve_date)
@@ -125,13 +127,13 @@ LANGFUSE_HOST=http://langfuse:3100
 
 | Biến | Mô tả | Lấy ở đâu |
 |------|-------|-----------|
-| `DATABASE_URL` | Connection string PostgreSQL | Cloud SQL IP — database `query_db` |
+| `DATABASE_URL` | Connection string PostgreSQL | Host `app-postgres:5432` — database `query_db` |
 | `JWT_SECRET_KEY` | Phải khớp với User Service | Dùng cùng key đã generate |
 | `OPENAI_API_KEY` | Key gọi OpenAI API (LLM + Embedding semantic cache) | platform.openai.com → API keys |
 | `OPENAI_BASE_URL` | Gateway LLM (ai-router); rỗng = thẳng OpenAI | `http://ai-router:8010/v1` |
-| `AGENT_MODE` | Override agent mode (MOSA) | `orchestrator_workers` |
+| `AGENT_MODE` | Override agent mode (Multi-Agent Orchestrator-Workers) | `orchestrator_workers` |
 | `OPENAI_LLM_MODEL` | Model/alias LLM (alias capability khi qua ai-router) | `gpt-4o-mini` |
-| `OPENAI_EMBEDDING_MODEL` | Model embedding — 1536 dims | `text-embedding-3-small` |
+| `EMBED_MODEL` | Embedding (CONTRACT-CRITICAL, nguồn ở `common.env`) — 4096 dims native | `qwen/qwen3-embedding-8b` |
 | `MCP_SERVICE_URL` | Endpoint MCP server (6 tool) | `http://mcp-service:8003` |
 | `NATS_URL` | URL kết nối NATS (doc.access, notify.doc_new, hr.employee_profile.updated) | `nats://nats:4222` |
 | `LANGFUSE_*` | LLM observability (traces, token cost, latency) | Self-hosted tại `:3100` |
@@ -144,9 +146,24 @@ LANGFUSE_HOST=http://langfuse:3100
 # RAG Worker chạy ingest async qua NATS, đọc/ghi GCS qua S3-compatible API, index Qdrant.
 # Không verify JWT; ACL được đưa vào payload/chunk để query-service/mcp-service enforce lúc search.
 
-# OpenAI Embedding — 1536 dims
+# Embedding — CONTRACT-CRITICAL (nguồn ở deploy/env/common.env; rag-worker==mcp==query khớp hệt)
 OPENAI_API_KEY=...
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+EMBED_MODEL=qwen/qwen3-embedding-8b            # PRIMARY — 4096 dims native (resolve_dimension); KHÔNG còn te3s/1536
+EMBED_DIMENSION=                               # rỗng = lấy native theo model
+EMBEDDINGS_CONFIG=embeddings.yaml              # danh sách model multi-collection (forward-write)
+MULTI_EMBED_ENABLED=1                          # ingest ghi ĐỒNG THỜI mọi collection active (augment); 0 = chỉ primary
+
+# Embed sub-batch concurrency (AdaptiveConcurrencyLimiter — AIMD tự dò trần)
+EMBED_BATCH_SIZE=100
+EMBED_BATCH_MAX_CONCURRENCY=16
+EMBED_BATCH_MIN_CONCURRENCY=4
+EMBED_BATCH_INITIAL_CONCURRENCY=8
+EMBED_GROW_AFTER=3
+EMBED_SHRINK_FACTOR=0.5
+
+# Bật/tắt vai trò ingest của container (search-only set false; ingest-worker set true)
+INGEST_ENABLED=true
+INGEST_WORKER_COUNT=2
 
 # Metadata DB cho ingest job/document state
 DATABASE_URL=postgresql+psycopg://user:password@postgres:5432/rag_db
@@ -172,10 +189,15 @@ S3_SECRET_ACCESS_KEY=...
 SOURCE_ROOT=/tmp
 ARTIFACT_ROOT=/tmp/artifacts
 
-# OCR / parse
+# OCR / parse (gotenberg convert office->pdf; OCR_* concurrency = AdaptiveConcurrencyLimiter)
 OCR_MODEL=gpt-4o-mini
 MAX_OCR_PAGES=25
 PDF_OCR_SCALE=2.0
+OCR_MAX_CONCURRENCY=8
+OCR_MIN_CONCURRENCY=2
+OCR_INITIAL_CONCURRENCY=4
+OCR_GROW_AFTER=3
+OCR_SHRINK_FACTOR=0.5
 
 # Langfuse
 LANGFUSE_PUBLIC_KEY=...
@@ -185,9 +207,12 @@ LANGFUSE_HOST=http://langfuse:3100
 
 | Biến | Mô tả | Lấy ở đâu |
 |------|-------|-----------|
-| `OPENAI_API_KEY` | Key gọi OpenAI Embedding API | platform.openai.com → API keys |
-| `OPENAI_EMBEDDING_MODEL` | Model embedding 1536 dims | `text-embedding-3-small` |
-| `DATABASE_URL` | Metadata DB cho ingest job/document state của rag-worker | Cloud SQL/Postgres, driver `postgresql+psycopg://` |
+| `OPENAI_API_KEY` | Key gọi embedding qua ai-router (1 token gateway) | `AIROUTER_INTERNAL_TOKEN` |
+| `EMBED_MODEL` | Embedding PRIMARY — 4096 dims native (CONTRACT-CRITICAL, nguồn `common.env`) | `qwen/qwen3-embedding-8b` |
+| `EMBEDDINGS_CONFIG` / `MULTI_EMBED_ENABLED` | File khai báo model multi-collection + bật forward-write nhiều collection | `embeddings.yaml` / `1` |
+| `EMBED_BATCH_*` / `EMBED_GROW_AFTER` / `EMBED_SHRINK_FACTOR` | Sub-batch concurrency embed (AIMD adaptive limiter) | xem block ở trên |
+| `INGEST_ENABLED` / `INGEST_WORKER_COUNT` | Bật vai trò ingest (NATS consumer) + số worker mỗi container | `true` / `2` |
+| `DATABASE_URL` | Metadata DB cho ingest job/document state của rag-worker | `app-postgres:5432/rag_db`, driver `postgresql+psycopg://` |
 | `NATS_URL` | URL kết nối NATS broker | `nats://nats:4222` |
 | `QDRANT_URL` | Vector DB endpoint | `http://qdrant:6333` (Docker) hoặc `http://localhost:6333` (local) |
 | `QDRANT_COLLECTION` | Tên collection Qdrant | Giữ nguyên `rag_chatbot` |
@@ -220,25 +245,22 @@ MCP_PORT=8003
 MCP_INTERNAL_TOKEN=                 # shared secret cho header X-Internal-Token (trống = auth TẮT)
 LOG_LEVEL=INFO
 
-# Tool rag_search — embed query
-EMBED_MODEL=text-embedding-3-small
-EMBED_BASE_URL=
-OPENAI_API_KEY=...
-EMBED_DIMENSION=
+# Tool rag_search — mcp = THIN interface: embed + vector search ĐÃ chuyển sang rag-worker.
+# mcp gọi HTTP rag-worker /api/search rồi rerank candidates (KHÔNG còn EMBED_MODEL/Qdrant ở mcp).
+RAG_WORKER_URL=http://rag-worker:8000
+RAG_SEARCH_TIMEOUT_SECONDS=30
 
-# Tool rag_search — vector store (đọc Qdrant TRỰC TIẾP, không qua NATS/RAG Worker)
-VECTOR_DB_PROVIDER=qdrant
-VECTOR_COLLECTION=rag_chatbot
-VECTOR_DB_URL=http://qdrant:6333
-VECTOR_DB_API_KEY=
-
-# Tool rag_search — reranker: none | lexical | llm (KHÔNG self-host BGE)
-RERANK_PROVIDER=none
+# Tool rag_search — reranker: lexical | llm (cohere qua ai-router). Bearer = AIROUTER_INTERNAL_TOKEN.
+RERANK_PROVIDER=lexical
 RERANK_MODEL=gpt-4o-mini            # chỉ dùng khi RERANK_PROVIDER=llm
+RERANK_BASE_URL=
+AIROUTER_INTERNAL_TOKEN=
 RERANK_TIMEOUT_SECONDS=30
-SEARCH_TOP_K=20                     # số candidates đọc từ Qdrant
-RERANK_TOP_K=3                      # số kết quả sau rerank
-RERANK_THRESHOLD=0.7
+SEARCH_TOP_K=20                     # số candidates rag-worker trả về
+RERANK_TOP_K=5                      # số kết quả sau rerank
+RERANK_THRESHOLD=0.05
+RERANK_MAX_PER_DOC=0                # >0 = chống 1 doc thống trị kết quả
+RERANK_DIVERSITY_POOL=3
 
 # Tool hr_query — HTTP proxy sang hr-service (mặc định TẮT)
 TOOL_HR_QUERY_ENABLED=0
@@ -250,10 +272,9 @@ HR_SERVICE_INTERNAL_TOKEN=
 |------|-------|-----------|
 | `MCP_HOST` / `MCP_PORT` | Host + port MCP server (Streamable HTTP, path `/mcp`) | `0.0.0.0` / `8003` |
 | `MCP_INTERNAL_TOKEN` | Shared secret cho `X-Internal-Token`; trống = auth tắt (fail-open) | Tự generate |
-| `EMBED_MODEL` / `OPENAI_API_KEY` | Model + key embed query | `text-embedding-3-small` |
-| `VECTOR_DB_URL` / `VECTOR_COLLECTION` | Qdrant mcp-service đọc trực tiếp (cùng collection rag-worker ghi) | `http://qdrant:6333` / `rag_chatbot` |
-| `RERANK_PROVIDER` | `none` \| `lexical` \| `llm` (fallback NoopReranker khi llm lỗi) | `none` |
-| `RERANK_TOP_K` / `RERANK_THRESHOLD` | Số kết quả sau rerank + ngưỡng score | `3` / `0.7` |
+| `RAG_WORKER_URL` / `RAG_SEARCH_TIMEOUT_SECONDS` | Endpoint rag-worker `/api/search` (mcp gọi để embed + vector search) | `http://rag-worker:8000` / `30` |
+| `RERANK_PROVIDER` | `lexical` \| `llm` (cohere qua ai-router; fallback khi lỗi) | `lexical` |
+| `RERANK_TOP_K` / `RERANK_THRESHOLD` | Số kết quả sau rerank + ngưỡng score | `5` / `0.05` |
 | `TOOL_HR_QUERY_ENABLED` | Bật/tắt tool `hr_query` | `0` (tắt) |
 | `HR_SERVICE_URL` / `HR_SERVICE_INTERNAL_TOKEN` | Endpoint + token hr-service cho tool `hr_query` | `http://hr-service:8004` |
 
@@ -262,7 +283,7 @@ HR_SERVICE_INTERNAL_TOKEN=
 ## HR Service — `src/hr-service/.env.example`
 
 ```env
-# Database (Cloud SQL — hr_db)
+# Database (Postgres — app-postgres container; hr_db)
 DATABASE_URL=postgresql+asyncpg://user:password@<cloud-sql-ip>:5432/hr_db
 
 # JWT (optional, nếu endpoint internal cần verify token/service token)
@@ -282,7 +303,7 @@ HR_SERVICE_PORT=8004
 
 | Biến | Mô tả | Lấy ở đâu |
 |------|-------|-----------|
-| `DATABASE_URL` | Connection string PostgreSQL | Cloud SQL IP — database `hr_db` |
+| `DATABASE_URL` | Connection string PostgreSQL | Host `app-postgres:5432` — database `hr_db` |
 | `JWT_SECRET_KEY` | Verify JWT cho nhóm `/hr/admin/*` | Dùng cùng key đã generate |
 | `NATS_URL` | Publish `hr.leave_request.*`, `hr.employee_profile.updated`, `hr.department.renamed` | `nats://nats:4222` |
 | `HR_DEFAULT_APPROVER` | Approver fallback khi nhân viên thiếu `manager_user_id` | user_id 1 quản lý |
@@ -309,7 +330,7 @@ AIROUTER_OPENROUTER_RPM=...
 AIROUTER_RECONCILE_ON_BOOT=0             # opt-in reconcile lúc khởi động
 ```
 
-> Cấu hình thuật toán/model: `src/ai-router/routing.yaml` (selector `sticky_rotation_soft`, capability→tier→model, hot-reload qua `POST /admin/reload`) + `config/model_catalog.json` (build từ OpenRouter `/models` mỗi deploy). Bind `127.0.0.1:8010` — `/admin/*` truy cập qua SSH tunnel.
+> Cấu hình thuật toán/model: `src/ai-router/routing.yaml` (selector default `banded_rotation` — xoay key theo ngưỡng token; nhiều capability override `adaptive_balanced` — AIMD cho OpenRouter / TPM-headroom cho OpenAI; capability→tier→model, hot-reload qua `POST /admin/reload`) + `config/model_catalog.json` (build từ OpenRouter `/models` mỗi deploy). Bind `127.0.0.1:8010` — `/admin/*` truy cập qua SSH tunnel.
 
 ---
 
