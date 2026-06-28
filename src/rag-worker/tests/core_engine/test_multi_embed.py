@@ -1,7 +1,7 @@
 """Multi-collection embed — contract + config + ingest fan-out + backfill (KHÔNG re-parse).
 
 Gác 5 bất biến:
-1. resolve_dimension trả đúng dim cho 5 model active; MODEL_TAGS đủ (collection riêng/model).
+1. resolve_dimension trả đúng dim cho 4 model active; MODEL_TAGS đủ (collection riêng/model).
 2. embeddings.yaml -> N model -> N collection config (dedup theo index_id).
 3. ingest multi: N target -> N collection upsert, MỖI collection nhận vector đúng dim,
    CHIA SẺ chunks (embed_texts giống nhau), 1 target fail KHÔNG vỡ primary/target khác.
@@ -22,9 +22,9 @@ from core_engine.multi_embed import (
 )
 from core_engine.vectorstore import VectorStoreConfig
 
-ACTIVE_5 = [
+# 4 model active (gỡ e5large 2026-06-28: ctx 512 = mắt xích yếu). Đồng bộ embeddings.yaml.
+ACTIVE_MODELS = [
     ("qwen/qwen3-embedding-8b", 4096),
-    ("intfloat/multilingual-e5-large", 1024),
     ("baai/bge-m3", 1024),
     ("openai/text-embedding-3-small", 1536),
     ("perplexity/pplx-embed-v1-0.6b", 1024),
@@ -32,22 +32,22 @@ ACTIVE_5 = [
 
 
 # ── 1. contract ───────────────────────────────────────────────────────────────
-@pytest.mark.parametrize("model,dim", ACTIVE_5)
-def test_resolve_dimension_for_5_models(model: str, dim: int) -> None:
+@pytest.mark.parametrize("model,dim", ACTIVE_MODELS)
+def test_resolve_dimension_for_active_models(model: str, dim: int) -> None:
     assert model in EMBED_MODELS
     assert resolve_dimension(model) == dim
     assert model in MODEL_TAGS, f"thiếu tag cho {model}"
 
 
 def test_each_model_has_distinct_collection_tag() -> None:
-    tags = {model_tag(m) for m, _ in ACTIVE_5}
-    assert len(tags) == 5, f"tag trùng -> collection trùng: {tags}"
+    tags = {model_tag(m) for m, _ in ACTIVE_MODELS}
+    assert len(tags) == len(ACTIVE_MODELS), f"tag trùng -> collection trùng: {tags}"
 
 
 # ── 2. config (embeddings.yaml) ───────────────────────────────────────────────
 def test_load_active_embed_models_from_yaml() -> None:
     models = load_active_embed_models()
-    for m, _ in ACTIVE_5:
+    for m, _ in ACTIVE_MODELS:
         assert m in models
 
 
@@ -56,9 +56,9 @@ def test_resolve_target_configs_one_collection_per_model() -> None:
         provider="qdrant", collection="rag_chatbot",
         embed_model="qwen/qwen3-embedding-8b", dimension=4096, hybrid=True,
     )
-    out = resolve_target_configs(base, [m for m, _ in ACTIVE_5])
+    out = resolve_target_configs(base, [m for m, _ in ACTIVE_MODELS])
     collections = [cfg.index_id() for _, _, cfg in out]
-    assert len(collections) == len(set(collections)) == 5
+    assert len(collections) == len(set(collections)) == len(ACTIVE_MODELS)
     for (model, dim, cfg) in out:
         assert cfg.dimension == dim
         assert model_tag(model) in cfg.index_id()
@@ -131,7 +131,7 @@ MD = "# Title\none two three four five six seven eight nine ten"
 @pytest.mark.asyncio
 async def test_ingest_writes_every_collection_with_correct_dim() -> None:
     pv, pe = _StubVectors(), _StubEmbedder(4)
-    targets = [_target(m, d) for m, d in ACTIVE_5[1:]]  # secondary (primary là qwen8b)
+    targets = [_target(m, d) for m, d in ACTIVE_MODELS[1:]]  # secondary (primary là qwen8b)
     engine = _engine(pv, pe, targets)
     count = await engine.ingest(IngestInput(
         document_id="d1", document_name="Doc", file_type="md", markdown=MD))
@@ -151,7 +151,7 @@ async def test_ingest_writes_every_collection_with_correct_dim() -> None:
 async def test_one_target_failure_does_not_break_others_or_primary() -> None:
     pv, pe = _StubVectors(), _StubEmbedder(4)
     good = _target("baai/bge-m3", 1024)
-    bad = _target("intfloat/multilingual-e5-large", 1024, embedder=_FailEmbedder(1024))
+    bad = _target("perplexity/pplx-embed-v1-0.6b", 1024, embedder=_FailEmbedder(1024))
     engine = _engine(pv, pe, [bad, good])
     count = await engine.ingest(IngestInput(
         document_id="d1", document_name="Doc", file_type="md", markdown=MD))
