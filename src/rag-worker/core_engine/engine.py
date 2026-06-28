@@ -57,10 +57,15 @@ class HaystackRagEngine:
         captioner: Optional[Captioner] = None,
         chunker: Chunker | None = None,
         tracer: object | None = None,
+        embed_targets: list | None = None,
     ):
         self.settings = settings or load_settings()
         self.embedder = embedder
         self.vectors = vectors
+        # Multi-collection: tập đích SECONDARY (model khác -> collection khác). Mỗi đích
+        # tự embed CÙNG chunks + upsert collection riêng. Rỗng -> hành vi cũ (1 collection).
+        # Tách parse/OCR/caption (làm 1 lần ở đây) khỏi embed -> chia sẻ chunks cho mọi model.
+        self.embed_targets = list(embed_targets or [])
         self.captioner = captioner
         self._tracer = tracer
         self.chunker = chunker or SectionChunker(
@@ -157,6 +162,75 @@ class HaystackRagEngine:
             if isinstance(name, str):
                 return name
         return ""
+
+    async def _write_one_target(
+        self,
+        target: object,
+        chunk_ids: List[str],
+        embed_texts: List[str],
+        payloads: List[dict],
+        existing_chunk_ids: set,
+    ) -> None:
+        """Embed embed_texts bằng embedder của target -> upsert vào vectors của target.
+
+        Mỗi target = 1 model + 1 collection độc lập. Prune stale chunk như primary (giữ
+        collection đồng bộ document). Vỡ ở đây KHÔNG ảnh hưởng primary/target khác (caller
+        gather return_exceptions)."""
+        vectors = await target.embedder.embed_batch(embed_texts)
+        records = [
+            VectorRecord(chunk_id=chunk_id, vector=vector, payload=payload)
+            for chunk_id, vector, payload in zip(chunk_ids, vectors, payloads)
+        ]
+        existing_target = set(
+            await target.vectors.list_chunk_ids_by_document(payloads[0]["document_id"])
+        ) if payloads else set(existing_chunk_ids)
+        await target.vectors.upsert_many(records)
+        stale = sorted(existing_target - set(chunk_ids))
+        if stale:
+            await target.vectors.delete_many(stale)
+
+    async def _write_secondary_targets(
+        self,
+        chunk_ids: List[str],
+        embed_texts: List[str],
+        payloads: List[dict],
+        existing_chunk_ids: set,
+        trace: object | None,
+        *,
+        correlation_id: str,
+        document_id: str,
+    ) -> None:
+        span = self._span_start(
+            trace,
+            "multi-embed",
+            {"targets": len(self.embed_targets), "chunks": len(embed_texts)},
+        )
+        results = await asyncio.gather(
+            *[
+                self._write_one_target(t, chunk_ids, embed_texts, payloads, existing_chunk_ids)
+                for t in self.embed_targets
+            ],
+            return_exceptions=True,
+        )
+        ok, failed = 0, 0
+        for target, result in zip(self.embed_targets, results):
+            if isinstance(result, BaseException):
+                failed += 1
+                log_event(
+                    self._logger,
+                    logging.WARNING,
+                    "multi_embed_target_failed",
+                    stage="multi-embed",
+                    correlation_id=correlation_id,
+                    document_id=document_id,
+                    embed_model=getattr(target, "embed_model", "?"),
+                    collection=getattr(getattr(target, "config", None), "index_id", lambda: "")(),
+                    error_type=type(result).__name__,
+                    error=str(result)[:300],
+                )
+            else:
+                ok += 1
+        self._span_ok(span, {"ok": ok, "failed": failed})
 
     async def ingest(self, doc: IngestInput) -> int:
         request_correlation_id = doc.correlation_id or str(uuid4())
@@ -393,6 +467,15 @@ class HaystackRagEngine:
                 "pruned_chunk_count": len(stale_chunk_ids),
             },
         )
+        # ── MULTI-COLLECTION: embed CÙNG chunks bằng mọi model secondary -> upsert
+        # collection riêng (index_id per model). CHIA SẺ embed_texts/payloads/chunk_ids
+        # đã tính 1 lần (parse/OCR/caption KHÔNG lặp). Fault-isolated: 1 model fail KHÔNG
+        # vỡ primary (đã commit ở trên) lẫn model khác (gather return_exceptions).
+        if self.embed_targets:
+            await self._write_secondary_targets(
+                chunk_ids, embed_texts, payloads, existing_chunk_ids, trace,
+                correlation_id=request_correlation_id, document_id=doc.document_id,
+            )
         log_event(
             self._logger,
             logging.INFO,

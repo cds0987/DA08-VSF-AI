@@ -609,6 +609,32 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # Multi-collection embed one-shot: đọc embeddings.yaml -> TẠO collection THIẾU trong Qdrant
+  # (model mới). CHỈ tạo collection (--yes, KHÔNG backfill) -> NHANH, blocking-được, idempotent.
+  # APPEND-ONLY: KHÔNG xóa collection cũ. Deploy thường (config không đổi) -> mọi collection đã
+  # sẵn -> NO-OP. Backfill corpus (chậm) do deploy.sh launch DETACHED (--backfill-new). Cùng image
+  # rag-worker; pattern giống rag-migrate. depends_on rag-migrate (schema sẵn) + qdrant.
+  rag-multi-embed-migrate:
+    image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/rag-worker:${IMAGE_TAG:-develop}
+    command: ["python", "scripts/multi_embed_migrate.py", "--yes"]
+    working_dir: /app
+    env_file:
+      - ./deploy/env/common.env
+      - ./deploy/env/rag-worker.env
+      - ./deploy/env/secret.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/rag_db
+      # forward-write + migrate multi-collection chỉ chạy khi bật cờ này.
+      MULTI_EMBED_ENABLED: "1"
+      # MỌI AI (embed) qua ai-router: 1 token -> gateway (giống rag-worker/ingest).
+      EMBED_API_KEY: ${AIROUTER_INTERNAL_TOKEN:-}
+    depends_on:
+      qdrant:
+        condition: service_started
+      rag-migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
   rag-worker:
     image: ${DOCKERHUB_USERNAME:-CHANGE_ME}/rag-worker:${IMAGE_TAG:-develop}
     env_file:
@@ -655,6 +681,9 @@ services:
       DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/rag_db
       INGEST_ENABLED: "true"
       INGEST_WORKER_COUNT: "2"
+      # forward-write multi-collection: ingest thật đồng thời ghi mọi collection active
+      # (embeddings.yaml) ngoài primary qwen8b. Tắt -> chỉ ghi primary (multi-embed là augment).
+      MULTI_EMBED_ENABLED: "1"
       # Part A đã đo: embed PROVIDER-throughput-bound (~18 chunk/s). Batch tuning vô ích.
       # Giữ batch default 100 + concurrency 16 (transient-safe).
       EMBED_BATCH_MAX_CONCURRENCY: "16"

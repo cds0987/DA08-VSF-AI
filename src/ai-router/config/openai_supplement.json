@@ -100,5 +100,56 @@
     "input_modalities": [
       "text"
     ]
+  },
+  {
+    "id": "intfloat/multilingual-e5-large",
+    "provider": "intfloat",
+    "name_native": "multilingual-e5-large",
+    "name_or": "intfloat/multilingual-e5-large",
+    "context_length": 512,
+    "price_in_per_mtok": 0.01,
+    "price_out_per_mtok": 0.0,
+    "price_in_with_fee": 0.01,
+    "price_out_with_fee": 0.0,
+    "is_free": false,
+    "supports_tools": false,
+    "input_modalities": [
+      "text"
+    ],
+    "endpoint": "embeddings"
+  },
+  {
+    "id": "baai/bge-m3",
+    "provider": "baai",
+    "name_native": "bge-m3",
+    "name_or": "baai/bge-m3",
+    "context_length": 8192,
+    "price_in_per_mtok": 0.01,
+    "price_out_per_mtok": 0.0,
+    "price_in_with_fee": 0.01,
+    "price_out_with_fee": 0.0,
+    "is_free": false,
+    "supports_tools": false,
+    "input_modalities": [
+      "text"
+    ],
+    "endpoint": "embeddings"
+  },
+  {
+    "id": "perplexity/pplx-embed-v1-0.6b",
+    "provider": "perplexity",
+    "name_native": "pplx-embed-v1-0.6b",
+    "name_or": "perplexity/pplx-embed-v1-0.6b",
+    "context_length": 4096,
+    "price_in_per_mtok": 0.01,
+    "price_out_per_mtok": 0.0,
+    "price_in_with_fee": 0.01,
+    "price_out_with_fee": 0.0,
+    "is_free": false,
+    "supports_tools": false,
+    "input_modalities": [
+      "text"
+    ],
+    "endpoint": "embeddings"
   }
 ]

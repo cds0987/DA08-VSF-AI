@@ -27,6 +27,13 @@ aliases:
   # rag-worker gửi model THẬT (= embed_model fingerprint collection) -> map về capability embed.
   qwen/qwen3-embedding-8b: embed   # 2026-06-27: model active (3 provider, hết engine_overloaded)
   qwen/qwen3-embedding-4b: embed   # giữ alias cũ cho rollback an toàn
+  # MULTI-COLLECTION embed (rag-worker ghi mỗi model 1 collection -> gửi model THẬT). Mỗi model
+  # -> capability embed_* PIN đúng model + đúng tier provider. KHÔNG đụng 'embed' (qwen8b primary).
+  intfloat/multilingual-e5-large: embed_e5large    # OpenRouter (embed_or)
+  baai/bge-m3: embed_bgem3                          # OpenRouter (embed_or)
+  perplexity/pplx-embed-v1-0.6b: embed_pplx         # OpenRouter (embed_or)
+  openai/text-embedding-3-small: embed_te3s         # OpenAI (embed_oai)
+  text-embedding-3-small: embed_te3s                # alias ngắn -> cùng capability
   # mcp gửi model THẬT (rerank) -> capability rerank_api (Cohere /rerank endpoint). Giữ cả 2 alias
   # (rolling-deploy an toàn); model THỰC SỰ gọi do rerank_api.paid quyết (hiện = cohere/rerank-v3.5).
   cohere/rerank-v3.5: rerank_api
@@ -237,3 +244,17 @@ capabilities:
     tiers: [embed_or]              # qwen3-embedding-8b qua OpenRouter (rag-worker + query intent)
     pinned_model: qwen/qwen3-embedding-8b   # 2026-06-27: 4b->8b (3 provider, hết engine_overloaded;
                                             # MRL dim=2560 giữ nguyên vector size; collection mới tự tạo)
+  # ── MULTI-COLLECTION secondary embed (mỗi model PIN riêng -> đúng provider/endpoint). Chỉ
+  #    rag-worker ingest dùng (ghi collection phụ); KHÔNG ảnh hưởng 'embed' primary qwen8b. ───────
+  embed_e5large:
+    tiers: [embed_or]
+    pinned_model: intfloat/multilingual-e5-large
+  embed_bgem3:
+    tiers: [embed_or]
+    pinned_model: baai/bge-m3
+  embed_pplx:
+    tiers: [embed_or]
+    pinned_model: perplexity/pplx-embed-v1-0.6b
+  embed_te3s:                       # OpenAI embeddings (embed_oai tier)
+    tiers: [embed_oai]
+    pinned_model: openai/text-embedding-3-small

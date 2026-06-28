@@ -610,6 +610,12 @@ async def compute_health(runtime: RuntimeState) -> HealthReport:
     )
 
 
+def _multi_embed_enabled_from_env() -> bool:
+    """Ghi multi-collection (embeddings.yaml) không. Default OFF -> giữ hành vi 1-collection
+    cho prod tới khi chủ động bật (MULTI_EMBED_ENABLED=1)."""
+    return _is_truthy(os.getenv("MULTI_EMBED_ENABLED", "0"))
+
+
 def hybrid_enabled_from_env() -> bool:
     """VECTOR_HYBRID env -> bool. Một nguồn duy nhất cho CẢ 2 nhánh bootstrap."""
     return os.getenv("VECTOR_HYBRID", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -765,6 +771,34 @@ def bootstrap_runtime() -> RuntimeState:
             source_bucket=source_bucket,
         )
         vector_config = engine.vectors.config
+        # MULTI-COLLECTION: gắn tập đích secondary (embeddings.yaml) cho engine -> ingest
+        # ghi song song mọi model active. primary = vector_config.embed_model (đã ghi bởi
+        # engine.vectors) -> loại khỏi secondary. ENABLE qua MULTI_EMBED_ENABLED (default off
+        # để không đổi hành vi prod tới khi chủ động bật). Lỗi dựng target -> log, KHÔNG sập
+        # ingest primary.
+        if _multi_embed_enabled_from_env():
+            try:
+                from core_engine.multi_embed import build_embed_targets
+
+                engine.embed_targets = build_embed_targets(
+                    vector_config, primary_model=vector_config.embed_model
+                )
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "multi_embed_targets_wired",
+                    stage="startup",
+                    primary_collection=vector_config.index_id(),
+                    secondary_collections=[t.collection for t in engine.embed_targets],
+                )
+            except Exception as exc:  # noqa: BLE001 - multi-embed phụ; không kéo sập ingest
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "multi_embed_targets_wire_failed",
+                    stage="startup",
+                    error=str(exc),
+                )
         ingest_use_case = IngestDocumentUseCase(
             engine,
             document_repository,
