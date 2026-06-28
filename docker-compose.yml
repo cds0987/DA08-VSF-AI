@@ -625,7 +625,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@app-postgres:5432/rag_db
       # forward-write + migrate multi-collection chỉ chạy khi bật cờ này.
-      MULTI_EMBED_ENABLED: "1"
+      MULTI_EMBED_ENABLED: "0"
       # MỌI AI (embed) qua ai-router: 1 token -> gateway (giống rag-worker/ingest).
       EMBED_API_KEY: ${AIROUTER_INTERNAL_TOKEN:-}
     depends_on:
@@ -652,7 +652,7 @@ services:
       # BẬT SHARD-READ: embeddings.yaml mode=shard -> doc chia 1/5 collection. Search PHẢI query
       # 5 collection + merge (nếu không doc shard ngoài-qwen KHÔNG tìm thấy). MULTI_EMBED_ENABLED=1
       # wire shard_read_targets (runtime.py:797). INGEST_ENABLED=false nên chỉ READ-merge, không ingest.
-      MULTI_EMBED_ENABLED: "1"
+      MULTI_EMBED_ENABLED: "0"
       # MỌI AI qua ai-router: 1 TOKEN -> gateway (ai-router giữ 2 key thật OpenRouter+OpenAI, tự
       # route). caption/ocr kế thừa key này. ${} substitute từ deploy env; env_file không substitute.
       EMBED_API_KEY: ${AIROUTER_INTERNAL_TOKEN:-}
@@ -687,7 +687,7 @@ services:
       INGEST_WORKER_COUNT: "2"
       # forward-write multi-collection: ingest thật đồng thời ghi mọi collection active
       # (embeddings.yaml) ngoài primary qwen8b. Tắt -> chỉ ghi primary (multi-embed là augment).
-      MULTI_EMBED_ENABLED: "1"
+      MULTI_EMBED_ENABLED: "0"
       # Part A đã đo: embed PROVIDER-throughput-bound (~18 chunk/s). Batch tuning vô ích.
       # Giữ batch default 100 + concurrency 16 (transient-safe).
       EMBED_BATCH_MAX_CONCURRENCY: "16"
