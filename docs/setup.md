@@ -22,7 +22,7 @@ cd rag-chatbot
 
 ## 2. Backend setup
 
-Project có **5 backend services** độc lập (user-service, document-service, query-service, rag-worker, mcp-service). Mỗi service có `requirements.txt` riêng.
+Project có **7 backend services** độc lập (user-service, document-service, query-service, rag-worker, mcp-service, hr-service, ai-router). Mỗi service có `requirements.txt` riêng.
 
 ```bash
 # User Service (Backend Dev)
@@ -85,12 +85,12 @@ Xem đầy đủ nội dung từng file và hướng dẫn lấy API keys tại 
 
 ## 4. Chạy PostgreSQL + Qdrant local (Docker)
 
-**Production:** PostgreSQL chạy trên GCP Cloud SQL — không có container. Xem chi tiết tại [docs/env-setup.md](env-setup.md).
+**Production:** PostgreSQL chạy bằng container `app-postgres:16` trên VM (Cloud SQL managed là kế hoạch Phase sau). Xem chi tiết tại [docs/env-setup.md](env-setup.md).
 
-**Local dev:** Có thể dùng PostgreSQL Docker để test nhanh mà không cần Cloud SQL:
+**Local dev:** Dùng PostgreSQL Docker để test nhanh:
 
 ```bash
-# PostgreSQL local — tạo 6 databases riêng như production
+# PostgreSQL local — tạo các database riêng như production
 docker run -d \
   --name rag-postgres \
   -e POSTGRES_USER=user \
@@ -99,15 +99,15 @@ docker run -d \
   -p 5432:5432 \
   postgres:15
 
-# Tạo 6 databases
+# Tạo các database
 docker exec -it rag-postgres psql -U user -c "
   CREATE DATABASE user_db;
   CREATE DATABASE doc_db;
   CREATE DATABASE query_db;
-  CREATE DATABASE mcp_db;
   CREATE DATABASE hr_db;
+  CREATE DATABASE rag_db;
   CREATE DATABASE langfuse_db;
-"
+"   # mcp-service KHÔNG có DB; ai-router dùng Redis, không có DB
 
 # Qdrant — mount volume để persist data khi restart container
 docker run -d \
@@ -129,7 +129,7 @@ Tạo tables bằng Alembic (mỗi service có `alembic/` riêng):
 cd src/user-service    && alembic upgrade head   # user_db
 cd ../document-service  && alembic upgrade head   # doc_db
 cd ../query-service    && alembic upgrade head   # query_db (conversations, messages, document_access, user_access_profile)
-cd ../mcp-service      && alembic upgrade head   # mcp_db (tool metadata/config nếu cần)
+# mcp-service KHÔNG có DB/alembic (chỉ gọi rag-worker /api/search + proxy hr-service)
 cd ../hr-service       && alembic upgrade head   # hr_db (employee profile + HR mock data)
 cd ../rag-worker       && alembic upgrade head   # rag_db (ingest job/document state)
 ```
@@ -162,10 +162,11 @@ cd src/query-service
 venv\Scripts\activate
 uvicorn app.interfaces.api.main:app --reload --port 8001
 
-# Terminal 4 — RAG Worker (no port — NATS subscriber)
+# Terminal 4 — RAG Worker (ingest NATS + query-search /api/search trên :8000 nội bộ)
 cd src/rag-worker
 venv\Scripts\activate
-python app/main.py
+uvicorn app.interfaces.api.main:app --port 8000   # /api/search + /api/ingest + health; INGEST_ENABLED=true để chạy ingest
+# (prod tách scale phần ingest thành rag-ingest-worker ×8 — cùng image, INGEST_ENABLED)
 
 # Terminal 5 — MCP Tool Service (port 8003)
 cd src/mcp-service
@@ -274,16 +275,21 @@ Services sau khi `docker compose up`:
 | nuxt-admin | 3001 | Admin console — Admin (production build, extends frontend/base) |
 | user-service | 8000 | Auth / User management |
 | document-service | 8002 | Document management (Admin only) |
-| query-service | 8001 | User chat / LLM Orchestration (MCP client) — SSE `/query` + `/notifications` |
-| rag-worker | — | NATS Worker — ingestion pipeline (no HTTP port) |
-| mcp-service | 8003 | MCP server — tool `rag_search`, `hr_query` (tool gateway, không sở hữu HR data) |
-| hr-service | 8004 | Employee profile + HR data API (internal only) |
+| query-service (+ query-service-2..8) | 8001 | User chat / LLM Orchestration (MCP client + Multi-Agent Orchestrator-Workers) — SSE `/query` + `/notifications`. **8 replica** sau nginx `query_pool` (SSE-safe). |
+| rag-worker | 8000 (nội bộ) | Embed + ingest pipeline + query-search `POST /api/search` (cho mcp); `INGEST_ENABLED=false`. Không expose host. |
+| rag-ingest-worker | — | Cùng image rag-worker, **×8 replica**, `INGEST_ENABLED=true` + `MULTI_EMBED_ENABLED=1` — NATS ingest (tách scale khỏi search). |
+| gotenberg | — | Convert office (docx/xlsx/pptx) → PDF cho pipeline OCR của rag-worker. |
+| mcp-service | 8003 | MCP server — 6 tool: `rag_search` (gọi rag-worker + rerank), `hr_query`, `leave_write`, `leave_approvals`, `leave_types`, `resolve_date` |
+| hr-service | 8004 | Employee profile + HR data + leave write/approve API (internal only) |
+| ai-router | 127.0.0.1:8010 | Gateway LLM tương thích OpenAI (multi-pool key; selector `banded_rotation` + `adaptive_balanced`). KHÔNG ra Internet — chỉ service nội bộ + SSH tunnel. |
 | nats | 4222 / 8222 | Message broker — JetStream enabled (4222: client, 8222: monitoring UI) |
 | qdrant | 6333 | Vector database |
-| redis | 6379 | JWT blacklist + rate limiting + semantic cache |
-| langfuse | 3100 | LLM observability dashboard (IT/DevOps only) |
+| redis | 6379 | JWT blacklist + rate limiting + semantic cache + ai-router state |
+| langfuse | 127.0.0.1:3100 | LLM observability dashboard (qua SSH tunnel) |
 
-> **PostgreSQL:** Không có container — dùng **GCP Cloud SQL db-g1-small** với 6 databases riêng: `user_db`, `doc_db`, `query_db`, `mcp_db`, `hr_db`, `langfuse_db`. Mỗi service kết nối đến database của mình qua cùng 1 Cloud SQL IP.
+> **Observability (overlay `docker-compose.observability.yml`, dùng chung network):** Prometheus + Grafana + Alertmanager (Slack) + node-exporter + otel-collector (OTLP) + Tempo (trace) + Loki (log). Truy cập qua subdomain Basic-Auth (`grafana|langfuse|qdrant.vsfchat.cloud`).
+>
+> **PostgreSQL:** Local dev & demo VM dùng container `app-postgres:16` (shared) với các database `user_db`, `doc_db`, `query_db`, `rag_db`, `hr_db` (+ `langfuse_db` ở container riêng). Mỗi service kết nối database của mình qua cùng 1 host.
 
 ---
 

@@ -34,6 +34,15 @@ Không chỉ là một chatbot — mà là **hệ thống quản lý tri thức 
 - Semantic Cache: cache câu hỏi tương tự (Redis TTL 1h), tiết kiệm ~60% OpenAI API cost
 - Deploy lên GCP: GCE + Docker Compose, Cloud SQL, Cloud Storage, HTTPS qua Nginx
 
+> **✅ Đã triển khai thêm (so với plan gốc — cập nhật theo runtime hiện tại):**
+> - **Multi-Agent (Orchestrator-Workers)** chạy mặc định trong prod (`AGENT_MODE=orchestrator_workers`), không còn là "phương án Phase 4". Lưu "suy nghĩ của agent" (thoughts/plan/trace) vào `messages.metadata.agent` → xem lại được sau reload.
+> - **ai-router** — gateway LLM tương thích OpenAI (multi-pool key OpenAI + OpenRouter, routing theo cost/tải, hot-reload).
+> - **Leave WRITE đầy đủ**: tạo/sửa/hủy/duyệt/từ chối + **"Đơn của tôi"** (nhân viên tự xem đơn & trạng thái); event `hr.leave_request.*` đẩy SSE cho sếp/nhân viên.
+> - **Notification Center**: thêm **xóa** thông báo (badge unread giảm real-time).
+> - **Documents**: **bulk-delete** (chọn nhiều, xóa 1 lần) + phân trang số.
+> - **Observability stack**: Prometheus/Grafana/Loki/Tempo/Alertmanager/otel-collector.
+> - **Scale**: 8 replica query-service sau nginx `query_pool` (SSE-safe).
+
 **Definition of Done:**
 
 _Auth_
@@ -70,10 +79,10 @@ _HR Personal Q&A_
 - [ ] Không tạo Word/PDF; DB record trong `hr_svc.leave_requests` là đơn chính thức
 
 _MCP Tool Service_
-- [ ] mcp-service chạy như MCP server riêng (port 8003), expose 3 tool: `rag_search`, `hr_query`, `create_leave_request`
+- [ ] mcp-service chạy như MCP server riêng (port 8003), expose 6 tool: `rag_search`, `hr_query`, `leave_write`, `leave_approvals`, `leave_types`, `resolve_date`
 - [ ] Query Service agent là MCP client — liệt kê + gọi tool qua MCP; inject `document_ids`/`user_id` (không để LLM tự điền)
-- [ ] `rag_search` self-contained: embed query → đọc Qdrant trực tiếp → rerank (`none`/`lexical`/`llm`, fallback an toàn) → Top-3; `hr_query` HTTP proxy gọi HR Service nội bộ và không sở hữu HR data
-- [ ] `create_leave_request` chỉ chạy sau user confirmation; Query Service lưu draft tạm bằng Redis `pending_action:{user_id}` TTL ~10 phút
+- [ ] `rag_search`: mcp gọi rag-worker `/api/search` (rag-worker embed query qwen3-8b + vector search) → rerank (`lexical`/`llm`, fallback an toàn) → Top-K; `hr_query` HTTP proxy gọi HR Service nội bộ và không sở hữu HR data
+- [ ] Tool `leave_write` chỉ chạy sau user confirmation (AI tạo draft, user xác nhận mới gọi)
 
 _Admin Dashboard + Analytics (FE — Admin app `frontend/admin`)_
 - [ ] Xem danh sách tài liệu + trạng thái ingestion (queued / processing / indexed / failed)
@@ -99,11 +108,11 @@ _Feedback & Observability_
 - [ ] Langfuse trace hoạt động: xem được latency, token cost, retrieved chunks
 
 _Cloud Deployment_
-- [ ] Toàn bộ stack chạy ổn định trên GCP GCE bằng Docker Compose (13 containers: nginx, nuxt-chat, nuxt-admin, user-service, document-service, query-service, rag-worker, mcp-service, hr-service, nats [JetStream], Qdrant, Redis, Langfuse :3100 — PostgreSQL = GCP Cloud SQL external; frontend/base là Nuxt layer build-time)
+- [ ] Toàn bộ stack chạy ổn định trên GCP GCE bằng Docker Compose (core: nginx, nuxt-chat, nuxt-admin, user-service, document-service, query-service ×8, rag-worker, mcp-service, hr-service, ai-router, nats [JetStream], Qdrant, Redis, app-postgres, Langfuse + overlay observability; frontend/base là Nuxt layer build-time)
 - [ ] Cloud SQL PostgreSQL thay thế local DB — data không mất khi restart
 - [ ] File upload lưu vào Cloud Storage (GCS), không lưu local
 - [ ] Qdrant self-hosted trên GCP, có persistent volume
-- [ ] HTTPS hoạt động qua Nginx + Let's Encrypt trên domain **vsfchat.com** (mua trên Namecheap, trỏ A record về GCE External IP)
+- [ ] HTTPS hoạt động trên domain **vsfchat.cloud** (TLS kết thúc ở Cloudflare → nginx :80 trên GCE)
 - [ ] Langfuse self-hosted trên GCP, IT/DevOps truy cập được
 - [ ] Cloud Monitoring alarm hoạt động — cảnh báo IT/DevOps khi GCE CPU > 80% hoặc service không phản hồi
 - [ ] Smoke test sau mỗi deploy: 10 câu hỏi mẫu pass toàn bộ trước khi tuyên bố production-ready
@@ -221,7 +230,7 @@ Các phase này không nằm trong scope hiện tại nhưng cho thấy sản ph
 |-------|-----------|---------|
 | **Phase 3** | Onboarding flow tự động | Nhân viên mới được bot dẫn qua checklist thay vì hỏi từng người |
 | **Phase 3** | REST API public | Hệ thống khác của công ty tích hợp vào chatbot |
-| **Phase 4** | GraphRAG / Multi-agent routing | Nếu standard RAG không đủ tốt cho câu hỏi phức tạp → nâng lên knowledge graph hoặc agent chuyên biệt (HR / IT / Finance) |
+| **Phase 4** | GraphRAG | Nâng lên knowledge graph cho câu hỏi phức tạp đa bước (Multi-agent (Orchestrator-Workers) đã triển khai sớm ở Phase 1) |
 | **Phase 4** | Vietnamese embedding optimization | Cải thiện độ chính xác với tài liệu tiếng Việt |
 | **Phase 4** | Auto re-index khi tài liệu cập nhật | Knowledge base luôn up-to-date |
 
