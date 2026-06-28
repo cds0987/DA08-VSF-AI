@@ -278,6 +278,11 @@ jobs:
         run: python infra/ci/http_contract_lint.py
       - name: Lint MCP tool-result contract (mcp producer ↔ query consumer)
         run: python infra/ci/mcp_result_lint.py
+      # Gác registry EMBED-MODEL liên-service: embeddings.yaml (active) ↔ contract.py (dim/tag)
+      # ↔ ai-router routing.yaml (alias/capability/pinned/tier) ↔ catalog. Bắt đúng class bug
+      # qwen8b (routing khai model nhưng không route được -> ép qwen8b im lặng) + drift gỡ/thêm model.
+      - name: Lint embed-model registry (embeddings.yaml ↔ contract ↔ routing.yaml ↔ catalog)
+        run: python infra/ci/embed_model_lint.py
 
   # ─────────────────── Phase 1b: CONTRACT PARITY ──────────────────────
   # Guard CONTRACT giữa rag-worker (producer) và mcp-service (consumer): cùng

@@ -7,9 +7,12 @@
 # Mỗi model -> collection {VECTOR_COLLECTION}__{model_tag}__d{native_dim}[__s{sparse}].
 # dim = native (core_engine.contract.resolve_dimension); model phải có trong EMBED_MODELS.
 #
-# PRIMARY model (collection chính phục vụ /api/search) VẪN do EMBED_MODEL env quyết định
-# (giữ nguyên contract search/runtime). Danh sách này là tập GHI multi-collection lúc ingest;
-# primary luôn được gộp vào tập ghi dù có/không liệt kê ở đây.
+# ANCHOR model (= EMBED_MODEL env) — KHÔNG privileged trong shard. Shard chia ĐỀU: mọi model
+# trong danh sách là PEER ngang nhau (mỗi cái nhận ~N/len, read query CẢ N + merge). "Anchor" chỉ
+# neo 3 thứ kỹ thuật: embedder bootstrap của engine + fingerprint runtime + fallback collection
+# nếu TẮT shard-read. KHÔNG model nào serve nhiều hơn. (Lịch sử: "anchor" là di sản single-collection
+# — chính lớp giả định 1-model này từng đẻ ra bug router ép-qwen8b; nay foundation đa-model thật,
+# gác bởi infra/ci/embed_model_lint.py.) Anchor luôn được gộp vào danh sách dù có liệt kê hay không.
 version: 1
 # Chế độ ghi multi-collection:
 #   replicate (mặc định) -> mỗi doc embed vào MỌI collection (5/5). Backward-compat.

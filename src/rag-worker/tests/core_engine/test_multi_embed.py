@@ -22,33 +22,33 @@ from core_engine.multi_embed import (
 )
 from core_engine.vectorstore import VectorStoreConfig
 
-# 4 model active (gỡ e5large 2026-06-28: ctx 512 = mắt xích yếu). Đồng bộ embeddings.yaml.
-ACTIVE_MODELS = [
-    ("qwen/qwen3-embedding-8b", 4096),
-    ("baai/bge-m3", 1024),
-    ("openai/text-embedding-3-small", 1536),
-    ("perplexity/pplx-embed-v1-0.6b", 1024),
-]
+# KHÔNG hardcode danh sách model — DERIVE từ NGUỒN SỰ THẬT (embeddings.yaml) qua
+# load_active_embed_models(). Đổi model = sửa 1 chỗ (embeddings.yaml), test tự theo; chỉ đỏ
+# nếu model thật sự thiếu hợp đồng (dim/tag). Drift xuyên-service (routing.yaml/catalog) do
+# infra/ci/embed_model_lint.py gác. [[no-rogue-follow-architecture]]
+ACTIVE_MODELS = [(m, resolve_dimension(m)) for m in load_active_embed_models()]
 
 
 # ── 1. contract ───────────────────────────────────────────────────────────────
+# KHÔNG canary model cụ thể (qwen8b) — đó CHÍNH là hardcode "model privileged" đã đẻ ra bug
+# qwen8b. Shard = N peer ngang nhau, không model nào đặc biệt. Chỉ kiểm BẤT BIẾN config-driven.
 @pytest.mark.parametrize("model,dim", ACTIVE_MODELS)
-def test_resolve_dimension_for_active_models(model: str, dim: int) -> None:
-    assert model in EMBED_MODELS
-    assert resolve_dimension(model) == dim
-    assert model in MODEL_TAGS, f"thiếu tag cho {model}"
+def test_active_model_fully_specified(model: str, dim: int) -> None:
+    """MỖI model active có hợp đồng đầy đủ: dim native (EMBED_MODELS) + tag (MODEL_TAGS)."""
+    assert model in EMBED_MODELS, f"{model} active nhưng thiếu dim trong EMBED_MODELS"
+    assert isinstance(dim, int) and dim > 0
+    assert model in MODEL_TAGS, f"{model} active nhưng thiếu tag trong MODEL_TAGS"
+
+
+def test_active_set_nonempty_and_has_anchor() -> None:
+    """Shard pool ≥1 model; anchor (bootstrap) = phần tử đầu, KHÔNG privileged — chỉ cần tồn tại."""
+    active = load_active_embed_models()
+    assert active, "embeddings.yaml.embed_models RỖNG"
 
 
 def test_each_model_has_distinct_collection_tag() -> None:
     tags = {model_tag(m) for m, _ in ACTIVE_MODELS}
     assert len(tags) == len(ACTIVE_MODELS), f"tag trùng -> collection trùng: {tags}"
-
-
-# ── 2. config (embeddings.yaml) ───────────────────────────────────────────────
-def test_load_active_embed_models_from_yaml() -> None:
-    models = load_active_embed_models()
-    for m, _ in ACTIVE_MODELS:
-        assert m in models
 
 
 def test_resolve_target_configs_one_collection_per_model() -> None:
