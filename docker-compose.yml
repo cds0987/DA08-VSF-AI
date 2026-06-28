@@ -649,6 +649,10 @@ services:
       # bóp. Ingest do service rag-ingest-worker (INGEST_ENABLED=true) đảm nhận riêng.
       # mcp-service vẫn route /api/search vào ĐÂY (rag-worker:8000).
       INGEST_ENABLED: "false"
+      # BẬT SHARD-READ: embeddings.yaml mode=shard -> doc chia 1/5 collection. Search PHẢI query
+      # 5 collection + merge (nếu không doc shard ngoài-qwen KHÔNG tìm thấy). MULTI_EMBED_ENABLED=1
+      # wire shard_read_targets (runtime.py:797). INGEST_ENABLED=false nên chỉ READ-merge, không ingest.
+      MULTI_EMBED_ENABLED: "1"
       # MỌI AI qua ai-router: 1 TOKEN -> gateway (ai-router giữ 2 key thật OpenRouter+OpenAI, tự
       # route). caption/ocr kế thừa key này. ${} substitute từ deploy env; env_file không substitute.
       EMBED_API_KEY: ${AIROUTER_INTERNAL_TOKEN:-}
