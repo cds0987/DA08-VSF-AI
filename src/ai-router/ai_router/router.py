@@ -433,13 +433,20 @@ class Router:
                         status="ok", latency_ms=latency_ms, usage=usage_seen, cost=cost)
 
     async def embeddings(self, body: dict) -> dict:
-        """Embed (PIN qwen3-4b — KHÔNG degrade model, giữ đúng vector space). Retry-across-keys
-        + backoff: dưới burst, key embed bench ngắn rồi hồi -> thử lại MAX_ATTEMPTS thay vì trả
-        503 ngay (Benchmark 1: embed 503 -> 81% src=0). KHÔNG đổi model -> chỉ xoay key qwen3-4b."""
+        """Embed: ROUTE THEO body['model'] -> capability THẬT (multi-collection). qwen8b->embed,
+        e5large->embed_e5large, bge-m3->embed_bgem3, pplx->embed_pplx, te3s->embed_te3s (OpenAI).
+        Mỗi capability PIN đúng model + tier provider riêng (routing.yaml aliases) + selector riêng
+        (rải key). GỐC BUG cũ: hardcode resolve('embed') -> ÉP MỌI model về qwen8b -> multi-collection
+        GIẢ (mọi collection lưu qwen8b cắt chiều). Retry-across-keys + backoff: key embed bench ngắn
+        rồi hồi -> thử lại MAX_ATTEMPTS thay vì 503 (Benchmark 1: 503 -> 81% src=0)."""
         est = estimate_tokens(None, body.get("input"))
+        # capability = alias của model THẬT client gửi (qwen8b/e5large/te3s/...). KHÔNG hardcode
+        # 'embed' -> router tôn trọng model -> giữ đúng vector space mỗi collection.
+        capability_alias = body.get("model") or "embed"
+        cap_label = self.table.resolve_capability(capability_alias)
         last_err: Exception | None = None
         for attempt in range(MAX_ATTEMPTS):
-            dec = await self.resolve("embed", est_tokens=0, endpoint="embeddings")
+            dec = await self.resolve(capability_alias, est_tokens=est, endpoint="embeddings")
             if dec is None:
                 # Mọi key embed đang cooldown (ngắn) -> chờ backoff rồi resolve lại, KHÔNG 503 ngay.
                 if attempt < MAX_ATTEMPTS - 1:
@@ -463,17 +470,17 @@ class Router:
                 usage = extract_usage(data)
                 cost = await self.account(dec, usage, est)
                 latency_ms = (time.monotonic() - t0) * 1000
-                self._emit_call(dec, "embed", usage, status="ok", cost=cost)
-                self._trace_log("call_ok", dec, "embed", conversation_id=None, status="ok",
+                self._emit_call(dec, cap_label, usage, status="ok", cost=cost)
+                self._trace_log("call_ok", dec, cap_label, conversation_id=None, status="ok",
                                 latency_ms=latency_ms, usage=usage, cost=cost)
                 served = data.get("model", "")
-                self._canon_model(data, dec, "embed")
+                self._canon_model(data, dec, cap_label)
                 pub = dec.public(); pub["served_model"] = served
                 data["_router"] = pub
                 return data
             except Exception as exc:  # noqa: BLE001 — phân loại 429/5xx, cooldown đúng rồi retry
                 last_err = exc
-                await self._handle_error(dec, "embed", exc, conversation_id=None, attempt=attempt)
+                await self._handle_error(dec, cap_label, exc, conversation_id=None, attempt=attempt)
                 if attempt < MAX_ATTEMPTS - 1:
                     await asyncio.sleep(_embed_backoff(attempt))
             finally:
