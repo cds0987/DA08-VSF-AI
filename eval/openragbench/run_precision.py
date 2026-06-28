@@ -42,7 +42,14 @@ def _login(email: str, password: str) -> str:
 
 
 def _norm(name: str) -> str:
-    return Path(str(name)).stem.strip().lower()
+    # CHỈ bỏ đuôi tài liệu THẬT (không dùng Path.stem — nó cắt phần sau dấu chấm CUỐI,
+    # làm hỏng arxiv id "2405.04904v2" -> "2405" khi không có .pdf; còn tên file CÓ .pdf
+    # thì chỉ bị bỏ .pdf -> 2 phía lệch -> N=0 recall giả). Giữ nguyên id, chỉ strip ext.
+    s = str(name).strip().lower()
+    for ext in (".pdf", ".docx", ".doc", ".txt", ".md", ".markdown", ".pptx", ".xlsx", ".html", ".htm"):
+        if s.endswith(ext):
+            return s[: -len(ext)]
+    return s
 
 
 def upload_corpus(token: str, corpus_dir: Path, state_path: Path) -> list[dict]:
@@ -75,7 +82,7 @@ def upload_corpus(token: str, corpus_dir: Path, state_path: Path) -> list[dict]:
     for rec in state:
         if rec["status"] in ("indexed", "failed"):
             continue
-        for i in range(80):
+        for i in range(240):   # 240×5s = 1200s/doc — PDF học thuật nặng + 8b/4096 chậm cần đủ thời gian
             r = requests.get(f"{BASE}/api/documents/{rec['document_id']}", headers=hdr, timeout=30)
             if r.ok:
                 j = r.json()

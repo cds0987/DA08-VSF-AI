@@ -75,9 +75,103 @@ class Metrics:
                     for (name, lbls), h in self._hist.items()]
 
 
-def render_prometheus(snapshot: dict, metrics: Metrics) -> str:
-    """Sinh text exposition (version 0.0.4) từ snapshot quota + counter leading-indicator."""
-    out: list[str] = []
+# --------------------------------------------------------------------------- #
+# Shared metrics qua Redis (nhiều worker/replica) — PERIODIC-FLUSH delta.
+#
+# Vấn đề: `Metrics` in-process -> mỗi uvicorn worker đếm RIÊNG; /metrics đọc 1 worker
+# -> số phân mảnh, dashboard sai. Giải: định kỳ flush DELTA (phần TĂNG so với lần
+# trước) sang 2 Redis hash dùng chung; render đọc từ Redis -> tổng across workers.
+#
+# Vì counter monotonic + histogram bucket cumulative => DELTA luôn ≥ 0, cộng dồn bằng
+# HINCRBY{,FLOAT} ở Redis = đúng tổng. last-snapshot giữ trong sink (per-worker) để
+# flush lần sau chỉ đẩy phần mới (KHÔNG double-count).
+# --------------------------------------------------------------------------- #
+_US = "\x1f"   # unit separator — ngăn cách name / labels / phần hist trong field
+COUNTERS_HASH = "airouter:metrics:counters"
+HIST_HASH = "airouter:metrics:hist"
+METRICS_TTL = 93_600   # 26h — refresh mỗi flush; metric của worker chết tự rụng
+
+
+def _ser_labels(labels: dict[str, str]) -> str:
+    """Serialize labels ổn định (sorted) -> 'k1=v1,k2=v2'. Đảo lại được khi render."""
+    return ",".join(f"{k}={v}" for k, v in sorted(labels.items()))
+
+
+def _deser_labels(s: str) -> dict[str, str]:
+    if not s:
+        return {}
+    out: dict[str, str] = {}
+    for part in s.split(","):
+        k, _, v = part.partition("=")
+        out[k] = v
+    return out
+
+
+class RedisMetricsSink:
+    """Flush DELTA counter+histogram của 1 `Metrics` (in-process) sang Redis hash dùng chung.
+
+    Schema:
+      hash COUNTERS_HASH  field = f"{name}{US}{labels_ser}"                 -> float (cộng dồn)
+      hash HIST_HASH      field = f"{name}{US}{labels_ser}{US}b{i}"        -> float (bucket cumulative)
+                          field = f"{name}{US}{labels_ser}{US}sum"         -> float
+                          field = f"{name}{US}{labels_ser}{US}count"       -> float
+    """
+
+    def __init__(self, client) -> None:
+        self._r = client
+        # last-snapshot đã flush (per-worker) -> chỉ đẩy phần TĂNG.
+        self._last_counters: dict[str, float] = {}
+        self._last_hist: dict[str, float] = {}   # field hist -> giá trị đã flush
+
+    async def flush(self, metrics: Metrics) -> None:
+        # ── COUNTER delta ─────────────────────────────────────────────────────
+        for name, labels, val in metrics.snapshot():
+            field = f"{name}{_US}{_ser_labels(labels)}"
+            delta = val - self._last_counters.get(field, 0.0)
+            if delta:
+                await self._r.hincrbyfloat(COUNTERS_HASH, field, delta)
+                self._last_counters[field] = val
+        # ── HISTOGRAM delta (mỗi bucket + sum + count) ────────────────────────
+        for name, labels, h in metrics.hist_snapshot():
+            base = f"{name}{_US}{_ser_labels(labels)}"
+            cur: dict[str, float] = {}
+            for i in range(len(LAT_BUCKETS)):
+                cur[f"{base}{_US}b{i}"] = float(h["b"][i])
+            cur[f"{base}{_US}sum"] = float(h["sum"])
+            cur[f"{base}{_US}count"] = float(h["count"])
+            for field, v in cur.items():
+                delta = v - self._last_hist.get(field, 0.0)
+                if delta:
+                    await self._r.hincrbyfloat(HIST_HASH, field, delta)
+                    self._last_hist[field] = v
+        await self._r.expire(COUNTERS_HASH, METRICS_TTL)
+        await self._r.expire(HIST_HASH, METRICS_TTL)
+
+    async def read(self) -> dict:
+        """HGETALL 2 hash -> cấu trúc render: {counters:[(name,labels,val)], hist:[(name,labels,h)]}."""
+        craw = await self._r.hgetall(COUNTERS_HASH) or {}
+        hraw = await self._r.hgetall(HIST_HASH) or {}
+        counters: list[tuple[str, dict[str, str], float]] = []
+        for field, val in craw.items():
+            name, _, labels_ser = field.partition(_US)
+            counters.append((name, _deser_labels(labels_ser), float(val)))
+        # gom hist theo (name,labels) -> dựng lại b[]/sum/count
+        agg: dict[tuple[str, str], dict] = {}
+        for field, val in hraw.items():
+            name, _, rest = field.partition(_US)
+            labels_ser, _, part = rest.rpartition(_US)
+            entry = agg.setdefault((name, labels_ser),
+                                   {"b": [0.0] * len(LAT_BUCKETS), "sum": 0.0, "count": 0.0})
+            if part.startswith("b"):
+                entry["b"][int(part[1:])] = float(val)
+            else:
+                entry[part] = float(val)
+        hist = [(name, _deser_labels(ls), h) for (name, ls), h in agg.items()]
+        return {"counters": counters, "hist": hist}
+
+
+def _render_gauges(snapshot: dict, out: list[str]) -> None:
+    """Per-key GAUGE từ Redis snapshot (GIỮ NGUYÊN — số chính xác, không phân mảnh)."""
 
     # ── Per-key GAUGE (nguồn: Redis qua snapshot) ─────────────────────────────
     out += [
@@ -127,9 +221,9 @@ def render_prometheus(snapshot: dict, metrics: Metrics) -> str:
         _line("airouter_keys_total", None, len(snapshot.get("keys", []))),
     ]
 
-    # ── Leading-indicator COUNTER (nguồn: in-process Metrics) ─────────────────
-    # Tách HELP/TYPE theo tên metric (1 lần), rồi liệt kê series.
-    series = metrics.snapshot()
+
+def _render_counters(series: list[tuple[str, dict, float]], out: list[str]) -> None:
+    """Leading-indicator COUNTER. `series` = [(name, labels, value)] (in-process HOẶC Redis)."""
     seen_help: set[str] = set()
     for name, labels, value in sorted(series, key=lambda s: s[0]):
         if name not in seen_help:
@@ -137,8 +231,9 @@ def render_prometheus(snapshot: dict, metrics: Metrics) -> str:
             seen_help.add(name)
         out.append(_line(name, labels, value))
 
-    # ── Histogram latency/ttfc (nguồn: in-process observe) -> p95/p99/avg ở Grafana ──
-    hist = metrics.hist_snapshot()
+
+def _render_hist(hist: list[tuple[str, dict, dict]], out: list[str]) -> None:
+    """Histogram latency/ttfc -> p95/p99/avg ở Grafana. `hist` = [(name, labels, {b,sum,count})]."""
     seen_h: set[str] = set()
     for name, labels, h in sorted(hist, key=lambda s: s[0]):
         if name not in seen_h:
@@ -151,4 +246,24 @@ def render_prometheus(snapshot: dict, metrics: Metrics) -> str:
         out.append(_line(f"{name}_sum", labels, h["sum"]))
         out.append(_line(f"{name}_count", labels, h["count"]))
 
+
+def render_prometheus(snapshot: dict, metrics: Metrics) -> str:
+    """Sinh text exposition (0.0.4) từ snapshot quota + counter/hist IN-PROCESS (dev/single)."""
+    out: list[str] = []
+    _render_gauges(snapshot, out)
+    _render_counters(metrics.snapshot(), out)
+    _render_hist(metrics.hist_snapshot(), out)
+    return "\n".join(out) + "\n"
+
+
+def render_prometheus_shared(snapshot: dict, sink_data: dict) -> str:
+    """Như render_prometheus nhưng counter/hist lấy từ Redis (sink.read()) -> tổng across workers.
+
+    GAUGE giữ nguyên nguồn snapshot (đã shared). Output GIỐNG HỆT định dạng bản in-process
+    (cùng tên metric, label, _bucket{le=...}, _sum, _count, +Inf) -> dashboard không đổi.
+    """
+    out: list[str] = []
+    _render_gauges(snapshot, out)
+    _render_counters(sink_data.get("counters", []), out)
+    _render_hist(sink_data.get("hist", []), out)
     return "\n".join(out) + "\n"

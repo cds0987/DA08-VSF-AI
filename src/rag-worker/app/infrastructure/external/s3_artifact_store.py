@@ -90,6 +90,10 @@ class S3ArtifactStore(ArtifactStore):
                 close()
         return payload.decode("utf-8")
 
+    def artifact_uri_for(self, document_id: str) -> str:
+        # Khớp write_markdown: {scheme}://{bucket}/{key}. Suy lại từ document_id (deterministic).
+        return f"{_artifact_uri_scheme()}://{self._bucket}/{self._artifact_key(document_id)}"
+
     async def delete_by_document(self, document_id: str) -> None:
         key = self._artifact_key(document_id)
         try:

@@ -17,7 +17,7 @@ from .catalog import load_catalog
 from .client_factory import ClientFactory
 from .config import RoutingTable, Settings, load_routing_table
 from .counters import create_counters
-from .observability import Metrics
+from .observability import Metrics, RedisMetricsSink
 from .parser import extract_usage
 from .reconcile import build_reconcilers
 from .registry import TIER_DEFS, Registry
@@ -96,6 +96,11 @@ class Router:
         self.counters = create_counters(settings.redis_url)
         self.clients = ClientFactory(timeout=settings.request_timeout)
         self.metrics = Metrics()   # leading-indicator counters (fallback, resolve-fail)
+        # Shared metrics qua Redis: nhiều worker/replica -> /metrics nhất quán (không phân mảnh
+        # theo process). Dùng CÙNG redis client với counters. Không có Redis (dev/test) -> None
+        # -> /metrics fallback render in-process như cũ.
+        self.metrics_sink = (RedisMetricsSink(self.counters._r)
+                             if getattr(self.counters, "_r", None) is not None else None)
         self.reconcilers = build_reconcilers(settings)
         self._build_selector()
 

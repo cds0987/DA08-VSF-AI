@@ -21,8 +21,18 @@ SPARSE_ENCODING_VERSION = 2
 
 EMBED_MODELS: dict[str, dict[str, object]] = {
     "text-embedding-3-small": {"native": 1536, "allowed": "256..1536"},
+    # Tên đầy đủ provider/model (qua ai-router -> OpenAI embed_oai). Alias ngắn ở dòng trên
+    # giữ cho cấu hình cũ; CHUNG tag "te3s" -> không sinh collection trùng.
+    "openai/text-embedding-3-small": {"native": 1536, "allowed": "256..1536"},
     "text-embedding-3-large": {"native": 3072, "allowed": "256..3072"},
     "bge-m3": {"native": 1024, "allowed": {1024}},
+    # BAAI bge-m3 qua OpenRouter (tên đầy đủ provider/model). Giữ alias ngắn "bge-m3" ở trên
+    # cho cấu hình cũ; cả 2 dùng CHUNG tag (xem MODEL_TAGS) -> không sinh collection trùng.
+    "baai/bge-m3": {"native": 1024, "allowed": {1024}},
+    # multilingual-e5-large (intfloat) qua OpenRouter: native 1024, fixed.
+    "intfloat/multilingual-e5-large": {"native": 1024, "allowed": {1024}},
+    # Perplexity pplx-embed-v1-0.6b qua OpenRouter: native 1024, fixed.
+    "perplexity/pplx-embed-v1-0.6b": {"native": 1024, "allowed": {1024}},
     # qwen3-embedding-4b qua OpenRouter (DeepInfra): native 2560, MRL 32..2560.
     "qwen/qwen3-embedding-4b": {"native": 2560, "allowed": "32..2560"},
     # qwen3-embedding-8b qua OpenRouter: native 4096, MRL 32..4096. 3 provider
@@ -34,8 +44,12 @@ EMBED_MODELS: dict[str, dict[str, object]] = {
 
 MODEL_TAGS = {
     "text-embedding-3-small": "te3s",
+    "openai/text-embedding-3-small": "te3s",   # CHUNG tag với alias ngắn -> 1 collection
     "text-embedding-3-large": "te3l",
     "bge-m3": "bgem3",
+    "baai/bge-m3": "bgem3",                     # CHUNG tag với alias ngắn -> 1 collection
+    "intfloat/multilingual-e5-large": "e5large",
+    "perplexity/pplx-embed-v1-0.6b": "pplxembed",
     "qwen/qwen3-embedding-4b": "qwen3emb4b",   # collection: {base}__qwen3emb4b__d2560
     "qwen/qwen3-embedding-8b": "qwen3emb8b",   # collection MỚI: {base}__qwen3emb8b__d2560__s2
     "offline": "offline",

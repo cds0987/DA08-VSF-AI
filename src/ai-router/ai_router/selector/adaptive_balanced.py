@@ -118,5 +118,23 @@ class AdaptiveBalanced(Selector):
             return await self.pick_model(tier_name, tdef, req)
         if len(cands) == 1:
             return cands[0]
+        # WEIGHTED round-robin nếu selector params có `weights` (model_id -> int): EXPAND cands
+        # theo trọng số rồi quay vòng -> phân phối đúng tỉ lệ (vd scout 50/qwen9b 30/qwenflash 20).
+        # Model không feasible/đang cooldown đã bị loại khỏi cands -> weight bỏ qua, model còn
+        # lại gánh (anti-queue khi 1 provider sập). KHÔNG weights -> expanded==cands -> đều như cũ.
+        expanded = self._expand_by_weight(cands, self.params.get("weights"))
         seq = await self.counters.next_seq(f"{req.capability}:{tier_name}:msplit")
-        return cands[seq % len(cands)]
+        return expanded[seq % len(expanded)]
+
+    @staticmethod
+    def _expand_by_weight(cands, weights):
+        """Nhân bản mỗi model trong cands theo trọng số (giữ thứ tự ổn định -> deterministic
+        theo seq). weights None/rỗng -> trả cands NGUYÊN (round-robin đều, backward compat).
+        Model thiếu trong weights -> mặc định weight 1. weight ≤ 0 -> coi như 1 (không loại)."""
+        if not weights:
+            return cands
+        expanded = []
+        for m in cands:
+            w = int(weights.get(m.id, 1))
+            expanded.extend([m] * (w if w > 0 else 1))
+        return expanded

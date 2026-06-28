@@ -18,6 +18,7 @@ import os
 from typing import List, Protocol, runtime_checkable
 
 from core_engine.ai import AIProvider, OCR, VisionImage, get_ai_provider
+from core_engine.concurrency import AdaptiveConcurrencyLimiter
 from core_engine.logging_utils import Stopwatch, log_event
 
 # Prompt phỏng theo DEFAULT_PROMPT_TEMPLATE của haystack LLMDocumentContentExtractor.
@@ -51,11 +52,31 @@ class ProviderImageTextExtractor:
         self._prompt = prompt
         self._logger = logging.getLogger(__name__)
         # Fan-out trang OCR song song (cùng pattern captioner). Throttle THẬT nằm ở
-        # AI Router (AIMD/multi-key); semaphore này chỉ chặn 1 doc ôm quá nhiều slot
-        # gateway dùng-chung -> tránh ingestion bão hoà, đói chat live. Liên-doc do
-        # INGEST_WORKER_COUNT lo; trong-doc do biến này lo.
-        self._page_semaphore = asyncio.Semaphore(
-            max(1, int(os.getenv("OCR_MAX_CONCURRENCY", "4")))
+        # AI Router (AIMD/multi-key, co giãn); feeder cũng nên co giãn để khỏi thành
+        # nút cổ chai. Thay semaphore TĨNH bằng AIMD elastic limiter: tự dò trần qua
+        # TransientAIError (shrink khi 429/overload, grow khi chuỗi success). Gate này
+        # chặn 1 doc ôm quá nhiều slot gateway dùng-chung -> tránh ingestion bão hoà,
+        # đói chat live. Liên-doc do INGEST_WORKER_COUNT lo; trong-doc do limiter lo.
+        max_limit = max(1, int(os.getenv("OCR_MAX_CONCURRENCY", "4")))
+        min_limit = max(1, min(max_limit, int(os.getenv("OCR_MIN_CONCURRENCY", "2"))))
+        initial = int(os.getenv("OCR_INITIAL_CONCURRENCY", str(min_limit)))
+        self._limiter = AdaptiveConcurrencyLimiter(
+            initial=initial,
+            min_limit=min_limit,
+            max_limit=max_limit,
+            grow_after_successes=max(1, int(os.getenv("OCR_GROW_AFTER", "3"))),
+            shrink_factor=float(os.getenv("OCR_SHRINK_FACTOR", "0.5")),
+            on_resize=self._on_concurrency_resize,
+            logger=self._logger,
+        )
+
+    def _on_concurrency_resize(self, event: str, limit: int) -> None:
+        log_event(
+            self._logger,
+            logging.INFO,
+            f"ocr_concurrency_{event}",
+            stage="parse",
+            limit=limit,
         )
 
     async def extract(self, images: List[VisionImage]) -> str:
@@ -64,7 +85,7 @@ class ProviderImageTextExtractor:
         total_sw = Stopwatch()
 
         async def _one(index: int, image: VisionImage) -> tuple[int, str, float]:
-            async with self._page_semaphore:
+            async with self._limiter.slot():
                 page_sw = Stopwatch()
                 text = await self._provider.extract_text_from_images(
                     [image],

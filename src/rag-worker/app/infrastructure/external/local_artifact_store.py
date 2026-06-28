@@ -58,3 +58,7 @@ class LocalArtifactStore(ArtifactStore):
     async def delete_by_document(self, document_id: str) -> None:
         path = _artifact_path(document_id)
         await asyncio.to_thread(path.unlink, missing_ok=True)
+
+    def artifact_uri_for(self, document_id: str) -> str:
+        # Khớp write_markdown: artifact://{path}. Suy lại từ document_id (deterministic).
+        return f"artifact://{_artifact_path(document_id)}"

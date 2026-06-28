@@ -178,8 +178,10 @@ def validate_runtime_settings() -> None:
 
 
 def validate_ingest_runtime_limits() -> None:
+    # Instance search-only (INGEST_ENABLED=false) KHÔNG spawn ingest-worker ->
+    # không validate INGEST_WORKER_COUNT (cho phép để mặc định/không set).
     worker_count = int(os.getenv("INGEST_WORKER_COUNT", "1"))
-    if worker_count <= 0:
+    if ingest_enabled_from_env() and worker_count <= 0:
         raise ValueError("INGEST_WORKER_COUNT must be > 0")
     if int(os.getenv("DB_POOL_SIZE", str(max(2, worker_count * 2)))) <= 0:
         raise ValueError("DB_POOL_SIZE must be > 0")
@@ -253,6 +255,16 @@ def validate_ai_config(ai_settings: AISettings, settings: HaystackSettings) -> N
 
 def _is_truthy(raw: str) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def ingest_enabled_from_env() -> bool:
+    """Có spawn vòng lặp ingest-worker không.
+
+    Default true => giữ hành vi cũ (an toàn nếu env không set). Đặt false cho
+    instance search-only (rag-worker phục vụ /api/search) để KHÔNG tốn core cho
+    ingest; instance rag-ingest-worker chạy true để claim-lease ingest riêng.
+    """
+    return _is_truthy(os.getenv("INGEST_ENABLED", "true"))
 
 
 _REMOTE_VECTOR_CLOUD_HOSTS = {
@@ -598,6 +610,12 @@ async def compute_health(runtime: RuntimeState) -> HealthReport:
     )
 
 
+def _multi_embed_enabled_from_env() -> bool:
+    """Ghi multi-collection (embeddings.yaml) không. Default OFF -> giữ hành vi 1-collection
+    cho prod tới khi chủ động bật (MULTI_EMBED_ENABLED=1)."""
+    return _is_truthy(os.getenv("MULTI_EMBED_ENABLED", "0"))
+
+
 def hybrid_enabled_from_env() -> bool:
     """VECTOR_HYBRID env -> bool. Một nguồn duy nhất cho CẢ 2 nhánh bootstrap."""
     return os.getenv("VECTOR_HYBRID", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -753,6 +771,34 @@ def bootstrap_runtime() -> RuntimeState:
             source_bucket=source_bucket,
         )
         vector_config = engine.vectors.config
+        # MULTI-COLLECTION: gắn tập đích secondary (embeddings.yaml) cho engine -> ingest
+        # ghi song song mọi model active. primary = vector_config.embed_model (đã ghi bởi
+        # engine.vectors) -> loại khỏi secondary. ENABLE qua MULTI_EMBED_ENABLED (default off
+        # để không đổi hành vi prod tới khi chủ động bật). Lỗi dựng target -> log, KHÔNG sập
+        # ingest primary.
+        if _multi_embed_enabled_from_env():
+            try:
+                from core_engine.multi_embed import build_embed_targets
+
+                engine.embed_targets = build_embed_targets(
+                    vector_config, primary_model=vector_config.embed_model
+                )
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "multi_embed_targets_wired",
+                    stage="startup",
+                    primary_collection=vector_config.index_id(),
+                    secondary_collections=[t.collection for t in engine.embed_targets],
+                )
+            except Exception as exc:  # noqa: BLE001 - multi-embed phụ; không kéo sập ingest
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "multi_embed_targets_wire_failed",
+                    stage="startup",
+                    error=str(exc),
+                )
         ingest_use_case = IngestDocumentUseCase(
             engine,
             document_repository,
@@ -996,9 +1042,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     on_job_finished = (
         status_publisher.publish_for_job if status_publisher is not None else None
     )
+    ingest_enabled = ingest_enabled_from_env()
     worker_count = int(os.getenv("INGEST_WORKER_COUNT", "1"))
     worker_poll_interval = float(os.getenv("INGEST_WORKER_POLL_INTERVAL_SECONDS", "0.5"))
-    if status_publisher is not None and worker_count <= 0:
+    if not ingest_enabled:
+        # Instance search-only: KHÔNG spawn ingest-worker (CÔ LẬP khỏi /api/search
+        # để không bóp chat-search-latency). NATS enqueue + claim-lease do
+        # rag-ingest-worker (INGEST_ENABLED=true) xử lý riêng.
+        log_event(
+            logger,
+            logging.INFO,
+            "ingest_worker_disabled",
+            stage="startup",
+        )
+    elif status_publisher is not None and worker_count <= 0:
         # NATS enqueue được nhưng không worker nào xử lý -> không bao giờ publish
         # doc.status. Cảnh báo để cấu hình sai lộ ra thay vì doc kẹt im lặng.
         log_event(
@@ -1009,7 +1066,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             worker_count=worker_count,
         )
     worker_tasks = []
-    if runtime.ingest_use_case is not None:
+    if ingest_enabled and runtime.ingest_use_case is not None:
         worker_tasks = [
             asyncio.create_task(
                 run_ingest_worker(

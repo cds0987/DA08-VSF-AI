@@ -1,0 +1,19 @@
+# Active embed models — multi-collection ghi (mỗi model = 1 collection).
+#
+# APPEND-MIGRATION (giống alembic forward-only): THÊM model = thêm dòng vào danh sách
+# -> collection MỚI tự tạo (auto_migrate) + backfill re-embed từ MD cache. XÓA model
+# khỏi danh sách KHÔNG xóa collection cũ (chỉ ngừng GHI tiếp; GC thủ công sau verify).
+#
+# Mỗi model -> collection {VECTOR_COLLECTION}__{model_tag}__d{native_dim}[__s{sparse}].
+# dim = native (core_engine.contract.resolve_dimension); model phải có trong EMBED_MODELS.
+#
+# PRIMARY model (collection chính phục vụ /api/search) VẪN do EMBED_MODEL env quyết định
+# (giữ nguyên contract search/runtime). Danh sách này là tập GHI multi-collection lúc ingest;
+# primary luôn được gộp vào tập ghi dù có/không liệt kê ở đây.
+version: 1
+embed_models:
+  - qwen/qwen3-embedding-8b           # PRIMARY hiện tại (4096)
+  - intfloat/multilingual-e5-large    # 1024
+  - baai/bge-m3                       # 1024
+  - openai/text-embedding-3-small     # 1536 (qua OpenAI embed_oai)
+  - perplexity/pplx-embed-v1-0.6b     # 1024

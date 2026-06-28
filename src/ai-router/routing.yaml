@@ -27,6 +27,13 @@ aliases:
   # rag-worker gửi model THẬT (= embed_model fingerprint collection) -> map về capability embed.
   qwen/qwen3-embedding-8b: embed   # 2026-06-27: model active (3 provider, hết engine_overloaded)
   qwen/qwen3-embedding-4b: embed   # giữ alias cũ cho rollback an toàn
+  # MULTI-COLLECTION embed (rag-worker ghi mỗi model 1 collection -> gửi model THẬT). Mỗi model
+  # -> capability embed_* PIN đúng model + đúng tier provider. KHÔNG đụng 'embed' (qwen8b primary).
+  intfloat/multilingual-e5-large: embed_e5large    # OpenRouter (embed_or)
+  baai/bge-m3: embed_bgem3                          # OpenRouter (embed_or)
+  perplexity/pplx-embed-v1-0.6b: embed_pplx         # OpenRouter (embed_or)
+  openai/text-embedding-3-small: embed_te3s         # OpenAI (embed_oai)
+  text-embedding-3-small: embed_te3s                # alias ngắn -> cùng capability
   # mcp gửi model THẬT (rerank) -> capability rerank_api (Cohere /rerank endpoint). Giữ cả 2 alias
   # (rolling-deploy an toàn); model THỰC SỰ gọi do rerank_api.paid quyết (hiện = cohere/rerank-v3.5).
   cohere/rerank-v3.5: rerank_api
@@ -211,18 +218,22 @@ capabilities:
                                     # qwen3.5-flash 100%@9.7s · qwen3.5-9b 100%@9.7s · llama-4-scout 95%@8.1s.
                                     # LOẠI: deepseek-v4-flash (no-vision CRASH), gemma-4 (chậm 28s).
     models:
-      paid:                          # round-robin -> rải 4 pool (Google/Qwen×2/Meta). Bỏ trần inflight
-        - google/gemini-2.5-flash-lite   #   100% @5.2s — nhanh+chuẩn nhất (≈ gpt-5.4-mini)
+      paid:                          # round-robin -> rải 3 pool (Qwen×2/Meta). Bỏ trần inflight.
+                                     # google/gemini-2.5-flash-lite ĐÃ BỎ (yêu cầu 2026-06-27).
         - qwen/qwen3.5-flash-02-23        #   100% @9.7s (reasoning-OFF)
         - qwen/qwen3.5-9b                 #   100% @9.7s (reasoning-OFF)
         - meta-llama/llama-4-scout       #   95% @8.1s — pool Meta đa dạng
-    selector:                       # adaptive_balanced = _pick_model_split ROUND-ROBIN 4 model (//hóa).
+    selector:                       # adaptive_balanced = _pick_model_split ROUND-ROBIN 3 model (//hóa).
                                     # banded_rotation chỉ xoay KEY 1 model -> KHÔNG rải model. ⚠️ reasoning
                                     # -OFF cho qwen-vl do AI-ROUTER tự inject server-side (_prep_body:
                                     # capability=='ocr' + provider=OpenRouter); degrade OpenAI -> bỏ -> no 400.
       impl: adaptive_balanced
       params:
         tpm_per_key: 500000
+        weights:                    # WEIGHTED round-robin (giữ 3 model anti-queue, chỉ đổi TỈ LỆ)
+          meta-llama/llama-4-scout: 5      # 50% — chủ lực, OCR ~1.8s (10x nhanh hơn qwen)
+          qwen/qwen3.5-9b: 3               # 30%
+          qwen/qwen3.5-flash-02-23: 2      # 20%
         save_mode:                  # cạn band -> xiaomi/mimo-v2.5 (OpenRouter omnimodal vision)
           enabled: true
           model: xiaomi/mimo-v2.5
@@ -233,3 +244,17 @@ capabilities:
     tiers: [embed_or]              # qwen3-embedding-8b qua OpenRouter (rag-worker + query intent)
     pinned_model: qwen/qwen3-embedding-8b   # 2026-06-27: 4b->8b (3 provider, hết engine_overloaded;
                                             # MRL dim=2560 giữ nguyên vector size; collection mới tự tạo)
+  # ── MULTI-COLLECTION secondary embed (mỗi model PIN riêng -> đúng provider/endpoint). Chỉ
+  #    rag-worker ingest dùng (ghi collection phụ); KHÔNG ảnh hưởng 'embed' primary qwen8b. ───────
+  embed_e5large:
+    tiers: [embed_or]
+    pinned_model: intfloat/multilingual-e5-large
+  embed_bgem3:
+    tiers: [embed_or]
+    pinned_model: baai/bge-m3
+  embed_pplx:
+    tiers: [embed_or]
+    pinned_model: perplexity/pplx-embed-v1-0.6b
+  embed_te3s:                       # OpenAI embeddings (embed_oai tier)
+    tiers: [embed_oai]
+    pinned_model: openai/text-embedding-3-small

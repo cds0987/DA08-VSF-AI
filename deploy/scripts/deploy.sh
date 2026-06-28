@@ -47,7 +47,7 @@ done
 
 echo "==> 3) Login Docker Hub + PULL image (KHÔNG build trên VM)"
 echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
-docker compose pull qdrant langfuse-db langfuse nats-bootstrap rag-worker mcp-service hr-service user-service gotenberg document-service query-migrate query-service ai-router frontend-chat frontend-admin nginx
+docker compose pull qdrant langfuse-db langfuse nats-bootstrap rag-worker rag-ingest-worker mcp-service hr-service user-service gotenberg document-service query-migrate query-service ai-router frontend-chat frontend-admin nginx
 
 echo "==> 3a) PRE-FLIGHT migration — image MỚI có định vị được revision DB không? (chặn drift TRƯỚC khi đụng prod)"
 # `alembic current` (READ-ONLY): đọc alembic_version trong DB rồi tra trong lịch sử migration
@@ -96,7 +96,9 @@ if [ -f "$WIPE_TOKEN_FILE" ]; then
 fi
 
 echo "==> 4) Up image đã pull (query/rag/hr migrations chạy one-shot và fail-fast)"
-docker compose up -d --no-build qdrant langfuse-db langfuse nats-bootstrap query-migrate rag-worker mcp-service hr-service user-service gotenberg document-service query-service ai-router frontend-chat frontend-admin \
+# rag-ingest-worker: ingest-only, scale N=4 (rebalance: N=8 thừa, chỉ queue tại ai-router MAXED
+# 401% -> dồn core sang ai-router UVICORN_WORKERS 6). compose up BỎ QUA deploy.replicas -> --scale.
+docker compose up -d --no-build --scale rag-ingest-worker=8 qdrant langfuse-db langfuse nats-bootstrap query-migrate rag-worker rag-ingest-worker mcp-service hr-service user-service gotenberg document-service query-service ai-router frontend-chat frontend-admin \
   || { echo "::error::compose up FAILED — dump migration + nats-bootstrap logs:"; \
        docker logs da08-vsf-hr-migrate-1 2>&1 | tail -80 || true; \
        docker logs da08-vsf-user-migrate-1 2>&1 | tail -40 || true; \
@@ -152,6 +154,32 @@ else
   echo "  Không migrate sparse lần này -> bỏ qua cutover mcp (verify chỉ để chẩn đoán)."
 fi
 
+
+# ── 4ac) MULTI-COLLECTION EMBED: tạo collection mới (blocking) + backfill-new (nền) ──────
+# embeddings.yaml có model MỚI -> TẠO collection (APPEND, KHÔNG xóa cũ) rồi backfill từ MD.
+# (1) one-shot rag-multi-embed-migrate `--yes`: CHỈ tạo collection thiếu — nhanh, idempotent,
+#     blocking-được. Deploy thường (config không đổi) -> collection đã sẵn -> NO-OP.
+# (2) backfill-new DETACHED (nền): re-embed CHỈ collection vừa created từ MD cache (corpus chậm)
+#     -> KHÔNG chờ, KHÔNG block deploy. Deploy thường -> 0 collection created -> backfill NO-OP nhanh.
+# NON-FATAL toàn bộ: multi-embed là AUGMENT (embed chính qwen8b vẫn chạy); lỗi collection-create
+# KHÔNG được wedge prod (forward-write của ingest-worker vẫn tự tạo/ghi khi gặp collection thiếu).
+echo "==> 4ac) Multi-collection embed: tạo collection mới (blocking) + backfill-new nền (NON-FATAL)"
+if ME_OUT=$(docker compose run --rm --no-deps \
+     -e MULTI_EMBED_ENABLED=1 rag-multi-embed-migrate 2>&1); then ME_OK=1; else ME_OK=0; fi
+echo "$ME_OUT"
+if [ "$ME_OK" = 1 ]; then
+  echo "  multi-embed collections OK (NO-OP nếu không có model mới trong embeddings.yaml)."
+  # LAUNCH backfill-new DETACHED (-d): re-embed CHỈ collection vừa created, chạy NỀN.
+  # KHÔNG chờ (corpus chậm). Lỗi launch -> chỉ cảnh báo. rag-ingest-worker đã có MULTI_EMBED_ENABLED.
+  if docker compose run -d --rm -e MULTI_EMBED_ENABLED=1 rag-ingest-worker \
+       python scripts/multi_embed_migrate.py --backfill-new --yes >/dev/null 2>&1; then
+    echo "  backfill-new launched in background (re-embed collection mới từ MD; KHÔNG block deploy)."
+  else
+    echo "::warning::multi-embed backfill-new launch FAIL — collection đã tạo, ingest forward-write vẫn ghi dần; chạy tay nếu cần backfill lịch sử."
+  fi
+else
+  echo "::warning::multi-embed collections-create FAIL (Qdrant chưa sẵn / embeddings.yaml lỗi?) — NON-FATAL, embed chính qwen8b vẫn chạy; xem log trên."
+fi
 
 echo "==> 4b) LANGFUSE readiness PROD bằng KEY THẬT (NON-FATAL — chỉ cảnh báo)"
 lf_warn() { echo "::warning::LANGFUSE prod: $1 — kiểm tra: docker compose logs langfuse"; }

@@ -187,6 +187,20 @@ def _extract_json(text: str) -> dict:
     return json.loads(t[start : end + 1])
 
 
+# RETRY sau parse-fail: prose-first (astream_plan) thỉnh thoảng truncate/quên JSON -> "không tìm
+# thấy JSON". Lần 2 ÉP CHỈ JSON (vẫn stream để giữ SSE) -> hết truncate, diệt parse-fail-lần-2.
+_JSON_ONLY = (
+    "\n\nLẦN NÀY BẮT BUỘC: CHỈ xuất DUY NHẤT đối tượng JSON kế hoạch đúng schema. "
+    "TUYỆT ĐỐI KHÔNG viết prose, giải thích, hay markdown nào trước/sau JSON."
+)
+
+
+def _is_degenerate_light(plan: Plan) -> bool:
+    """route=light KHÔNG steps + KHÔNG answer_hint = mis-route (câu data bị retry-confuse ra light
+    rỗng -> verify trả 'Mình chưa rõ'). Coi như fail -> fallback heavy rag (an toàn hơn trả rỗng)."""
+    return plan.route == "light" and not plan.steps and not (plan.answer_hint or "").strip()
+
+
 def _fallback_plan() -> Plan:
     """Khi orchestrator lỗi hoàn toàn: heavy 1-step rag + synthesize (vẫn trả lời được)."""
     return Plan.model_validate({
@@ -254,13 +268,18 @@ class OrchestratorWorkersPlanner(Planner):
         user = f"{_memory_block(ctx)}CÂU HỎI MỚI NHẤT: {ctx.question}"
         err_hint = ""
         for attempt in range(2):
-            # STREAM phần PROSE (suy nghĩ) của planner ra SSE NGAY (node=orchestrate) -> user thấy
-            # chữ chạy từ giây đầu, LẤP dead-air pha plan (10-20s). deepseek-v4-pro giấu reasoning
-            # nhưng VẪN stream content -> ta để model viết prose TRƯỚC rồi JSON; astream_plan stream
-            # prose, dừng emit khi gặp '{' (JSON gom thầm để parse, không leak). emit=None -> fallback.
-            text = await astream_plan(model, system, user + err_hint, ctx.emit,
-                                      node="plan", tracer=ctx.tracer, trace=ctx.trace)
+            if attempt == 0:
+                # STREAM PROSE (suy nghĩ) ra SSE NGAY (node=plan) -> user thấy chữ chạy từ giây đầu,
+                # LẤP dead-air pha plan (10-20s). model viết prose TRƯỚC rồi JSON; astream_plan gom cả.
+                text = await astream_plan(model, system, user + err_hint, ctx.emit,
+                                          node="plan", tracer=ctx.tracer, trace=ctx.trace)
+            else:
+                # RETRY: VẪN stream (giữ SSE, KHÔNG freeze) nhưng + _JSON_ONLY -> model nhả JSON
+                # ngay, hết truncate. attempt 0 đã stream prose CoT rồi nên retry không cần prose nữa.
+                text = await astream_plan(model, system + _JSON_ONLY, user + err_hint, ctx.emit,
+                                          node="plan", tracer=ctx.tracer, trace=ctx.trace)
             if not text:
+                err_hint = "\n\nLỖI: model trả rỗng. Trả JSON ĐÚNG schema."
                 continue
             try:
                 data = _extract_json(text)
@@ -268,6 +287,8 @@ class OrchestratorWorkersPlanner(Planner):
                 bad = [s.role for s in plan.steps if s.role not in valid_roles]
                 if bad:
                     raise ValueError(f"role không có trong catalog: {bad}")
+                if _is_degenerate_light(plan):
+                    raise ValueError("route=light degenerate: thiếu answer_hint (mis-route?)")
                 return self._with_question(plan, ctx.question)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("orchestrator parse fail (attempt %d): %s", attempt, str(exc)[:160])

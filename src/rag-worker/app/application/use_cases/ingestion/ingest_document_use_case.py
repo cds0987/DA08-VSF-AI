@@ -33,6 +33,27 @@ class LeaseLostError(RuntimeError):
     """Raised when this worker loses the claim lease and must stop ingesting early."""
 
 
+def _is_infra_transient_error(exc: BaseException) -> bool:
+    """Lỗi HẠ TẦNG transient: mạng/timeout/protocol tới provider hoặc Qdrant (vd httpx ConnectError/
+    ReadTimeout/RemoteProtocol, qdrant_client ResponseHandlingException bọc lỗi mạng). Default
+    'permanent' quá gắt -> các lỗi này GIẾT doc vĩnh viễn dù chỉ là flake mạng dưới burst (đo thấy
+    ~7% fail). Xếp transient -> store_reconciler retry (cap 3) -> KHÔNG mất tài liệu user đã upload.
+    Disjoint với PermanentAIError/ChunkLimit (không phải httpx/network) nên không nuốt nhầm."""
+    try:
+        import httpx
+
+        if isinstance(exc, httpx.TransportError):  # Connect/Read/Write/Pool timeout, RemoteProtocol
+            return True
+    except ImportError:
+        pass
+    if isinstance(exc, (ConnectionError, TimeoutError)):  # builtin network/OSError
+        return True
+    # qdrant_client bọc lỗi mạng -> ResponseHandlingException (check tên, tránh hard-import coupling).
+    if type(exc).__name__ in ("ResponseHandlingException", "ResponseHandlingError"):
+        return True
+    return False
+
+
 def classify_ingest_error(exc: BaseException) -> str:
     if isinstance(
         exc,
@@ -49,6 +70,8 @@ def classify_ingest_error(exc: BaseException) -> str:
     ):
         return "transient"
     if is_qdrant_collection_missing_error(exc):
+        return "transient"
+    if _is_infra_transient_error(exc):
         return "transient"
     if isinstance(exc, (PermanentAIError, ChunkLimitExceededError)):
         return "permanent"
