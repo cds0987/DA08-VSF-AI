@@ -58,6 +58,7 @@ class HaystackRagEngine:
         chunker: Chunker | None = None,
         tracer: object | None = None,
         embed_targets: list | None = None,
+        shard_mode: bool = False,
     ):
         self.settings = settings or load_settings()
         self.embedder = embedder
@@ -66,6 +67,12 @@ class HaystackRagEngine:
         # tự embed CÙNG chunks + upsert collection riêng. Rỗng -> hành vi cũ (1 collection).
         # Tách parse/OCR/caption (làm 1 lần ở đây) khỏi embed -> chia sẻ chunks cho mọi model.
         self.embed_targets = list(embed_targets or [])
+        # SHARD N/5: khi bật, mỗi doc ghi vào CHỈ 1 collection (round-robin hash theo
+        # document_id) thay vì replicate cả pool -> embed throughput ×len(pool). Pool ghi =
+        # [primary] + embed_targets (slot 0 = primary self.embedder/self.vectors). mode=False
+        # (mặc định) -> hành vi replicate cũ (primary LUÔN ghi + mọi secondary). Xem
+        # core_engine.multi_embed.select_shard_index.
+        self.shard_mode = bool(shard_mode)
         self.captioner = captioner
         self._tracer = tracer
         self.chunker = chunker or SectionChunker(
@@ -199,21 +206,25 @@ class HaystackRagEngine:
         *,
         correlation_id: str,
         document_id: str,
+        targets: list | None = None,
     ) -> None:
+        # targets=None -> mọi embed_targets (replicate). Shard truyền danh sách 1-phần-tử
+        # (chỉ collection của slot đã chọn).
+        targets = list(self.embed_targets if targets is None else targets)
         span = self._span_start(
             trace,
             "multi-embed",
-            {"targets": len(self.embed_targets), "chunks": len(embed_texts)},
+            {"targets": len(targets), "chunks": len(embed_texts)},
         )
         results = await asyncio.gather(
             *[
                 self._write_one_target(t, chunk_ids, embed_texts, payloads, existing_chunk_ids)
-                for t in self.embed_targets
+                for t in targets
             ],
             return_exceptions=True,
         )
         ok, failed = 0, 0
-        for target, result in zip(self.embed_targets, results):
+        for target, result in zip(targets, results):
             if isinstance(result, BaseException):
                 failed += 1
                 log_event(
@@ -408,6 +419,69 @@ class HaystackRagEngine:
                     f"{self._caption_fallback_threshold:.3f}"
                 )
 
+        # ── SHARD selection ──────────────────────────────────────────────────
+        # Pool ghi = [primary] + embed_targets. shard_mode -> chọn 1 slot deterministic
+        # theo hash(document_id); slot 0 = primary. write_primary = (slot==0). Secondary
+        # được ghi = chỉ target ở slot đã chọn (nếu !=0). replicate -> primary + tất cả.
+        write_primary = True
+        selected_secondaries = list(self.embed_targets)
+        shard_slot = -1
+        if self.shard_mode:
+            from core_engine.multi_embed import select_shard_index
+
+            pool_size = 1 + len(self.embed_targets)
+            shard_slot = select_shard_index(doc.document_id, pool_size)
+            write_primary = shard_slot == 0
+            selected_secondaries = (
+                [self.embed_targets[shard_slot - 1]] if shard_slot >= 1 else []
+            )
+            log_event(
+                self._logger,
+                logging.INFO,
+                "shard_route_selected",
+                stage="ingest",
+                correlation_id=request_correlation_id,
+                document_id=doc.document_id,
+                shard_slot=shard_slot,
+                pool_size=pool_size,
+                collection=(
+                    self._safe_collection_name()
+                    if write_primary
+                    else getattr(getattr(selected_secondaries[0], "config", None), "index_id", lambda: "")()
+                ),
+            )
+            if not write_primary:
+                # Doc KHÔNG thuộc shard primary: dọn vector cũ ở collection primary nếu có
+                # (vd re-ingest sau khi đổi pool) để collection primary không giữ bản mồ côi.
+                if existing_chunk_ids:
+                    await self.vectors.delete_many(sorted(existing_chunk_ids))
+
+        if not write_primary:
+            # Primary KHÔNG nhận doc này (shard): bỏ qua embed+write primary, chỉ ghi
+            # secondary đã chọn. Trả về số chunk đã produce (đo throughput nhất quán).
+            stale_chunk_ids: List[str] = []
+            await self._write_secondary_targets(
+                chunk_ids, embed_texts, payloads, existing_chunk_ids, trace,
+                correlation_id=request_correlation_id, document_id=doc.document_id,
+                targets=selected_secondaries,
+            )
+            log_event(
+                self._logger,
+                logging.INFO,
+                "ingest_completed",
+                stage="ingest",
+                correlation_id=request_correlation_id,
+                document_id=doc.document_id,
+                chunk_count=len(chunk_ids),
+                pruned_chunk_count=0,
+                split_ms=split_ms,
+                caption_ms=round(caption_ms, 3),
+                caption_fallback_count=caption_fallbacks,
+                shard_slot=shard_slot,
+                total_ms=total_sw.elapsed_ms(),
+            )
+            return len(chunk_ids)
+
         embed_span = self._span_start(
             trace,
             "embed",
@@ -471,10 +545,13 @@ class HaystackRagEngine:
         # collection riêng (index_id per model). CHIA SẺ embed_texts/payloads/chunk_ids
         # đã tính 1 lần (parse/OCR/caption KHÔNG lặp). Fault-isolated: 1 model fail KHÔNG
         # vỡ primary (đã commit ở trên) lẫn model khác (gather return_exceptions).
-        if self.embed_targets:
+        # replicate -> selected_secondaries = mọi embed_targets. shard slot==0 (primary) ->
+        # selected_secondaries = [] (doc chỉ thuộc primary). slot>=1 đã return sớm ở trên.
+        if selected_secondaries:
             await self._write_secondary_targets(
                 chunk_ids, embed_texts, payloads, existing_chunk_ids, trace,
                 correlation_id=request_correlation_id, document_id=doc.document_id,
+                targets=selected_secondaries,
             )
         log_event(
             self._logger,

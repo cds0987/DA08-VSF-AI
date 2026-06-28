@@ -14,6 +14,7 @@ Kiến trúc (KHÔNG bypass):
 
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -27,6 +28,14 @@ from core_engine.types import EmbeddingService, VectorRepository
 from core_engine.vectorstore import VectorStoreConfig, build_vector_repository
 
 DEFAULT_EMBEDDINGS_CONFIG = "embeddings.yaml"
+
+# Ghi multi-collection 2 chế độ:
+#   replicate (mặc định) -> mỗi doc embed vào MỌI collection (5/5) — backward compat.
+#   shard     -> mỗi doc embed vào CHỈ 1 collection chọn round-robin theo doc-id
+#                (hash(document_id) % pool) => corpus chia đều ~N/5 -> throughput ×5.
+EMBED_MODE_REPLICATE = "replicate"
+EMBED_MODE_SHARD = "shard"
+_VALID_EMBED_MODES = {EMBED_MODE_REPLICATE, EMBED_MODE_SHARD}
 
 
 @dataclass(frozen=True)
@@ -68,6 +77,40 @@ def load_active_embed_models(path: str | os.PathLike[str] | None = None) -> List
         seen.add(name)
         models.append(name)
     return models
+
+
+def load_embed_mode(path: str | os.PathLike[str] | None = None) -> str:
+    """Đọc embeddings.yaml -> chế độ ghi (`replicate` mặc định | `shard`).
+
+    File thiếu / field thiếu / giá trị lạ -> replicate (AN TOÀN, giữ hành vi cũ). Có thể
+    override bằng env MULTI_EMBED_MODE (ưu tiên cao hơn yaml) cho thử nghiệm/rollback nhanh.
+    """
+    env_mode = os.getenv("MULTI_EMBED_MODE", "").strip().lower()
+    if env_mode in _VALID_EMBED_MODES:
+        return env_mode
+    cfg_path = Path(path) if path is not None else embeddings_config_path()
+    if not cfg_path.is_file():
+        return EMBED_MODE_REPLICATE
+    payload = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    mode = str(payload.get("mode", EMBED_MODE_REPLICATE)).strip().lower()
+    return mode if mode in _VALID_EMBED_MODES else EMBED_MODE_REPLICATE
+
+
+def select_shard_index(document_id: str | None, pool_size: int) -> int:
+    """Chọn slot shard cho 1 doc: hash(document_id) % pool_size — DETERMINISTIC + đều.
+
+    Cùng document_id -> CÙNG slot (re-ingest idempotent, doc đi đúng collection cũ).
+    Dùng SHA-1 (KHÔNG dùng builtin hash() — PYTHONHASHSEED ngẫu nhiên hoá str hash giữa
+    các process -> mất tính ổn định). document_id rỗng/None -> slot 0 (fallback primary,
+    KHÔNG crash). pool_size<=0 -> 0.
+    """
+    if pool_size <= 0:
+        return 0
+    doc = (document_id or "").strip()
+    if not doc:
+        return 0
+    digest = hashlib.sha1(doc.encode("utf-8")).hexdigest()
+    return int(digest, 16) % pool_size
 
 
 def resolve_target_configs(
@@ -130,16 +173,31 @@ def build_embed_targets(
     for model, dim, cfg in resolve_target_configs(base_config, active):
         if cfg.index_id() == primary_collection:
             continue  # đã ghi bởi engine primary
-        provider = _provider_for_model(model, dim)
-        from core_engine.embedding import ProviderEmbeddingService
-
-        targets.append(
-            EmbedTarget(
-                embed_model=model,
-                dimension=dim,
-                config=cfg,
-                embedder=ProviderEmbeddingService(provider, dimension=dim),
-                vectors=build_vector_repository(cfg),
-            )
-        )
+        targets.append(_build_target(model, dim, cfg))
     return targets
+
+
+def _build_target(model: str, dim: int, cfg: VectorStoreConfig) -> EmbedTarget:
+    from core_engine.embedding import ProviderEmbeddingService
+
+    provider = _provider_for_model(model, dim)
+    return EmbedTarget(
+        embed_model=model,
+        dimension=dim,
+        config=cfg,
+        embedder=ProviderEmbeddingService(provider, dimension=dim),
+        vectors=build_vector_repository(cfg),
+    )
+
+
+def build_read_targets(
+    base_config: VectorStoreConfig,
+    *,
+    models: List[str] | None = None,
+) -> List[EmbedTarget]:
+    """Dựng tập EmbedTarget cho READ shard-merge: 1 target / collection của MỌI model active
+    (GỒM CẢ primary — đối xứng với pool ghi shard). Mỗi target tự embed query bằng model
+    của nó -> search ĐÚNG vector space của collection đó. Dedup theo index_id (collection).
+    """
+    active = models if models is not None else load_active_embed_models()
+    return [_build_target(model, dim, cfg) for model, dim, cfg in resolve_target_configs(base_config, active)]

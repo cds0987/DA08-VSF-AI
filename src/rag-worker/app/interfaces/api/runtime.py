@@ -776,20 +776,40 @@ def bootstrap_runtime() -> RuntimeState:
         # engine.vectors) -> loại khỏi secondary. ENABLE qua MULTI_EMBED_ENABLED (default off
         # để không đổi hành vi prod tới khi chủ động bật). Lỗi dựng target -> log, KHÔNG sập
         # ingest primary.
+        shard_read_targets: list = []
         if _multi_embed_enabled_from_env():
             try:
-                from core_engine.multi_embed import build_embed_targets
+                from core_engine.multi_embed import (
+                    EMBED_MODE_SHARD,
+                    build_embed_targets,
+                    load_embed_mode,
+                )
 
                 engine.embed_targets = build_embed_targets(
                     vector_config, primary_model=vector_config.embed_model
                 )
+                # SHARD N/5: mode=shard -> mỗi doc ghi 1 collection (engine.shard_mode); READ
+                # phải query 5 collection + merge -> dựng read_targets (gồm primary). mode=
+                # replicate (mặc định) -> shard_mode off + read_targets rỗng = search 1-collection
+                # cũ. MULTI_EMBED_SHARD_READ=0 ép tắt read-merge (vd verify ghi-shard trước khi
+                # bật read). load_embed_mode đọc embeddings.yaml + env MULTI_EMBED_MODE.
+                embed_mode = load_embed_mode()
+                engine.shard_mode = embed_mode == EMBED_MODE_SHARD
+                shard_read_on = _is_truthy(os.getenv("MULTI_EMBED_SHARD_READ", "1"))
+                if engine.shard_mode and shard_read_on:
+                    from core_engine.multi_embed import build_read_targets
+
+                    shard_read_targets = build_read_targets(vector_config)
                 log_event(
                     logger,
                     logging.INFO,
                     "multi_embed_targets_wired",
                     stage="startup",
+                    embed_mode=embed_mode,
+                    shard_mode=engine.shard_mode,
                     primary_collection=vector_config.index_id(),
                     secondary_collections=[t.collection for t in engine.embed_targets],
+                    shard_read_collections=[t.collection for t in shard_read_targets],
                 )
             except Exception as exc:  # noqa: BLE001 - multi-embed phụ; không kéo sập ingest
                 log_event(
@@ -810,7 +830,9 @@ def bootstrap_runtime() -> RuntimeState:
         )
         # Query-side retrieval (chuyển từ mcp về rag-worker): tái dùng ĐÚNG embedder +
         # vectorstore của engine ingest -> cùng provider/model/dim/sparse encoding.
-        search_use_case = SearchUseCase(engine.embedder, engine.vectors)
+        search_use_case = SearchUseCase(
+            engine.embedder, engine.vectors, read_targets=shard_read_targets
+        )
         storage_reasons, storage_warnings = parser.startup_diagnostics(
             source_bucket=source_bucket
         )

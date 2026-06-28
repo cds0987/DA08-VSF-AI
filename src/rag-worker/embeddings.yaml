@@ -11,6 +11,16 @@
 # (giữ nguyên contract search/runtime). Danh sách này là tập GHI multi-collection lúc ingest;
 # primary luôn được gộp vào tập ghi dù có/không liệt kê ở đây.
 version: 1
+# Chế độ ghi multi-collection:
+#   replicate (mặc định) -> mỗi doc embed vào MỌI collection (5/5). Backward-compat.
+#   shard               -> mỗi doc embed vào CHỈ 1 collection chọn round-robin DETERMINISTIC
+#                          theo hash(document_id) % len(pool) -> corpus chia đều ~N/5,
+#                          embed throughput ×5. READ tự query 5 collection + merge + rerank.
+# Pool shard = primary (qwen8b, EMBED_MODEL) + 4 model dưới (primary cũng nhận 1/5).
+# Override nhanh bằng env MULTI_EMBED_MODE (ưu tiên cao hơn field này). READ-merge bật mặc
+# định khi shard; tắt bằng MULTI_EMBED_SHARD_READ=0. Đổi replicate->shard: doc CŨ vẫn nằm ở
+# mọi collection (giữ), doc MỚI chỉ vào 1 collection; read-merge phủ cả hai.
+mode: shard
 embed_models:
   - qwen/qwen3-embedding-8b           # PRIMARY hiện tại (4096)
   - intfloat/multilingual-e5-large    # 1024
