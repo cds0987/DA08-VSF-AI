@@ -36,7 +36,11 @@ _SDK_CALL_RE = re.compile(r"\.(responses|chat\.completions|embeddings)\.create\s
 # plan + synth = capability RIÊNG per-step MOSA (orchestrate=plan, think2=synth) -> đổi model
 # chỉ sửa routing.yaml, không sửa code.
 _EXPECTED_CAPABILITIES = {"answer", "triage", "triage_fast", "think", "worker", "rerank", "guardrail",
-                          "summary", "caption", "ocr", "embed", "plan", "synth", "rerank_api"}
+                          "summary", "caption", "ocr", "embed", "plan", "synth", "rerank_api",
+                          # MULTI-COLLECTION embed (rag-worker ingest/shard-read gửi model THẬT ->
+                          # capability riêng/model). query-service KHÔNG dùng, nhưng CÓ trong routing.yaml
+                          # nên phải khai để drift-guard không đỏ. Đồng bộ embeddings.yaml + embed_model_lint.
+                          "embed_e5large", "embed_bgem3", "embed_pplx", "embed_te3s"}
 
 
 def _py_files():
