@@ -123,3 +123,132 @@ Nhưng **muốn vượt ~4 doc/phút phải A2 (scale rag-worker ngang nhiều p
 là trần thật, không phải embed/OCR concurrency.
 
 → **bm3 (đề xuất tiếp)**: A2 scale rag-worker 1→N replica (claim-lease DB-safe) — dùng 15 core rảnh.
+
+---
+
+## bm3 — A2: tách + scale rag-ingest-worker (đã làm)
+
+**What**: tách service `rag-ingest-worker` (INGEST_ENABLED=true) khỏi `rag-worker` search; scale
+`deploy.replicas` + `INGEST_WORKER_COUNT` (claim-lease DB-safe, nhiều process/core). Search giữ
+riêng (INGEST_ENABLED=false) → ingest KHÔNG bóp chat-search-latency.
+
+**Why**: bm2 chứng minh trần là **CPU 1-core** (single event-loop decode/rasterize serial), không
+phải embed/OCR concurrency. Vượt = scale ngang nhiều process → dùng 15 core rảnh.
+
+**Result**: throughput vượt trần ~4 doc/phút của bm2. Đo full corpus HR-VN (120 doc nhỏ):
+**45 doc/phút, 0 fail**. PDF academic NẶNG (openragbench, 449-1025 chunk/file, vision-OCR):
+**8.5 pdf/phút** (≈ baseline cũ 7-9) — bottleneck giờ là **parse + vision-OCR PDF khổng lồ**, không
+phải số process. Combined-test (chat + ingest đồng thời): chat 0-err coexist, ai-router gỡ maxout.
+
+**Conclusion**: A2 thắng throughput cho corpus thường; PDF siêu-nặng thì OCR-vision là trần kế tiếp
+(`OCR_MAX_CONCURRENCY=4`/worker — nâng nếu cần, ai-router AIMD còn headroom: no_capacity ocr=0).
+
+---
+
+## bm4 — Multi-collection (shard N embed model) — "phá BẪY embedding"
+
+**What**: mỗi embed model → 1 Qdrant collection riêng (qwen8b@4096 · bge-m3@1024 · te3s@1536 ·
+pplx@1024). `embeddings.yaml mode: shard` → mỗi doc embed vào CHỈ 1 collection (hash document_id %
+N) → corpus chia đều ~N/N; READ query N collection song song + merge + rerank. e5large GỠ (ctx 512
+quá nhỏ = mắt xích yếu). `index_id` fingerprint = collection+model+dim.
+
+**Why / Motivation**: single qwen8b = 1 vector-space PIN cố định (**BẪY embedding**, PLAN §4b) — phụ
+thuộc 1 model/provider; kém resilience + không đa dạng ngữ nghĩa. Kỳ vọng (a) embed throughput cao
+(shard = 1 embed/doc thay vì replicate N), (b) đa dạng model bắt được nhiều ngữ nghĩa hơn.
+
+---
+
+## bm5 — 🚨 BUG NGẦM: router ÉP mọi embed về qwen8b (multi-collection GIẢ)
+
+**Phát hiện**: multi-collection chạy "thành công" 0 lỗi, NHƯNG forensic **cosine** lộ sự thật:
+`cos(stored e5large, qwen8b-tươi) = 0.96` (model THẬT phải ≈ 0); gửi `model=e5large` vs `model=qwen8b`
+→ kết quả Y HỆT. → mọi collection phụ lưu **vector qwen8b cắt chiều**, KHÔNG phải model riêng.
+
+**Gốc**: `router.embeddings()` **hardcode `resolve('embed')`** → bỏ qua `body['model']` → MỌI request
+embed phục vụ qwen8b. routing.yaml ĐÃ khai capability `embed_e5large/bgem3/...` + rag-worker ĐÃ gửi
+model thật, nhưng router **chưa bao giờ route tới** = migration single→multi-collection **DỞ DANG**
+(foundation còn giả định 1-model). Cùng gốc bệnh với "primary/anchor thừa thãi trong shard".
+
+**Vì sao IM LẶNG tuyệt đối**: (1) router passthrough param `dimensions`; (2) qwen8b là **Matryoshka
+(MRL)** → TUÂN `dimensions` → trả ĐÚNG dim mỗi collection mong đợi (1024/1536) → upsert vừa khít →
+**0 lỗi, 0 cảnh báo**. Nếu thiếu BẤT KỲ điều kiện nào (qwen8b non-MRL HOẶC router không-passthrough)
+→ dim-mismatch CRASH = lộ ngay. Cả 2 trùng → bug sống ẩn. Chỉ phát hiện bằng forensic cosine.
+
+---
+
+## bm6 — 6 fix gốc + gate CI chống tái phát (đã deploy)
+
+1. **router.embeddings() route theo `body['model']`** → capability THẬT (qwen8b→embed,
+   e5large→embed_e5large, te3s→embed_te3s/OpenAI, bge-m3/pplx→embed_*). Primary qwen8b KHÔNG đổi.
+2. **embed est = MAX per-text** (KHÔNG sum batch): est cũ = sum(100 chunk)~8300 tok > ctx bge-m3 8192
+   → `feasible_model` loại OAN → 503 no_capacity → 7/14 doc mất. context_length là PER-TEXT → phải
+   MAX (~200 tok) < mọi ctx.
+3. **`no_inflight_cap` cho embed** (LLM-router pattern, LiteLLM/OpenRouter): bỏ AIMD inflight-cap
+   client-side (gây tự-503 "no capacity" dù key CÒN tiền) → đẩy thoải mái + round-robin key +
+   failover-on-429 + cooldown. AIMD GIỮ cho chat (đúng chỗ nó cần).
+4. **Dẹp hardcode**: `test_multi_embed` DERIVE từ `load_active_embed_models()` (bỏ hardcode list);
+   reframe "primary" → "anchor" (KHÔNG privileged trong shard; mọi model peer ngang nhau).
+5. **`infra/ci/embed_model_lint.py` + CI gate XUYÊN-SERVICE**: embeddings.yaml(active) ⊆
+   contract.EMBED_MODELS/MODEL_TAGS ⊆ routing.yaml(alias/capability/pinned/tier) ⊆ catalog →
+   thiếu/lệch chỗ nào = **CI ĐỎ trước prod** (bắt đúng class bug qwen8b). Cũng fix drift
+   `_EXPECTED_CAPABILITIES` query-service.
+6. **Gỡ e5large** (ctx 512 = mắt xích yếu).
+
+**Verify**: secondary collection giờ là model THẬT — `cos(stored, qwen8b) ≈ 0` (-0.04 bge-m3 /
+-0.01 te3s / 0.09 pplx) vs 0.96 thời-bug; OpenRouter serve thật (e5large=intfloat, bge-m3=parasail,
+pplx); shard-read merge phủ **4/4 collection**.
+
+---
+
+## bm7 — Recall multi-collection THẬT (120 doc HR-VN, 480 câu gold)
+
+**Corpus**: 120 doc HR-VN (full team dataset, ingest 45 doc/phút 0 fail). Gold 480 câu (4/doc,
+gt=doc, có ref_answer). **Phương pháp ĐÚNG cho multi-collection**: recall qua **shard-read merge**
+`/api/search` (embed query bằng CẢ N model → search N collection → merge → rerank). Per-collection
+cũ (single-model) VÔ NGHĨA vì shard (mỗi collection chỉ ~1/N doc). Domain phải đúng (HR-VN, KHÔNG
+openragbench academic — chỉ hợp đo throughput).
+
+**Result**:
+| | giá trị |
+|---|---|
+| Recall shard-merge | @1=0.53 @3=0.78 @5=0.85 @10=0.90 MRR=0.67 · latency p50=1.1s |
+| **Per-model** (recall trên shard của model đó) | **qwen8b 0.73@1 (TỐT NHẤT)** · bge-m3 0.58 · te3s 0.42 · **pplx 0.41 (TỆ)** |
+| Chấm tay (Claude judge relevance, 110 câu) | 75% answered@3 · khớp gt-match |
+
+**Conclusion**: **shard ĐANG HẠI recall** — qwen8b trên shard của nó = 0.73@1 nhưng TỔNG chỉ 0.53@1
+vì 3/4 doc rơi vào model yếu hơn (pplx/te3s 0.41). "Đa dạng model" KHÔNG giúp khi model phụ yếu.
+
+---
+
+## bm8 — Single qwen8b vs Multi → 🏁 QUYẾT KIẾN TRÚC
+
+**What**: `MULTI_EMBED_ENABLED=0` = single qwen8b (mọi doc → 1 collection qwen8b@4096). Re-ingest
+120 doc → đo recall + latency CÙNG 480 câu, so trực tiếp multi.
+
+**Result** (cùng corpus + gold):
+| | Multi-collection shard (4 model) | **Single qwen8b** |
+|---|---|---|
+| **recall@1** | 0.53 | **0.73** (+0.20) |
+| recall@3 / @10 | 0.78 / 0.90 | 0.86 / 0.91 |
+| **MRR** | 0.67 | **0.80** (+0.13) |
+| latency p50 / p95 | 1.1s / 4.3s | 1.4s / 8.4s (~tương đương; qwen8b-tail) |
+| ingest throughput | 45 doc/phút | ~tương đương (shard cũng 1 embed/doc) |
+
+**Conclusion — QUYẾT ĐỊNH (data-driven)**: **SINGLE QWEN8B THẮNG ÁP ĐẢO** — recall@1 **+0.20**, MRR
++0.13; latency/throughput tương đương. **Multi-collection shard = LỖ RÒNG**: model phụ yếu kéo recall
+xuống mà KHÔNG đổi lại được throughput (shard = 1 embed/doc = BẰNG single, KHÔNG phải ×N — ×N chỉ
+đúng so với replicate) hay latency.
+
+→ **PRODUCTION = single qwen8b** (`MULTI_EMBED_ENABLED=0`, đã deploy 2026-06-29). "Hybrid" hiện hữu =
+**dense(qwen8b) + sparse(BM25)** mỗi collection (`__s2`) — đủ; hybrid đa-MODEL data nói KHÔNG đáng.
+Hạ tầng multi-collection + gate CI **GIỮ** (sẵn bật lại) — chỉ có nghĩa NẾU sau này có model phụ
+MẠNH ≥ qwen8b. Embeddings.yaml vẫn khai 4 model (cho shard) nhưng MULTI_EMBED_ENABLED=0 → chạy single.
+
+**Bài học**:
+1. **Đo recall ĐÚNG** (đúng domain HR-VN + đúng path shard-merge, không gt-match per-collection) mới ra
+   sự thật — "multi-model giả" + "shard hại recall" đều chỉ lộ khi đo nghiêm.
+2. **Bug correctness có thể IM LẶNG TUYỆT ĐỐI** (qwen8b-MRL + router passthrough che lấp) → cần forensic
+   (cosine) + **gate CI xuyên-service** để không tái phát.
+3. **"Đa dạng model" chỉ giúp NẾU model phụ đủ mạnh** — pplx 0.6B / te3s nhỏ << qwen8b 8B → đa dạng =
+   pha loãng chất lượng. Một model MẠNH > nhiều model yếu.
+
