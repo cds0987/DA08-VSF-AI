@@ -47,9 +47,6 @@ def _configure_s3_pipeline_test(
     startup_reasons: list[str] | None = None,
     startup_warnings: list[str] | None = None,
 ) -> None:
-    async def _noop_write_contract_stamp(*args, **kwargs) -> None:
-        return None
-
     class _TestS3SourceParser(S3SourceParser):
         def startup_diagnostics(
             self,
@@ -71,11 +68,7 @@ def _configure_s3_pipeline_test(
         "build_engine_from_config",
         lambda *args, **kwargs: _FakeEngine(),
     )
-    monkeypatch.setattr(
-        runtime_module,
-        "write_contract_stamp",
-        _noop_write_contract_stamp,
-    )
+    # write_contract_stamp ĐÃ GỠ khỏi startup (mcp-thin không verify) -> không cần patch.
 
 
 def test_health_reports_unhealthy_when_running_degraded(
