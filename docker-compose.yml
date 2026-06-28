@@ -658,11 +658,8 @@ services:
       # Part A đã đo: embed PROVIDER-throughput-bound (~18 chunk/s). Batch tuning vô ích.
       # Giữ batch default 100 + concurrency 16 (transient-safe).
       EMBED_BATCH_MAX_CONCURRENCY: "16"
-      # TEST window/chunk-size (Part A lever embed): chunk 90->180 words (overlap 15->30) ->
-      # ~½ chunk/doc (372->~190) -> embed 20.6s->~10s. RECALL-GATE: đo recall@k vs baseline
-      # 0.944 — chunk to có vỡ retrieval không. REVERT nếu recall tụt.
-      CHILD_MAX_WORDS: "180"
-      CHILD_OVERLAP_WORDS: "30"
+      # chunk-180 TEST (Part A): embed −26% (20.6→15.2s) NHƯNG recall@1 tụt 0.944→0.873 (−7.5%)
+      # -> TRƯỢT quality-gate -> REVERT về default 90/15. Chunk-size KHÔNG phải lever embed an toàn.
       EMBED_API_KEY: ${AIROUTER_INTERNAL_TOKEN:-}
     depends_on:
       nats:
