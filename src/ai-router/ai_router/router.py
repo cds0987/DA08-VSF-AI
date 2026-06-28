@@ -439,7 +439,12 @@ class Router:
         (rải key). GỐC BUG cũ: hardcode resolve('embed') -> ÉP MỌI model về qwen8b -> multi-collection
         GIẢ (mọi collection lưu qwen8b cắt chiều). Retry-across-keys + backoff: key embed bench ngắn
         rồi hồi -> thử lại MAX_ATTEMPTS thay vì 503 (Benchmark 1: 503 -> 81% src=0)."""
-        est = estimate_tokens(None, body.get("input"))
+        # embeddings KHÔNG sinh output -> est = INPUT tokens THẬT (KHÔNG dùng estimate_tokens vì nó
+        # +DEFAULT_OUTPUT_EST=600 output-pad của chat -> est luôn ≥600 > ctx model nhỏ (e5large=512)
+        # -> feasible_model loại OAN + sai TPM-reserve. Input-only: ~4 ký tự/token.
+        _inp = body.get("input")
+        est = (sum(len(x) for x in _inp if isinstance(x, str)) if isinstance(_inp, list)
+               else len(_inp or "")) // 4
         # capability = alias của model THẬT client gửi (qwen8b/e5large/te3s/...). KHÔNG hardcode
         # 'embed' -> router tôn trọng model -> giữ đúng vector space mỗi collection.
         capability_alias = body.get("model") or "embed"
