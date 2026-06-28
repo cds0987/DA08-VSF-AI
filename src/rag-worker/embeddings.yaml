@@ -23,7 +23,9 @@ version: 1
 mode: shard
 embed_models:
   - qwen/qwen3-embedding-8b           # PRIMARY hiện tại (4096)
-  - intfloat/multilingual-e5-large    # 1024
-  - baai/bge-m3                       # 1024
-  - openai/text-embedding-3-small     # 1536 (qua OpenAI embed_oai)
-  - perplexity/pplx-embed-v1-0.6b     # 1024
+  - baai/bge-m3                       # 1024 (ctx 8192)
+  - openai/text-embedding-3-small     # 1536 (qua OpenAI embed_oai, ctx 8191)
+  - perplexity/pplx-embed-v1-0.6b     # 1024 (ctx 4096)
+  # GỠ intfloat/multilingual-e5-large 2026-06-28: ctx CHỈ 512 — nhỏ nhất, mắt xích yếu
+  # (3 model còn lại ≥4096). Hiện chunk ~90 token nên vẫn vừa, nhưng bỏ để an toàn khi chunk
+  # lớn dần + giảm 1 embed/query (latency shard-read). Collection cũ GC khi clear.
