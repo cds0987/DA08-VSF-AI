@@ -64,6 +64,25 @@ async def _ensure_collection(target) -> str:
     return "exists" if existed else "created"
 
 
+async def _collection_point_count(target) -> int | None:
+    """Số điểm trong collection target. Dùng cho backfill-EMPTY (points=0) — robust hơn
+    "created-this-run": CI/CD tạo collection ở run TRƯỚC (one-shot --yes) -> run backfill
+    thấy "exists" dù collection RỖNG -> phải dựa EMPTINESS, không phải created-flag.
+    None = không xác định (an toàn: KHÔNG backfill)."""
+    provider = getattr(target.vectors, "provider", None)
+    client = getattr(provider, "_client", None)
+    collection = getattr(provider, "_collection", None)
+    if client is None or collection is None:
+        return None
+    try:
+        if not await client.collection_exists(collection):
+            return 0
+        info = await client.get_collection(collection)
+        return int(getattr(info, "points_count", 0) or 0)
+    except Exception:  # noqa: BLE001 - không xác định -> None -> không backfill (an toàn)
+        return None
+
+
 async def _backfill_target(
     engine_settings,
     captioner,
@@ -179,14 +198,20 @@ async def _run(dry_run: bool, backfill: bool, backfill_new: bool, limit: int | N
         print("DONE (append-only; chạy --backfill / --backfill-new để re-embed corpus từ MD).")
         return 0
 
-    # backfill-new: CHỈ backfill collection vừa created lần này (tránh re-embed corpus đã có
-    # mỗi deploy = phí + chậm). --backfill (thủ công): backfill TẤT CẢ target.
+    # backfill-new: CHỈ backfill collection RỖNG (points=0) — robust với CI/CD (create ở run
+    # trước -> "exists" nhưng rỗng -> vẫn backfill). Collection ĐÃ có data -> skip (idempotent,
+    # deploy thường nhanh + không re-embed corpus đã có). --backfill (thủ công): TẤT CẢ target.
     if backfill_new and not dry_run:
-        backfill_targets = [t for t in targets if t.collection in created_collections]
+        backfill_targets = []
+        for t in targets:
+            n = await _collection_point_count(t)
+            print(f"  {t.collection}: points={n}")
+            if n == 0:  # RỖNG (mới tạo / chưa backfill) -> backfill. None (không rõ) -> skip an toàn.
+                backfill_targets.append(t)
         if not backfill_targets:
-            print("backfill-new: KHÔNG có collection created lần này -> NO-OP (deploy thường nhanh).")
+            print("backfill-new: mọi collection đã có data -> NO-OP (deploy thường nhanh).")
             return 0
-        print(f"backfill-new: chỉ backfill collection VỪA created: "
+        print(f"backfill-empty: backfill collection RỖNG: "
               f"{[t.collection for t in backfill_targets]}")
     else:
         backfill_targets = targets

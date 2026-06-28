@@ -83,22 +83,32 @@ def _load_migrate_module():
     return mod
 
 
-class _FakeEnsureClient:
-    """Client tối thiểu cho _ensure_collection: collection_exists trả theo set existing."""
+class _FakeColInfo:
+    def __init__(self, points: int) -> None:
+        self.points_count = points
 
-    def __init__(self, existing: set[str]) -> None:
+
+class _FakeEnsureClient:
+    """Client tối thiểu: collection_exists theo set existing + get_collection trả points
+    (cho _collection_point_count -> backfill collection RỖNG)."""
+
+    def __init__(self, existing: set[str], points: int = 0) -> None:
         self._existing = set(existing)
+        self._points = points
 
     async def collection_exists(self, name: str) -> bool:
         return name in self._existing
+
+    async def get_collection(self, name: str) -> _FakeColInfo:
+        return _FakeColInfo(self._points)
 
     async def _ensure(self) -> None:  # provider._ensure giả (no-op create)
         return None
 
 
 class _FakeProvider:
-    def __init__(self, existing: set[str], collection: str) -> None:
-        self._client = _FakeEnsureClient(existing)
+    def __init__(self, existing: set[str], collection: str, points: int = 0) -> None:
+        self._client = _FakeEnsureClient(existing, points)
         self._collection = collection
 
     async def _ensure(self) -> None:
@@ -111,11 +121,11 @@ class _FakeVectors:
 
 
 class _FakeTarget:
-    def __init__(self, collection: str, existing: set[str]) -> None:
+    def __init__(self, collection: str, existing: set[str], points: int = 0) -> None:
         self.collection = collection
         self.embed_model = "fake/model"
         self.dimension = 1024
-        self.vectors = _FakeVectors(_FakeProvider(existing, collection))
+        self.vectors = _FakeVectors(_FakeProvider(existing, collection, points))
 
 
 @pytest.mark.asyncio
@@ -135,12 +145,14 @@ async def test_ensure_collection_returns_exists_for_present() -> None:
 
 @pytest.mark.asyncio
 async def test_backfill_new_only_backfills_created(monkeypatch) -> None:
-    """--backfill-new: collection created -> backfill; collection exists -> SKIP backfill."""
+    """--backfill-new: collection RỖNG (points=0) -> backfill; collection CÓ DATA -> SKIP.
+    Robust với CI/CD: collection 'exists' nhưng RỖNG (create ở run trước) VẪN được backfill."""
     mod = _load_migrate_module()
 
-    created = _FakeTarget("rag__new__d1024", existing=set())          # -> "created"
-    existing = _FakeTarget("rag__old__d1024", existing={"rag__old__d1024"})  # -> "exists"
-    targets = [created, existing]
+    # RỖNG: exists=True (đã tạo run trước) NHƯNG points=0 -> PHẢI backfill (fix bug CI/CD).
+    empty = _FakeTarget("rag__new__d1024", existing={"rag__new__d1024"}, points=0)
+    populated = _FakeTarget("rag__old__d1024", existing={"rag__old__d1024"}, points=500)  # có data -> skip
+    targets = [empty, populated]
 
     # build_embed_targets -> trả targets giả; bootstrap_runtime -> runtime giả tối thiểu.
     class _Cfg:
@@ -181,9 +193,9 @@ async def test_backfill_new_only_backfills_created(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_backfill_new_noop_when_nothing_created(monkeypatch) -> None:
-    """Deploy thường: mọi collection đã có -> backfill-new NO-OP (không gọi _backfill_target)."""
+    """Deploy thường: mọi collection đã CÓ DATA (points>0) -> backfill-new NO-OP."""
     mod = _load_migrate_module()
-    existing = _FakeTarget("rag__old__d1024", existing={"rag__old__d1024"})
+    existing = _FakeTarget("rag__old__d1024", existing={"rag__old__d1024"}, points=500)
 
     class _Cfg:
         def index_id(self) -> str:
