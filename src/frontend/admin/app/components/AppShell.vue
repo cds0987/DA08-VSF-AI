@@ -76,13 +76,8 @@ const handleSignOut = () => {
   session.signOut()
 }
 
-const maskedEmail = computed(() => {
-  const email = session.user?.email
-  if (!email) return ''
-  const [local, domain] = email.split('@')
-  if (!domain) return email
-  return `${local.slice(0, 3)}*****@${domain}`
-})
+// Hiện full email (không che) — tài khoản của chính người dùng trong app nội bộ (khớp chat).
+const userEmail = computed(() => session.user?.email ?? '')
 
 const userInitials = computed(() => {
   if (session.user?.initials) return session.user.initials
@@ -159,7 +154,7 @@ const userInitials = computed(() => {
 
         <button
           @click="setSidebarCollapsed(true)"
-          class="rounded-md p-1.5 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-sidebar-accent hover:text-slate-900 dark:hover:text-sidebar-accent-foreground bg-white dark:bg-chat-input border border-slate-200/50 dark:border-sidebar-border shadow-sm cursor-pointer shrink-0 mr-4 transition-opacity duration-300"
+          class="rounded-md p-1.5 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-sidebar-accent hover:text-slate-900 dark:hover:text-sidebar-accent-foreground bg-white dark:bg-card border border-slate-200/50 dark:border-sidebar-border shadow-sm cursor-pointer shrink-0 mr-4 transition-opacity duration-300"
           :class="isCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'"
         >
           <PanelLeftClose
@@ -221,7 +216,7 @@ const userInitials = computed(() => {
                 :class="isCollapsed ? 'opacity-0' : 'opacity-100'"
               >
                 <div class="truncate text-sm font-semibold text-slate-900 dark:text-sidebar-foreground leading-tight">
-                  {{ maskedEmail }}
+                  {{ userEmail }}
                 </div>
               </div>
               <ChevronsUpDown
@@ -234,14 +229,14 @@ const userInitials = computed(() => {
             side="top"
             align="start"
             :side-offset="8"
-            class="w-[240px] bg-white dark:bg-chat-input shadow-lg border-slate-100 dark:border-sidebar-border text-slate-900 dark:text-sidebar-foreground p-1.5"
+            class="w-[240px] bg-white dark:bg-popover shadow-lg border-slate-100 dark:border-sidebar-border text-slate-900 dark:text-sidebar-foreground p-1.5"
           >
             <!-- Header: avatar + email -->
             <DropdownMenuLabel class="flex items-center gap-2.5 px-2 py-1.5">
               <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white">
                 {{ userInitials }}
               </div>
-              <span class="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-900 dark:text-sidebar-foreground">{{ maskedEmail }}</span>
+              <span class="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-900 dark:text-sidebar-foreground">{{ userEmail }}</span>
             </DropdownMenuLabel>
             <DropdownMenuSeparator class="bg-slate-100 dark:bg-sidebar-accent" />
             <DropdownMenuItem
