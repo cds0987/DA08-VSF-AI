@@ -65,7 +65,6 @@ onMounted(async () => {
   if (!alreadyStreaming) tasks.push(chat.loadConversation(id))
 
   await Promise.all(tasks)
-  chat.flushProactiveMessage()
 })
 
 // User click conversation khác trong sidebar → URL thay đổi, trang không remount
@@ -92,6 +91,9 @@ watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText
   if (chat.isHistoryLoading || chat.isConversationLoading) { scheduleInstantScroll(); return }
   nextTick(() => scheduleAutoScroll())
 })
+
+// Gợi ý chủ động (từ chuông thông báo) chèn vào hội thoại -> BẮT BUỘC cuộn tới card mới.
+watch(() => chat.proactiveInjectTick, () => nextTick(() => scheduleInstantScroll()))
 
 function handleSend(question: string) {
   chat.ask(question, PIPELINE_STAGES)
