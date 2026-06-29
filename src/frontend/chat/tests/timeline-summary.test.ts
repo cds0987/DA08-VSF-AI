@@ -186,6 +186,21 @@ test('object step nội bộ rời -> KHÔNG surface "id:.. role:.." (đã có l
   assert.match(r.summary, /lập kế hoạch tra cứu/)
 })
 
+// "MỞ KHỐI suy luận gốc vẫn GỌN": phần CoT mở rộng KHÔNG được dump jargon planning (route heavy,
+// tên role rag_retrieve/synthesize_recommend, "plan N steps") — đã render thành lane plan riêng.
+// Cắt từ ĐẦU CÂU chứa jargon (không để mảnh cụt), GIỮ phần phân tích người-đọc-được.
+test('mở suy luận gốc: cắt đuôi jargon planning (route heavy / tên role / plan N steps), giữ phân tích', () => {
+  const raw = 'Đây là câu hỏi về lịch nghỉ lễ Tết của công ty, thuộc chính sách nhân sự nội bộ. '
+    + 'Ta sẽ route heavy, dùng rag_retrieve để tra tài liệu. Nên plan 2 steps: rag_retrieve và synthesize_recommend.'
+  const r = summarizeThought(raw)
+  const surface = `${r.summary} ${r.detail.map(s => s.lines.join(' ')).join(' ')}`
+  // jargon BỊ CẮT hết
+  assert.doesNotMatch(surface, /route heavy|rag_retrieve|synthesize_recommend|plan 2 steps/i)
+  // phân tích người-đọc-được GIỮ lại, KHÔNG để mảnh cụt "Ta sẽ"
+  assert.match(surface, /lịch nghỉ lễ Tết của công ty/)
+  assert.doesNotMatch(surface, /Ta sẽ\s*$/)
+})
+
 test('truncateFilename keeps extension and adds ellipsis', () => {
   const t = truncateFilename('CNHC_Employee_Handbook_2024_final.pdf', 20)
   assert.ok(t.length <= 21)

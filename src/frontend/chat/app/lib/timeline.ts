@@ -253,15 +253,28 @@ function stripJsonLikeBlocks(text: string): string {
   return out.replace(/\s+/g, ' ').trim()
 }
 
-// Cắt "recap kế hoạch" kỹ thuật ở đuôi prose orchestrator (vd "Plan: 1 step rag_retrieve
-// input=… depends_on…") — vốn TRÙNG với danh sách plan step render ngay bên dưới timeline,
-// nên thừa + lộ token kỹ thuật ra người dùng. CHỈ cắt khi có dấu hiệu kỹ thuật RÕ RÀNG; prose
-// thường (không marker) giữ NGUYÊN. Cắt làm rỗng/cụt -> giữ nguyên (không mất nội dung).
-const PLAN_RECAP_RE = /\b(?:plan|kế hoạch)\s*[:：]\s*\d|\bdepends_on\b|\bstep_id\b|\binput\s*=|\breasoning\s*=/i
+// Cắt "recap kế hoạch" kỹ thuật ở đuôi prose orchestrator — phần model QUYẾT ĐỊNH plan (vd "Ta sẽ
+// route heavy, dùng rag_retrieve... plan 2 steps: rag_retrieve và synthesize_recommend") vốn TRÙNG
+// với danh sách plan step render ngay bên dưới timeline, nên thừa + lộ jargon kỹ thuật (tên role,
+// route, depends_on...) ra người dùng. CHỈ cắt khi có dấu hiệu kỹ thuật RÕ RÀNG; prose thường (không
+// marker) giữ NGUYÊN. Cắt làm head cụt/ngắn -> giữ nguyên (không mất nội dung).
+const PLAN_RECAP_RE = new RegExp(
+  [
+    '\\b(?:plan|kế hoạch)\\s*[:：]?\\s*\\d+\\s*(?:step|bước)',   // "plan 2 steps" / "kế hoạch: 2 bước"
+    '\\broute\\s*["\']?\\s*(?:heavy|light)\\b',                  // "route heavy" / 'route "light"'
+    '\\b(?:rag_retrieve|synthesize_recommend|hr_lookup|leave_action|analyze|critic)\\b',  // tên role nội bộ
+    '\\bdepends_on\\b', '\\bstep_id\\b', '\\binput\\s*=', '\\breasoning\\s*=',  // recap kỹ thuật cũ
+  ].join('|'),
+  'i',
+)
 function stripPlanRecap(text: string): string {
   const m = PLAN_RECAP_RE.exec(text)
   if (!m) return text
-  const head = text.slice(0, m.index).replace(/[\s.;,:—–-]+$/, '').trim()
+  // Cắt từ ĐẦU CÂU chứa marker (lùi về dấu kết câu '. ! ? …' hoặc xuống dòng gần nhất TRƯỚC marker)
+  // -> KHÔNG để lại mảnh câu cụt kiểu "...Ta sẽ". Không có ranh giới -> cắt ngay tại marker (như cũ).
+  const boundary = text.slice(0, m.index).search(/[.!?…\n][^.!?…\n]*$/)
+  const cut = boundary >= 0 ? boundary + 1 : m.index
+  const head = text.slice(0, cut).replace(/[\s.;,:—–-]+$/, '').trim()
   return head.length >= 20 ? head : text
 }
 
