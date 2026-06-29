@@ -199,8 +199,8 @@ async def get_document_file_preview(
 ) -> Response:
     """Nội dung render-được inline trong viewer (giữ URL /admin/documents/{id}).
 
-    Native (pdf/ảnh/text) passthrough; office convert sang PDF qua Gotenberg (cache GCS).
-    Gotenberg lỗi/timeout -> 503 (FE hiện error card: Thử lại + Tải bản gốc).
+    Native (pdf/ảnh/txt/md) passthrough; office (docx/pptx) convert sang PDF qua Gotenberg
+    (cache GCS previews/). Gotenberg lỗi/timeout -> 503 (FE hiện error card: Thử lại + Tải gốc).
     """
     try:
         result = await use_case.execute(user, document_id)
