@@ -16,6 +16,15 @@ test('StreamingBlock bị gỡ bỏ (không còn 2 component render câu trả l
   assert.doesNotMatch(chatMessages, /StreamingBlock/)
 })
 
+test('Pipeline live orchestrator: prose liên tục qua liveThoughtProse, KHÔNG summarizeThought/flash', async () => {
+  const f = await read('app/components/chat/Pipeline.vue')
+  assert.match(f, /liveThoughtProse/)
+  assert.match(f, /const orchProse = computed/)
+  // gate cũ orchReady + render summary cấu trúc cho orchestrator đã bỏ
+  assert.doesNotMatch(f, /orchReady|orchViews/)
+  assert.match(f, /v-if="orchProse \|\| plan\?\.steps\?\.length \|\| \(isThinking && traceLog\.length === 0\)"/)
+})
+
 test('ChatMessages render placeholder-stream bằng AnswerBlock với turnKey ổn định', async () => {
   const f = await read('app/components/chat/ChatMessages.vue')
   // prop key ổn định cho cả lượt
