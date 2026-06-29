@@ -7,7 +7,7 @@ import { computed, ref, watch, onUnmounted } from 'vue'
 import { Search, Database, Sparkles, GitBranch, ShieldCheck, FileSearch, Lightbulb, XCircle, Check } from '@lucide/vue'
 import type { TraceEntry, NodeModel, AgentPlan, AgentPlanStep } from '~/types'
 import { nodeGroup } from '~/types/sse-contract.gen'
-import { summarizeThought, truncateFilename, firstJsonObjectClosed } from '~/lib/timeline'
+import { summarizeThought, truncateFilename } from '~/lib/timeline'
 import ThoughtDetail from './ThoughtDetail.vue'
 
 interface Props {
@@ -59,12 +59,12 @@ const orchThoughts = computed(() => (props.thoughts ?? []).filter(t => nodeGroup
 const verifyThoughts = computed(() => (props.thoughts ?? []).filter(t => nodeGroup(t.node) === 'verify'))
 const otherThoughts = computed(() => (props.thoughts ?? []).filter(t => !['orchestrator', 'verify'].includes(nodeGroup(t.node))))
 
-// CHỐNG FLASH (live): thought orchestrate stream dần (CoT thô -> rồi JSON kế hoạch). Nếu render
-// ngay lúc JSON CHƯA đóng, summarizeThought hiện CoT/step con rồi NHẢY format khi plan xong ->
-// "flash". Chỉ render khi JSON NGOÀI CÙNG đã đóng (firstJsonObjectClosed — KHÔNG khớp sớm step
-// con {id,role,input,direction}) -> 1 lần chuyển sạch hint -> cấu trúc. Khi chưa chốt: giữ hint.
-// (Chỉ áp cho orchestrator; verify/khác là reasoning thuần -> vẫn stream live bình thường.)
-const orchReady = computed(() => orchThoughts.value.filter(t => firstJsonObjectClosed(t.text)))
+// STREAM LIVE: orchestrator reasoning hiện DẦN cho user thấy agent đang nghĩ (CoT thô -> rồi tự
+// chuyển sang tóm tắt cấu trúc khi JSON kế hoạch đóng). Trước đây phải CHỜ JSON đóng mới render để
+// chống "flash" — vì summarizeThought CŨ parse nhầm mảnh '[1]'/object step con thành rác "1". Nay
+// summarizeThought đã miễn nhiễm (isMeaningfulJson bỏ qua mảng primitive + step rời) nên render thẳng
+// prose đang stream là AN TOÀN, không còn rác -> khôi phục cảm giác streaming. (verify/khác vẫn live.)
+const orchReady = computed(() => orchThoughts.value.filter(t => t.text.trim().length > 0))
 
 // Tóm tắt 1 dòng cho mỗi thought (chi tiết + raw ẩn trong ThoughtDetail). View song song mảng gốc.
 const orchViews = computed(() => orchReady.value.map(t => summarizeThought(t.text)))

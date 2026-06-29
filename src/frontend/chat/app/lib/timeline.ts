@@ -229,15 +229,6 @@ export function extractFirstJsonObject(text: string): ExtractedJson | null {
   return null
 }
 
-// Khối JSON bắt đầu từ '{'/'[' ĐẦU TIÊN đã ĐÓNG cân bằng chưa? Khác extractFirstJsonObject ở
-// chỗ KHÔNG quét sang '{' con: dùng cho cổng render LIVE -> tránh khớp SỚM step con
-// ({id,role,input,direction}) khi plan ngoài còn stream dở (gây flash ID/ROLE/INPUT/DIRECTION).
-export function firstJsonObjectClosed(text?: string | null): boolean {
-  const t = (text ?? '').trim()
-  const start = firstJsonStart(t, 0)
-  return start >= 0 && matchJsonEnd(t, start) >= 0
-}
-
 // Text "trông như JSON/debug" (để xử lý cả khi parse hỏng): có ngoặc kèm cặp "key":.
 const JSON_LIKE_RE = /[{[][\s\S]*?["'][^"']*["']\s*:/
 export function isDebugJsonLike(text: string): boolean {
@@ -279,6 +270,10 @@ const PLAN_RECAP_RE = new RegExp(
 function stripPlanRecap(text: string): string {
   const m = PLAN_RECAP_RE.exec(text)
   if (!m) return text
+  // CHỈ cắt khi marker nằm ở ĐUÔI (recap đến SAU phần phân tích). Role/route được nhắc SỚM (vd
+  // "...cần dùng rag_retrieve để tra...") là MỘT PHẦN suy luận thật -> cắt sẽ XOÁ SẠCH "suy luận gốc".
+  // Ngưỡng 40%: marker trong 40% đầu = suy luận, GIỮ nguyên; chỉ phần đuôi mới coi là recap kỹ thuật.
+  if (m.index < text.length * 0.4) return text
   // Cắt từ ĐẦU CÂU chứa marker (lùi về dấu kết câu '. ! ? …' hoặc xuống dòng gần nhất TRƯỚC marker)
   // -> KHÔNG để lại mảnh câu cụt kiểu "...Ta sẽ". Không có ranh giới -> cắt ngay tại marker (như cũ).
   const boundary = text.slice(0, m.index).search(/[.!?…\n][^.!?…\n]*$/)
