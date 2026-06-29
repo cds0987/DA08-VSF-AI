@@ -97,6 +97,37 @@ export function buildCitationSources(
   return { sources, refToNumber }
 }
 
+/**
+ * Nén số nguồn ĐƯỢC TRÍCH trong câu trả lời theo THỨ TỰ XUẤT HIỆN: marker [N] đầu tiên gặp -> 1,
+ * nguồn MỚI kế tiếp -> 2... -> không còn nhảy 1,2,5 (do lọc bỏ nguồn không cited). Dùng CHUNG cho
+ * pill inline lẫn danh sách nguồn nên số luôn KHỚP nhau.
+ *  - cited: nguồn được trích (number = số nén, ĐÚNG thứ tự xuất hiện);
+ *  - markerToNumber: marker thô LLM phát (vd 5) -> số nén (vd 3). data-ref vẫn dùng marker thô để
+ *    mở đúng chunk (resolveRef), CHỈ số HIỂN THỊ là nén.
+ */
+export function compactCitedSources(
+  content: string,
+  citations?: Citation[],
+): { cited: NormalizedSource[]; markerToNumber: Record<number, number> } {
+  const { sources, refToNumber } = buildCitationSources(citations)
+  const fullToCompact: Record<number, number> = {}
+  const markerToNumber: Record<number, number> = {}
+  const cited: NormalizedSource[] = []
+  for (const m of (content || '').matchAll(/\[(\d+)\]/g)) {
+    const marker = parseInt(m[1] ?? '', 10)
+    const full = refToNumber[marker]
+    if (full === undefined) continue                 // ref LLM bịa (không khớp source) -> bỏ
+    const src = sources.find(s => s.number === full)
+    if (!src) continue
+    if (fullToCompact[full] === undefined) {
+      fullToCompact[full] = cited.length + 1
+      cited.push({ number: fullToCompact[full], citation: src.citation })
+    }
+    markerToNumber[marker] = fullToCompact[full]
+  }
+  return { cited, markerToNumber }
+}
+
 /** Nhóm loại tệp (để chọn icon/màu) — KHÔNG hardcode PDF, phủ đủ định dạng hỗ trợ. */
 export type CitationFileGroup = 'pdf' | 'doc' | 'text' | 'web' | 'sheet' | 'slide' | 'image' | 'unknown'
 
