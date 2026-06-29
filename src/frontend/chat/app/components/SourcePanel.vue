@@ -491,11 +491,11 @@ onBeforeUnmount(() => {
       />
       <pre
         v-else-if="viewerMode === 'text'"
-        class="h-full overflow-auto whitespace-pre-wrap break-words bg-white dark:bg-card p-6 font-mono text-sm leading-6 text-slate-800 dark:text-foreground"
+        class="custom-scrollbar h-full overflow-auto whitespace-pre-wrap break-words bg-white dark:bg-card p-6 font-mono text-sm leading-6 text-slate-800 dark:text-foreground"
       >{{ textContent }}</pre>
       <div
         v-else-if="viewerMode === 'image' && fileUrl"
-        class="flex h-full w-full items-center justify-center overflow-auto bg-slate-100 dark:bg-background p-6"
+        class="custom-scrollbar flex h-full w-full items-center justify-center overflow-auto bg-slate-100 dark:bg-background p-6"
       >
         <img
           :src="fileUrl"
