@@ -43,6 +43,9 @@ const streamingRenderer = createStreamingRenderer({
   sanitize: (h: string) => DOMPurify.sanitize(h),
 })
 
+// Tin gợi ý chủ động (doc cập nhật) -> tự nó là 1 card, KHÔNG hiện toolbar copy/feedback.
+const isProactive = computed(() => props.data.actions?.some(a => a.action_type === 'proactive_doc_suggestion'))
+
 function resolveRef(n: number): Citation | undefined {
   return props.data.citations?.find(x => x.ref === n) ?? props.data.citations?.[n - 1]
 }
@@ -198,7 +201,7 @@ function copyToClipboard() {
       </div>
     </div>
 
-    <div v-if="!data.streaming" class="flex items-center gap-1 px-5 py-2">
+    <div v-if="!data.streaming && !isProactive" class="flex items-center gap-1 px-5 py-2">
       <!-- Retry button — only shown for interrupted (network) messages -->
       <Tooltip v-if="data.interrupted">
         <TooltipTrigger as-child>

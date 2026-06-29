@@ -42,8 +42,8 @@ test('AnswerBlock: lúc streaming render thô, KHÔNG inject chip, ẩn toolbar;
   const f = await read('app/components/chat/AnswerBlock.vue')
   // nhánh streaming trong renderedContent
   assert.match(f, /if \(props\.data\.streaming\)/)
-  // toolbar feedback chỉ hiện khi KHÔNG streaming
-  assert.match(f, /v-if="!data\.streaming"[^>]*>\s*<!-- Retry button|v-if="!data\.streaming"/)
+  // toolbar feedback gate theo !data.streaming (có thể kèm điều kiện khác, vd && !isProactive)
+  assert.match(f, /v-if="!data\.streaming\b/)
   // Con trỏ stream đã được gỡ bỏ hoàn toàn (không inject span, không CSS blink)
   assert.doesNotMatch(f, /streaming-cursor/)
   assert.doesNotMatch(f, /@keyframes streaming-blink/)
