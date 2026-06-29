@@ -339,7 +339,7 @@ export const useChatStore = defineStore('chat', () => {
   const plan = ref<AgentPlan | null>(null)
   const panelCitation = ref<Citation | null>(null)
   const isPanelOpen = ref(false)
-  const pendingProactiveDoc = ref<{ name: string; docId: string | null } | null>(null)
+  const proactiveInjectTick = ref(0) // bump mỗi lần chèn gợi ý chủ động -> page buộc cuộn tới
   let abortController: AbortController | null = null
   // Giữ citation tới khi panel trượt hết ra (khớp transition 300ms) để tránh flash
   // nội dung trống trong lúc animation đóng.
@@ -1011,11 +1011,13 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  // Chèn gợi ý chủ động vào HỘI THOẠI HIỆN TẠI (không mở new chat). Tăng tick -> page buộc
+  // cuộn tới card mới (kể cả khi user đang cuộn lên đọc) để thấy ngay.
   function injectProactiveMessage(documentName: string, docId: string | null = null) {
     messages.value.push({
       id: crypto.randomUUID(),
       role: 'assistant',
-      content: `Tài liệu **${documentName}** vừa được cập nhật. Mình có thể giúp gì cho bạn?`,
+      content: '',
       timestamp: new Date().toISOString(),
       actions: [
         {
@@ -1030,17 +1032,7 @@ export const useChatStore = defineStore('chat', () => {
         },
       ],
     })
-  }
-
-  function queueProactiveMessage(documentName: string, docId: string | null) {
-    pendingProactiveDoc.value = { name: documentName, docId }
-  }
-
-  function flushProactiveMessage() {
-    if (!pendingProactiveDoc.value) return
-    const { name, docId } = pendingProactiveDoc.value
-    pendingProactiveDoc.value = null
-    injectProactiveMessage(name, docId)
+    proactiveInjectTick.value++
   }
 
   return {
@@ -1082,7 +1074,6 @@ export const useChatStore = defineStore('chat', () => {
     retryMessage,
     submitFeedback,
     injectProactiveMessage,
-    queueProactiveMessage,
-    flushProactiveMessage,
+    proactiveInjectTick,
   }
 })

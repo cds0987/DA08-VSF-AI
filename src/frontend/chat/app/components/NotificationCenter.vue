@@ -11,7 +11,6 @@ import {
   XCircle,
 } from '@lucide/vue'
 import type { Component } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useNotificationStore } from '~/stores/notifications'
 import { useChatStore } from '~/stores/chat'
@@ -29,8 +28,6 @@ import type { NotificationItem } from '~/types'
 const notifications = useNotificationStore()
 const chat = useChatStore()
 const queryService = useQueryService()
-const router = useRouter()
-const route = useRoute()
 const isOpen = ref(false)
 let lastFetchedAt = 0
 
@@ -105,13 +102,9 @@ async function handleAskAI(event: MouseEvent, item: NotificationItem) {
     await notifications.markAsRead(item.id).catch(() => {})
   }
   const docName = extractDocName(item.message)
-  // Nếu đang ở /chat (new chat), inject trực tiếp; nếu không thì queue + navigate
-  if (route.path === '/chat' && !route.params.id) {
-    chat.injectProactiveMessage(docName, item.doc_id)
-  } else {
-    chat.queueProactiveMessage(docName, item.doc_id)
-    await router.push('/chat')
-  }
+  // Chèn gợi ý vào HỘI THOẠI HIỆN TẠI (cả /chat lẫn /chat/:id) — KHÔNG mở new chat.
+  // injectProactiveMessage tự bump tick -> page cuộn tới card.
+  chat.injectProactiveMessage(docName, item.doc_id)
 }
 
 // Click X → xóa hẳn khỏi DB + list (không refresh lại nữa)

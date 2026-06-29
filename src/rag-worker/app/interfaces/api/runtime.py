@@ -987,21 +987,29 @@ async def start_nats_ingest(
             default_bucket=cfg["source_bucket"] or None,
             logger=logger,
         )
-        subscription = await start_doc_ingest_subscription(
-            broker,
-            consumer,
-            subject=cfg["doc_ingest_subject"],
-            durable=cfg["durable"],
-            logger=logger,
-        )
+        # 2 subscription ĐỘC LẬP. Durable push-consumer chỉ 1 instance bind được (6 replica -> 5 cái
+        # "consumer already bound"). TRƯỚC: chung 1 try -> ingest "already bound" raise -> doc.access
+        # KHÔNG start -> delete KHÔNG cascade (orphan Qdrant+artifact tích lũy, đã thấy 1636 doc rác).
+        # NAY: try RIÊNG + KHÔNG tear-down broker -> instance thua race ingest VẪN bind doc.access ->
+        # 1 instance giữ doc.access -> delete cascade chạy. (Share đầy đủ multi-replica = deliver-group,
+        # TODO docs/ops/ingest-transport.md.)
+        subscription = None
+        try:
+            subscription = await start_doc_ingest_subscription(
+                broker, consumer, subject=cfg["doc_ingest_subject"],
+                durable=cfg["durable"], logger=logger,
+            )
+        except Exception as exc:  # noqa: BLE001 - already-bound (replica khác giữ) -> KHÔNG chặn doc.access
+            log_event(logger, logging.WARNING, "nats_ingest_sub_skipped", stage="startup", error=str(exc))
         access_consumer = DocAccessDeleteConsumer(runtime.ingest_use_case, logger=logger)
-        access_subscription = await start_doc_access_subscription(
-            broker,
-            access_consumer,
-            subject=cfg["doc_access_subject"],
-            durable=cfg["access_durable"],
-            logger=logger,
-        )
+        access_subscription = None
+        try:
+            access_subscription = await start_doc_access_subscription(
+                broker, access_consumer, subject=cfg["doc_access_subject"],
+                durable=cfg["access_durable"], logger=logger,
+            )
+        except Exception as exc:  # noqa: BLE001 - already-bound -> replica khác giữ doc.access
+            log_event(logger, logging.WARNING, "nats_access_sub_skipped", stage="startup", error=str(exc))
     except Exception as exc:  # noqa: BLE001 - NATS hỏng không được giết search/HTTP
         with contextlib.suppress(Exception):
             await broker.close()

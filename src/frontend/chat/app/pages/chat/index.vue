@@ -39,7 +39,6 @@ onMounted(async () => {
 
   chat.clear()
   await chat.syncHistory()
-  chat.flushProactiveMessage()
 })
 
 watch(
@@ -58,6 +57,9 @@ watch([() => chat.messages.length, () => chat.pipeline, () => chat.streamingText
   if (chat.isHistoryLoading) { scheduleInstantScroll(); return }
   nextTick(() => scheduleAutoScroll())
 })
+
+// Gợi ý chủ động (từ chuông thông báo) chèn vào hội thoại -> BẮT BUỘC cuộn tới card mới.
+watch(() => chat.proactiveInjectTick, () => nextTick(() => scheduleInstantScroll()))
 
 function handleSend(question: string) {
   chat.ask(question, PIPELINE_STAGES)
