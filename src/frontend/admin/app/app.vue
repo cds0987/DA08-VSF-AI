@@ -19,7 +19,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <TooltipProvider :delay-duration="0">
+  <!-- disable-hoverable-content: tooltip đóng NGAY khi rời trigger -> tránh tooltip giả/tích tụ
+       khi con trỏ lướt qua icon sidebar thu gọn (đồng bộ chat, fix phantom-hover). -->
+  <TooltipProvider :delay-duration="0" :disable-hoverable-content="true">
     <NuxtLayout>
       <NuxtRouteAnnouncer />
       <NuxtPage />

@@ -10,6 +10,7 @@ interface NavItem {
 const props = defineProps<{
   item: NavItem
   isCollapsed: boolean
+  disableTooltip?: boolean
 }>()
 
 const route = useRoute()
@@ -20,23 +21,23 @@ const active = computed(() => {
 </script>
 
 <template>
-  <Tooltip>
+  <Tooltip :disabled="disableTooltip" :ignore-non-keyboard-focus="true">
     <TooltipTrigger asChild>
       <NuxtLink
         :to="item.to"
         :class="cn(
-          'flex items-center rounded-md text-[13px] font-semibold overflow-hidden cursor-pointer shrink-0 h-9 transition-all w-full justify-start',
+          'flex items-center rounded-lg text-sm font-semibold overflow-hidden cursor-pointer shrink-0 h-9 transition-all w-full justify-start text-slate-900 dark:text-sidebar-foreground',
           active
-            ? 'bg-blue-50 text-blue-700 shadow-sm ring-1 ring-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-500/25'
-            : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+            ? 'bg-slate-100 dark:bg-sidebar-accent'
+            : 'hover:bg-slate-100 dark:hover:bg-sidebar-accent',
         )"
       >
-        <div class="flex h-9 w-[64px] items-center justify-center shrink-0">
+        <div class="flex h-9 items-center justify-center shrink-0" :class="isCollapsed ? 'w-full' : 'w-[64px]'">
           <component
             :is="item.icon"
             :class="cn(
               'h-5 w-5 shrink-0',
-              active ? 'text-blue-600 dark:text-blue-300' : 'text-muted-foreground'
+              active ? 'text-slate-700 dark:text-sidebar-accent-foreground' : 'text-slate-900 dark:text-white'
             )"
           />
         </div>
@@ -51,7 +52,7 @@ const active = computed(() => {
     <TooltipContent
       v-if="isCollapsed"
       side="right"
-      class="bg-popover/95 backdrop-blur-md border-border text-popover-foreground shadow-md"
+      class="bg-slate-900 text-[11px] font-medium text-white dark:bg-slate-100 dark:text-slate-900 border-none shadow-md"
     >
       {{ item.label }}
     </TooltipContent>
