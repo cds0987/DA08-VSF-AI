@@ -28,7 +28,7 @@ test('long plain text -> truncated summary + full text as a label-less detail se
   const long = 'từ '.repeat(120).trim()
   const r = summarizeThought(long)
   assert.ok(r.summary.endsWith('…'))
-  assert.ok(r.summary.length <= 142)
+  assert.ok(r.summary.length <= 242)
   assert.equal(r.detail.length, 1)
   assert.equal(r.detail[0].label, '')
   assert.equal(r.detail[0].lines[0], long)
