@@ -201,6 +201,26 @@ test('mở suy luận gốc: cắt đuôi jargon planning (route heavy / tên ro
   assert.doesNotMatch(surface, /Ta sẽ\s*$/)
 })
 
+// REGRESSION (huuhung): stripPlanRecap CŨ cắt tại marker ĐẦU TIÊN -> khi role/route được nhắc SỚM
+// trong suy luận thật, "suy luận gốc" bị xoá gần hết (có khi rỗng -> mất luôn nút "Xem suy luận gốc").
+// Marker ở 40% ĐẦU = suy luận -> GIỮ NGUYÊN, không cắt.
+test('role/route nhắc SỚM trong suy luận -> KHÔNG cắt (giữ nội dung "suy luận gốc")', () => {
+  const raw = 'Mình cần dùng rag_retrieve để tra quy trình tăng lương định kỳ rồi đối chiếu với chính '
+    + 'sách nội bộ, sau đó tổng hợp các bước cụ thể cho bạn về điều kiện, hồ sơ và thời gian xét duyệt.'
+  const r = summarizeThought(raw)
+  assert.match(r.summary, /tra quy trình tăng lương định kỳ/)   // suy luận giữ nguyên, không cụt
+})
+
+test('CoT dài + recap kỹ thuật ở ĐUÔI -> "suy luận gốc" GIỮ phân tích (không rỗng), cắt đuôi', () => {
+  const analysis = 'Đây là câu hỏi follow-up về quy trình tăng lương định kỳ của công ty, thuộc chính sách nhân sự nội bộ. '.repeat(4)
+  const raw = analysis + 'Vậy nên route heavy, dùng rag_retrieve rồi synthesize_recommend để tổng hợp.'
+  const r = summarizeThought(raw)
+  const surface = `${r.summary} ${r.detail.map(s => s.lines.join(' ')).join(' ')}`
+  assert.match(surface, /quy trình tăng lương định kỳ/)                              // phân tích còn
+  assert.doesNotMatch(surface, /route heavy|rag_retrieve|synthesize_recommend/i)     // recap đuôi bị cắt
+  assert.ok(r.detail.some(s => !s.label), 'vẫn còn section "suy luận gốc" (không rỗng)')
+})
+
 test('truncateFilename keeps extension and adds ellipsis', () => {
   const t = truncateFilename('CNHC_Employee_Handbook_2024_final.pdf', 20)
   assert.ok(t.length <= 21)
