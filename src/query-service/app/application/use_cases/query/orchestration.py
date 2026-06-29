@@ -276,6 +276,7 @@ class QueryOrchestrationUseCase:
         trace = None
         last_done: dict | None = None
         usage_meta: dict | None = None
+        done_emitted = False
         try:
             trace = tracer.start(question, user, trace_session or pre_session_id) if tracer is not None else None
             async for event in self._stream_inner(
@@ -285,6 +286,7 @@ class QueryOrchestrationUseCase:
                 _document_ids=document_ids,
             ):
                 if event.get("done"):
+                    done_emitted = True
                     # _usage/_answer là kênh nội bộ (token/model/answer cho langfuse) —
                     # pop ra để KHÔNG rò xuống SSE/frontend; chỉ tracer dùng.
                     usage_meta = event.pop("_usage", None)
@@ -296,6 +298,18 @@ class QueryOrchestrationUseCase:
                         if tid:
                             event["trace_id"] = tid
                 yield event
+        except Exception as exc:  # noqa: BLE001 — LƯỚI AN TOÀN CUỐI: mọi lỗi chưa lường (DB/ACL/
+            # context fetch raise TRƯỚC graph, hoặc bug bất kỳ) PHẢI kết thúc stream BẰNG done-event
+            # sạch + câu xin lỗi — KHÔNG để client đứt kết nối giữa chừng (FE treo spinner mãi).
+            logger.error("query_stream_unhandled: %s", str(exc)[:300], exc_info=True)
+            if not done_emitted:
+                fail_msg = ("Xin lỗi, hệ thống gặp trục trặc khi xử lý câu hỏi của bạn. "
+                            "Bạn thử lại sau giây lát hoặc liên hệ HR/IT Helpdesk nhé.")
+                yield {"token": fail_msg, "phase": "generating",
+                       "agent_mode": "orchestrator_workers", "session_id": pre_session_id}
+                yield {"done": True, "session_id": pre_session_id, "sources": [],
+                       "outcome": Outcome.NO_INFO.value, "message_id": None,
+                       "agent_mode": "orchestrator_workers"}
         finally:
             try:
                 if tracer is not None and trace is not None:
@@ -619,6 +633,14 @@ class QueryOrchestrationUseCase:
 
         result = holder.get("result") or {}
         answer = str(result.get("answer") or "").strip()
+        # GUARD CHỐT CHẶN CUỐI (defense-in-depth): nếu answer trông như raw worker output
+        # ('[rag_retrieve...]' / '[hr_lookup...]' — internal format của _build_data_text), KHÔNG
+        # bao giờ word-chunk JSON thô ra user. Coi như rỗng -> rơi vào fallback thân thiện bên dưới.
+        # (leave_action passthrough = '{"action_type":...}' bắt đầu bằng '{' nên KHÔNG bị dính.)
+        from app.agents.graph_builder import _is_raw_data_leak
+        if _is_raw_data_leak(answer):
+            logger.warning("orchestration: chặn raw-data leak ở boundary (answer mở đầu bằng nhãn worker)")
+            answer = ""
         raw_sources = result.get("sources") or []
         # retrieved: tổng chunk rag lấy được (kể cả dưới ngưỡng) — pipeline-health cho smoke.
         retrieved = sum(getattr(o, "retrieved", 0) for o in (result.get("results") or {}).values())
@@ -652,7 +674,11 @@ class QueryOrchestrationUseCase:
             _plan_route = getattr(result.get("plan"), "route", "heavy")
             outcome_value = _classify_mosa_outcome(answer, _plan_route)
 
-        answer = await self._output_guardrail.redact(answer)
+        # Redact PII best-effort: lỗi guardrail KHÔNG được chặn câu trả lời (giữ answer gốc).
+        try:
+            answer = await self._output_guardrail.redact(answer)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("output_guardrail_redact_failed: %s", str(exc)[:160])
         # Synth ĐÃ stream token (qua emit) -> KHÔNG word-chunk lại. Chưa stream (light route /
         # fallback / no_info) -> word-chunk câu trả lời cuối để UI vẫn thấy chữ chạy.
         if not streamed_tokens:
@@ -666,10 +692,16 @@ class QueryOrchestrationUseCase:
                 await asyncio.sleep(0)
 
         agent_meta = _build_agent_meta(agent_thoughts, agent_plan, agent_trace, agent_models)
-        message_id = await self._save_assistant(
-            user.id, session_id, answer, sources, started, question=question,
-            metadata={"agent": agent_meta} if agent_meta else None,
-        )
+        # Lưu DB best-effort: answer ĐÃ stream tới user; nếu DB write lỗi -> message_id=None nhưng
+        # VẪN PHẢI emit done-event (else FE treo / lưới an toàn nối thêm câu xin lỗi sau answer thật).
+        try:
+            message_id = await self._save_assistant(
+                user.id, session_id, answer, sources, started, question=question,
+                metadata={"agent": agent_meta} if agent_meta else None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("save_assistant_failed: %s", str(exc)[:200], exc_info=True)
+            message_id = None
         yield _emit_guard({
             "done": True,
             "sources": sources,

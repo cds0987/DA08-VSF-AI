@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Any, Callable
 
 from langgraph.graph import END, START, StateGraph
@@ -26,6 +27,24 @@ logger = logging.getLogger(__name__)
 
 _SYNTH_ROLE = "synthesize_recommend"
 _ACTION_ROLE = "leave_action"
+
+# Câu trả lời an toàn khi verify_answer KHÔNG sinh được answer (LLM lỗi/timeout/None).
+# TUYỆT ĐỐI KHÔNG fallback bằng data_text (format nội bộ '[role · ...] {json}') -> sẽ lộ raw JSON ra user.
+_ANSWER_FAIL_MSG = (
+    "Mình chưa tổng hợp được câu trả lời lúc này, bạn thử hỏi lại nhé. "
+    "Nếu vấn đề tiếp tục, vui lòng liên hệ HR/IT Helpdesk."
+)
+# Nhãn block nội bộ của _build_data_text = '[<role_snake_case>]' hoặc '[<role> · <direction>]'.
+# Match CẤU TRÚC (snake_case trong ngoặc vuông ở ĐẦU) thay vì hardcode tên role -> phủ MỌI role
+# hiện có (rag_retrieve/hr_lookup/leave_action/analyze/critic) lẫn role thêm về sau. Câu trả lời
+# thật bắt đầu bằng nội dung ("Chào bạn,..."); citation '[1]' bắt đầu bằng SỐ; leave_action passthrough
+# bắt đầu bằng '{' -> KHÔNG cái nào khớp '[chữ_thường...]'. Nếu answer khớp -> raw data rò -> chặn.
+_RAW_DATA_LEAK = re.compile(r"^\s*\[[a-z][a-z0-9_]*(?:\s*·|\])")
+
+
+def _is_raw_data_leak(answer: str | None) -> bool:
+    """True nếu chuỗi trông như output worker thô (nhãn '[role · ...]') lọt ra thay vì câu trả lời."""
+    return bool(answer and _RAW_DATA_LEAK.match(answer))
 
 
 def _build_data_text(data_results: dict, steps: list) -> str:
@@ -308,11 +327,9 @@ def build_orchestrator_graph(
             return {"answer": "Mình chưa tìm được thông tin phù hợp. Bạn thử hỏi lại theo "
                               "cách khác hoặc liên hệ HR/IT Helpdesk nhé.", "sources": []}
 
-        # Không có model (mock/test) -> gộp text thô (vẫn trả sources cho FE).
+        # Không có model (mock/test) -> KHÔNG lộ data_text thô ra user (internal format).
         if make_model is None:
-            return {"answer": data_text or
-                    "Mình chưa lấy được dữ liệu phù hợp, bạn thử lại hoặc liên hệ HR/IT Helpdesk.",
-                    "sources": sources_ref}
+            return {"answer": _ANSWER_FAIL_MSG, "sources": sources_ref}
 
         if ctx.emit:
             await ctx.emit({"phase": "thinking", "node": "verify",
@@ -340,9 +357,13 @@ def build_orchestrator_graph(
                 await ctx.emit({"phase": "thought", "node": "verify",
                                 "text": f"Thông tin chưa đủ ({missing or 'thiếu khía cạnh chính'}) — tra cứu thêm."})
             return {"verify_verdict": "insufficient", "replan_count": replan_count + 1}
-        if not answer:
-            answer = data_text or \
-                "Mình chưa lấy được dữ liệu phù hợp, bạn thử lại hoặc liên hệ HR/IT Helpdesk."
+        # LLM timeout/lỗi (answer None) HOẶC answer trông như raw data (rò nhãn '[rag_retrieve...]')
+        # -> KHÔNG đẩy ra user, thay bằng message an toàn. Guard chốt chặn cuối: dù bất kỳ đường nào
+        # khiến answer = internal format, user CŨNG không bao giờ thấy JSON thô.
+        if not answer or _is_raw_data_leak(answer):
+            if _is_raw_data_leak(answer):
+                logger.warning("verify_answer raw-data leak chặn được (answer mở đầu bằng nhãn worker)")
+            answer = _ANSWER_FAIL_MSG
         return {"answer": answer, "sources": sources_ref}
 
     def route_after(state: OrchestratorState):
