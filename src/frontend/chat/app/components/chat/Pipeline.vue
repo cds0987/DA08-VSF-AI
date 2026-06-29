@@ -7,7 +7,7 @@ import { computed, ref, watch, onUnmounted } from 'vue'
 import { Search, Database, Sparkles, GitBranch, ShieldCheck, FileSearch, Lightbulb, XCircle, Check } from '@lucide/vue'
 import type { TraceEntry, NodeModel, AgentPlan, AgentPlanStep } from '~/types'
 import { nodeGroup } from '~/types/sse-contract.gen'
-import { summarizeThought, truncateFilename, extractFirstJsonObject } from '~/lib/timeline'
+import { summarizeThought, truncateFilename, firstJsonObjectClosed } from '~/lib/timeline'
 import ThoughtDetail from './ThoughtDetail.vue'
 
 interface Props {
@@ -60,11 +60,11 @@ const verifyThoughts = computed(() => (props.thoughts ?? []).filter(t => nodeGro
 const otherThoughts = computed(() => (props.thoughts ?? []).filter(t => !['orchestrator', 'verify'].includes(nodeGroup(t.node))))
 
 // CHỐNG FLASH (live): thought orchestrate stream dần (CoT thô -> rồi JSON kế hoạch). Nếu render
-// ngay lúc JSON CHƯA đóng, summarizeThought hiện CoT thô rồi NHẢY format sang cấu trúc khi JSON
-// xong -> "flash". Chỉ render khi đã có khối JSON HOÀN CHỈNH -> 1 lần chuyển sạch (hint -> cấu
-// trúc). Khi chưa chốt: giữ hint ổn định. (Chỉ áp cho orchestrator; verify/khác là reasoning
-// thuần -> vẫn stream live bình thường.)
-const orchReady = computed(() => orchThoughts.value.filter(t => extractFirstJsonObject(t.text)))
+// ngay lúc JSON CHƯA đóng, summarizeThought hiện CoT/step con rồi NHẢY format khi plan xong ->
+// "flash". Chỉ render khi JSON NGOÀI CÙNG đã đóng (firstJsonObjectClosed — KHÔNG khớp sớm step
+// con {id,role,input,direction}) -> 1 lần chuyển sạch hint -> cấu trúc. Khi chưa chốt: giữ hint.
+// (Chỉ áp cho orchestrator; verify/khác là reasoning thuần -> vẫn stream live bình thường.)
+const orchReady = computed(() => orchThoughts.value.filter(t => firstJsonObjectClosed(t.text)))
 
 // Tóm tắt 1 dòng cho mỗi thought (chi tiết + raw ẩn trong ThoughtDetail). View song song mảng gốc.
 const orchViews = computed(() => orchReady.value.map(t => summarizeThought(t.text)))

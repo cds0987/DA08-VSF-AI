@@ -213,6 +213,15 @@ export function extractFirstJsonObject(text: string): ExtractedJson | null {
   return null
 }
 
+// Khối JSON bắt đầu từ '{'/'[' ĐẦU TIÊN đã ĐÓNG cân bằng chưa? Khác extractFirstJsonObject ở
+// chỗ KHÔNG quét sang '{' con: dùng cho cổng render LIVE -> tránh khớp SỚM step con
+// ({id,role,input,direction}) khi plan ngoài còn stream dở (gây flash ID/ROLE/INPUT/DIRECTION).
+export function firstJsonObjectClosed(text?: string | null): boolean {
+  const t = (text ?? '').trim()
+  const start = firstJsonStart(t, 0)
+  return start >= 0 && matchJsonEnd(t, start) >= 0
+}
+
 // Text "trông như JSON/debug" (để xử lý cả khi parse hỏng): có ngoặc kèm cặp "key":.
 const JSON_LIKE_RE = /[{[][\s\S]*?["'][^"']*["']\s*:/
 export function isDebugJsonLike(text: string): boolean {
