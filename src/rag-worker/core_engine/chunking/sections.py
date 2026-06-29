@@ -163,18 +163,25 @@ def _table_children(table_text: str, child_max_words: int) -> List[str]:
 
 
 def _dedup_children(sections: List[Section]) -> List[Section]:
-    """Loại bỏ children trùng nội dung (hash MD5) xuyên suốt document.
+    """Loại bỏ children trùng nội dung (hash MD5) xuyên suốt document + DROP child rỗng.
 
     Sliding window overlap + trang bìa lặp lại tạo ra nhiều chunk giống nhau
     → dedup giữ lại chunk đầu tiên gặp, bỏ các bản sao. Section rỗng sau dedup
     bị loại (không còn children nào mới).
+
+    DROP child rỗng/whitespace: segment toàn dòng-trắng (vd dòng trắng cuối mục
+    "Hiệu lực thi hành" trang cuối, quanh bảng) lọt qua `_cap_words`/`_windows`
+    dạng `[text]` → child `.strip()` ra rỗng. Embed vector rỗng = vô nghĩa (lọt
+    search) + embedder strict (pplx) TỪ CHỐI chuỗi rỗng → batch 400-fail. Lọc tại
+    chokepoint này -> ingest embedder-agnostic, index sạch (recall không đổi).
     """
     seen: set[str] = set()
     result: List[Section] = []
     for s in sections:
         unique = [
             child for child in s.children
-            if (h := hashlib.md5(child.strip().encode()).hexdigest()) not in seen
+            if child.strip()                    # bỏ child rỗng/whitespace (xem docstring)
+            and (h := hashlib.md5(child.strip().encode()).hexdigest()) not in seen
             and not seen.add(h)  # type: ignore[func-returns-value]
         ]
         if unique:

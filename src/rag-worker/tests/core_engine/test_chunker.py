@@ -83,3 +83,19 @@ def test_dedup_across_repeated_cover_page() -> None:
     all_children = [c for s in sections for c in s.children]
     unique_children = list(dict.fromkeys(all_children))
     assert len(all_children) == len(unique_children), "Chunk trang bìa bị lặp không được dedup"
+
+
+def test_no_empty_or_whitespace_children() -> None:
+    # Segment toàn dòng-trắng (cuối mục ngắn / quanh bảng) TRƯỚC ĐÂY lọt thành child rỗng qua
+    # `_cap_words`/`_windows` dạng [text] -> embed vector rỗng (vô nghĩa, lọt search) + embedder
+    # strict (pplx) TỪ CHỐI chuỗi rỗng -> batch 400. Bất biến: KHÔNG child rỗng/whitespace.
+    md = (
+        "# A. Nội dung\nĐây là nội dung chính của mục một.\n\n"
+        "| Phòng | Số |\n| --- | --- |\n| HR | 12 |\n\n\n"        # bảng + dòng trắng cuối -> prose rỗng
+        "# B. Hiệu lực thi hành\nQuy định có hiệu lực từ ngày ký.\n\n\n\n"  # mục ngắn + trailing blank
+    )
+    sections = split_sections(md, parent_max_words=220, child_max_words=90, child_overlap_words=15)
+    all_children = [c for s in sections for c in s.children]
+    assert all_children, "phải còn child thật"
+    for c in all_children:
+        assert c.strip(), f"child rỗng/whitespace lọt qua dedup: {c!r}"
