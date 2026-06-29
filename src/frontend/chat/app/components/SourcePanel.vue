@@ -28,7 +28,6 @@ const HIGHLIGHT_ID = 'vsf-citation-highlight'
 
 const viewerMode = ref<ViewerMode>('fallback')
 const fileUrl = ref<string | null>(null)
-const sourceUrl = ref<string | null>(null)
 const htmlContent = ref('')
 const textContent = ref('')
 const fileType = ref('')
@@ -38,11 +37,63 @@ let loadController: AbortController | null = null
 // Blob URL (same-origin) cấp cho PDF.js viewer: presigned URL của GCS/MinIO khác origin
 // nên viewer.mjs validateFileURL chặn ("file origin does not match viewer's").
 let objectUrl: string | null = null
+// Blob URL của tab "Mở tài liệu gốc" — phải sống tới khi mở tab mới / đóng panel
+// (revoke ngay sẽ làm tab trống), nên giữ riêng khỏi objectUrl của viewer.
+let previewObjectUrl: string | null = null
+const isOpening = ref(false)
+const isDownloading = ref(false)
 
 function revokeObjectUrl() {
   if (objectUrl) {
     URL.revokeObjectURL(objectUrl)
     objectUrl = null
+  }
+}
+
+function revokePreviewObjectUrl() {
+  if (previewObjectUrl) {
+    URL.revokeObjectURL(previewObjectUrl)
+    previewObjectUrl = null
+  }
+}
+
+// Mở tài liệu qua domain mình: fetch blob (axios gắn auth) -> object-URL ->
+// tab blob:vsfchat… render inline (office đã convert -> PDF). KHÔNG nhảy GCS.
+async function openFile() {
+  const documentId = props.citation?.document_id
+  if (!documentId || isOpening.value) return
+  isOpening.value = true
+  try {
+    const blob = await documentService.getPreviewBlob(documentId)
+    revokePreviewObjectUrl()
+    previewObjectUrl = URL.createObjectURL(blob)
+    window.open(previewObjectUrl, '_blank', 'noopener')
+  } catch (error) {
+    console.error('Failed to open citation document:', error)
+    errorMsg.value = 'Không mở được tài liệu'
+  } finally {
+    isOpening.value = false
+  }
+}
+
+// Tải bản gốc (attachment) qua domain mình: blob tạm rồi revoke ngay sau khi click.
+async function downloadFile() {
+  const documentId = props.citation?.document_id
+  if (!documentId || isDownloading.value) return
+  isDownloading.value = true
+  try {
+    const blob = await documentService.getFileBlob(documentId)
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = props.citation?.document || 'document'
+    anchor.click()
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    console.error('Failed to download citation document:', error)
+    errorMsg.value = 'Không tải được tài liệu'
+  } finally {
+    isDownloading.value = false
   }
 }
 
@@ -263,9 +314,9 @@ function createHtmlDocument(content: string, highlight: string): string {
 
 function resetViewer() {
   revokeObjectUrl()
+  revokePreviewObjectUrl()
   viewerMode.value = 'fallback'
   fileUrl.value = null
-  sourceUrl.value = null
   htmlContent.value = ''
   textContent.value = ''
   fileType.value = ''
@@ -294,7 +345,6 @@ watch(
 
       const normalizedType = normalizeFileType(result.file_type, newCitation.document)
       fileType.value = normalizedType
-      sourceUrl.value = result.url
 
       const mode = resolveViewerMode(normalizedType)
 
@@ -311,6 +361,9 @@ watch(
         return
       }
 
+      // ponytail: viewer inline vẫn fetch bytes từ presigned GCS (client-side render).
+      // Upgrade path: chuyển sang documentService.getPreviewBlob (server office->PDF) nếu
+      // muốn bỏ hẳn GCS khỏi client — xem docs/chat-citation-open-via-vsfchat-proxy.md.
       const data = await fetchFile(result.url, controller.signal)
       if (controller.signal.aborted) return
       const highlight = newCitation.snippet?.trim() || newCitation.caption
@@ -389,6 +442,7 @@ watch(
 onBeforeUnmount(() => {
   loadController?.abort()
   revokeObjectUrl()
+  revokePreviewObjectUrl()
 })
 </script>
 
@@ -419,25 +473,26 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="flex shrink-0 items-center gap-1">
-          <a
-            v-if="sourceUrl"
-            :href="sourceUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="rounded-full p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-accent hover:text-slate-900 dark:hover:text-accent-foreground"
+          <button
+            v-if="citation?.document_id"
+            type="button"
+            :disabled="isOpening"
+            class="rounded-full p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-accent hover:text-slate-900 dark:hover:text-accent-foreground disabled:opacity-50"
             title="Mở tài liệu gốc"
+            @click="openFile"
           >
             <ExternalLink class="h-4 w-4" />
-          </a>
-          <a
-            v-if="sourceUrl"
-            :href="sourceUrl"
-            :download="citation?.document"
-            class="rounded-full p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-accent hover:text-slate-900 dark:hover:text-accent-foreground"
+          </button>
+          <button
+            v-if="citation?.document_id"
+            type="button"
+            :disabled="isDownloading"
+            class="rounded-full p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-accent hover:text-slate-900 dark:hover:text-accent-foreground disabled:opacity-50"
             title="Tải tài liệu"
+            @click="downloadFile"
           >
             <Download class="h-4 w-4" />
-          </a>
+          </button>
           <button class="rounded-full p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-accent hover:text-slate-900 dark:hover:text-accent-foreground" @click="emit('close')">
             <X class="h-5 w-5" />
           </button>
@@ -466,15 +521,15 @@ onBeforeUnmount(() => {
       </div>
       <div v-else-if="errorMsg" class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white dark:bg-card p-6 text-center">
         <div class="text-sm text-red-500">{{ errorMsg }}</div>
-        <a
-          v-if="sourceUrl"
-          :href="sourceUrl"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+        <button
+          v-if="citation?.document_id"
+          type="button"
+          :disabled="isOpening"
+          class="text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 disabled:opacity-50"
+          @click="openFile"
         >
           Mở tài liệu gốc
-        </a>
+        </button>
       </div>
       <iframe
         v-else-if="viewerMode === 'pdf' && fileUrl"
@@ -514,24 +569,25 @@ onBeforeUnmount(() => {
             Định dạng {{ fileTypeLabel || 'này' }} cần mở bằng ứng dụng phù hợp.
           </p>
         </div>
-        <div v-if="sourceUrl" class="flex flex-wrap items-center justify-center gap-2.5">
-          <a
-            :href="sourceUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="inline-flex h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+        <div v-if="citation?.document_id" class="flex flex-wrap items-center justify-center gap-2.5">
+          <button
+            type="button"
+            :disabled="isOpening"
+            class="inline-flex h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-50"
+            @click="openFile"
           >
             <ExternalLink class="h-4 w-4" aria-hidden="true" />
             Mở tài liệu gốc
-          </a>
-          <a
-            :href="sourceUrl"
-            :download="citation?.document"
-            class="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-border dark:text-foreground dark:hover:bg-accent"
+          </button>
+          <button
+            type="button"
+            :disabled="isDownloading"
+            class="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-50 dark:border-border dark:text-foreground dark:hover:bg-accent"
+            @click="downloadFile"
           >
             <Download class="h-4 w-4" aria-hidden="true" />
             Tải xuống
-          </a>
+          </button>
         </div>
       </div>
     </div>
