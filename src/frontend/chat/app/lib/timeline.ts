@@ -287,6 +287,18 @@ function cleanNaturalLanguage(text: string): string {
   return stripPlanRecap(stripJsonLikeBlocks(text).replace(/^output\s*json[.:]?\s*/i, '')).trim()
 }
 
+// Prose orchestrator cho STREAM LIVE: trả phần ngôn ngữ tự nhiên SẠCH, KHÔNG bao giờ lộ JSON kế
+// hoạch (BE stream cả prose lẫn JSON ra phase:thought). Lúc stream, khối JSON mở DỞ ('{', '{"route"…)
+// chưa có '"key":' nên stripJsonLikeBlocks chưa cắt -> lóe ngoặc thô; nên cắt sẵn từ ngoặc mở ĐẦU
+// TIÊN còn chưa đóng cân bằng (matchJsonEnd < 0 = đang stream dở) trước khi làm sạch.
+export function liveThoughtProse(text?: string | null): string {
+  let t = (text ?? '').trim()
+  for (let s = firstJsonStart(t, 0); s >= 0; s = firstJsonStart(t, s + 1)) {
+    if (matchJsonEnd(t, s) < 0) { t = t.slice(0, s); break }
+  }
+  return cleanNaturalLanguage(t)
+}
+
 // Dựng kết quả từ 1 JSON đã parse (object/array) + phần NL hữu ích (nếu có).
 function summarizeParsed(parsed: unknown, naturalLanguage: string): ThoughtSummary {
   const nl = cleanNaturalLanguage(naturalLanguage)
