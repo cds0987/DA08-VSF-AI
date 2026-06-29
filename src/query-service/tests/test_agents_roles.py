@@ -404,6 +404,27 @@ def test_build_data_text_prefixes_role_and_direction():
     assert "hr_lookup" not in text              # output rỗng bị loại
 
 
+def test_is_raw_data_leak_detects_internal_block_labels():
+    """Guard chống rò: answer mở đầu bằng nhãn worker nội bộ ('[rag_retrieve...]', '[hr_lookup...]')
+    -> coi là raw data lọt ra, KHÔNG phải câu trả lời. Câu trả lời thật (kể cả có cite [1]) -> KHÔNG dính."""
+    from app.agents.graph_builder import _is_raw_data_leak
+
+    # data_text thô bị rò (đúng định dạng _build_data_text) -> phải bắt được MỌI role snake_case
+    assert _is_raw_data_leak('[rag_retrieve · trích dẫn] {"results": [{"document_name": "a.docx"}]}')
+    assert _is_raw_data_leak("[hr_lookup] {...}")
+    assert _is_raw_data_leak("  [analyze · x] noi dung")   # có leading space
+    assert _is_raw_data_leak("[leave_action] {}")
+    assert _is_raw_data_leak("[critic · phản biện] ...")   # role thêm về sau cũng dính (match cấu trúc)
+    assert _is_raw_data_leak("[future_role] x")            # tổng quát: role chưa tồn tại vẫn chặn
+    # câu trả lời hợp lệ -> KHÔNG bị nhầm
+    assert not _is_raw_data_leak("Chào bạn, theo quy định nghỉ phép [1] bạn được 12 ngày.")
+    assert not _is_raw_data_leak("Theo tài liệu nội bộ [1], công ty hỗ trợ 100% chi phí.")
+    assert not _is_raw_data_leak("[1] là chú thích nguồn đầu câu")   # citation số -> KHÔNG dính
+    assert not _is_raw_data_leak('{"action_type": "create_leave_request"}')  # leave_action passthrough OK
+    assert not _is_raw_data_leak("")
+    assert not _is_raw_data_leak(None)
+
+
 async def test_role_never_raises_on_mcp_error():
     class _BadMCP:
         async def rag_search(self, *a, **k):
