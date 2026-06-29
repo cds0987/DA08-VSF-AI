@@ -21,7 +21,7 @@ export interface ThoughtSummary {
   raw: string | null
 }
 
-const SUMMARY_MAX = 140
+const SUMMARY_MAX = 240
 
 // Khóa "có nghĩa" ưu tiên khi thought là JSON object -> lấy làm TÓM TẮT người đọc được.
 const PREFERRED_KEYS = [
@@ -256,12 +256,14 @@ function summarizeParsed(parsed: unknown, naturalLanguage: string): ThoughtSumma
     sections = buildSections(obj)
     human = humanizeObject(obj)
   }
-  // summary ưu tiên NL người dùng; không có thì lấy field có nghĩa; cuối cùng nhãn trung tính.
-  const summary = clampLine(nl || human) || 'Chi tiết suy luận'
-  // Giữ NL prefix DÀI (sẽ bị cắt ở summary) làm section không nhãn -> không mất thông tin.
-  const detail: ThoughtDetailSection[] = []
+  // summary ưu tiên FIELD CÓ NGHĨA (sạch, tiếng Việt) hơn prose CoT thô — prose có thể là
+  // chuỗi suy luận tiếng Anh dài dòng (reasoning_content) -> dòng tóm tắt gọn, đúng trọng tâm.
+  // NL chỉ dùng làm tóm tắt khi object không có field nào đọc được.
+  const summary = clampLine(human || nl) || 'Chi tiết suy luận'
+  // Section CÓ NHÃN (cấu trúc) đứng TRƯỚC -> ThoughtDetail hiện INLINE ngay (không phải bấm).
+  // Prose CoT dài (KHÔNG nhãn) xếp CUỐI -> nằm sau "Xem suy luận gốc", không lấn nội dung chính.
+  const detail: ThoughtDetailSection[] = [...sections]
   if (nl && nl.length > SUMMARY_MAX) detail.push({ label: '', lines: [nl] })
-  detail.push(...sections)
   return { summary, detail, raw: JSON.stringify(parsed, null, 2) }
 }
 
