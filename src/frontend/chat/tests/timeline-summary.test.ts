@@ -159,6 +159,33 @@ test('prose thường KHÔNG có marker kỹ thuật -> KHÔNG cắt nhầm', ()
   assert.equal(r.summary, raw)
 })
 
+// REGRESSION (bug "1" của huuhung): prose chứa '[1]' (vd "depends_on [1]") đứng TRƯỚC khối JSON plan
+// thật -> extractFirstJsonObject cũ parse '[1]' = mảng [1] -> summary RÁC "1". Phải BỎ QUA mảng toàn
+// số, lấy object plan thật -> summary = reasoning/prose.
+test('prose có "[1]" trước JSON plan -> KHÔNG tóm tắt thành "1", lấy reasoning thật', () => {
+  const raw = 'Câu hỏi về bảo vệ. step2 synthesize_recommend depends_on [1].\n\n'
+    + 'Để mình lập plan.\n{"route":"heavy","reasoning":"Cần tra cứu quy định trực bảo vệ nội bộ",'
+    + '"steps":[{"id":1,"role":"rag_retrieve","input":"quy định trực bảo vệ","direction":"tìm tài liệu","depends_on":[]}]}'
+  const r = summarizeThought(raw)
+  assert.notEqual(r.summary.trim(), '1')
+  assert.match(r.summary, /tra cứu quy định trực bảo vệ/)
+})
+
+test('mảng toàn primitive ([1], [1,2]) KHÔNG bị coi là JSON -> giữ nguyên prose', () => {
+  const r1 = summarizeThought('Bước này phụ thuộc [1] và [2] nên làm sau')
+  assert.match(r1.summary, /phụ thuộc/)
+  assert.notEqual(r1.summary.trim(), '1')
+})
+
+// REGRESSION: lúc STREAM, object step con ('{id,role,input,direction,depends_on}') đóng TRƯỚC object
+// ngoài -> KHÔNG được tóm tắt thành "id: 1 · role…" (đã render thành lane plan riêng).
+test('object step nội bộ rời -> KHÔNG surface "id:.. role:.." (đã có lane plan)', () => {
+  const raw = 'Đang lập kế hoạch tra cứu.\n{"id":1,"role":"rag_retrieve","input":"x","direction":"y","depends_on":[]}'
+  const r = summarizeThought(raw)
+  assert.doesNotMatch(r.summary, /^id:|role:\s*rag_retrieve/)
+  assert.match(r.summary, /lập kế hoạch tra cứu/)
+})
+
 test('truncateFilename keeps extension and adds ellipsis', () => {
   const t = truncateFilename('CNHC_Employee_Handbook_2024_final.pdf', 20)
   assert.ok(t.length <= 21)

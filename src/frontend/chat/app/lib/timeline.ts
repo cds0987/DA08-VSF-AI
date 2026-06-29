@@ -194,8 +194,24 @@ function matchJsonEnd(text: string, start: number): number {
 
 interface ExtractedJson { jsonText: string; parsed: unknown; before: string; after: string }
 
+// JSON "ĐÁNG KỂ" (đáng coi là khối debug/plan để tóm tắt): object có ÍT NHẤT 1 key, HOẶC array chứa
+// ÍT NHẤT 1 object. Mảng TOÀN primitive ('[1]', '[1,2]', '["a"]') KHÔNG tính — đó thường là VĂN BẢN
+// THƯỜNG bị hiểu nhầm là JSON: model hay viết 'depends_on [1]' trong lời giải thích, hoặc citation
+// '[1]' -> extractFirstJsonObject cũ parse '[1]' = mảng [1] -> summary RÁC "1" (bug huuhung).
+function isMeaningfulJson(parsed: unknown): boolean {
+  if (Array.isArray(parsed)) return parsed.some(el => el !== null && typeof el === 'object')
+  if (typeof parsed !== 'object' || parsed === null) return false
+  const obj = parsed as Record<string, unknown>
+  // Bỏ qua 1 OBJECT STEP nội bộ ('{id,role,input,direction,depends_on}'): khi JSON plan đang STREAM,
+  // object con (step[0]) đóng TRƯỚC object ngoài -> extract bắt nhầm step -> summary thô "id:1 · role…".
+  // Step đã render thành lane plan riêng nên KHÔNG cần tóm tắt lại -> coi như không đáng kể.
+  if ('role' in obj && 'depends_on' in obj) return false
+  return Object.keys(obj).length > 0
+}
+
 // Bóc KHỐI JSON top-level HỢP LỆ ĐẦU TIÊN trong text (chỉ JSON.parse, không eval). Quét lần lượt
-// từng vị trí '{'/'[' -> khớp ngoặc -> thử parse; khối hỏng thì thử khối kế. null nếu không có.
+// từng vị trí '{'/'[' -> khớp ngoặc -> thử parse; khối hỏng / primitive-array tầm thường -> thử khối
+// kế. null nếu không có. CHỈ nhận JSON đáng kể (isMeaningfulJson) -> '[1]' trong prose KHÔNG bị nuốt.
 export function extractFirstJsonObject(text: string): ExtractedJson | null {
   for (let start = firstJsonStart(text, 0); start >= 0; start = firstJsonStart(text, start + 1)) {
     const end = matchJsonEnd(text, start)
@@ -203,7 +219,7 @@ export function extractFirstJsonObject(text: string): ExtractedJson | null {
     const jsonText = text.slice(start, end + 1)
     try {
       const parsed = JSON.parse(jsonText)
-      if (parsed && typeof parsed === 'object') {
+      if (parsed && typeof parsed === 'object' && isMeaningfulJson(parsed)) {
         return { jsonText, parsed, before: text.slice(0, start), after: text.slice(end + 1) }
       }
     } catch {
