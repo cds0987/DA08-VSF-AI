@@ -42,7 +42,8 @@ test('JSON object -> human-readable labeled detail (no braces/quotes), raw JSON 
   assert.doesNotMatch(r.summary, /\[object Object\]|undefined|null/)
   // first-level detail: có nhãn người đọc được, KHÔNG có ngoặc/nháy JSON
   const text = detailText(r.detail)
-  assert.match(text, /Tuyến xử lý/)
+  // route ('heavy') là jargon -> ẨN khỏi hiển thị (chỉ còn ở raw)
+  assert.doesNotMatch(text, /Tuyến xử lý|heavy/)
   assert.match(text, /Lý do/)
   assert.match(text, /chính sách/)
   assert.doesNotMatch(text, /[{}"]/)
@@ -50,21 +51,24 @@ test('JSON object -> human-readable labeled detail (no braces/quotes), raw JSON 
   assert.ok(r.raw && r.raw.includes('\n') && r.raw.includes('"route"'))
 })
 
-test('JSON with steps array -> "Các bước" section, numbered + role label, no raw braces leaked', () => {
+test('JSON steps array -> KHÔNG surface "Các bước" (đã vẽ thành lane plan-step), chỉ còn ở raw', () => {
   const raw = JSON.stringify({
     route: 'heavy',
+    reasoning: 'cần tra tài liệu rồi tổng hợp',
     steps: [
       { role: 'rag_retrieve', direction: 'tìm tài liệu liên quan' },
       { role: 'answer', direction: 'tổng hợp câu trả lời' },
     ],
   })
   const r = summarizeThought(raw)
-  const steps = r.detail.find(s => s.label === 'Các bước')
-  assert.ok(steps, 'phải có section Các bước')
-  assert.equal(steps!.lines.length, 2)
-  assert.match(steps!.lines[0], /^1\./)
-  assert.match(steps!.lines[0], /Tìm tài liệu/)
-  assert.doesNotMatch(detailText(r.detail), /[{}"]/)
+  // steps KHÔNG còn hiện ở first-level (tránh trùng lane); route cũng ẩn
+  assert.equal(r.detail.find(s => s.label === 'Các bước'), undefined)
+  const text = detailText(r.detail)
+  assert.doesNotMatch(text, /Các bước|Tuyến xử lý|tổng hợp câu trả lời/)
+  assert.doesNotMatch(text, /[{}"]/)
+  // summary = reasoning (sạch); steps vẫn còn ở raw cấp 2
+  assert.match(r.summary, /tra tài liệu/)
+  assert.ok(r.raw && r.raw.includes('"steps"'))
 })
 
 test('JSON with only nested objects -> neutral summary, empty first-level detail, raw available', () => {

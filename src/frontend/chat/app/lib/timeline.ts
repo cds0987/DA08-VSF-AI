@@ -24,10 +24,18 @@ export interface ThoughtSummary {
 const SUMMARY_MAX = 240
 
 // Khóa "có nghĩa" ưu tiên khi thought là JSON object -> lấy làm TÓM TẮT người đọc được.
+// KHÔNG đưa 'route' vào: 'heavy'/'light' là jargon nội bộ, không phải tóm tắt người đọc được.
 const PREFERRED_KEYS = [
   'summary', 'conclusion', 'reason', 'reasoning', 'decision',
-  'route', 'intent', 'answer', 'message', 'text', 'note', 'status',
+  'intent', 'answer', 'message', 'text', 'note', 'status',
 ]
+
+// Field ẨN khỏi phần hiển thị (vẫn còn trong `raw` cấp 2). Lý do: thought kế hoạch orchestrate
+// chứa các field ĐÃ hiển thị ở chỗ khác hoặc không phù hợp panel suy nghĩ:
+//   steps       -> đã vẽ thành lane plan-step ngay dưới header (phase:plan) -> in lại = trùng.
+//   answer_hint -> bản NHÁP câu trả lời (light route stream chính nó làm câu trả lời) -> đúp.
+//   route       -> 'heavy'/'light' jargon nội bộ.
+const HIDDEN_KEYS = new Set(['steps', 'answer_hint', 'route'])
 
 // Nhãn tiếng Việt cho field JSON khi dựng detail mức 1.
 const FIELD_LABELS: Record<string, string> = {
@@ -89,9 +97,11 @@ function humanizeObject(obj: Record<string, unknown>): string {
     const text = stringifyValue(obj[key])
     if (text) return text
   }
-  // Fallback: ghép cặp key: value primitive (bỏ object lồng nhau -> không [object Object]).
+  // Fallback: ghép cặp key: value primitive (bỏ object lồng nhau -> không [object Object];
+  // bỏ field ẩn -> không lộ jargon route/answer_hint vào tóm tắt).
   const pairs: string[] = []
   for (const [key, value] of Object.entries(obj)) {
+    if (HIDDEN_KEYS.has(key)) continue
     const text = stringifyValue(value)
     if (text) pairs.push(`${key}: ${text}`)
   }
@@ -117,9 +127,11 @@ function formatStep(step: unknown, i: number): string {
 // Dựng section detail mức 1 từ object. KHÔNG render object lồng nhau (để ở raw) -> không ngoặc/nháy.
 function buildSections(obj: Record<string, unknown>): ThoughtDetailSection[] {
   const sections: ThoughtDetailSection[] = []
-  const used = new Set<string>()
+  // Đánh dấu field ẩn là "đã dùng" -> bỏ qua ở CẢ vòng FIELD_ORDER lẫn vòng field lạ.
+  const used = new Set<string>(HIDDEN_KEYS)
 
   const pushField = (key: string) => {
+    if (HIDDEN_KEYS.has(key)) return   // ẩn khỏi hiển thị (vẫn còn ở raw)
     used.add(key)
     if (key === 'steps') {
       const arr = obj.steps
