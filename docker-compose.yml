@@ -562,6 +562,12 @@ services:
       # NAY: metrics dashboard ĐÃ chuyển Redis-shared (observability.RedisMetricsSink) -> /metrics ĐÚNG
       # dù N worker -> Grafana không vỡ. Multi-worker để tăng THROUGHPUT dưới tải đồng thời (đo lại).
       VSF_OTEL_ENABLED: "0"
+      # Demand-driven coalescing /v1/embeddings (gom request embed theo queue-depth thật -> ít upstream
+      # call -> tôn trọng trần 3-provider, đỡ đụng mcp-search). OPT-IN (default 0 = passthrough an toàn).
+      # ⚠ UVICORN_WORKERS=8 -> gom THEO TỪNG worker (không cross-process). Bật để A/B test combined-load.
+      EMBED_COALESCE_ENABLED: "${EMBED_COALESCE_ENABLED:-0}"
+      EMBED_COALESCE_WINDOW_MS: "${EMBED_COALESCE_WINDOW_MS:-15}"
+      EMBED_COALESCE_MAX_BATCH: "${EMBED_COALESCE_MAX_BATCH:-256}"
       UVICORN_WORKERS: "8"          # 6->8: push throughput tối đa (company scale). ingest-6 đo ai-router
                                     # 70% + embed 0-shrink (còn headroom) -> đẩy ai-router+ingest tới trần
                                     # VM. Đo doc/min max + nơi ceiling (embed-429 / ai-router-max / VM-core).

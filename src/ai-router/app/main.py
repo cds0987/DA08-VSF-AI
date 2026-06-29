@@ -21,12 +21,15 @@ from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from ai_router.config import get_settings
 from ai_router.observability import render_prometheus, render_prometheus_shared
 from ai_router.router import NoCapacityError, Router, RouterCallError, estimate_tokens
+from ai_router.embed_coalescer import EmbedCoalescer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("ai_router.app")
 
 settings = get_settings()
 router = Router(settings)
+# Demand-driven coalescing /v1/embeddings (opt-in EMBED_COALESCE_ENABLED). OFF -> passthrough.
+_embed_coalescer = EmbedCoalescer(router.embeddings)
 app = FastAPI(title="AI Router", version="0.1.0")
 
 
@@ -173,7 +176,7 @@ async def embeddings(req: Request,
     _auth(authorization, x_internal_token)
     body = await req.json()
     try:
-        return JSONResponse(await router.embeddings(body))
+        return JSONResponse(await _embed_coalescer.embeddings(body))
     except NoCapacityError:
         raise HTTPException(status_code=503, detail="no capacity for embed")
     except RouterCallError as exc:
