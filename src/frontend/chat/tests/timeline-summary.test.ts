@@ -159,6 +159,48 @@ test('prose thường KHÔNG có marker kỹ thuật -> KHÔNG cắt nhầm', ()
   assert.equal(r.summary, raw)
 })
 
+// REGRESSION (bug "1" của huuhung): prose chứa '[1]' (vd "depends_on [1]") đứng TRƯỚC khối JSON plan
+// thật -> extractFirstJsonObject cũ parse '[1]' = mảng [1] -> summary RÁC "1". Phải BỎ QUA mảng toàn
+// số, lấy object plan thật -> summary = reasoning/prose.
+test('prose có "[1]" trước JSON plan -> KHÔNG tóm tắt thành "1", lấy reasoning thật', () => {
+  const raw = 'Câu hỏi về bảo vệ. step2 synthesize_recommend depends_on [1].\n\n'
+    + 'Để mình lập plan.\n{"route":"heavy","reasoning":"Cần tra cứu quy định trực bảo vệ nội bộ",'
+    + '"steps":[{"id":1,"role":"rag_retrieve","input":"quy định trực bảo vệ","direction":"tìm tài liệu","depends_on":[]}]}'
+  const r = summarizeThought(raw)
+  assert.notEqual(r.summary.trim(), '1')
+  assert.match(r.summary, /tra cứu quy định trực bảo vệ/)
+})
+
+test('mảng toàn primitive ([1], [1,2]) KHÔNG bị coi là JSON -> giữ nguyên prose', () => {
+  const r1 = summarizeThought('Bước này phụ thuộc [1] và [2] nên làm sau')
+  assert.match(r1.summary, /phụ thuộc/)
+  assert.notEqual(r1.summary.trim(), '1')
+})
+
+// REGRESSION: lúc STREAM, object step con ('{id,role,input,direction,depends_on}') đóng TRƯỚC object
+// ngoài -> KHÔNG được tóm tắt thành "id: 1 · role…" (đã render thành lane plan riêng).
+test('object step nội bộ rời -> KHÔNG surface "id:.. role:.." (đã có lane plan)', () => {
+  const raw = 'Đang lập kế hoạch tra cứu.\n{"id":1,"role":"rag_retrieve","input":"x","direction":"y","depends_on":[]}'
+  const r = summarizeThought(raw)
+  assert.doesNotMatch(r.summary, /^id:|role:\s*rag_retrieve/)
+  assert.match(r.summary, /lập kế hoạch tra cứu/)
+})
+
+// "MỞ KHỐI suy luận gốc vẫn GỌN": phần CoT mở rộng KHÔNG được dump jargon planning (route heavy,
+// tên role rag_retrieve/synthesize_recommend, "plan N steps") — đã render thành lane plan riêng.
+// Cắt từ ĐẦU CÂU chứa jargon (không để mảnh cụt), GIỮ phần phân tích người-đọc-được.
+test('mở suy luận gốc: cắt đuôi jargon planning (route heavy / tên role / plan N steps), giữ phân tích', () => {
+  const raw = 'Đây là câu hỏi về lịch nghỉ lễ Tết của công ty, thuộc chính sách nhân sự nội bộ. '
+    + 'Ta sẽ route heavy, dùng rag_retrieve để tra tài liệu. Nên plan 2 steps: rag_retrieve và synthesize_recommend.'
+  const r = summarizeThought(raw)
+  const surface = `${r.summary} ${r.detail.map(s => s.lines.join(' ')).join(' ')}`
+  // jargon BỊ CẮT hết
+  assert.doesNotMatch(surface, /route heavy|rag_retrieve|synthesize_recommend|plan 2 steps/i)
+  // phân tích người-đọc-được GIỮ lại, KHÔNG để mảnh cụt "Ta sẽ"
+  assert.match(surface, /lịch nghỉ lễ Tết của công ty/)
+  assert.doesNotMatch(surface, /Ta sẽ\s*$/)
+})
+
 test('truncateFilename keeps extension and adds ellipsis', () => {
   const t = truncateFilename('CNHC_Employee_Handbook_2024_final.pdf', 20)
   assert.ok(t.length <= 21)

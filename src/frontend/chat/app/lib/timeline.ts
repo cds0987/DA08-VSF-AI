@@ -194,8 +194,24 @@ function matchJsonEnd(text: string, start: number): number {
 
 interface ExtractedJson { jsonText: string; parsed: unknown; before: string; after: string }
 
+// JSON "ĐÁNG KỂ" (đáng coi là khối debug/plan để tóm tắt): object có ÍT NHẤT 1 key, HOẶC array chứa
+// ÍT NHẤT 1 object. Mảng TOÀN primitive ('[1]', '[1,2]', '["a"]') KHÔNG tính — đó thường là VĂN BẢN
+// THƯỜNG bị hiểu nhầm là JSON: model hay viết 'depends_on [1]' trong lời giải thích, hoặc citation
+// '[1]' -> extractFirstJsonObject cũ parse '[1]' = mảng [1] -> summary RÁC "1" (bug huuhung).
+function isMeaningfulJson(parsed: unknown): boolean {
+  if (Array.isArray(parsed)) return parsed.some(el => el !== null && typeof el === 'object')
+  if (typeof parsed !== 'object' || parsed === null) return false
+  const obj = parsed as Record<string, unknown>
+  // Bỏ qua 1 OBJECT STEP nội bộ ('{id,role,input,direction,depends_on}'): khi JSON plan đang STREAM,
+  // object con (step[0]) đóng TRƯỚC object ngoài -> extract bắt nhầm step -> summary thô "id:1 · role…".
+  // Step đã render thành lane plan riêng nên KHÔNG cần tóm tắt lại -> coi như không đáng kể.
+  if ('role' in obj && 'depends_on' in obj) return false
+  return Object.keys(obj).length > 0
+}
+
 // Bóc KHỐI JSON top-level HỢP LỆ ĐẦU TIÊN trong text (chỉ JSON.parse, không eval). Quét lần lượt
-// từng vị trí '{'/'[' -> khớp ngoặc -> thử parse; khối hỏng thì thử khối kế. null nếu không có.
+// từng vị trí '{'/'[' -> khớp ngoặc -> thử parse; khối hỏng / primitive-array tầm thường -> thử khối
+// kế. null nếu không có. CHỈ nhận JSON đáng kể (isMeaningfulJson) -> '[1]' trong prose KHÔNG bị nuốt.
 export function extractFirstJsonObject(text: string): ExtractedJson | null {
   for (let start = firstJsonStart(text, 0); start >= 0; start = firstJsonStart(text, start + 1)) {
     const end = matchJsonEnd(text, start)
@@ -203,7 +219,7 @@ export function extractFirstJsonObject(text: string): ExtractedJson | null {
     const jsonText = text.slice(start, end + 1)
     try {
       const parsed = JSON.parse(jsonText)
-      if (parsed && typeof parsed === 'object') {
+      if (parsed && typeof parsed === 'object' && isMeaningfulJson(parsed)) {
         return { jsonText, parsed, before: text.slice(0, start), after: text.slice(end + 1) }
       }
     } catch {
@@ -246,15 +262,28 @@ function stripJsonLikeBlocks(text: string): string {
   return out.replace(/\s+/g, ' ').trim()
 }
 
-// Cắt "recap kế hoạch" kỹ thuật ở đuôi prose orchestrator (vd "Plan: 1 step rag_retrieve
-// input=… depends_on…") — vốn TRÙNG với danh sách plan step render ngay bên dưới timeline,
-// nên thừa + lộ token kỹ thuật ra người dùng. CHỈ cắt khi có dấu hiệu kỹ thuật RÕ RÀNG; prose
-// thường (không marker) giữ NGUYÊN. Cắt làm rỗng/cụt -> giữ nguyên (không mất nội dung).
-const PLAN_RECAP_RE = /\b(?:plan|kế hoạch)\s*[:：]\s*\d|\bdepends_on\b|\bstep_id\b|\binput\s*=|\breasoning\s*=/i
+// Cắt "recap kế hoạch" kỹ thuật ở đuôi prose orchestrator — phần model QUYẾT ĐỊNH plan (vd "Ta sẽ
+// route heavy, dùng rag_retrieve... plan 2 steps: rag_retrieve và synthesize_recommend") vốn TRÙNG
+// với danh sách plan step render ngay bên dưới timeline, nên thừa + lộ jargon kỹ thuật (tên role,
+// route, depends_on...) ra người dùng. CHỈ cắt khi có dấu hiệu kỹ thuật RÕ RÀNG; prose thường (không
+// marker) giữ NGUYÊN. Cắt làm head cụt/ngắn -> giữ nguyên (không mất nội dung).
+const PLAN_RECAP_RE = new RegExp(
+  [
+    '\\b(?:plan|kế hoạch)\\s*[:：]?\\s*\\d+\\s*(?:step|bước)',   // "plan 2 steps" / "kế hoạch: 2 bước"
+    '\\broute\\s*["\']?\\s*(?:heavy|light)\\b',                  // "route heavy" / 'route "light"'
+    '\\b(?:rag_retrieve|synthesize_recommend|hr_lookup|leave_action|analyze|critic)\\b',  // tên role nội bộ
+    '\\bdepends_on\\b', '\\bstep_id\\b', '\\binput\\s*=', '\\breasoning\\s*=',  // recap kỹ thuật cũ
+  ].join('|'),
+  'i',
+)
 function stripPlanRecap(text: string): string {
   const m = PLAN_RECAP_RE.exec(text)
   if (!m) return text
-  const head = text.slice(0, m.index).replace(/[\s.;,:—–-]+$/, '').trim()
+  // Cắt từ ĐẦU CÂU chứa marker (lùi về dấu kết câu '. ! ? …' hoặc xuống dòng gần nhất TRƯỚC marker)
+  // -> KHÔNG để lại mảnh câu cụt kiểu "...Ta sẽ". Không có ranh giới -> cắt ngay tại marker (như cũ).
+  const boundary = text.slice(0, m.index).search(/[.!?…\n][^.!?…\n]*$/)
+  const cut = boundary >= 0 ? boundary + 1 : m.index
+  const head = text.slice(0, cut).replace(/[\s.;,:—–-]+$/, '').trim()
   return head.length >= 20 ? head : text
 }
 
