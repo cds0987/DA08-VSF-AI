@@ -15,7 +15,7 @@ import {
   ThumbsDown,
   ThumbsUp,
 } from '@lucide/vue'
-import { buildCitationSources, citationFileKind, cn } from '~/lib/utils'
+import { citationFileKind, cn, compactCitedSources } from '~/lib/utils'
 import type { CitationFileGroup } from '~/lib/utils'
 import type { ChatMessage, Citation } from '~/types'
 import MarkdownIt from 'markdown-it'
@@ -43,26 +43,16 @@ const streamingRenderer = createStreamingRenderer({
   sanitize: (h: string) => DOMPurify.sanitize(h),
 })
 
-// Gom citation theo tài liệu -> số nguồn + map ref->số. Dùng cho cả pill inline lẫn list nguồn.
-const citationSources = computed(() => buildCitationSources(props.data.citations))
-
 function resolveRef(n: number): Citation | undefined {
   return props.data.citations?.find(x => x.ref === n) ?? props.data.citations?.[n - 1]
 }
 
-// CHỈ nguồn THỰC SỰ được trích trong câu trả lời (có [N] khớp source) — không liệt kê hết
-// mọi chunk đã lấy. Quét marker [N] trong content, map qua refToNumber, giữ số hợp lệ.
-const citedSources = computed(() => {
-  const content = props.data.content || ''
-  const { refToNumber, sources } = citationSources.value
-  const used = new Set<number>()
-  for (const m of content.matchAll(/\[(\d+)\]/g)) {
-    const marker = parseInt(m[1])
-    const num = refToNumber[marker]
-    if (num !== undefined && resolveRef(marker)) used.add(num)
-  }
-  return sources.filter(s => used.has(s.number))
-})
+// CHỈ nguồn THỰC SỰ được trích + NÉN SỐ theo THỨ TỰ XUẤT HIỆN (lần trích đầu = 1, nguồn mới kế = 2...)
+// -> pill đọc từ trên xuống luôn 1,2,3 (không nhảy 1,2,5 do lọc nguồn không cited). markerToNumber dùng
+// CHUNG cho pill (renderedContent) lẫn danh sách (citedSources) -> số luôn khớp.
+const citationView = computed(() => compactCitedSources(props.data.content || '', props.data.citations))
+
+const citedSources = computed(() => citationView.value.cited)
 
 // Icon + màu theo nhóm loại tệp (không hardcode PDF).
 const GROUP_ICON: Record<CitationFileGroup, any> = {
@@ -86,7 +76,7 @@ const renderedContent = computed(() => {
     return streamingRenderer.toHtml(props.data.content.replace(/\[\d+\]/g, ''))
   }
   const rawHtml = md.render(props.data.content)
-  const { refToNumber } = citationSources.value
+  const { markerToNumber } = citationView.value
   const esc = (t: string) => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!))
   // [N] liền nhau -> pill số gọn kiểu DeepSeek; dedup theo SỐ NGUỒN trong cùng run; đẩy dấu
   // câu RA TRƯỚC pill (pill đứng sau dấu chấm). data-ref = marker thô để mở đúng chunk đã trích.
@@ -96,7 +86,7 @@ const renderedContent = computed(() => {
     const pills: string[] = []
     for (const marker of markers) {
       const cit = resolveRef(marker)
-      const num = refToNumber[marker]
+      const num = markerToNumber[marker]   // số NÉN (theo lần xuất hiện), khớp danh sách nguồn
       // Bỏ ref LLM bịa (không khớp source) + dedup nguồn trùng trong cùng cụm.
       if (!cit || num === undefined || seen.has(num)) continue
       seen.add(num)

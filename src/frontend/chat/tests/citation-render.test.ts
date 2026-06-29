@@ -8,9 +8,10 @@ const read = (path: string) => readFile(new URL(path, root), 'utf8')
 test('AnswerBlock renders slim numbered citation pills wired to the source panel', async () => {
   const block = await read('app/components/chat/AnswerBlock.vue')
 
-  // Numbered-pill pipeline (replaces the old logo + teaser chip).
-  assert.match(block, /buildCitationSources/)
-  assert.match(block, /const \{ refToNumber \} = citationSources\.value/)
+  // Numbered-pill pipeline (replaces the old logo + teaser chip). Số NÉN theo thứ tự xuất hiện.
+  assert.match(block, /compactCitedSources/)
+  assert.match(block, /const \{ markerToNumber \} = citationView\.value/)
+  assert.match(block, /const num = markerToNumber\[marker\]/)
   assert.match(block, /class="citation-ref[^"]*" role="button" tabindex="0" aria-label="\$\{label\}" data-ref="\$\{marker\}">\$\{num\}</)
   // One pill per source: dedup within a [N][N] run by source number.
   assert.match(block, /const seen = new Set<number>\(\)/)
