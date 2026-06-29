@@ -63,8 +63,12 @@ def prelogin(i: int) -> dict | None:
 # ───────────────────────── SSE-HTTP user ─────────────────────────
 async def sse_user(u: dict, barrier: asyncio.Barrier) -> dict:
     rec = _blank(u, "sse")
+    # LOAD_FRESH_CONV=1 -> conversation_id MỚI mỗi query (uuid) -> load_context rỗng -> route HEAVY
+    # (tránh memory pollution do test lặp khiến câu hỏi thành follow-up -> route light, không rag).
+    import os as _os, uuid as _uuid
+    _conv = str(_uuid.uuid4()) if _os.environ.get("LOAD_FRESH_CONV") == "1" else None
     body = {"user_id": u["user_id"], "question": u["question"],
-            "conversation_id": None}
+            "conversation_id": _conv}
     h = {"Authorization": f"Bearer {u['token']}"}
     try:
         await barrier.wait()  # ── tất cả user bắn cùng lúc ──

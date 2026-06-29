@@ -477,6 +477,11 @@ class Router:
                 usage = extract_usage(data)
                 cost = await self.account(dec, usage, est)
                 latency_ms = (time.monotonic() - t0) * 1000
+                # Histogram latency theo capability (như chat/chat_stream) -> embed HIỆN trên
+                # dashboard 'Latency theo capability'. embed KHÔNG stream nên không có TTFC.
+                self.metrics.observe("airouter_call_latency_seconds",
+                                     {"capability": cap_label, "provider": dec.provider.value},
+                                     latency_ms / 1000.0)
                 self._emit_call(dec, cap_label, usage, status="ok", cost=cost)
                 self._trace_log("call_ok", dec, cap_label, conversation_id=None, status="ok",
                                 latency_ms=latency_ms, usage=usage, cost=cost)
@@ -521,6 +526,10 @@ class Router:
             usage = Usage(cost_usd=_rerank_cost(data))
             cost = await self.account(dec, usage, 0)
             latency_ms = (time.monotonic() - t0) * 1000
+            # Histogram latency (như chat/embed) -> rerank HIỆN trên dashboard capability. Không stream.
+            self.metrics.observe("airouter_call_latency_seconds",
+                                 {"capability": "rerank_api", "provider": dec.provider.value},
+                                 latency_ms / 1000.0)
             self._emit_call(dec, "rerank_api", usage, status="ok", cost=cost)
             self._trace_log("call_ok", dec, "rerank_api", conversation_id=None, status="ok",
                             latency_ms=latency_ms, usage=usage, cost=cost)
