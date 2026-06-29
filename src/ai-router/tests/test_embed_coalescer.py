@@ -46,8 +46,11 @@ def _make_fn(calls):
     return fn
 
 
-@pytest.mark.asyncio
-async def test_passthrough_when_disabled():
+def test_passthrough_when_disabled():
+    asyncio.run(_passthrough_when_disabled())
+
+
+async def _passthrough_when_disabled():
     os.environ["EMBED_COALESCE_ENABLED"] = "0"
     calls = []
     c = EmbedCoalescer(_make_fn(calls))
@@ -56,8 +59,11 @@ async def test_passthrough_when_disabled():
     await c.aclose()
 
 
-@pytest.mark.asyncio
-async def test_coalesce_maps_each_caller_correctly():
+def test_coalesce_maps_each_caller_correctly():
+    asyncio.run(_coalesce_maps_each_caller_correctly())
+
+
+async def _coalesce_maps_each_caller_correctly():
     os.environ["EMBED_COALESCE_ENABLED"] = "1"
     os.environ["EMBED_COALESCE_WINDOW_MS"] = "40"
     calls = []
@@ -75,8 +81,11 @@ async def test_coalesce_maps_each_caller_correctly():
     await c.aclose()
 
 
-@pytest.mark.asyncio
-async def test_diff_model_not_coalesced():
+def test_diff_model_not_coalesced():
+    asyncio.run(_diff_model_not_coalesced())
+
+
+async def _diff_model_not_coalesced():
     os.environ["EMBED_COALESCE_ENABLED"] = "1"
     os.environ["EMBED_COALESCE_WINDOW_MS"] = "30"
     calls_meta = []
