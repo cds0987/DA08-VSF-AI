@@ -149,8 +149,9 @@ function getResultLabel(entry: TraceEntry): string {
           </div>
         </div>
 
-        <!-- ═══ VERIFY ═══ -->
-        <div v-if="verifyThoughts.length || verifyActive" class="space-y-2">
+        <!-- ═══ VERIFY ═══ — gate theo thought THẬT (như MessageSteps persisted): không vẽ mốc
+             "ảo" chỉ vì verifyActive, tránh Verify hiện lúc stream rồi BIẾN MẤT khi xong. -->
+        <div v-if="verifyThoughts.length" class="space-y-2">
           <div class="relative">
             <span
               aria-hidden="true"
@@ -163,9 +164,6 @@ function getResultLabel(entry: TraceEntry): string {
               <span class="text-[15px] font-medium text-slate-600 dark:text-foreground/80" :class="verifyActive && 'ai-shimmer'">Verify — Kiểm tra &amp; tổng hợp</span>
             </div>
             <ThoughtDetail v-for="(view, i) in verifyViews" :key="`v-${i}`" :view="view" class="mt-1.5" />
-            <div v-if="verifyActive && !verifyThoughts.length" class="mt-1.5 text-sm font-medium text-slate-500 dark:text-muted-foreground">
-              {{ thinkingStatus || rotatingHint }}
-            </div>
           </div>
         </div>
 
