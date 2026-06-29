@@ -10,8 +10,10 @@ export default defineNuxtConfig({
     head: {
       title: 'vsfchat',
       link: [
-        // Favicon = logo octopus (mascot thương hiệu), thay favicon Vue/VSF mặc định
-        { rel: 'icon', type: 'image/svg+xml', href: '/octopus.svg' },
+        // Favicon = logo FeatureMind (đồng bộ tab + Google). .ico là fallback root mà
+        // trình duyệt/Google luôn nạp; png cho màn hình retina.
+        { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' },
+        { rel: 'icon', type: 'image/png', href: '/logo.png' },
       ],
     },
   },
