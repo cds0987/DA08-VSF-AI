@@ -75,11 +75,13 @@ const groupedViews = computed<Record<string, ThoughtSummary[]>>(() => {
   return by
 })
 
-// Group cần hiển thị, ĐÚNG THỨ TỰ SSE_GROUPS. orchestrator còn hiện khi có plan/trace.
+// Group cần hiển thị, ĐÚNG THỨ TỰ SSE_GROUPS. orchestrator + verify là MỐC CỐ ĐỊNH: còn hiện
+// khi có plan/trace (pipeline nặng đã chạy) dù chưa có thought riêng -> Verify luôn hiện nhất
+// quán với Pipeline live, không "biến mất" lúc xong.
 const visibleGroups = computed(() =>
   SSE_GROUPS.filter(g =>
     (grouped.value[g]?.length)
-    || (g === 'orchestrator' && (props.plan?.steps?.length || props.trace.length)),
+    || ((g === 'orchestrator' || g === 'verify') && (props.plan?.steps?.length || props.trace.length)),
   ),
 )
 
