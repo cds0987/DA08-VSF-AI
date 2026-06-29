@@ -7,10 +7,10 @@ system load + quality-judge.
 ## questions/ — 450 câu, đa dạng real-world (grounded trên corpus HR trong Qdrant)
 | Loại | n | Mô tả | Hành vi mong đợi |
 |---|---|---|---|
-| **simple_rag** (single_fact) | 330 | tra 1 quy định/fact cụ thể | triage→RAG, 1 worker, nhanh, grounded |
-| **multiagent** (multi_topic) | 72 | gộp ≥2 chủ đề HR | fan-out ≥2 worker, phủ đủ |
-| **hr_intent** | 28 | payroll/leave_balance/leave_requests/attendance/benefits/onboarding/performance | route HR-tool per-user (KHÔNG bịa) |
-| **non_rag** (edge) | 20 | identity·off_topic·out_of_scope·clarification·**prompt_injection** | route đúng / từ chối an toàn / hỏi lại |
+| **simple_rag** (single_fact) | 245 | tra 1 quy định/fact cụ thể | triage→RAG, 1 worker, nhanh, grounded |
+| **multiagent** (multi_topic) | 120 | gộp ≥2 chủ đề HR | fan-out ≥2 worker, phủ đủ |
+| **hr_intent** | 45 | payroll/leave/attendance/benefits/onboarding/performance | route HR-tool per-user (KHÔNG bịa) |
+| **non_rag** (edge) | 36 | identity·off_topic·out_of_scope·clarification·**prompt_injection**·edge_format | route đúng / từ chối an toàn / hỏi lại / chịu input lạ |
 
 - `gt_doc` = tài liệu đáp án (RAG); `ref_answer` = đáp án tham chiếu (cho judge). Grounded trên doc
   ĐANG có trong Qdrant (khảo sát 2026-06-29: 262 doc, docx/pdf + ảnh/sheet/text) → tránh false-negative.
