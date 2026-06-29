@@ -86,9 +86,13 @@ mới đáng kể như đã đo). Config: `EMBED_COALESCE_ENABLED=1`, `EMBED_COA
 
 ## 5. Bug + việc cần làm (phát hiện trong test)
 
-1. **🐞 Orphan Qdrant vector khi xóa doc:** `bulk-delete` (document-service) xóa metadata Postgres
-   NHƯNG **KHÔNG cascade sang Qdrant** → vector rác tích lũy (1 đợt test = 5753 point orphan, phải
-   xóa trực tiếp Qdrant). **Cần fix: delete doc phải xóa cả Qdrant points.** ⚠️ ưu tiên.
+1. **✅ ĐÃ FIX — Orphan Qdrant/GCS khi xóa doc** (commit `1465b201`, deployed 2026-06-29): delete API
+   từng KHÔNG cascade sang Qdrant + GCS-artifact → orphan (khảo sát prod thấy **1636 loadtest doc rác**,
+   1 đợt = 5753 point). **Gốc:** 6 replica rag-worker durable push-subscribe cùng consumer →
+   `nats: consumer already bound`; doc.ingest+doc.access chung 1 try → ingest fail kéo doc.access không
+   start → handler delete 0-firing. **Fix:** tách try riêng mỗi subscription + retry-on-already-bound.
+   **Verified end-to-end:** delete API → Qdrant 100→0 + GCS raw/artifact→0 + handler `doc_access_delete_done`
+   firing. (Rác 1636 doc cũ đã purge tay 1 lần — Qdrant+GCS+doc_db.)
 2. **Trần CHƯA đo:** mới thấy "saturate êm" (chậm, 502 transient), **chưa tìm điểm GÃY cứng** — cần
    ramp 3→8→12 req/s + upload tăng dần tới khi chat FAIL.
 3. **Coalescer 8-worker:** gom per-worker (không cross-process). Muốn cắt mạnh hơn → shared-queue
