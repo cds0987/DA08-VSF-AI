@@ -149,9 +149,11 @@ function getResultLabel(entry: TraceEntry): string {
           </div>
         </div>
 
-        <!-- ═══ VERIFY ═══ — gate theo thought THẬT (như MessageSteps persisted): không vẽ mốc
-             "ảo" chỉ vì verifyActive, tránh Verify hiện lúc stream rồi BIẾN MẤT khi xong. -->
-        <div v-if="verifyThoughts.length" class="space-y-2">
+        <!-- ═══ VERIFY ═══ — MỐC CỐ ĐỊNH: hiện bất cứ khi nào pipeline nặng đã chạy (có plan/
+             trace), KHÔNG chỉ khi có verify-thought. Gate GIỐNG HỆT MessageSteps persisted ->
+             hiện nhất quán cả lúc stream lẫn lúc xong (không còn nhấp nháy rồi biến mất). Có
+             reasoning thật -> render dưới header; không có -> chỉ mốc tĩnh báo bước đã chạy. -->
+        <div v-if="verifyThoughts.length || plan?.steps?.length || traceLog.length" class="space-y-2">
           <div class="relative">
             <span
               aria-hidden="true"

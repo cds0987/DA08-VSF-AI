@@ -101,3 +101,33 @@ def test_nfd_unicode_buoc():
 
 def test_glyph_normalize():
     assert _va_normalize("nghỉ 03 ngày 【1】〔2〕（3）") == "nghỉ 03 ngày [1][2](3)"
+
+
+# ───── BUG huuhung: NEED_MORE tolerant (model nhả 1 ngoặc '<NEED_MORE>' thay vì '<<>>') ─────
+import pytest as _pytest  # noqa
+from app.agents.roles._llm import _va_need_more, _VA_NEEDMORE_START
+
+
+@_pytest.mark.parametrize("text,expect_nm", [
+    ("<<NEED_MORE>> cần tra quy trình", True),      # 2 ngoặc (cũ)
+    ("<NEED_MORE> cần tra quy trình", True),        # 1 ngoặc (BUG huuhung)
+    ("<NEED MORE> thiếu thông tin", True),          # space thay '_'
+    ("Câu trả lời bình thường về nghỉ phép [1].", False),
+])
+def test_need_more_tolerant_brackets(text, expect_nm):
+    nm, _ = _va_need_more(text)
+    assert nm is expect_nm, f"{text!r} -> nm={nm}, expect {expect_nm}"
+
+
+def test_need_more_start_detect_single_bracket():
+    # streaming start-detect phải bắt 1 ngoặc (trước chỉ bắt '<<')
+    assert _VA_NEEDMORE_START.match("<NEED_MORE> abc")
+    assert _VA_NEEDMORE_START.match("<<NEED_MORE>> abc")
+    assert _VA_NEEDMORE_START.match("**<NEED_MORE>")          # có prefix markdown
+    assert not _VA_NEEDMORE_START.match("Nghỉ phép 12 ngày")
+
+
+def test_need_more_trailing_after_answer_stripped():
+    # answer thật + '<NEED_MORE>' cuối -> _va_need_more thấy sentinel -> caller strip (không leak)
+    nm, missing = _va_need_more("Nếu camera hư, bạn báo IT ngay [1].\n<NEED_MORE> thêm chi tiết camera")
+    assert nm and "chi tiết" in missing

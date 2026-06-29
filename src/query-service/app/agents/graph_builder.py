@@ -359,7 +359,8 @@ def build_orchestrator_graph(
             return {"verify_verdict": "insufficient", "replan_count": replan_count + 1}
         # LLM timeout/lỗi (answer None) HOẶC answer trông như raw data (rò nhãn '[rag_retrieve...]')
         # -> KHÔNG đẩy ra user, thay bằng message an toàn. Guard chốt chặn cuối: dù bất kỳ đường nào
-        # khiến answer = internal format, user CŨNG không bao giờ thấy JSON thô.
+        # khiến answer = internal format (data_text thô), user CŨNG không bao giờ thấy JSON thô.
+        # (Gộp với fix BUG#1 raw-dump của Nguyen Tran — bỏ hẳn fallback data_text + thêm guard cấu trúc.)
         if not answer or _is_raw_data_leak(answer):
             if _is_raw_data_leak(answer):
                 logger.warning("verify_answer raw-data leak chặn được (answer mở đầu bằng nhãn worker)")
