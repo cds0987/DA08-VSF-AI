@@ -341,8 +341,10 @@ def build_orchestrator_graph(
                                 "text": f"Thông tin chưa đủ ({missing or 'thiếu khía cạnh chính'}) — tra cứu thêm."})
             return {"verify_verdict": "insufficient", "replan_count": replan_count + 1}
         if not answer:
-            answer = data_text or \
-                "Mình chưa lấy được dữ liệu phù hợp, bạn thử lại hoặc liên hệ HR/IT Helpdesk."
+            # ⚠️ KHÔNG fallback `data_text` — đó là context THÔ '[rag_retrieve]{results...}' → rò JSON
+            # nguyên khối ra message (BUG nghiêm trọng, 6/7 trace huuhung). Model fail/empty -> CHỈ
+            # message an toàn cho user (KHÔNG bao giờ dump context).
+            answer = "Mình chưa tổng hợp được câu trả lời phù hợp, bạn thử hỏi lại cụ thể hơn hoặc liên hệ HR/IT Helpdesk."
         return {"answer": answer, "sources": sources_ref}
 
     def route_after(state: OrchestratorState):

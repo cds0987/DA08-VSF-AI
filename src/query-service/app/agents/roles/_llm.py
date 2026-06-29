@@ -259,7 +259,11 @@ _VA_GLYPHS = {"【": "[", "】": "]", "〔": "[", "〕": "]", "（": "(", "）":
 # (Trước chỉ match khi BƯỚC ở ĐẦU + có '\n' -> model nào in '**BƯỚC 1 —...:** answer' 1 dòng/markdown -> RÒ.)
 _VA_BUOC2 = re.compile(r"[*_#>\-\s]*B[Ưư][Ớớ]C\s*2\b[^\n:]*[:\n]\**\s*", re.I)
 _VA_BUOC1 = re.compile(r"[*_#>\-\s]*B[Ưư][Ớớ]C\s*1\b[^\n:]*[:\n]\**\s*", re.I)
-_VA_NEEDMORE = re.compile(r"<<\s*NEED_MORE\s*>>\s*(.*)", re.I | re.S)
+# Tolerant: model //hóa reasoning-off hay nhả 1 ngoặc '<NEED_MORE>' (thay vì '<<...>>') hoặc
+# 'NEED MORE' (space) -> regex cũ đòi '<<...>>' KHÔNG khớp -> sentinel RÒ vào answer (bug huuhung).
+# Khớp 1+ ngoặc + optional underscore/space.
+_VA_NEEDMORE = re.compile(r"<+\s*NEED[_\s]?MORE\s*>+\s*(.*)", re.I | re.S)
+_VA_NEEDMORE_START = re.compile(r"^[*_#>\-\s]*<+\s*NEED[_\s]?MORE", re.I)
 # Verdict mở đầu (khi model gộp verdict + answer dưới BƯỚC 1, KHÔNG có BƯỚC 2) -> bỏ câu verdict ngắn.
 # CHỈ áp khi ĐÃ ở split-mode (cấu trúc verify) nên an toàn (không nhầm answer thường).
 _VA_VERDICT = re.compile(
@@ -355,6 +359,7 @@ async def astream_verify_answer(
         #            tách cuối stream (BƯỚC1->panel, answer->orchestration word-chunk). 'need_more' = sentinel.
         decided: str | None = None
         buf = ""
+        ans_buf = ""        # accumulator 'answer' mode -> bắt '<NEED_MORE>' model nhả CUỐI answer, NGỪNG stream sentinel
         async for chunk in model.astream([SystemMessage(content=system), HumanMessage(content=user)]):
             um = getattr(chunk, "usage_metadata", None)
             if um:
@@ -375,10 +380,14 @@ async def astream_verify_answer(
             last_tok_dt = datetime.now(timezone.utc)
             parts.append(tok)
             if decided == "answer":
+                ans_buf += tok
+                if _VA_NEEDMORE.search(ans_buf):                    # answer rồi '<NEED_MORE>' -> NGỪNG (KHÔNG stream sentinel)
+                    decided = "answer_done"
+                    continue
                 await emit({"token": tok, "phase": "generating"})   # ANSWER stream ở message
                 continue
-            if decided in ("need_more", "split"):
-                continue                                            # gom hết, xử lý cuối stream
+            if decided in ("need_more", "split", "answer_done"):
+                continue                                            # gom hết / đã ngừng, xử lý cuối stream
             # chưa quyết: gom buf tới khi phân biệt được sentinel / BƯỚC-structure / answer-thuần.
             # _va_is_struct nhận cấu trúc verify DÙ có prefix markdown ('**BƯỚC 1 —...') hay '(Bước 1)' ->
             # KHÔNG còn rò khi model in markdown. Chờ tới 60 ký tự để marker (có thể tới muộn) kịp xuất hiện.
@@ -386,24 +395,27 @@ async def astream_verify_answer(
             stripped = buf.lstrip()
             if not stripped:
                 continue
-            if stripped.startswith(_VA_SENTINEL):
+            if _VA_NEEDMORE_START.match(stripped):                  # '<NEED_MORE>' (1 HOẶC 2 ngoặc) ở đầu
                 decided = "need_more"
             elif _va_is_struct(buf):                                # cấu trúc verify -> GOM + tách cuối
                 decided = "split"
             elif _VA_SENTINEL.startswith(stripped) or len(stripped) < 60:
                 continue                                            # còn mơ hồ / marker chưa tới -> đợi thêm
             else:
-                decided = "answer"                                  # đủ dài, không cấu trúc -> stream live
+                decided = "answer"; ans_buf = buf                   # đủ dài, không cấu trúc -> stream live
                 await emit({"token": buf, "phase": "generating"})
         full = _va_normalize("".join(parts)).strip()
         _report_llm(tracer, trace, node, model, user, full or None, usage_meta, router, start_dt,
                     first_tok_dt, last_tok_dt, len(parts))
         nm, missing = _va_need_more(full)
-        if nm and allow_replan:
+        already_answered = decided in ("answer", "answer_done")
+        # Replan CHỈ khi CHƯA stream answer thật. Nếu model đã trả lời rồi mới nhả '<NEED_MORE>' cuối
+        # -> KHÔNG replan (answer đã hiện) -> chỉ STRIP sentinel khỏi state cuối.
+        if nm and allow_replan and not already_answered:
             return (None, True, missing)
-        if nm:                                                      # hết hạn replan -> bỏ sentinel, phần còn lại là answer
+        if nm:                                                      # bỏ sentinel khỏi answer cuối (state)
             full = _VA_NEEDMORE.sub("", full).strip()
-        if decided == "answer":
+        if already_answered:
             return (full or None, False, "")                        # đã stream live (pure-answer)
         # split / chưa-quyết: tách BƯỚC-1 (panel) khỏi answer (orchestration word-chunk vì chưa emit token)
         answer, reasoning_part = _va_split(full)
