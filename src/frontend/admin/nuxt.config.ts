@@ -10,8 +10,10 @@ export default defineNuxtConfig({
     head: {
       title: 'FeatureMind',
       link: [
-        // Favicon = logo octopus (đồng bộ trang chat), thay favicon mặc định
+        // Favicon = logo octopus (đồng bộ trang chat). SVG cho trình duyệt hiện đại; .ico
+        // (octopus solid) là fallback root mà Google/legacy luôn nạp.
         { rel: 'icon', type: 'image/svg+xml', href: '/octopus.svg' },
+        { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' },
       ],
     },
   },
