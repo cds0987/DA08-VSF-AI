@@ -1,11 +1,28 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { File, FileText } from '@lucide/vue'
 import type { MessageAttachment } from '~/types'
 
-defineProps<{
+const props = defineProps<{
   text: string
   attachments?: MessageAttachment[]
 }>()
+
+// Tin nhắn trích dẫn (reply): buildQuotedContent gắn đoạn bot đang trả lời thành blockquote
+// "> ..." ở ĐẦU content (vẫn gửi BE để có ngữ cảnh). Tách ra -> hiện thành KHỐI trích dẫn riêng
+// phía trên câu hỏi, không lẫn dấu ">" vào câu hỏi. Chạy cho cả tin mới lẫn tin load lại.
+const parsed = computed(() => {
+  const lines = props.text.split('\n')
+  let i = 0
+  const quoted: string[] = []
+  while (i < lines.length && lines[i].startsWith('>')) {
+    quoted.push(lines[i].replace(/^>\s?/, ''))
+    i++
+  }
+  if (!quoted.length) return { quote: '', body: props.text }
+  while (i < lines.length && lines[i].trim() === '') i++ // bỏ dòng trống ngăn cách
+  return { quote: quoted.join('\n').trim(), body: lines.slice(i).join('\n') }
+})
 
 const formatSize = (bytes: number) => {
   if (bytes === 0) return '0 B'
@@ -52,9 +69,17 @@ const formatSize = (bytes: number) => {
         </div>
       </div>
 
-      <!-- Text Content -->
-      <div v-if="text" class="whitespace-pre-wrap [overflow-wrap:anywhere] [word-break:break-word]">
-        {{ text }}
+      <!-- Trích dẫn: đoạn bot đang được trả lời — khối riêng (viền trái, mờ, cắt 3 dòng) -->
+      <div
+        v-if="parsed.quote"
+        class="border-l-2 border-blue-400/60 dark:border-white/20 pl-2.5 text-[13px] leading-snug text-slate-600 dark:text-chat-user-foreground/60 line-clamp-3 whitespace-pre-wrap [overflow-wrap:anywhere]"
+      >
+        {{ parsed.quote }}
+      </div>
+
+      <!-- Câu hỏi của người dùng -->
+      <div v-if="parsed.body" class="whitespace-pre-wrap [overflow-wrap:anywhere] [word-break:break-word]">
+        {{ parsed.body }}
       </div>
     </div>
   </div>
