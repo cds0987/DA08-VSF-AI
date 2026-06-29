@@ -7,7 +7,7 @@ import { computed, ref, watch, onUnmounted } from 'vue'
 import { Search, Database, Sparkles, GitBranch, ShieldCheck, FileSearch, Lightbulb, XCircle, Check } from '@lucide/vue'
 import type { TraceEntry, NodeModel, AgentPlan, AgentPlanStep } from '~/types'
 import { nodeGroup } from '~/types/sse-contract.gen'
-import { summarizeThought, truncateFilename } from '~/lib/timeline'
+import { summarizeThought, truncateFilename, extractFirstJsonObject } from '~/lib/timeline'
 import ThoughtDetail from './ThoughtDetail.vue'
 
 interface Props {
@@ -59,8 +59,15 @@ const orchThoughts = computed(() => (props.thoughts ?? []).filter(t => nodeGroup
 const verifyThoughts = computed(() => (props.thoughts ?? []).filter(t => nodeGroup(t.node) === 'verify'))
 const otherThoughts = computed(() => (props.thoughts ?? []).filter(t => !['orchestrator', 'verify'].includes(nodeGroup(t.node))))
 
+// CHỐNG FLASH (live): thought orchestrate stream dần (CoT thô -> rồi JSON kế hoạch). Nếu render
+// ngay lúc JSON CHƯA đóng, summarizeThought hiện CoT thô rồi NHẢY format sang cấu trúc khi JSON
+// xong -> "flash". Chỉ render khi đã có khối JSON HOÀN CHỈNH -> 1 lần chuyển sạch (hint -> cấu
+// trúc). Khi chưa chốt: giữ hint ổn định. (Chỉ áp cho orchestrator; verify/khác là reasoning
+// thuần -> vẫn stream live bình thường.)
+const orchReady = computed(() => orchThoughts.value.filter(t => extractFirstJsonObject(t.text)))
+
 // Tóm tắt 1 dòng cho mỗi thought (chi tiết + raw ẩn trong ThoughtDetail). View song song mảng gốc.
-const orchViews = computed(() => orchThoughts.value.map(t => summarizeThought(t.text)))
+const orchViews = computed(() => orchReady.value.map(t => summarizeThought(t.text)))
 const verifyViews = computed(() => verifyThoughts.value.map(t => summarizeThought(t.text)))
 const otherViews = computed(() => otherThoughts.value.map(t => summarizeThought(t.text)))
 
@@ -105,7 +112,7 @@ function getResultLabel(entry: TraceEntry): string {
 
       <div class="space-y-3">
         <!-- ═══ ORCHESTRATOR ═══ -->
-        <div v-if="orchThoughts.length || plan?.steps?.length || (isThinking && traceLog.length === 0)" class="space-y-2">
+        <div v-if="orchReady.length || plan?.steps?.length || (isThinking && traceLog.length === 0)" class="space-y-2">
           <div class="relative">
             <!-- marker: ring xanh + pulse khi đang hoạt động -->
             <span
@@ -121,7 +128,7 @@ function getResultLabel(entry: TraceEntry): string {
             <!-- reasoning live: summary + chi tiết human-readable + raw lồng (ThoughtDetail) -->
             <ThoughtDetail v-for="(view, i) in orchViews" :key="`o-${i}`" :view="view" class="mt-1.5" />
             <!-- trạng thái lập kế hoạch (trước khi có thought/plan) — text thường, KHÔNG shimmer -->
-            <div v-if="isThinking && !orchThoughts.length && !plan?.steps?.length && traceLog.length === 0" class="mt-1.5 text-sm font-medium text-slate-500 dark:text-muted-foreground">
+            <div v-if="isThinking && !orchReady.length && !plan?.steps?.length && traceLog.length === 0" class="mt-1.5 text-sm font-medium text-slate-500 dark:text-muted-foreground">
               {{ thinkingStatus || rotatingHint }}
             </div>
           </div>
