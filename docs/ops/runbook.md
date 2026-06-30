@@ -90,15 +90,15 @@ Ghi chú:
 
 ## 5. Flow GitHub Actions deploy
 
-Workflow: `.github/workflows/deploy-develop.yml`
+Workflow: `.github/workflows/deploy.yml`
 
 Trigger:
-- push vào branch `develop`
+- push vào branch `main` (develop = nhánh tích hợp/dev; merge develop → main để deploy production)
 
 Deploy script trên VM sẽ:
 1. `git fetch`
-2. `git checkout develop`
-3. `git reset --hard origin/develop`
+2. `git checkout main`
+3. `git reset --hard origin/main`
 4. `docker compose up --build -d`
 5. `docker image prune -f`
 

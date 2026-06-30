@@ -1,15 +1,15 @@
 # CI/CD — DA08-VSF (RAG Chatbot)
 
-> Tài liệu ghi nhớ toàn bộ luồng CI/CD của project. Nguồn sự thật: [.github/workflows/deploy-develop.yml](.github/workflows/deploy-develop.yml).
+> Tài liệu ghi nhớ toàn bộ luồng CI/CD của project. Nguồn sự thật: [.github/workflows/deploy.yml](.github/workflows/deploy.yml).
 > **Một pipeline hợp nhất duy nhất** — validate + build + deploy nằm chung 1 file.
 
 ---
 
 ## 1. Trigger & nguyên tắc
 
-- **Khi nào chạy**: `push` vào nhánh `develop`, hoặc `workflow_dispatch` (chạy tay).
+- **Khi nào chạy**: `push` vào nhánh `main`, hoặc `workflow_dispatch` (chạy tay).
 - **Bỏ qua hoàn toàn**: thay đổi chỉ `docs/**` hoặc `**.md` → KHÔNG chạy gì (`paths-ignore`).
-- **Concurrency**: `group: deploy-develop`, `cancel-in-progress: false` → 2 merge sát nhau **xếp hàng**, không deploy chồng, không đụng cloud e2e dùng chung.
+- **Concurrency**: `group: deploy-main`, `cancel-in-progress: false` → 2 merge sát nhau **xếp hàng**, không deploy chồng, không đụng cloud e2e dùng chung.
 - **Bỏ qua validate (giữ build + deploy)**:
   - `workflow_dispatch` tick `skip_tests=true`, **hoặc**
   - nhét `[skip-tests]` vào commit message.
@@ -31,7 +31,7 @@ Xuất các cờ output:
 | `run_frontend` | `src/frontend/**` đổi → build FE |
 | `run_deploy` | 1 trong 6 service hoặc `docker-compose.yml` đổi → deploy |
 
-> **FORCE chạy TẤT CẢ** khi: `workflow_dispatch`, hoặc khi chính file workflow này (`.github/workflows/deploy-develop.yml`) bị đổi.
+> **FORCE chạy TẤT CẢ** khi: `workflow_dispatch`, hoặc khi chính file workflow này (`.github/workflows/deploy.yml`) bị đổi.
 
 6 backend service: `rag-worker`, `mcp-service`, `hr-service`, `user-service`, `document-service`, `query-service`.
 
@@ -62,13 +62,13 @@ Secrets cloud cho e2e-cloud: `OPENAI_API_KEY`, `QDRANT_URL`, `QDRANT_API_KEY`, `
 
 ## 5. Phase 3 — BUILD + PUSH (Docker Hub)
 
-Chỉ chạy khi `gate.result == 'success'`. Mỗi image **2 tag**: `:develop` + `:<git-sha>`. Push lên Docker Hub user `${{ secrets.DOCKERHUB_USERNAME }}` (= `dadlks08`).
+Chỉ chạy khi `gate.result == 'success'`. Mỗi image **2 tag**: `:main` + `:<git-sha>`. Push lên Docker Hub user `${{ secrets.DOCKERHUB_USERNAME }}` (= `dadlks08`).
 
 | Job | Điều kiện | Build gì |
 |---|---|---|
 | **build-push** | `services != '[]'` | Matrix = **CHỈ** backend service thay đổi (`context: ./src/<service>`). |
 | **build-push-frontend** | `run_frontend` | 2 app Nuxt matrix `[admin, chat]`, image `frontend-<app>` (`context: ./src/frontend/<app>`). |
-| **build-push-nginx** | `run_deploy` | nginx config **nướng vào image** (`nginx/Dockerfile` COPY nginx.conf), build MỖI lần deploy → image `:develop` luôn tồn tại + khớp git. Bỏ bind-mount → chống sửa tay trên VM. |
+| **build-push-nginx** | `run_deploy` | nginx config **nướng vào image** (`nginx/Dockerfile` COPY nginx.conf), build MỖI lần deploy → image `:main` luôn tồn tại + khớp git. Bỏ bind-mount → chống sửa tay trên VM. |
 
 Cache: `type=gha,scope=<service>,mode=max`.
 
@@ -78,13 +78,13 @@ Cache: `type=gha,scope=<service>,mode=max`.
 
 Chạy khi: gate success **&&** `run_deploy=true` **&&** build-push(+frontend) success/skipped **&&** build-push-nginx success.
 
-SSH vào VM (`appleboy/ssh-action@v1.2.0`, `command_timeout: 20m`). Deploy dùng tag `:develop` — service không build lần này vẫn giữ image cũ.
+SSH vào VM (`appleboy/ssh-action@v1.2.0`, `command_timeout: 20m`). Deploy dùng tag `:main` — service không build lần này vẫn giữ image cũ.
 
-**STAGE-GATE + AUTO-ROLLBACK** (mục tiêu: bản hỏng KHÔNG phục vụ production). Ngay đầu script đặt `trap` rollback; **2b** ghi điểm rollback = image ID đang chạy (trước khi pull). BẤT KỲ gate nào (health/FE/luồng-vàng) fail → `exit 1` → trap **tự retag image cũ về `:develop` + recreate** → production giữ bản trước đang chạy được, pipeline = đỏ. (Fail TRƯỚC khi pull/up → chưa có điểm rollback → prod chưa bị đụng.)
+**STAGE-GATE + AUTO-ROLLBACK** (mục tiêu: bản hỏng KHÔNG phục vụ production). Ngay đầu script đặt `trap` rollback; **2b** ghi điểm rollback = image ID đang chạy (trước khi pull). BẤT KỲ gate nào (health/FE/luồng-vàng) fail → `exit 1` → trap **tự retag image cũ về `:main` + recreate** → production giữ bản trước đang chạy được, pipeline = đỏ. (Fail TRƯỚC khi pull/up → chưa có điểm rollback → prod chưa bị đụng.)
 
 Các bước script trên VM:
 
-1. **Sync code = origin/develop**: `git reset --hard FETCH_HEAD` → ghi đè mọi sửa tay trên VM (gồm `deploy/env/*.env`).
+1. **Sync code = origin/main**: `git reset --hard FETCH_HEAD` → ghi đè mọi sửa tay trên VM (gồm `deploy/env/*.env`).
 2. **Env đến TỪ git** (không provision từ secret). FAIL-FAST đủ 7 file env. Xem [§8](#8-kiến-trúc-env-common--per-service). `deploy/secrets/gcp-sa.json` đặt 1 lần trên VM.
 3. **Login Docker Hub + `docker compose pull`** (KHÔNG build trên VM).
 4. **`up -d --no-build`** + nginx `--force-recreate`.
@@ -135,4 +135,4 @@ env_file:
 
 ## 9. Tóm tắt 1 dòng
 
-**detect (so commit trước) → validate chọn lọc theo path → gate chặn nếu fail → build chỉ phần đổi lên Docker Hub (2 tag) → SSH VM: reset hard origin/develop (kéo cả env) + ghi điểm rollback + pull + up + health gate + smoke FE + smoke luồng-vàng CHỌN LỌC theo detect (RAG/HR/DOC) → fail bất kỳ = AUTO-ROLLBACK về image trước, prod không hỏng.**
+**detect (so commit trước) → validate chọn lọc theo path → gate chặn nếu fail → build chỉ phần đổi lên Docker Hub (2 tag) → SSH VM: reset hard origin/main (kéo cả env) + ghi điểm rollback + pull + up + health gate + smoke FE + smoke luồng-vàng CHỌN LỌC theo detect (RAG/HR/DOC) → fail bất kỳ = AUTO-ROLLBACK về image trước, prod không hỏng.**

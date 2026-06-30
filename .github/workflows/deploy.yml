@@ -1,6 +1,6 @@
-name: CI/CD develop (validate + build + deploy)
+name: CI/CD (validate + build + deploy)
 
-# PIPELINE HỢP NHẤT — TẤT CẢ chạy khi merge vào develop (push:develop) hoặc chạy tay.
+# PIPELINE HỢP NHẤT — TẤT CẢ chạy khi merge vào main (push:main) hoặc chạy tay.
 #   Phase 0 DETECT     : dò service/path THAY ĐỔI -> quyết định test/build/deploy cái gì.
 #   Phase 1 PER-SERVICE: test CỤC BỘ từng service (behavior + contract), infra off:
 #       - unit       : matrix pytest mỗi service THAY ĐỔI (rag-worker bỏ tests/e2e)
@@ -10,14 +10,14 @@ name: CI/CD develop (validate + build + deploy)
 #                        (nats-bootstrap -> migrate -> service) -> bắt lỗi TÍCH HỢP.
 #                        GCS + Qdrant CLOUD thật; Postgres/NATS container; Langfuse v2.
 #   Phase GATE         : fail nếu BẤT KỲ test nào failure/cancelled -> chặn build+deploy.
-#   Phase 3 BUILD+PUSH : build CHỈ service thay đổi -> Docker Hub (:develop + :<git-sha>).
+#   Phase 3 BUILD+PUSH : build CHỈ service thay đổi -> Docker Hub (:main + :<git-sha>).
 #   Phase 4 DEPLOY     : SSH VM -> docker compose PULL + up --no-build -> HEALTH GATE.
 # Sửa docs/**, **.md -> KHÔNG chạy gì. workflow_dispatch -> chạy FULL (test+build+deploy).
 
 on:
   push:
     branches:
-      - develop
+      - main
     paths-ignore:
       - "docs/**"
       - "**.md"
@@ -35,7 +35,7 @@ on:
 
 # Serialize: 2 merge sát nhau xếp hàng (không deploy chồng, không đụng cloud e2e dùng chung).
 concurrency:
-  group: deploy-develop
+  group: deploy-main
   cancel-in-progress: false
 
 permissions:
@@ -97,7 +97,7 @@ jobs:
               - 'deploy/**'                 # deploy.sh, render-secrets, env, observability config/dashboard -> phải deploy
               - 'infra/nats/**'
               - 'infra/e2e/**'
-            wf: '.github/workflows/deploy-develop.yml'
+            wf: '.github/workflows/deploy.yml'
       - id: matrix
         env:
           # SOFT-DETECT migration embedding: marker [embed-migration] trong commit message.
@@ -425,7 +425,7 @@ jobs:
           echo "GATE OK: không test nào fail (e2e nới nếu embed_migration)."
 
   # ──────────────────── Phase 3: BUILD + PUSH ──────────────────────
-  # Matrix = CHỈ service thay đổi (detect.services). Mỗi image 2 tag: :develop + :<git-sha>.
+  # Matrix = CHỈ service thay đổi (detect.services). Mỗi image 2 tag: :main + :<git-sha>.
   build-push:
     needs: [detect, gate]
     if: always() && needs.detect.result == 'success' && needs.gate.result == 'success' && needs.detect.outputs.services != '[]'
@@ -449,14 +449,14 @@ jobs:
           context: ./src/${{ matrix.service }}
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:develop
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:main
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,scope=${{ matrix.service }},mode=max
 
   # ──────────────── Phase 3b: BUILD + PUSH FRONTEND ────────────────
   # FE nằm ở src/frontend/<app> (context KHÁC 6 backend service nên tách job riêng).
-  # 2 app Nuxt: admin + chat. Image: frontend-<app>:develop + :<git-sha>.
+  # 2 app Nuxt: admin + chat. Image: frontend-<app>:main + :<git-sha>.
   build-push-frontend:
     needs: [detect, gate]
     if: always() && needs.detect.result == 'success' && needs.gate.result == 'success' && needs.detect.outputs.run_frontend == 'true'
@@ -480,14 +480,14 @@ jobs:
           context: ./src/frontend/${{ matrix.app }}
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/frontend-${{ matrix.app }}:develop
+            ${{ secrets.DOCKERHUB_USERNAME }}/frontend-${{ matrix.app }}:main
             ${{ secrets.DOCKERHUB_USERNAME }}/frontend-${{ matrix.app }}:${{ github.sha }}
           cache-from: type=gha,scope=frontend-${{ matrix.app }}
           cache-to: type=gha,scope=frontend-${{ matrix.app }},mode=max
 
   # ───────────────── Phase 3c: BUILD + PUSH NGINX ──────────────────
   # nginx config nướng vào image (nginx/Dockerfile COPY nginx.conf). Build MỖI lần
-  # deploy để image :develop luôn tồn tại + khớp git. Bỏ bind-mount -> chống sửa tay VM.
+  # deploy để image :main luôn tồn tại + khớp git. Bỏ bind-mount -> chống sửa tay VM.
   build-push-nginx:
     needs: [detect, gate]
     if: always() && needs.detect.result == 'success' && needs.gate.result == 'success' && needs.detect.outputs.run_deploy == 'true'
@@ -507,14 +507,14 @@ jobs:
           context: ./nginx
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/nginx:develop
+            ${{ secrets.DOCKERHUB_USERNAME }}/nginx:main
             ${{ secrets.DOCKERHUB_USERNAME }}/nginx:${{ github.sha }}
           cache-from: type=gha,scope=nginx
           cache-to: type=gha,scope=nginx,mode=max
 
   # ──────────────────────── Phase 4: DEPLOY ────────────────────────
   # Chỉ chạy khi gate pass, run_deploy=true, và build-push success/skipped.
-  # Deploy dùng tag :develop — service không build lần này vẫn giữ image cũ.
+  # Deploy dùng tag :main — service không build lần này vẫn giữ image cũ.
   deploy:
     needs: [detect, gate, build-push, build-push-frontend, build-push-nginx]
     if: |
@@ -600,7 +600,7 @@ jobs:
           SVCS: ${{ needs.detect.outputs.services }}
         run: |
           set -euo pipefail
-          # Build payload: export secrets an toàn (printf %q) -> sync code (fetch/reset develop
+          # Build payload: export secrets an toàn (printf %q) -> sync code (fetch/reset main
           # ngay trong payload để bootstrap khi VM chưa có remote-entry.sh) -> exec remote-entry.sh.
           PAYLOAD="$(mktemp)"
           for v in DOCKERHUB_USERNAME DOCKERHUB_TOKEN POSTGRES_PASSWORD NEW_RELIC_LICENSE_KEY \
@@ -618,7 +618,7 @@ jobs:
           cat >> "$PAYLOAD" <<'BOOT'
           set -euo pipefail
           cd /home/TOMAP/DA08-VSF
-          git fetch "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" develop
+          git fetch "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" main
           git reset --hard FETCH_HEAD
           exec bash deploy/scripts/remote-entry.sh
           BOOT

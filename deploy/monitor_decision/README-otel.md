@@ -7,7 +7,7 @@
 ## Bật — QUA CI/CD (KHÔNG đụng tay VM)
 1. Repo **Settings → Secrets and variables → Actions → Variables** → tạo/sửa
    **`VSF_OTEL_ENABLED` = `1`** (đây là Variable, không phải Secret).
-2. Chạy lại workflow **deploy-develop** (push 1 commit, hoặc Actions → Run workflow).
+2. Chạy lại workflow **CI/CD** (`deploy.yml` — push 1 commit, hoặc Actions → Run workflow).
 3. Pipeline render `.env` (VSF_OTEL_ENABLED=1) → `docker compose up -d ai-router` TỰ recreate
    ai-router với entrypoint `opentelemetry-instrument` → phát trace OTLP về `otel-collector:4317`.
 

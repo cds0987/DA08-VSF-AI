@@ -2,7 +2,7 @@
 
 ## Mục tiêu
 
-Thiết lập **1 môi trường dev/demo** trên GCP để khi code được merge vào branch `develop`, GitHub Actions tự động deploy phiên bản mới lên server demo.
+Thiết lập deploy tự động trên GCP: khi code được merge/push vào branch `main`, GitHub Actions tự động deploy phiên bản mới lên production (`vsfchat.cloud`). `develop` là nhánh tích hợp/dev; merge `develop → main` để phát hành.
 
 Môi trường này ưu tiên:
 - đơn giản để team mới vận hành được
@@ -28,7 +28,7 @@ Môi trường này ưu tiên:
 - **GCP Cloud Storage (GCS)**: lưu file tài liệu gốc
 - **Qdrant Cloud**: vector database
 - **Cloud SQL PostgreSQL**: 6 databases riêng cho services (`user_db`, `doc_db`, `query_db`, `mcp_db`, `hr_db`, `langfuse_db`)
-- **GitHub Actions**: CI/CD trigger từ branch `develop`
+- **GitHub Actions**: CI/CD trigger từ branch `main`
 
 > Frontend hiện chưa đủ code trong repo để containerize hoàn chỉnh, nên môi trường demo trước mắt tập trung vào backend/API. Khi frontend hoàn thiện, chỉ cần thêm container và route Nginx.
 
@@ -37,7 +37,7 @@ Môi trường này ưu tiên:
 ## Sơ đồ kết nối
 
 ```text
-GitHub (branch develop)
+GitHub (branch main)
   -> GitHub Actions
   -> SSH vào GCP VM
   -> docker compose up --build -d
@@ -80,19 +80,18 @@ Services nội bộ
 ### Chọn VM + Docker Compose
 - Đơn giản nhất để có demo
 - Dễ debug bằng SSH
-- Phù hợp với yêu cầu "merge develop là tự deploy"
+- Phù hợp với yêu cầu "merge main là tự deploy"
 
 ---
 
 ## Môi trường hiện tại
 
 Chỉ tạo **1 môi trường dev/demo**:
-- branch deploy: `develop`
+- branch deploy: `main`
 - mục tiêu: để team tích hợp và demo nội bộ
 
-Khi dự án ổn hơn có thể mở rộng:
-- `develop` -> `dev/staging`
-- `main` -> `production`
+- `main` -> production (`vsfchat.cloud`)
+- `develop` -> nhánh tích hợp/dev (không tự deploy)
 
 ---
 
@@ -102,7 +101,7 @@ Khi dự án ổn hơn có thể mở rộng:
 2. Viết Dockerfile còn thiếu
 3. Viết `docker-compose.yml`
 4. Viết `nginx/nginx.conf`
-5. Cấu hình GitHub Actions deploy từ `develop`
+5. Cấu hình GitHub Actions deploy từ `main`
 6. Cung cấp thông tin kết nối cho team:
    - `GCS_BUCKET`
    - `QDRANT_URL`, `QDRANT_API_KEY`
@@ -121,7 +120,7 @@ Khi dự án ổn hơn có thể mở rộng:
 - `src/query-service/Dockerfile`
 - `src/mcp-service/Dockerfile`
 - `src/hr-service/Dockerfile`
-- `.github/workflows/deploy-develop.yml`
+- `.github/workflows/deploy.yml`
 - `infra/gcp/gce-setup.sh`
 - `deploy/env/*.env.example`
 - `docs/devops-deployment-architecture.md`

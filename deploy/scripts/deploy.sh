@@ -570,5 +570,5 @@ echo "==> 6) OK (mọi gate pass). Dọn image rác."
 DEPLOY_OK=1
 rm -f "$QUERY_DB_BACKUP"
 docker image prune -f
-echo "Deploy develop -> production: DONE (tag=$IMAGE_TAG)."
+echo "Deploy main -> production: DONE (tag=$IMAGE_TAG)."
 
