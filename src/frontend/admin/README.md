@@ -24,6 +24,4 @@ so it is safe to run without cloud credentials. See
 [frontend-upload-test.md](../../../docs/frontend-upload-test.md) for automated
 and manual integration steps.
 
-Ownership details: [team-ownership.md](../../../docs/team-ownership.md).
-
-# frontend/admin — Frontend Dev (Đặng Hồ Hải) · Nuxt 4 — Admin Application · :3001 · standalone app · gọi Document Service + User Service `/users` + Query Service `/admin/metrics` · chi tiết: [docs/team-ownership.md](../../../docs/team-ownership.md)
+# frontend/admin — Nuxt 4 — Admin Application · :3001 · standalone app · gọi Document Service + User Service `/users` + Query Service `/admin/metrics`

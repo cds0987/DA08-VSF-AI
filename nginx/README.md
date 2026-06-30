@@ -1,1 +1,1 @@
-# nginx — DevOps (Trần Hữu Gia Huy) · Reverse proxy / entry point (nginx.conf, ssl/) · route `/`→nuxt-chat:3000, `/admin`→nuxt-admin:3001, `/api/*`→backend · chi tiết: [docs/team-ownership.md](../docs/team-ownership.md)
+# nginx — Reverse proxy / entry point (nginx.conf, ssl/) · route `/`→nuxt-chat:3000, `/admin`→nuxt-admin:3001, `/api/*`→backend

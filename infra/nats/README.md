@@ -24,5 +24,3 @@ Suggested durable consumers:
 - `QUERY_SERVICE_USER_ACCESS_PROFILE`: filters `hr.employee_profile.updated`, explicit ack, deliver all, max deliver 20.
 
 DevOps should mount `jetstream.conf` into the NATS container and start `nats-server` with that config. Do not add `rag.search` to JetStream; it is synchronous core NATS request-reply.
-
-See also: [team ownership](../../docs/team-ownership.md).

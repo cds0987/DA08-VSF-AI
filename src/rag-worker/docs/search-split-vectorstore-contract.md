@@ -34,7 +34,7 @@ Hiện tại `rag-worker` ôm cả hai việc:
 - **Search**: HTTP `POST /api/search` → `core_engine.engine.HaystackRagEngine.search()` (embed query → hybrid_search → rerank).
 
 Vấn đề:
-1. Search và rerank đáng lẽ thuộc `mcp-service` (theo `docs/team-ownership.md`). rag-worker đang làm thừa.
+1. Search và rerank đáng lẽ thuộc `mcp-service` (phân tách trách nhiệm). rag-worker đang làm thừa.
 2. Có hai đường transport mâu thuẫn (contract ghi NATS `rag.search`, code lại là HTTP) → nợ kỹ thuật.
 3. **Rủi ro lớn nhất:** khi search ở một service và ingest ở service khác, nếu hai bên lệch **embedding model / dimension / collection / payload schema** thì retrieval trả kết quả rác mà **không có lỗi nào nổ ra**. Đây là loại bug nguy hiểm nhất vì im lặng.
 
@@ -338,7 +338,7 @@ Vì sao mạnh: env override lúc deploy → collection mong đợi không tồn
 - [ ] ACL thật cho `document_ids` (hiện no-op, fail-open) — §8, §13.
 - [ ] LLM rerank ở mcp (v1 chỉ noop/lexical).
 - [ ] Hybrid search (BM25 RRF) ở mcp (v1 dense-only).
-- [ ] Cập nhật `docs/contracts.md`/`api-spec.md`/`team-ownership.md` (bỏ `rag.search`; rag-worker ingest-only; mcp đọc Qdrant). **Xin SA duyệt** (đội khác đang đọc spec cũ).
+- [ ] Cập nhật `docs/contracts.md`/`api-spec.md` (bỏ `rag.search`; rag-worker ingest-only; mcp đọc Qdrant). **Xin SA duyệt** (đội khác đang đọc spec cũ).
 
 ---
 

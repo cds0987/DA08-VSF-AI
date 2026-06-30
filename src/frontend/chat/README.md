@@ -1,1 +1,1 @@
-# frontend/chat — Frontend Dev (Đặng Hồ Hải) · Nuxt 4 — User Application / Chat End User · :3000 · standalone app · gọi User Service + Query Service · chi tiết: [docs/team-ownership.md](../../../docs/team-ownership.md)
+# frontend/chat — Nuxt 4 — User Application / Chat End User · :3000 · standalone app · gọi User Service + Query Service

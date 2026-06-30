@@ -142,17 +142,3 @@ phải spec viết trước rồi để lệch dần. Bản đồ đầy đủ: 
 | Đánh giá | [docs/eval/](docs/eval/) |
 | Nhật ký phát triển (theo commit) | [docs/journal/](docs/journal/) — quá trình thật, kể cả sai-sửa, không tô vẽ |
 
----
-
-## Đội ngũ (6 người)
-
-| Vai trò | Phụ trách |
-|---|---|
-| Solution Architect | Domain model, contracts, schema, review |
-| Frontend Dev | Nuxt 4 chat/admin/base |
-| Backend Dev | user-service, document-service, NATS infra |
-| RAG Engineer | rag-worker, mcp-service, hr-service |
-| AI/Agent Engineer | query-service (multi-agent orchestration) |
-| DevOps | Infra, CI/CD, GCP |
-
-Chi tiết phân công file: [docs/ops/team-ownership.md](docs/ops/team-ownership.md).

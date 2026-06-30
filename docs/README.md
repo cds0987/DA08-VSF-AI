@@ -38,7 +38,7 @@ duy nhất** — mọi file dưới đây verify trực tiếp từ code/compose
 
 ### ops/ — vận hành (procedural; đối chiếu infra/ + docker-compose khi dùng)
 [runbook](ops/runbook.md) · [deployment](ops/deployment.md) · [env-setup](ops/env-setup.md) ·
-[ci-cd](ops/ci-cd.md) · [team-access](ops/team-access.md) · [team-ownership](ops/team-ownership.md)
+[ci-cd](ops/ci-cd.md) · [team-access](ops/team-access.md)
 
 ### eval/ — đánh giá
 [load-benchmark](eval/load-benchmark.md) (sức chịu tải 800-1200 user) ·
