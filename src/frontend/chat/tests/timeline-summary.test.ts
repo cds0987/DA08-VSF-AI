@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { summarizeThought, truncateFilename } from '../app/lib/timeline.ts'
+import { liveThoughtProse, summarizeThought, truncateFilename } from '../app/lib/timeline.ts'
 
 // Gộp toàn bộ text của các section human-readable (KHÔNG gồm raw) — để khẳng định
 // first-level detail không chứa dấu ngoặc/nháy JSON.
@@ -227,4 +227,41 @@ test('truncateFilename keeps extension and adds ellipsis', () => {
   assert.ok(t.endsWith('.pdf'))
   assert.ok(t.includes('…'))
   assert.equal(truncateFilename('A.pdf', 20), 'A.pdf')
+})
+
+// ── liveThoughtProse: prose orchestrator LIVE, KHÔNG bao giờ lóe JSON (BE stream cả prose + JSON) ──
+
+test('liveThoughtProse giữ prose thường nguyên văn', () => {
+  assert.equal(liveThoughtProse('Đang tra cứu chính sách nghỉ phép'), 'Đang tra cứu chính sách nghỉ phép')
+})
+
+test('liveThoughtProse KHÔNG lóe ngoặc mở dở (trước khi có "key:") lúc stream', () => {
+  // Khe giữa khi JSON mới mở, chưa tới dấu ':' đầu tiên — phải đã bị cắt, không lộ '{'/'['.
+  for (const partial of ['Phân tích yêu cầu {', 'Phân tích yêu cầu {"route', 'Phân tích yêu cầu [{"id"']) {
+    const r = liveThoughtProse(partial)
+    assert.equal(r, 'Phân tích yêu cầu')
+    assert.doesNotMatch(r, /[{[]/)
+  }
+})
+
+test('liveThoughtProse cắt JSON dở ở đuôi (đã có "key:") khi đang stream', () => {
+  const r = liveThoughtProse('Phân tích yêu cầu {"route":"hea')
+  assert.equal(r, 'Phân tích yêu cầu')
+  assert.doesNotMatch(r, /[{]|"route"/)
+})
+
+test('liveThoughtProse bóc JSON đầy đủ lẫn prose', () => {
+  const r = liveThoughtProse('Tôi sẽ tra cứu. {"route":"heavy","steps":[{"id":1,"role":"rag_retrieve"}]}')
+  assert.equal(r, 'Tôi sẽ tra cứu.')
+  assert.doesNotMatch(r, /route|steps|[{]/)
+})
+
+test('liveThoughtProse giữ ngoặc cân bằng trong prose (không cắt nhầm)', () => {
+  assert.equal(liveThoughtProse('dùng {var} ở đây'), 'dùng {var} ở đây')
+})
+
+test('liveThoughtProse rỗng/null -> chuỗi rỗng', () => {
+  assert.equal(liveThoughtProse(''), '')
+  assert.equal(liveThoughtProse(null), '')
+  assert.equal(liveThoughtProse(undefined), '')
 })

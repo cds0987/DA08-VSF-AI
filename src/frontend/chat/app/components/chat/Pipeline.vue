@@ -7,7 +7,7 @@ import { computed, ref, watch, onUnmounted } from 'vue'
 import { Search, Database, Sparkles, GitBranch, ShieldCheck, FileSearch, Lightbulb, XCircle, Check } from '@lucide/vue'
 import type { TraceEntry, NodeModel, AgentPlan, AgentPlanStep } from '~/types'
 import { nodeGroup } from '~/types/sse-contract.gen'
-import { summarizeThought, truncateFilename } from '~/lib/timeline'
+import { summarizeThought, truncateFilename, liveThoughtProse } from '~/lib/timeline'
 import ThoughtDetail from './ThoughtDetail.vue'
 
 interface Props {
@@ -59,15 +59,15 @@ const orchThoughts = computed(() => (props.thoughts ?? []).filter(t => nodeGroup
 const verifyThoughts = computed(() => (props.thoughts ?? []).filter(t => nodeGroup(t.node) === 'verify'))
 const otherThoughts = computed(() => (props.thoughts ?? []).filter(t => !['orchestrator', 'verify'].includes(nodeGroup(t.node))))
 
-// STREAM LIVE: orchestrator reasoning hiện DẦN cho user thấy agent đang nghĩ (CoT thô -> rồi tự
-// chuyển sang tóm tắt cấu trúc khi JSON kế hoạch đóng). Trước đây phải CHỜ JSON đóng mới render để
-// chống "flash" — vì summarizeThought CŨ parse nhầm mảnh '[1]'/object step con thành rác "1". Nay
-// summarizeThought đã miễn nhiễm (isMeaningfulJson bỏ qua mảng primitive + step rời) nên render thẳng
-// prose đang stream là AN TOÀN, không còn rác -> khôi phục cảm giác streaming. (verify/khác vẫn live.)
-const orchReady = computed(() => orchThoughts.value.filter(t => t.text.trim().length > 0))
+// STREAM LIVE: orchestrator reasoning hiện DẦN dạng prose LIÊN TỤC (token-by-token). BE stream cả
+// prose lẫn JSON kế hoạch ra phase:thought -> liveThoughtProse lọc bỏ JSON ở MỌI trạng thái stream
+// (kể cả khe mở dở '{"route') nên KHÔNG bao giờ lóe JSON / nhảy format. Các bước plan vẫn hiện ở
+// lane riêng bên dưới (phase:plan). (verify/khác vẫn dùng summarizeThought như cũ.)
+const orchProse = computed(() =>
+  (orchThoughts.value.map(t => liveThoughtProse(t.text)).filter(Boolean).join('\n')).trim(),
+)
 
 // Tóm tắt 1 dòng cho mỗi thought (chi tiết + raw ẩn trong ThoughtDetail). View song song mảng gốc.
-const orchViews = computed(() => orchReady.value.map(t => summarizeThought(t.text)))
 const verifyViews = computed(() => verifyThoughts.value.map(t => summarizeThought(t.text)))
 const otherViews = computed(() => otherThoughts.value.map(t => summarizeThought(t.text)))
 
@@ -112,7 +112,7 @@ function getResultLabel(entry: TraceEntry): string {
 
       <div class="space-y-3">
         <!-- ═══ ORCHESTRATOR ═══ -->
-        <div v-if="orchReady.length || plan?.steps?.length || (isThinking && traceLog.length === 0)" class="space-y-2">
+        <div v-if="orchProse || plan?.steps?.length || (isThinking && traceLog.length === 0)" class="space-y-2">
           <div class="relative">
             <!-- marker: ring xanh + pulse khi đang hoạt động -->
             <span
@@ -125,10 +125,15 @@ function getResultLabel(entry: TraceEntry): string {
             <div class="flex items-center gap-1.5">
               <span class="text-[15px] font-medium text-slate-600 dark:text-foreground/80" :class="orchActive && 'ai-shimmer'">Orchestrator</span>
             </div>
-            <!-- reasoning live: summary + chi tiết human-readable + raw lồng (ThoughtDetail) -->
-            <ThoughtDetail v-for="(view, i) in orchViews" :key="`o-${i}`" :view="view" class="mt-1.5" />
+            <!-- reasoning live: prose liên tục, JSON/plan payload luôn bị lọc khỏi surface -->
+            <p
+              v-if="orchProse"
+              class="mt-1.5 max-w-[68ch] whitespace-pre-wrap break-words text-sm font-normal leading-relaxed text-slate-500 dark:text-muted-foreground"
+            >
+              {{ orchProse }}
+            </p>
             <!-- trạng thái lập kế hoạch (trước khi có thought/plan) — text thường, KHÔNG shimmer -->
-            <div v-if="isThinking && !orchReady.length && !plan?.steps?.length && traceLog.length === 0" class="mt-1.5 text-sm font-medium text-slate-500 dark:text-muted-foreground">
+            <div v-if="isThinking && !orchProse && !plan?.steps?.length && traceLog.length === 0" class="mt-1.5 text-sm font-medium text-slate-500 dark:text-muted-foreground">
               {{ thinkingStatus || rotatingHint }}
             </div>
           </div>
