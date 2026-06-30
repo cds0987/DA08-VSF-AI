@@ -1,101 +1,158 @@
-# RAG-based Internal Q&A Chatbot — VinSmartFuture
+# VSF RAG Chatbot — Internal Q&A + HR Assistant
 
-Hệ thống chatbot nội bộ giúp ~800 DAU nhân viên truy vấn tài liệu công ty qua giao diện hội thoại, sử dụng RAG pipeline + OpenAI GPT-4o mini + LlamaIndex FunctionCallingAgent (MCP client) gọi tool qua **MCP Tool Service**. Trả lời stream qua **SSE**.
+RAG chatbot nội bộ cho doanh nghiệp: nhân viên hỏi chính sách/tài liệu công ty và tự thao tác HR
+(xin nghỉ, xem công, lương) qua hội thoại tự nhiên, trả lời **stream theo thời gian thực (SSE)** kèm
+trích dẫn nguồn. Kiến trúc multi-agent + LLM gateway tách lớp, vận hành full CI/CD với health-gate +
+auto-rollback. Production: **https://vsfchat.cloud** (1 GCP VM, docker-compose).
+
+> Tài liệu chi tiết, **verify trực tiếp từ code** (không phải spec lý thuyết): xem [docs/](docs/).
 
 ---
 
-## Quick Start
+## Vì sao đáng xem
+
+Đây không phải "demo RAG nối OpenAI SDK". Vài quyết định kỹ thuật cụ thể đã đo bằng số liệu thật,
+không phải lý thuyết:
+
+- **LLM gateway tách riêng (`ai-router`)** — mọi service gọi LLM/embedding qua 1 cổng OpenAI-compatible
+  duy nhất, route theo "capability alias" (không hardcode tên model), quota/cost theo Redis, failover
+  nhiều provider (OpenAI/OpenRouter). Đổi model production = sửa 1 file YAML, không sửa code agent.
+- **Multi-agent Orchestrator-Workers (LangGraph)** — câu hỏi đơn đi thẳng `light path`; câu hỏi phức
+  tạp (đa chủ đề, cần nhiều tool) fan-out ra `worker` song song rồi `verify_answer` tổng hợp + chấm
+  citation. Bỏ 1 LLM call thừa (`worker distill`) sau khi đo regression → giảm latency câu nặng **53%**,
+  giữ accuracy ~75% — quyết định dựa trên A/B thật, không suy đoán.
+- **Contract-first giữa các service** — SSE event, NATS subject, JWT claims, embedding dimension đều có
+  1-nguồn-sự-thật + gate trong CI (sai hợp đồng → build đỏ trước khi lên prod), không phải convention
+  ngầm dễ vỡ khi nhiều người cùng sửa.
+- **Deploy có rollback tự động** — mỗi lần deploy ghi điểm "image đang chạy" trước khi pull bản mới;
+  health-gate + smoke test (chọn lọc theo service đổi) fail ở bất kỳ bước nào → tự retag về bản cũ,
+  production không bao giờ đứng yên ở bản hỏng.
+- **Đã load-test thật, không chỉ chạy local**: 450 câu hỏi/60s mô phỏng giờ cao điểm — 0 lỗi 5xx/timeout,
+  85% SUCCESS, nhưng cũng đo ra trần thật của hệ thống (đa-agent chậm hơn rõ rệt) và biết chính xác
+  nghẽn ở đâu để fix tiếp, thay vì tuyên bố "scale tốt" mà không có số.
+
+---
+
+## Kiến trúc
+
+```
+                          Cloudflare TLS
+                               │
+                          nginx :80  ──/admin/──> frontend-admin (Nuxt 4)
+        /───────────────────┬─┴───────────────────\        └/──> frontend-chat (Nuxt 4)
+ /api/user      /api/documents   /api/query (×8)   /api/hr     /api/mcp
+    │                 │               │               │           │
+user-service    document-service   query-service   hr-service   mcp-service
+                       │ GCS upload      │  │                        │
+                       │ NATS doc.ingest │  └─ MCP ──> mcp-service ──┴─ HTTP /api/search ──> rag-worker ──> Qdrant
+                       ▼                 │                           └─ HTTP proxy (internal token) ──> hr-service
+              rag-ingest-worker (×8)     └─ OpenAI SDK (base_url) ──> ai-router ──> OpenAI / OpenRouter
+                  embed via ai-router
+```
+
+**8 service ứng dụng** (mỗi service: 1 DB riêng, container riêng, scale độc lập):
+
+| Service | Vai trò |
+|---|---|
+| `query-service` (×8 replica) | Orchestrate hội thoại — LangGraph orchestrator-workers, stream SSE |
+| `ai-router` | Gateway LLM/embedding OpenAI-compatible — chọn model/provider theo capability, quota Redis |
+| `mcp-service` | MCP tool server: `rag_search`, `hr_query`, `leave_write/approvals/types`, `resolve_date` |
+| `rag-worker` (+ ingest-worker ×8) | Ingest (OCR/chunk/embed) + retrieval (`/api/search`) trên Qdrant |
+| `hr-service` | Sở hữu dữ liệu nhân sự (lương/nghỉ/công), internal-only |
+| `document-service` | Vòng đời tài liệu — upload → GCS, ACL theo phòng ban |
+| `user-service` | Auth/JWT |
+| `frontend-chat` / `frontend-admin` | 2 Nuxt 4 micro-frontend, dùng chung base layer (auth + design system) |
+
+Hạ tầng: **Qdrant** (vector), **Postgres** (database-per-service), **Redis** (memory hội thoại + quota),
+**NATS JetStream** (event bus: doc/hr/user/notify), **GCS** (lưu file), **Langfuse** (LLM trace),
+**Grafana/Prometheus** (metrics).
+
+> Chi tiết đầy đủ + sơ đồ mermaid: [docs/architecture/overview.md](docs/architecture/overview.md) ·
+> [docs/architecture/ai-architecture.md](docs/architecture/ai-architecture.md) (luồng multi-agent) ·
+> [docs/architecture/data-flow.md](docs/architecture/data-flow.md) (chat + ingest end-to-end).
+
+---
+
+## Tech stack
+
+| Lớp | Công nghệ |
+|---|---|
+| Agent orchestration | LangGraph (orchestrator-workers), Model Context Protocol (MCP) |
+| LLM/embedding | OpenAI-compatible gateway tự viết (`ai-router`), provider OpenAI + OpenRouter |
+| Backend | FastAPI (Python), kiến trúc theo domain/use-case mỗi service |
+| Vector DB | Qdrant |
+| Messaging | NATS JetStream |
+| DB | PostgreSQL (database-per-service), Redis |
+| Frontend | Nuxt 4 (Vue 3), 2 micro-frontend dùng chung base layer |
+| Observability | Langfuse (LLM trace), Grafana + Prometheus (metrics) |
+| Infra/CI-CD | Docker Compose (1 VM), GitHub Actions — detect-path → validate chọn lọc → build → deploy với health-gate + auto-rollback |
+
+---
+
+## Quick Start (local)
 
 ```bash
-# 1. Clone
-git clone <repo-url>
+git clone <repo-url> && cd DA08-VSF-AI
 
-# 2. Copy env files và điền API keys
-cp src/user-service/.env.example      src/user-service/.env
-cp src/document-service/.env.example  src/document-service/.env
-cp src/query-service/.env.example     src/query-service/.env
-cp src/rag-worker/.env.example        src/rag-worker/.env
-cp src/mcp-service/.env.example       src/mcp-service/.env
-cp src/hr-service/.env.example        src/hr-service/.env
+# copy env mẫu cho từng service rồi điền API key thật
+cp src/user-service/.env.example       src/user-service/.env
+cp src/document-service/.env.example   src/document-service/.env
+cp src/query-service/.env.example      src/query-service/.env
+cp src/rag-worker/.env.example         src/rag-worker/.env
 cp src/frontend/chat/.env.local.example   src/frontend/chat/.env.local
 cp src/frontend/admin/.env.local.example  src/frontend/admin/.env.local
-# Xem hướng dẫn chi tiết: docs/env-setup.md
+# mcp-service / hr-service / ai-router cấu hình qua config.yaml + routing.yaml (override bằng ${VAR})
+# chi tiết biến môi trường: docs/ops/env-setup.md
 
-# 3. Start toàn bộ stack
 docker compose up --build
 ```
 
-Sau khi start: Chat (End User) http://localhost:3000 · Admin console http://localhost:3001
+Sau khi lên: Chat http://localhost:3000 · Admin http://localhost:3001 ·
+API docs: `:8000/docs` (user) · `:8001/docs` (query) · `:8002/docs` (document) · `:8004/docs` (hr, internal).
 
 ---
 
-## Architecture
+## Đo đạc thật (không phải claim)
 
-```
-Browser → Nginx :80
-               ├── /                → Chat app (Nuxt)    :3000  (End User)
-               ├── /admin           → Admin console (Nuxt) :3001  (Admin)
-               │       (2 micro-frontend dùng chung Nuxt base layer: auth + design system)
-               ├── /api/user/*      → User Service          :8000  (/auth/login → Chat; /auth/admin/login → Admin only; /users → Admin only)
-               ├── /api/documents/* → Document Service      :8002  (Upload, Admin only)
-               ├── /api/query/*     → Query Service         :8001  (LLM, Conversation; SSE /query + /notifications)
-               │                          └── MCP → MCP Tool Service :8003 (tool: rag_search, hr_query)
-               │                                          ├── NATS :4222 → RAG Worker (Retrieval — no HTTP)
-               │                                          └── internal HTTP/gRPC → HR Service :8004
-               └── /api/mcp/*       → MCP Tool Service      :8003
-
-Ingestion: Document Service → NATS doc.ingest → RAG Worker (OCR, chunk, embed → Qdrant)
-ACL projection: Document Service → NATS doc.access → Query Service query_db.document_access
-Employee projection: HR Service → NATS hr.employee_profile.updated → Query Service query_db.user_access_profile
-Infra: Qdrant :6333 | Redis :6379 | NATS :4222 (JetStream) | Langfuse :3100
-PostgreSQL: GCP Cloud SQL PostgreSQL — 6 databases: user_db / doc_db / query_db / mcp_db / hr_db / langfuse_db
-```
+- **Load test giờ cao điểm** (450 query/60s, mô phỏng ~2× nhịp 1200-user): 0 lỗi 5xx/timeout,
+  85% SUCCESS, TTFT p50=19.7s/p95=46.4s. Multi-agent path chậm hơn rõ rệt (p95 74s) — điểm cần
+  tối ưu tiếp, không che giấu. Chi tiết: [docs/eval/load-benchmark.md](docs/eval/load-benchmark.md).
+- **Retrieval recall** (corpus 120 tài liệu HR-VN + 480 câu gold, embedding qwen3-8b @4096):
+  recall@1=**0.73**, recall@3=0.86, MRR=0.80 — đo qua harness riêng, tách khỏi lỗi tầng orchestrator
+  phía trên. Số liệu + phương pháp: [systemeval/benchmark.md](systemeval/benchmark.md).
+- **Quyết định kiến trúc bằng số liệu, không bằng cảm tính**: đã build xong multi-collection shard
+  (4 embedding model) nhưng đo ra recall@1 chỉ 0.53 (model phụ kéo điểm xuống) so với single qwen8b
+  0.73 → **chọn single-model cho production**, giữ lại hạ tầng multi để bật khi có model phụ đủ mạnh.
+- **Tối ưu pipeline có đo regression**: bỏ 1 bước LLM dư per-worker (`worker distill`), gộp việc trích
+  xuất vào bước verify chính → latency câu nặng **-53%**, accuracy giữ ~75%.
 
 ---
 
-## Service Ports
+## Tài liệu
 
-| Service | Port | Mô tả |
-|---------|------|-------|
-| User Service | 8000 | Auth, User management |
-| Query Service | 8001 | LLM Orchestration, FunctionCallingAgent (MCP client), Conversation, SSE |
-| Document Service | 8002 | Document upload & management (Admin only) |
-| RAG Worker | — | NATS subscriber — Ingestion + Retrieval (no HTTP port, no DB) |
-| MCP Tool Service | 8003 | MCP server — tool `rag_search`, `hr_query` (dùng chung cho mọi agent) |
-| HR Service | 8004 | Employee profile + HR data API (internal only; MCP Service gọi cho `hr_query`) |
-| Chat app (frontend/chat) | 3000 | Nuxt UI — End User: chat SSE, notifications, document viewer |
-| Admin console (frontend/admin) | 3001 | Nuxt UI — Admin: documents, users, analytics |
-| Langfuse | 3100 | LLM observability dashboard (IT/DevOps only) |
+Bộ doc được **rebuild từ code** (mỗi file có `last-verified` + `code-refs` trỏ đúng source) — không
+phải spec viết trước rồi để lệch dần. Bản đồ đầy đủ: [docs/README.md](docs/README.md).
 
-> 2 micro-frontend dùng chung `frontend/base` (Nuxt layer: `useAuth` + `useApi` + middleware + design system) — build-time, không phải container. Trang `/login` tách riêng: Chat dùng `POST /auth/login`, Admin dùng `POST /auth/admin/login` (admin only).
-> `hr-service` deploy cùng Docker Compose nhưng internal only, không route public qua Nginx. `mcp-service` gọi bằng `HR_SERVICE_URL=http://hr-service:8004`.
-
-API docs (local): http://localhost:8000/docs | http://localhost:8001/docs | http://localhost:8002/docs | http://localhost:8003 (MCP endpoint) | http://localhost:8004/docs (internal)
+| Mảng | Vào nhanh |
+|---|---|
+| Kiến trúc | [overview](docs/architecture/overview.md) · [ai-architecture](docs/architecture/ai-architecture.md) · [data-flow](docs/architecture/data-flow.md) |
+| Từng service | [docs/services/](docs/services/) (1 file/service) |
+| Hợp đồng liên-service | [docs/contracts/](docs/contracts/) (SSE, API, NATS, JWT, embedding — đều có CI gate) |
+| Vận hành | [deployment](docs/ops/deployment.md) · [ci-cd](docs/ops/ci-cd.md) · [env-setup](docs/ops/env-setup.md) |
+| Đánh giá | [docs/eval/](docs/eval/) |
+| Nhật ký phát triển (theo commit) | [docs/journal/](docs/journal/) — quá trình thật, kể cả sai-sửa, không tô vẽ |
 
 ---
 
-## Query History & Sources
+## Đội ngũ (6 người)
 
-Query Service lưu lịch sử hội thoại trong `query_db`:
+| Vai trò | Phụ trách |
+|---|---|
+| Solution Architect | Domain model, contracts, schema, review |
+| Frontend Dev | Nuxt 4 chat/admin/base |
+| Backend Dev | user-service, document-service, NATS infra |
+| RAG Engineer | rag-worker, mcp-service, hr-service |
+| AI/Agent Engineer | query-service (multi-agent orchestration) |
+| DevOps | Infra, CI/CD, GCP |
 
-- `query_svc.conversations`: nhiều cuộc trò chuyện cho mỗi user, gồm title và summary buffer riêng.
-- `query_svc.messages`: từng user/assistant message.
-- `query_svc.messages.sources`: JSONB citation metadata, chỉ set cho assistant message có source từ `rag_search`.
-
-Frontend gửi `conversation_id` cho mỗi New Chat; context AI và summary chỉ đọc trong conversation đó. `sources` lưu theo từng assistant message để khi reload conversation, frontend vẫn render lại citation/source đúng câu trả lời. Schema được cập nhật bởi one-shot service `query-migrate`; migration lỗi sẽ chặn query-service khởi động và deploy rollback phục hồi snapshot `query_db`.
-
----
-
-## Docs
-
-| File | Dành cho |
-|------|---------|
-| [docs/setup.md](docs/setup.md) | Tất cả — hướng dẫn cài đặt và chạy local |
-| [docs/SA_RAG_Chatbot_Final.md](docs/SA_RAG_Chatbot_Final.md) | SA, tất cả Dev — kiến trúc tổng thể (source of truth) |
-| [docs/architecture.md](docs/architecture.md) | SA, tất cả Dev — Clean Architecture 4 layer |
-| [docs/contracts.md](docs/contracts.md) | SA, Dev Infra, Dev Use Case — Domain interfaces |
-| [docs/api-spec.md](docs/api-spec.md) | Frontend Dev, AI/Agent Eng — HTTP endpoints |
-| [docs/data-schema.md](docs/data-schema.md) | Backend Dev, RAG Eng — PostgreSQL + Qdrant schema |
-| [docs/env-setup.md](docs/env-setup.md) | Tất cả — biến môi trường và API keys |
-| [docs/team-ownership.md](docs/team-ownership.md) | SA, Team Lead — ai làm file nào |
-| [docs/roadmap.md](docs/roadmap.md) | PM, SA — lộ trình 5 tuần |
+Chi tiết phân công file: [docs/ops/team-ownership.md](docs/ops/team-ownership.md).

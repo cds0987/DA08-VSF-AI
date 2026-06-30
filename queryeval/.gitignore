@@ -1,5 +1,0 @@
-__pycache__/
-*.pyc
-*.bak.*
-langfuse_state.json
-state.json

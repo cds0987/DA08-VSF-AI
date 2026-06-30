@@ -1,8 +1,8 @@
 # Load Benchmark — Sức chịu tải hệ thống (query + ingest)
 
 > Báo cáo đánh giá khả năng chịu tải prod `https://vsfchat.cloud` (1 GCP VM, docker-compose) ở quy mô
-> **800–1200 user**. Harness + raw data: `systemeval/query-test/` (`benchmark.md`, `runners/peak_load.py`,
-> `results/`). Agent timing: Langfuse `generations.all`. Đo lần đầu **2026-06-29**.
+> **800–1200 user**. Số liệu hợp nhất + phương pháp: `systemeval/benchmark.md` + `systemeval/testdesign.md`.
+> Agent timing: Langfuse `generations.all`. Đo lần đầu **2026-06-29**.
 
 ## 1. Kịch bản đo (mô phỏng giờ cao điểm)
 
@@ -11,7 +11,7 @@
 | Chat query | 450 câu / 60s (≈7.5 q/s, 3 burst ~14 q/s), 21 account round-robin | nặng gấp ~2× nhịp 1200-user thật |
 | Ingest | 40 tài liệu docx/pdf / 60s, đồng thời | đúng giờ cao điểm (20–30 admin uploader) |
 
-Bộ câu hỏi 450 đa dạng (`systemeval/query-test/questions/`): simple_rag 249, multiagent 120,
+Bộ câu hỏi 450 đa dạng: simple_rag 249, multiagent 120,
 hr_intent 45, non_rag 36.
 
 ## 2. Kết quả
@@ -65,4 +65,4 @@ gate/HTTP (0 lỗi). Muốn nhanh hơn hoặc gánh nhiều nghìn user → scal
 - Số 1200-user là **nội suy** từ mức đo 7.5 q/s; đo đúng 5 q/s (300 câu/60s) để chốt.
 - Qdrant lúc đo có residue (≥262 doc) → trọng tâm là latency/throughput/độ bền + outcome, **không phải
   recall@k tuyệt đối** (đo recall trên corpus sạch riêng).
-- Chi tiết phương pháp + raw: `systemeval/query-test/benchmark.md`.
+- Chi tiết phương pháp + số liệu hợp nhất: `systemeval/testdesign.md` + `systemeval/benchmark.md`.

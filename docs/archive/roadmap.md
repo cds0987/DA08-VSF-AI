@@ -18,7 +18,8 @@ Không chỉ là một chatbot — mà là **hệ thống quản lý tri thức 
 
 ## 5 tuần — Lộ trình cụ thể
 
-> 📅 **Kế hoạch chi tiết từng tuần (ai làm gì theo Sprint):** [docs/sprints/](sprints/README.md) — roadmap này = *làm gì + DoD theo Phase*; folder sprints = *lịch thực thi từng tuần*.
+> 📅 **Lịch sử thực tế từng tuần (theo commit, không phải kế hoạch):** [docs/journal/](../journal/) — đây
+> là kế hoạch *trước khi làm* (đã lệch nhiều so với thực tế); folder journal mới ghi lại *đã làm gì, đúng-sai, vì sao* dựa trên git log.
 
 ### Phase 1 — Core MVP + Cloud Deploy _(Tuần 1–3)_
 

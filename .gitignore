@@ -1,5 +1,10 @@
 .claude/
 proposal/
+# IDE / runtime junk — không thuộc repo
+.idea/
+.vscode/
+.codex-runtime-logs/
+image_fix/
 .env
 # Private repo nội bộ: env thật của các service được SHARE cho team (track trong git).
 .env-backup-*/

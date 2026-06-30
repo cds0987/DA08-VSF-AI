@@ -43,7 +43,8 @@ duy nhất** — mọi file dưới đây verify trực tiếp từ code/compose
 ### eval/ — đánh giá
 [load-benchmark](eval/load-benchmark.md) (sức chịu tải 800-1200 user) ·
 [golden-dataset](eval/golden-dataset.md) · [eval-plan](eval/eval-plan.md).
-Harness + raw data: `systemeval/` và `queryeval/`.
+Phương pháp test + số liệu thực đo (đã gom gọn, không còn code harness): `systemeval/testdesign.md`
++ `systemeval/benchmark.md`.
 
 ### archive/ — lịch sử (KHÔNG phải sự thật hiện tại)
 Plan cũ, gap-iteration, sprint, doc bản nháp trước refactor. Giữ để tra cứu, **đừng tin là khớp code**.

@@ -1,7 +1,0 @@
-
-========== BÁO CÁO LỖI THEO TRANG ==========
-PAGE ERRORS (uncaught JS): 0
-CONSOLE ERRORS: 0
-NETWORK >=400 (bỏ asset): 0
-
-Screenshots + report -> C:\VFS-Project\pipeline-dev\DA08-VSF\tmp-ui-check
